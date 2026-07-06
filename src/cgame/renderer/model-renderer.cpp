@@ -164,20 +164,30 @@ void ModelRenderer::RenderGroup(id_t tag
     if (!meshGroups.contains(tag)) return;
     auto& meshes = meshGroups.at(tag);
 
+    // Base extent (world units visible at zoom 1.0); dividing by zoom shrinks
+    // the visible area as the player zooms in, matching ModelRenderer2's
+    // pixels-per-unit convention.
     Matrix3 matrix =
-            Matrix3::projection({1280/4, 720/4}) *
+            Matrix3::projection(Vector2{1280.f, 720.f} / m_zoom) *
+            Matrix3::translation(-m_cameraPos) *
             Matrix3::translation({static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())}) *
             Matrix3::rotation(Rad(transf.rot)) *
             Matrix3::scaling({static_cast<float>(transf.scale.x()), static_cast<float>(transf.scale.y())});
 
-    m_lineSegmentsShader.setWidth(0.5f);
+    // This shader applies width in world space before projection, so convert
+    // the shared pixel-width setting using the same pixels-per-unit implied
+    // by the projection above (windowHeight/baseExtentHeight * zoom).
+    const float pixelsPerUnit = 1.5f * m_zoom;
+    const float widthWorld = m_lineWidthPixels / pixelsPerUnit;
+
+    m_lineSegmentsShader.setWidth(widthWorld);
     m_lineSegmentsShader.setTransformationProjectionMatrix(matrix);
     for (auto& meshColor : meshes) {
         m_lineSegmentsShader.setColor(meshColor.color);
         m_lineSegmentsShader.draw(meshColor.segment);
     }
 
-    m_lineMiterShader.setWidth(0.5f);
+    m_lineMiterShader.setWidth(widthWorld);
     m_lineMiterShader.setTransformationProjectionMatrix(matrix);
     for (auto& meshColor : meshes) {
         m_lineMiterShader.setColor(meshColor.color);

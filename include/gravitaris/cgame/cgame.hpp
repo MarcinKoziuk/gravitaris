@@ -1,9 +1,15 @@
 #pragma once
 
+#include <algorithm>
+
+#include <Magnum/Math/Vector2.h>
+
 #include <gravitaris/game/game.hpp>
 
+#include <gravitaris/cgame/camera.hpp>
 #include <gravitaris/cgame/renderer/simple-model-renderer.hpp>
 #include <gravitaris/cgame/renderer/model-renderer.hpp>
+#include <gravitaris/cgame/renderer/model-renderer2.hpp>
 
 namespace Gravitaris {
 
@@ -11,10 +17,35 @@ class CGame : public Game {
 protected:
     SimpleModelRenderer m_simpleModelRenderer;
     ModelRenderer m_modelRenderer;
+    ModelRenderer2 m_modelRenderer2;
+
+    Camera m_camera;
+
+    // Shared line-thickness setting (pixels), forwarded to whichever
+    // renderer is active; each converts it to its own internal units.
+    float m_lineWidthPixels = 2.f;
+    static constexpr float MIN_LINE_WIDTH = 0.5f;
+    static constexpr float MAX_LINE_WIDTH = 16.f;
 
     std::unique_ptr<EntitySpawner> CreateEntitySpawner() override;
 public:
     explicit CGame(IFilesystem& filesystem);
+
+    void SetViewportSize(const Magnum::Vector2& size) { m_modelRenderer2.SetViewportSize(size); }
+
+    Camera& GetCamera() { return m_camera; }
+
+    [[nodiscard]] float GetLineWidth() const { return m_lineWidthPixels; }
+
+    void AddLineWidth(float deltaPixels)
+    {
+        m_lineWidthPixels = std::clamp(m_lineWidthPixels + deltaPixels, MIN_LINE_WIDTH, MAX_LINE_WIDTH);
+    }
+
+    void ToggleDebugForceFacetedCircles()
+    {
+        m_modelRenderer2.SetDebugForceFacetedCircles(!m_modelRenderer2.GetDebugForceFacetedCircles());
+    }
 
     void Render(double delta);
 };

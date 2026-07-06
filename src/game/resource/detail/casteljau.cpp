@@ -12,7 +12,7 @@ using Magnum::Vector4d;
 
 static bool IsFlat(const std::vector<Vector2d>& curve)
 {
-    const double tol = 10.0;
+    const double tol = 1000.0;
 
     double ax = 3.*curve[1][0] - 2.*curve[0][0] - curve[3][0]; ax *= ax;
     double ay = 3.*curve[1][1] - 2.*curve[0][1] - curve[3][1]; ay *= ay;

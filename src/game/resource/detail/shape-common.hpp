@@ -39,6 +39,20 @@ std::unique_ptr<ShapeFiles> GetShapeFiles(IFilesystem& fs, const std::string& pa
 
 Vector2d GetShapeCenter(const NSVGshape* shape);
 
+struct CircleInfo {
+    Vector2d center;
+    double radius;
+};
+
+// True if this single path is (within tolerance) exactly the 4-arc cubic
+// bezier construction nanosvg emits for <circle>/<ellipse> with equal
+// radii (see nsvg__parseCircle in nanosvg.h) — i.e. a genuine circle, not an
+// ellipse or an arbitrary hand-drawn closed curve that merely looks round.
+// Deliberately per-path (unlike body.cpp's stricter shape-level IsCircle,
+// which also requires the shape to have exactly one path) so it can be used
+// while iterating individual paths in a possibly multi-path shape.
+bool IsCircleGeometry(const NSVGpath* path, CircleInfo* outInfo = nullptr);
+
 Matrix4d GetTransformMatrix(const ShapeFiles& mf);
 
 Color3 Hex3ToNormalizedColor3(std::uint32_t hex);

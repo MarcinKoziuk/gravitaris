@@ -1,5 +1,6 @@
 #include <cstring>
 
+#include <Magnum/Math/Vector3.h>
 #include <Magnum/Math/Matrix4.h>
 
 #include <nanosvg/nanosvg.h>
@@ -11,6 +12,8 @@
 #include "game/resource/detail/casteljau.hpp"
 
 namespace Gravitaris {
+
+using Magnum::Vector3d;
 
 static std::vector<Shape::Path> ShapeToPaths(const NSVGshape* shape, Shape::Style style, const Matrix4d& transform, id_t group);
 
@@ -80,6 +83,13 @@ static std::vector<Shape::Path> ShapeToPaths(const NSVGshape* shape, Shape::Styl
         path.style = style;
         path.closed = svgPath->closed == 1;
         path.group = group;
+
+        if (CircleInfo circleInfo; IsCircleGeometry(svgPath, &circleInfo)) {
+            const Vector3d centerT = transform.transformPoint(
+                    Vector3d(circleInfo.center.x(), circleInfo.center.y(), 0.));
+            const double scale = transform.transformVector(Vector3d(1., 0., 0.)).length();
+            path.circle = Shape::Circle{Vector2d(centerT.x(), centerT.y()), circleInfo.radius * scale};
+        }
 
 #if 0
         std::vector<Vector2> cubicBezier;

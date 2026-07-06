@@ -1,4 +1,5 @@
 #include <cstring>
+#include <cmath>
 
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Vector2.h>
@@ -91,6 +92,26 @@ Vector2d GetShapeCenter(const NSVGshape* shape)
     center.x() = (path->bounds[0] + path->bounds[2]) / 2.f;
     center.y() = (path->bounds[1] + path->bounds[3]) / 2.f;
     return center;
+}
+
+bool IsCircleGeometry(const NSVGpath* path, CircleInfo* outInfo)
+{
+    if (!path->closed || path->npts != 16) {
+        return false;
+    }
+
+    const double diff = std::abs((path->bounds[2] - path->bounds[0]) - (path->bounds[3] - path->bounds[1]));
+    if (diff >= 0.001) {
+        return false;
+    }
+
+    if (outInfo) {
+        outInfo->center.x() = (path->bounds[0] + path->bounds[2]) / 2.;
+        outInfo->center.y() = (path->bounds[1] + path->bounds[3]) / 2.;
+        outInfo->radius = (path->bounds[2] - path->bounds[0]) / 2.;
+    }
+
+    return true;
 }
 
 Matrix4d GetTransformMatrix(const ShapeFiles& mf)

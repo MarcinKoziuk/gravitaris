@@ -19,6 +19,7 @@
 #include <gravitaris/game/component/controls.hpp>
 
 #include <gravitaris/cgame/cgame.hpp>
+#include <gravitaris/cgame/renderer/glow-post-process.hpp>
 
 #include <gravitaris/ui/ui.hpp>
 
@@ -37,6 +38,7 @@ private:
     FilesystemPhysFS m_filesystem;
 
     std::unique_ptr<CGame> m_game;
+    std::unique_ptr<GlowPostProcess> m_glow;
 
     UI m_ui;
 
@@ -51,6 +53,7 @@ private:
     void drawEvent() override;
     void keyPressEvent(KeyEvent& event) override;
     void keyReleaseEvent(KeyEvent& event) override;
+    void scrollEvent(ScrollEvent& event) override;
 };
 
 GravitarisApplication::GravitarisApplication(const Arguments& arguments)
@@ -72,6 +75,8 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
 
     m_game = std::make_unique<CGame>(m_filesystem);
     m_game->Start();
+
+    m_glow = std::make_unique<GlowPostProcess>(m_filesystem);
 }
 
 void GravitarisApplication::tickEvent()
@@ -97,14 +102,19 @@ void GravitarisApplication::tickEvent()
 
 void GravitarisApplication::drawEvent()
 {
-    // Clear the window and restore viewport to full size;
-    // RmlUi sets the viewport to its context size and doesn't restore it
-    Magnum::GL::defaultFramebuffer.clear(Magnum::GL::FramebufferClear::Color);
-    Magnum::GL::defaultFramebuffer.setViewport({{}, windowSize()});
+    m_game->SetViewportSize(Magnum::Vector2{windowSize()});
 
-    // Render
+    // Render the game world into the glow pass's offscreen scene target
+    // instead of directly onto the screen, so it can be blurred/composited.
+    m_glow->BeginScene(windowSize());
     const double delta = m_frameTimeAccumulator / Game::PHYSICS_DELTA;
     m_game->Render(delta);
+
+    // Composite (blur+add, or just a straight blit when disabled) back onto
+    // the real framebuffer. Restore viewport to full size afterwards; RmlUi
+    // sets the viewport to its own context size and doesn't restore it.
+    m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, windowSize());
+    Magnum::GL::defaultFramebuffer.setViewport({{}, windowSize()});
 
     // RmlUi uses raw OpenGL calls that bypass Magnum's state cache
     Magnum::GL::Context::current().resetState(Magnum::GL::Context::State::EnterExternal);
@@ -117,6 +127,24 @@ void GravitarisApplication::drawEvent()
 
 void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::KeyEvent& event)
 {
+    constexpr float LINE_WIDTH_STEP = 0.5f;
+    switch (event.key()) {
+        case KeyEvent::Key::NumAdd:
+            m_game->AddLineWidth(LINE_WIDTH_STEP);
+            return;
+        case KeyEvent::Key::NumSubtract:
+            m_game->AddLineWidth(-LINE_WIDTH_STEP);
+            return;
+        case KeyEvent::Key::C:
+            m_game->ToggleDebugForceFacetedCircles();
+            return;
+        case KeyEvent::Key::B:
+            m_glow->SetEnabled(!m_glow->IsEnabled());
+            return;
+        default:
+            break;
+    }
+
     std::optional<entt::entity> maybePlayer = m_game->GetPlayer();
     if (!maybePlayer) return;
 
@@ -168,6 +196,12 @@ void GravitarisApplication::keyReleaseEvent(Magnum::Platform::Sdl2Application::K
         default:
             (void)0;
     }
+}
+
+void GravitarisApplication::scrollEvent(ScrollEvent& event)
+{
+    m_game->GetCamera().AddZoomNotches(event.offset().y());
+    event.setAccepted();
 }
 
 static double GetTime()

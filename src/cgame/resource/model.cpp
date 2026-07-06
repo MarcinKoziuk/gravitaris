@@ -66,10 +66,19 @@ void Model::InitFromShape(const Shape& shape)
         }
 
         const std::size_t newOffset = modelGroup.vertexBuffer.size();
+
+        std::optional<CircleHint> circleHint;
+        if (path.circle) {
+            circleHint = CircleHint{
+                Vector2{static_cast<float>(path.circle->center.x()), static_cast<float>(path.circle->center.y())},
+                static_cast<float>(path.circle->radius)};
+        }
+
         modelGroup.lineStrips.emplace_back(VertexLineStrip{
             .color  = path.style.color.rgb(),
             .offset = offset,
-            .count  = newOffset - offset});
+            .count  = newOffset - offset,
+            .circle = circleHint});
         offsets[tag] = newOffset;
     }
 

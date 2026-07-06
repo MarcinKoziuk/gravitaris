@@ -3,6 +3,7 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
+#include <optional>
 
 #include <Magnum/Magnum.h>
 
@@ -23,10 +24,21 @@ using Magnum::Color3;
 
 class Model : public IResource {
 public:
+    // Present only when this strip is an exact circle (see
+    // Shape::Path::circle). Renderers that don't know about circles simply
+    // ignore this and draw the polyline in `offset`/`count` as always;
+    // ModelRenderer2 uses it to draw an analytically perfect circle instead
+    // and skips the (still-present, redundant-for-it) polyline.
+    struct CircleHint {
+        Vector2 center;
+        float radius;
+    };
+
     struct VertexLineStrip {
         Color3 color;
         std::size_t offset;
         std::size_t count;
+        std::optional<CircleHint> circle;
     };
 
     struct Group {

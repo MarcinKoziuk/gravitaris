@@ -287,6 +287,17 @@ add_executable(GravitarisNG
     src/cgame/renderer/shader/line-segments-shader.cpp
     include/gravitaris/cgame/renderer/model-renderer.hpp
     src/cgame/renderer/model-renderer.cpp
+    include/gravitaris/cgame/renderer/shader/line2-shader.hpp
+    src/cgame/renderer/shader/line2-shader.cpp
+    include/gravitaris/cgame/renderer/model-renderer2.hpp
+    src/cgame/renderer/model-renderer2.cpp
+    include/gravitaris/cgame/camera.hpp
+    include/gravitaris/cgame/renderer/shader/glow-blur-shader.hpp
+    src/cgame/renderer/shader/glow-blur-shader.cpp
+    include/gravitaris/cgame/renderer/shader/glow-composite-shader.hpp
+    src/cgame/renderer/shader/glow-composite-shader.cpp
+    include/gravitaris/cgame/renderer/glow-post-process.hpp
+    src/cgame/renderer/glow-post-process.cpp
     include/gravitaris/cgame/renderer/shader/line-miter-shader.hpp
     src/cgame/renderer/shader/line-miter-shader.cpp
     src/cgame/ui/detail/system-interface.hpp

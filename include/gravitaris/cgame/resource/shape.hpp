@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <memory>
+#include <optional>
 
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Color.h>
@@ -30,11 +31,21 @@ public:
         Style() : thickness(1.f), useTeamColor(true) {}
     };
 
+    // Present only when the path is (within tolerance) an exact circle, as
+    // opposed to an arbitrary closed curve that happens to look round — see
+    // IsCircleGeometry(). Center/radius are already in the same
+    // post-transform space as `points`.
+    struct Circle {
+        Vector2d center;
+        double radius;
+    };
+
     struct Path {
         std::vector<Vector2d> points;
         Style style;
         bool closed;
         id_t group;
+        std::optional<Circle> circle;
 
         Path()
             : group(0L)

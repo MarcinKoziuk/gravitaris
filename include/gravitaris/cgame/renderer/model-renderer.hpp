@@ -41,6 +41,10 @@ private:
     std::unordered_map<id_t,
         std::unordered_map<id_t, std::vector<MeshColor>>> m_meshes;
 
+    Magnum::Vector2 m_cameraPos{0.f, 0.f};
+    float m_zoom = 1.f;
+    float m_lineWidthPixels = 2.f;
+
     void HandleModelAdded(const Model& model, id_t id);
 
     void HandleModelRemoved(const Model& model, id_t id);
@@ -51,6 +55,10 @@ public:
     ModelRenderer(entt::registry& registry, IFilesystem& filesystem, ResourceLoader& resourceLoader);
 
     ~ModelRenderer();
+
+    void SetCameraPosition(const Magnum::Vector2& pos) { m_cameraPos = pos; }
+    void SetZoom(float zoom) { m_zoom = zoom; }
+    void SetLineWidth(float pixels) { m_lineWidthPixels = pixels; }
 
     void Render(double delta);
 };
