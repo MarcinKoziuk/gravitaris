@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   width="210mm"
+   height="297mm"
+   viewBox="0 0 744.09448819 1052.3622047"
+   id_t="svg2"
+   version="1.1"
+   inkscape:version="0.91 r13725"
+   sodipodi:docname="simple.svg">
+  <defs
+     id_t="defs4" />
+  <sodipodi:namedview
+     id_t="base"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:pageopacity="0.0"
+     inkscape:pageshadow="2"
+     inkscape:zoom="0.98994949"
+     inkscape:cx="-248.41073"
+     inkscape:cy="654.1022"
+     inkscape:document-units="px"
+     inkscape:current-layer="layer1"
+     showgrid="false"
+     inkscape:window-width="1920"
+     inkscape:window-height="1137"
+     inkscape:window-x="-8"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1" />
+  <metadata
+     id_t="metadata7">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:type
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+        <dc:title />
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
+  <g
+     inkscape:groupmode="layer"
+     id_t="layer2"
+     inkscape:label="@body"
+     style="display:inline">
+    <circle
+       style="fill:none;stroke:#00ffff;stroke-width:2.00337839"
+       id_t="path3416"
+       cx="321.71329"
+       cy="470.00925"
+       r="299.50854" />
+  </g>
+  <g
+     style="display:inline"
+     inkscape:label="model"
+     id_t="g3418"
+     inkscape:groupmode="layer">
+    <circle
+       style="display:inline;fill:none;stroke:#00ffff;stroke-width:2.00337839"
+       id_t="path3416-9"
+       cx="322.23865"
+       cy="469.52451"
+       r="299.50854" />
+  </g>
+  <g
+     inkscape:label="@origin"
+     inkscape:groupmode="layer"
+     id_t="layer1">
+    <circle
+       style="stroke:#00ffff"
+       id_t="path3408"
+       cx="327.69299"
+       cy="473.08032"
+       r="3.5355339" />
+  </g>
+</svg>

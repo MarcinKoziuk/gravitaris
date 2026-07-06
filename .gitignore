@@ -1,0 +1,51 @@
+# CMake build dirs
+build/
+out/
+cmake-build-*/
+
+# CMake generated artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+*.cmake.in
+
+# FetchContent downloads and build trees
+_deps/
+
+# Compiled output
+*.exe
+*.dll
+*.lib
+*.a
+*.so
+*.dylib
+*.pdb
+*.ilk
+*.exp
+*.o
+*.obj
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.VC.opendb
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Inkscape backup/autosave files (e.g. foo.svg.2016_06_11_22_14_56.0.svg)
+*.svg.*.svg
