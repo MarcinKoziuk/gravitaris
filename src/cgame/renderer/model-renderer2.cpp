@@ -2,8 +2,6 @@
 #include <functional>
 #include <vector>
 
-#include <windows.h>
-
 #include <Corrade/Containers/ArrayView.h>
 
 #include <Magnum/Mesh.h>
@@ -122,12 +120,17 @@ std::vector<LineVertex> BakeGroup(const Model::Group& group, bool forceFaceted)
 // prevents it from tearing down the process; the upload itself still succeeds.
 unsigned long SafeUpload(Magnum::GL::Buffer& buf, const void* data, std::size_t bytes)
 {
+#if defined(_WIN32)
     __try {
         buf.setData(Containers::ArrayView<const void>{data, bytes});
         return 0;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return GetExceptionCode();
     }
+#else
+    buf.setData(Containers::ArrayView<const void>{data, bytes});
+    return 0;
+#endif
 }
 
 } // namespace

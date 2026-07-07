@@ -79,6 +79,9 @@ FetchContent_Declare(SDL2
     GIT_SHALLOW     TRUE
     OVERRIDE_FIND_PACKAGE
 )
+# Avoid an "uninstall" custom target name clash with PhysFS, which also
+# defines one when fetched as a sibling subdirectory.
+set(SDL2_DISABLE_UNINSTALL ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(SDL2)
 
 # Same OVERRIDE_FIND_PACKAGE no-op issue as Freetype: Magnum's internal
@@ -172,6 +175,11 @@ FetchContent_Declare(physfs
     OVERRIDE_FIND_PACKAGE
 )
 FetchContent_MakeAvailable(physfs)
+
+# PhysFS forces CMAKE_SKIP_RPATH ON as a cache variable, which would disable
+# RPATH handling for the whole project (breaking our own executable's ability
+# to find the fetched shared libs at runtime). Restore it.
+set(CMAKE_SKIP_RPATH OFF CACHE BOOL "Skip RPATH" FORCE)
 
 # ---------------------------------------------------------------------------
 # EnTT (header-only)
@@ -363,4 +371,13 @@ elseif(TARGET physfs-static)
     target_link_libraries(GravitarisNG PRIVATE physfs-static)
 elseif(TARGET physfs)
     target_link_libraries(GravitarisNG PRIVATE physfs)
+endif()
+
+# On macOS the fetched shared libs (Magnum, Corrade, etc.) carry no install
+# name fixup, and the executable gets no LC_RPATH by default, so it can't
+# find them at runtime. Point it at its own lib output directory.
+if(APPLE)
+    set_target_properties(GravitarisNG PROPERTIES
+        BUILD_RPATH "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}"
+    )
 endif()
