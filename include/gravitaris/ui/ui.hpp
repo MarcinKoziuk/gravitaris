@@ -29,7 +29,10 @@ public:
 
     void Update();
 
-    void Render();
+    // width/height are the real framebuffer size in pixels (not the
+    // window's logical/point size), so the UI stays pixel-accurate on
+    // HiDPI/Retina displays where the two differ.
+    void Render(int width, int height);
 
     bool Init();
 };

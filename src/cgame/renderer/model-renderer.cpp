@@ -1,6 +1,8 @@
 #include <Magnum/Mesh.h>
 #include <Magnum/Math/Matrix3.h>
 
+#include <Magnum/GL/Context.h>
+#include <Magnum/GL/Extensions.h>
 #include <Magnum/GL/GL.h>
 
 #include <gravitaris/game/component/transform.hpp>
@@ -49,12 +51,18 @@ ModelRenderer::ModelRenderer(entt::registry& registry, IFilesystem& filesystem, 
     , m_lineSegmentsShader(filesystem)
     , m_lineMiterShader(filesystem)
 {
-    glEnable(GL_DEBUG_OUTPUT);
-    glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-    glDebugMessageCallback(openglDebugCallback, nullptr);
-    // Suppress NVIDIA's "Buffer object will use VIDEO memory"
-    glDebugMessageControl(GL_DEBUG_SOURCE_API, GL_DEBUG_TYPE_OTHER,
-                          GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
+    // GL_KHR_debug (glDebugMessageCallback et al.) requires GL 4.3+; Apple's
+    // GL drivers cap out at 4.1, and calling these on an unsupporting
+    // context dereferences a null function pointer. Skip on contexts that
+    // lack the extension instead of crashing.
+    if (GL::Context::current().isExtensionSupported<GL::Extensions::KHR::debug>()) {
+        glEnable(GL_DEBUG_OUTPUT);
+        glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+        glDebugMessageCallback(openglDebugCallback, nullptr);
+        // Suppress NVIDIA's "Buffer object will use VIDEO memory"
+        glDebugMessageControl(GL_DEBUG_SOURCE_API, GL_DEBUG_TYPE_OTHER,
+                              GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
+    }
 
     m_resourceLoader.OnCreate<Model>().connect<&ModelRenderer::HandleModelAdded>(*this);
     m_resourceLoader.OnDestroy<Model>().connect<&ModelRenderer::HandleModelRemoved>(*this);

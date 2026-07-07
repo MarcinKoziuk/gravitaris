@@ -102,23 +102,32 @@ void GravitarisApplication::tickEvent()
 
 void GravitarisApplication::drawEvent()
 {
-    m_game->SetViewportSize(Magnum::Vector2{windowSize()});
+    // Use the real framebuffer size (pixels), not windowSize() (logical
+    // points). On HiDPI/Retina displays the two differ by the DPI scale
+    // factor; sizing viewports/offscreen targets and RmlUi's canvas off the
+    // smaller logical size left the actual framebuffer mostly uninitialized
+    // (visible as a small rendered region in one corner and black
+    // elsewhere), and the postprocess pass sampling across that boundary is
+    // what showed up as glitching once glow was enabled.
+    const Magnum::Vector2i fbSize = framebufferSize();
+
+    m_game->SetViewportSize(Magnum::Vector2{fbSize});
 
     // Render the game world into the glow pass's offscreen scene target
     // instead of directly onto the screen, so it can be blurred/composited.
-    m_glow->BeginScene(windowSize());
+    m_glow->BeginScene(fbSize);
     const double delta = m_frameTimeAccumulator / Game::PHYSICS_DELTA;
     m_game->Render(delta);
 
     // Composite (blur+add, or just a straight blit when disabled) back onto
     // the real framebuffer. Restore viewport to full size afterwards; RmlUi
     // sets the viewport to its own context size and doesn't restore it.
-    m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, windowSize());
-    Magnum::GL::defaultFramebuffer.setViewport({{}, windowSize()});
+    m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, fbSize);
+    Magnum::GL::defaultFramebuffer.setViewport({{}, fbSize});
 
     // RmlUi uses raw OpenGL calls that bypass Magnum's state cache
     Magnum::GL::Context::current().resetState(Magnum::GL::Context::State::EnterExternal);
-    m_ui.Render();
+    m_ui.Render(fbSize.x(), fbSize.y());
     Magnum::GL::Context::current().resetState(Magnum::GL::Context::State::ExitExternal);
 
     // The context is double-buffered, swap buffers

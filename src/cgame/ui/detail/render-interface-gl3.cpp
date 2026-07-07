@@ -1,3 +1,4 @@
+#include <Magnum/configure.h>
 #include <Magnum/GL/Extensions.h>
 #include <Magnum/GL/Shader.h>
 
@@ -16,7 +17,17 @@
 #endif
 
 
+// "#version 300 es" is only valid on an OpenGL ES context (or a driver that
+// tolerates the "es" profile suffix on desktop GL, as most Windows/Linux
+// drivers do). Apple's desktop GL compiler rejects it outright, so pick a
+// desktop-appropriate header there; the two GLSL versions are otherwise
+// close enough (same 'in'/'out' qualifiers) that no shader body changes are
+// needed.
+#if defined(MAGNUM_TARGET_GLES)
 #define RMLUI_SHADER_HEADER "#version 300 es\nprecision highp float;\n"
+#else
+#define RMLUI_SHADER_HEADER "#version 330 core\n"
+#endif
 
 namespace Gravitaris {
 
@@ -305,6 +316,19 @@ void RenderInterfaceGL3::SetViewport(int width, int height)
 void RenderInterfaceGL3::BeginFrame()
 {
     RMLUI_ASSERT(viewport_width >= 0 && viewport_height >= 0);
+
+    // This backend always binds its textures on unit 0 and relies on the
+    // '_tex' sampler's default value of 0, without ever calling
+    // glActiveTexture. That's only safe if unit 0 is already active: the
+    // glow post-process pass (glow-composite-shader) binds its glow texture
+    // on unit 1 and leaves it active, so when it runs before this (toggled
+    // via the 'B' key), RmlUi's glBindTexture calls land on unit 1 while
+    // the shader keeps sampling whatever was last bound to unit 0 - the
+    // captured game scene texture. That's what showed up as the UI turning
+    // into a "mirror" of the screen. Force unit 0 back before doing any
+    // texture work.
+    glActiveTexture(GL_TEXTURE0);
+
     glViewport(0, 0, viewport_width, viewport_height);
 
     glClearStencil(0);
@@ -390,6 +414,11 @@ Rml::CompiledGeometryHandle RenderInterfaceGL3::CompileGeometry(Rml::Span<const 
 void RenderInterfaceGL3::RenderGeometry(Rml::CompiledGeometryHandle handle, Rml::Vector2f translation,
                                          Rml::TextureHandle texture)
 {
+    // If shader setup failed (e.g. unsupported GLSL version on this driver),
+    // `shaders` is null; skip rendering instead of dereferencing it.
+    if (!shaders)
+        return;
+
     Gfx::CompiledGeometryData* geometry = (Gfx::CompiledGeometryData*)handle;
 
     if (texture)
@@ -617,6 +646,10 @@ Rml::TextureHandle RenderInterfaceGL3::GenerateTexture(Rml::Span<const Rml::byte
         return 0;
     }
 
+    // Textures can be generated outside of BeginFrame/EndFrame (e.g. RCSS
+    // background images loaded on demand), so make sure this doesn't land
+    // on a texture unit left active by unrelated code.
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture_id);
 
     GLint internal_format = GL_RGBA8;

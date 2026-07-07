@@ -34,6 +34,8 @@ bool UI::Init()
 
     if (!Rml::Initialise()) return false;
 
+    // Placeholder size; corrected on the first Render() call to the real
+    // framebuffer size once the window/context is up.
     m_context = Rml::CreateContext("default", Rml::Vector2i(1280, 720));
 
     Rml::LoadFontFace("ui/LatoLatin-Regular.ttf");
@@ -60,9 +62,14 @@ void UI::Update()
     m_context->Update();
 }
 
-void UI::Render()
+void UI::Render(int width, int height)
 {
-    m_renderInterfaceGl3->SetViewport(1280, 720);
+    const Rml::Vector2i dimensions{width, height};
+    if (m_context->GetDimensions() != dimensions) {
+        m_context->SetDimensions(dimensions);
+    }
+
+    m_renderInterfaceGl3->SetViewport(width, height);
     m_renderInterfaceGl3->BeginFrame();
 
     m_context->Render();
