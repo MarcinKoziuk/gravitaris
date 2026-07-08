@@ -141,6 +141,15 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         case KeyEvent::Key::B:
             m_glow->SetEnabled(!m_glow->IsEnabled());
             return;
+        case KeyEvent::Key::V:
+            m_glow->SetCrtEnabled(!m_glow->IsCrtEnabled());
+            return;
+        case KeyEvent::Key::RightBracket:
+            m_glow->AddIntensity(0.25f);
+            return;
+        case KeyEvent::Key::LeftBracket:
+            m_glow->AddIntensity(-0.25f);
+            return;
         default:
             break;
     }

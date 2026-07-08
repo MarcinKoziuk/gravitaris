@@ -38,6 +38,7 @@ GL::Framebuffer MakeColorFramebuffer(const Vector2i& size, GL::Texture2D& colorT
 GlowPostProcess::GlowPostProcess(IFilesystem& filesystem)
     : m_blurShader(filesystem)
     , m_compositeShader(filesystem)
+    , m_crtShader(filesystem)
 {
     // No vertex buffers at all — the vertex shader derives positions purely
     // from gl_VertexID (the "big triangle" trick).
@@ -64,6 +65,9 @@ void GlowPostProcess::Resize(const Vector2i& windowSize)
     m_blurB = MakeColorTexture(m_blurSize);
     m_blurFboA = MakeColorFramebuffer(m_blurSize, m_blurA);
     m_blurFboB = MakeColorFramebuffer(m_blurSize, m_blurB);
+
+    m_outputColor = MakeColorTexture(m_fullSize);
+    m_outputFbo = MakeColorFramebuffer(m_fullSize, m_outputColor);
 }
 
 void GlowPostProcess::BeginScene(const Vector2i& windowSize)
@@ -75,12 +79,28 @@ void GlowPostProcess::BeginScene(const Vector2i& windowSize)
     m_sceneFbo.clearColor(0, Color4{0.f, 0.f, 0.f, 1.f});
 }
 
+void GlowPostProcess::Present(GL::Texture2D& sourceTex, GL::Framebuffer& sourceFbo,
+                             GL::AbstractFramebuffer& target, const Vector2i& windowSize)
+{
+    if (m_crtEnabled) {
+        GL::Renderer::disable(GL::Renderer::Feature::Blending);
+        target.bind();
+        target.setViewport(Range2Di{{}, windowSize});
+        m_crtShader.setViewportSize(Vector2{windowSize})
+                .setScanlineStrength(m_scanlineStrength)
+                .bindImage(sourceTex)
+                .draw(m_fullscreenTri);
+    } else {
+        GL::AbstractFramebuffer::blit(sourceFbo, target, Range2Di{{}, m_fullSize}, Range2Di{{}, windowSize},
+                                       GL::FramebufferBlit::Color, GL::FramebufferBlitFilter::Linear);
+    }
+}
+
 void GlowPostProcess::EndSceneAndComposite(GL::AbstractFramebuffer& target, const Vector2i& windowSize)
 {
     if (!m_enabled) {
-        // Cheap path: just copy the sharp scene through untouched.
-        GL::AbstractFramebuffer::blit(m_sceneFbo, target, Range2Di{{}, m_fullSize}, Range2Di{{}, windowSize},
-                                       GL::FramebufferBlit::Color, GL::FramebufferBlitFilter::Linear);
+        // No glow: present the sharp scene directly (CRT pass still applies).
+        Present(m_sceneColor, m_sceneFbo, target, windowSize);
         return;
     }
 
@@ -95,26 +115,32 @@ void GlowPostProcess::EndSceneAndComposite(GL::AbstractFramebuffer& target, cons
     GL::AbstractFramebuffer::blit(m_halfFbo, m_blurFboA, Range2Di{{}, m_halfSize}, Range2Di{{}, m_blurSize},
                                    GL::FramebufferBlit::Color, GL::FramebufferBlitFilter::Linear);
 
-    // Separable Gaussian at 1/4 res: horizontal A -> B, vertical B -> A.
-    m_blurFboB.bind();
-    m_blurFboB.setViewport(Range2Di{{}, m_blurSize});
-    m_blurShader.setDirection(Vector2{1.f / static_cast<float>(m_blurSize.x()), 0.f})
-            .bindImage(m_blurA)
-            .draw(m_fullscreenTri);
+    // Separable Gaussian at 1/4 res, repeated to widen the glow. Each pass:
+    // horizontal A -> B, vertical B -> A, leaving the result back in blurA.
+    for (int i = 0; i < m_blurPasses; ++i) {
+        m_blurFboB.bind();
+        m_blurFboB.setViewport(Range2Di{{}, m_blurSize});
+        m_blurShader.setDirection(Vector2{1.f / static_cast<float>(m_blurSize.x()), 0.f})
+                .bindImage(m_blurA)
+                .draw(m_fullscreenTri);
 
-    m_blurFboA.bind();
-    m_blurFboA.setViewport(Range2Di{{}, m_blurSize});
-    m_blurShader.setDirection(Vector2{0.f, 1.f / static_cast<float>(m_blurSize.y())})
-            .bindImage(m_blurB)
-            .draw(m_fullscreenTri);
+        m_blurFboA.bind();
+        m_blurFboA.setViewport(Range2Di{{}, m_blurSize});
+        m_blurShader.setDirection(Vector2{0.f, 1.f / static_cast<float>(m_blurSize.y())})
+                .bindImage(m_blurB)
+                .draw(m_fullscreenTri);
+    }
 
-    // Composite: sharp scene + intensity * blurred glow -> target, at window res.
-    target.bind();
-    target.setViewport(Range2Di{{}, windowSize});
+    // Composite sharp scene + intensity * blurred glow into the full-res
+    // output target (so the CRT present pass can sample it).
+    m_outputFbo.bind();
+    m_outputFbo.setViewport(Range2Di{{}, m_fullSize});
     m_compositeShader.setIntensity(m_intensity)
             .bindScene(m_sceneColor)
             .bindGlow(m_blurA)
             .draw(m_fullscreenTri);
+
+    Present(m_outputColor, m_outputFbo, target, windowSize);
 }
 
 } // namespace Gravitaris
