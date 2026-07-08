@@ -49,11 +49,19 @@ private:
     double m_prevTime;
     double m_frameTimeAccumulator;
 
+    bool m_uiInWorld = true; // render UI into the scene so it gets bloom + CRT
+
     void tickEvent() override;
     void drawEvent() override;
     void keyPressEvent(KeyEvent& event) override;
     void keyReleaseEvent(KeyEvent& event) override;
     void scrollEvent(ScrollEvent& event) override;
+    void pointerPressEvent(PointerEvent& event) override;
+    void pointerReleaseEvent(PointerEvent& event) override;
+    void pointerMoveEvent(PointerMoveEvent& event) override;
+
+    static int RmlButtonIndex(Pointer pointer);
+    void RenderUi();
 };
 
 GravitarisApplication::GravitarisApplication(const Arguments& arguments)
@@ -100,9 +108,18 @@ void GravitarisApplication::tickEvent()
     m_ui.Update(); // ? Claude: now the normal game doesn't show any more
 }
 
+void GravitarisApplication::RenderUi()
+{
+    // RmlUi uses raw OpenGL calls that bypass Magnum's state cache.
+    Magnum::GL::Context::current().resetState(Magnum::GL::Context::State::EnterExternal);
+    m_ui.Render();
+    Magnum::GL::Context::current().resetState(Magnum::GL::Context::State::ExitExternal);
+}
+
 void GravitarisApplication::drawEvent()
 {
     m_game->SetViewportSize(Magnum::Vector2{windowSize()});
+    m_ui.SetDimensions(windowSize().x(), windowSize().y());
 
     // Render the game world into the glow pass's offscreen scene target
     // instead of directly onto the screen, so it can be blurred/composited.
@@ -110,16 +127,19 @@ void GravitarisApplication::drawEvent()
     const double delta = m_frameTimeAccumulator / Game::PHYSICS_DELTA;
     m_game->Render(delta);
 
-    // Composite (blur+add, or just a straight blit when disabled) back onto
-    // the real framebuffer. Restore viewport to full size afterwards; RmlUi
-    // sets the viewport to its own context size and doesn't restore it.
-    m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, windowSize());
-    Magnum::GL::defaultFramebuffer.setViewport({{}, windowSize()});
+    if (m_uiInWorld) {
+        // Draw the UI into the still-bound scene target BEFORE compositing, so
+        // its bright cyan lines pick up the same bloom + CRT as the game.
+        RenderUi();
+        m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, windowSize());
+    } else {
+        // Composite first, then draw the UI crisply on top of the result.
+        m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, windowSize());
+        RenderUi();
+    }
 
-    // RmlUi uses raw OpenGL calls that bypass Magnum's state cache
-    Magnum::GL::Context::current().resetState(Magnum::GL::Context::State::EnterExternal);
-    m_ui.Render();
-    Magnum::GL::Context::current().resetState(Magnum::GL::Context::State::ExitExternal);
+    // Restore viewport to full size; RmlUi sets it to its own context size.
+    Magnum::GL::defaultFramebuffer.setViewport({{}, windowSize()});
 
     // The context is double-buffered, swap buffers
     swapBuffers();
@@ -149,6 +169,12 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
             return;
         case KeyEvent::Key::LeftBracket:
             m_glow->AddIntensity(-0.25f);
+            return;
+        case KeyEvent::Key::U:
+            m_uiInWorld = !m_uiInWorld;
+            return;
+        case KeyEvent::Key::F8:
+            m_ui.ToggleDebugger();
             return;
         default:
             break;
@@ -211,6 +237,40 @@ void GravitarisApplication::scrollEvent(ScrollEvent& event)
 {
     m_game->GetCamera().AddZoomNotches(event.offset().y());
     event.setAccepted();
+}
+
+int GravitarisApplication::RmlButtonIndex(Pointer pointer)
+{
+    // RmlUi convention: 0 = left, 1 = right, 2 = middle.
+    switch (pointer) {
+        case Pointer::MouseRight:  return 1;
+        case Pointer::MouseMiddle: return 2;
+        default:                   return 0; // MouseLeft / anything else
+    }
+}
+
+void GravitarisApplication::pointerPressEvent(PointerEvent& event)
+{
+    const Vector2 p = event.position();
+    m_ui.ProcessMouseMove(static_cast<int>(p.x()), static_cast<int>(p.y()));
+    if (m_ui.ProcessMouseButton(RmlButtonIndex(event.pointer()), true)) {
+        event.setAccepted();
+    }
+}
+
+void GravitarisApplication::pointerReleaseEvent(PointerEvent& event)
+{
+    if (m_ui.ProcessMouseButton(RmlButtonIndex(event.pointer()), false)) {
+        event.setAccepted();
+    }
+}
+
+void GravitarisApplication::pointerMoveEvent(PointerMoveEvent& event)
+{
+    const Vector2 p = event.position();
+    if (m_ui.ProcessMouseMove(static_cast<int>(p.x()), static_cast<int>(p.y()))) {
+        event.setAccepted();
+    }
 }
 
 static double GetTime()

@@ -1,0 +1,121 @@
+/* Vector-display UI theme: thin cyan lines on near-black, no sprites, so it
+   matches the game's glowing-vector aesthetic. When the UI is rendered into
+   the scene target (option 4), the bright cyan borders/text pick up the same
+   bloom + CRT scanlines as the game's vector lines automatically. The
+   font-effect glow below is a subtle baked fallback for when that pass is off. */
+
+body
+{
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-style: normal;
+    font-size: 15dp;
+    color: #8ff;
+}
+
+body.window
+{
+    padding-top: 34dp;
+    padding-bottom: 14dp;
+
+    min-width: 180dp;
+    max-width: 800dp;
+    min-height: 90dp;
+    max-height: 700dp;
+
+    background-color: #01141aec;   /* near-black, slightly translucent */
+    border-width: 2dp;
+    border-color: #0ff;
+}
+
+/* Title bar: a labelled strip with a cyan underline; the <handle> inside it
+   (see template) is what makes the window draggable. */
+div#title_bar
+{
+    z-index: 1;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+
+    height: 26dp;
+    text-align: left;
+
+    background-color: #0ff2;       /* faint cyan wash */
+    border-bottom-width: 1dp;
+    border-bottom-color: #0ff;
+}
+
+div#title_bar div#icon
+{
+    display: none;
+}
+
+div#title_bar span#title
+{
+    display: block;
+    padding: 5dp 10dp;
+
+    color: #cff;
+    font-size: 16dp;
+    font-weight: bold;
+    font-effect: glow(2dp #0ff8);
+}
+
+div#window
+{
+    width: auto;
+    height: 100%;
+    padding: 12dp 14dp;
+}
+
+div#content
+{
+    z-index: 2;
+    width: auto;
+    height: 100%;
+    overflow: hidden auto;
+    text-align: center;
+    color: #9ff;
+}
+
+/* Outlined cyan button: transparent fill, inverts on press. */
+button
+{
+    display: inline-block;
+    box-sizing: border-box;
+
+    padding: 8dp 22dp;
+    margin: 4dp;
+
+    color: #0ff;
+    font-size: 15dp;
+    font-weight: bold;
+    text-align: center;
+    tab-index: auto;
+
+    background-color: #0ff1;
+    border-width: 1dp;
+    border-color: #0ff;
+    cursor: pointer;
+    font-effect: glow(2dp #0ff6);
+}
+
+button:hover
+{
+    background-color: #0ff3;
+    border-color: #bff;
+    color: #dff;
+}
+
+button:active
+{
+    background-color: #0ff;
+    color: #012;                   /* inverted: dark text on cyan fill */
+    font-effect: none;
+}
+
+button:focus
+{
+    border-color: #fff;
+}
