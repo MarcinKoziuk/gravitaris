@@ -189,6 +189,9 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         case KeyEvent::Key::U:
             m_uiInWorld = !m_uiInWorld;
             return;
+        case KeyEvent::Key::F:
+            m_game->ToggleCameraFollow();
+            return;
         case KeyEvent::Key::F8:
             m_ui.ToggleDebugger();
             return;

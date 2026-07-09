@@ -20,6 +20,12 @@ protected:
     ModelRenderer2 m_modelRenderer2;
 
     Camera m_camera;
+    Magnum::Vector2 m_viewportSize{1280.f, 720.f};
+
+    bool m_cameraFollow = true;
+    // Dead-zone half-size as a fraction of the visible half-extent: the ship
+    // roams the central (2*fraction) of the view before the camera follows.
+    static constexpr float DEAD_ZONE_FRACTION = 0.35f;
 
     // Shared line-thickness setting (pixels), forwarded to whichever
     // renderer is active; each converts it to its own internal units.
@@ -27,13 +33,21 @@ protected:
     static constexpr float MIN_LINE_WIDTH = 0.5f;
     static constexpr float MAX_LINE_WIDTH = 16.f;
 
+    void UpdateCameraFollow();
+
     std::unique_ptr<EntitySpawner> CreateEntitySpawner() override;
 public:
     explicit CGame(IFilesystem& filesystem);
 
-    void SetViewportSize(const Magnum::Vector2& size) { m_modelRenderer2.SetViewportSize(size); }
+    void SetViewportSize(const Magnum::Vector2& size)
+    {
+        m_viewportSize = size;
+        m_modelRenderer2.SetViewportSize(size);
+    }
 
     Camera& GetCamera() { return m_camera; }
+
+    void ToggleCameraFollow() { m_cameraFollow = !m_cameraFollow; }
 
     [[nodiscard]] float GetLineWidth() const { return m_lineWidthPixels; }
 
