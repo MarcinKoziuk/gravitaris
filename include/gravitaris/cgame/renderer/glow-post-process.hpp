@@ -10,6 +10,7 @@
 
 #include <gravitaris/game/fwd.hpp>
 
+#include <gravitaris/cgame/renderer/shader/glow-threshold-shader.hpp>
 #include <gravitaris/cgame/renderer/shader/glow-blur-shader.hpp>
 #include <gravitaris/cgame/renderer/shader/glow-composite-shader.hpp>
 #include <gravitaris/cgame/renderer/shader/crt-shader.hpp>
@@ -55,6 +56,7 @@ private:
     Magnum::GL::Texture2D m_outputColor{Magnum::NoCreate};
     Magnum::GL::Framebuffer m_outputFbo{Magnum::NoCreate};
 
+    GlowThresholdShader m_thresholdShader;
     GlowBlurShader m_blurShader;
     GlowCompositeShader m_compositeShader;
     CrtShader m_crtShader;
@@ -66,19 +68,27 @@ private:
     Vector2i m_halfSize{0, 0};
     Vector2i m_blurSize{0, 0};
 
-    bool m_enabled = false;
+    bool m_enabled = true;
     float m_intensity = 2.2f;
     int m_blurPasses = 3; // more passes = wider, softer, more present glow
 
-    bool m_crtEnabled = false;
-    float m_scanlineStrength = 0.525f; // 50% stronger than the initial 0.35 default
+    // Bright-pass cutoff before the blur (0-1, in linear-ish 8-bit color
+    // units): pixels at/below this don't bloom at all. Without it, blurring a
+    // large flat-filled area (a UI dialog's background) returns nearly that
+    // same color, which the composite then ADDS back on top — inflating
+    // brightness across the whole interior regardless of size. Vector lines
+    // (near-white/cyan, ~1.0) stay well above this; dim UI panel fills don't.
+    float m_threshold = 0.35f;
+
+    bool m_crtEnabled = true;
+    float m_scanlineStrength = 0.725f; // 50% stronger than the initial 0.35 default
 
     void Resize(const Vector2i& windowSize);
 
     // Present `sourceTex` (in `sourceFbo`) to `target`, through the CRT
     // scanline shader if enabled, else a plain blit.
     void Present(Magnum::GL::Texture2D& sourceTex, Magnum::GL::Framebuffer& sourceFbo,
-                 Magnum::GL::AbstractFramebuffer& target, const Vector2i& windowSize);
+                 Magnum::GL::AbstractFramebuffer& target, const Vector2i& windowSize, float time);
 
 public:
     explicit GlowPostProcess(IFilesystem& filesystem);
@@ -89,6 +99,9 @@ public:
     void SetIntensity(float intensity) { m_intensity = std::max(0.f, intensity); }
     [[nodiscard]] float GetIntensity() const { return m_intensity; }
     void AddIntensity(float delta) { SetIntensity(m_intensity + delta); }
+
+    void SetThreshold(float threshold) { m_threshold = std::max(0.f, threshold); }
+    [[nodiscard]] float GetThreshold() const { return m_threshold; }
 
     void SetCrtEnabled(bool enabled) { m_crtEnabled = enabled; }
     [[nodiscard]] bool IsCrtEnabled() const { return m_crtEnabled; }
@@ -101,7 +114,10 @@ public:
     void BeginScene(const Vector2i& windowSize);
 
     // Blur+composite (or plain blit, if disabled) the scene into `target`.
-    void EndSceneAndComposite(Magnum::GL::AbstractFramebuffer& target, const Vector2i& windowSize);
+    // `time` (seconds, any monotonically-increasing small-magnitude clock —
+    // NOT wall-clock epoch time, which would lose float precision in the
+    // shader's sin()) drives the CRT wiggle when the CRT pass is enabled.
+    void EndSceneAndComposite(Magnum::GL::AbstractFramebuffer& target, const Vector2i& windowSize, float time);
 };
 
 } // namespace Gravitaris

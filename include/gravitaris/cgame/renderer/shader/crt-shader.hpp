@@ -17,6 +17,7 @@ class CrtShader : public Magnum::GL::AbstractShaderProgram {
 protected:
     Magnum::Int u_viewportSize;
     Magnum::Int u_scanlineStrength;
+    Magnum::Int u_time;
     Magnum::Int u_imageUnit = 0;
 
 public:
@@ -26,6 +27,9 @@ public:
 
     CrtShader& setViewportSize(const Vector2& size);
     CrtShader& setScanlineStrength(Magnum::Float strength);
+    // Seconds, from any monotonically-increasing small-magnitude clock — see
+    // the caution in GlowPostProcess::EndSceneAndComposite.
+    CrtShader& setTime(Magnum::Float time);
     CrtShader& bindImage(Magnum::GL::Texture2D& texture);
 };
 

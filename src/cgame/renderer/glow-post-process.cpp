@@ -1,3 +1,5 @@
+#include <cmath>
+
 #include <Magnum/Mesh.h>
 #include <Magnum/GL/Renderer.h>
 #include <Magnum/GL/TextureFormat.h>
@@ -36,7 +38,8 @@ GL::Framebuffer MakeColorFramebuffer(const Vector2i& size, GL::Texture2D& colorT
 } // namespace
 
 GlowPostProcess::GlowPostProcess(IFilesystem& filesystem)
-    : m_blurShader(filesystem)
+    : m_thresholdShader(filesystem)
+    , m_blurShader(filesystem)
     , m_compositeShader(filesystem)
     , m_crtShader(filesystem)
 {
@@ -80,7 +83,7 @@ void GlowPostProcess::BeginScene(const Vector2i& windowSize)
 }
 
 void GlowPostProcess::Present(GL::Texture2D& sourceTex, GL::Framebuffer& sourceFbo,
-                             GL::AbstractFramebuffer& target, const Vector2i& windowSize)
+                             GL::AbstractFramebuffer& target, const Vector2i& windowSize, float time)
 {
     if (m_crtEnabled) {
         GL::Renderer::disable(GL::Renderer::Feature::Blending);
@@ -88,6 +91,7 @@ void GlowPostProcess::Present(GL::Texture2D& sourceTex, GL::Framebuffer& sourceF
         target.setViewport(Range2Di{{}, windowSize});
         m_crtShader.setViewportSize(Vector2{windowSize})
                 .setScanlineStrength(m_scanlineStrength)
+                .setTime(time)
                 .bindImage(sourceTex)
                 .draw(m_fullscreenTri);
     } else {
@@ -96,22 +100,29 @@ void GlowPostProcess::Present(GL::Texture2D& sourceTex, GL::Framebuffer& sourceF
     }
 }
 
-void GlowPostProcess::EndSceneAndComposite(GL::AbstractFramebuffer& target, const Vector2i& windowSize)
+void GlowPostProcess::EndSceneAndComposite(GL::AbstractFramebuffer& target, const Vector2i& windowSize, float time)
 {
     if (!m_enabled) {
         // No glow: present the sharp scene directly (CRT pass still applies).
-        Present(m_sceneColor, m_sceneFbo, target, windowSize);
+        Present(m_sceneColor, m_sceneFbo, target, windowSize, time);
         return;
     }
 
     GL::Renderer::disable(GL::Renderer::Feature::Blending);
 
-    // Prefiltered downsample: two chained 2x linear blits give an exact 4x4
-    // box filter, so thin lines can't alias against the 1/4-res grid (a
-    // single 4x decimation drops rows entirely, which showed up as periodic
-    // glow blobs along shallow-angle curves).
-    GL::AbstractFramebuffer::blit(m_sceneFbo, m_halfFbo, Range2Di{{}, m_fullSize}, Range2Di{{}, m_halfSize},
-                                   GL::FramebufferBlit::Color, GL::FramebufferBlitFilter::Linear);
+    // Bright-pass + downsample: extracts only pixels above m_threshold (so
+    // large dim UI fills don't bloom, see m_threshold's comment) while also
+    // doing the first 2x box-filtered downsample in the same pass. The
+    // second 2x downsample stays a plain blit — the data's already small and
+    // thresholded, so a further box-filtered halving is enough on its own to
+    // avoid the thin-line aliasing a naive 4x jump would cause.
+    m_halfFbo.bind();
+    m_halfFbo.setViewport(Range2Di{{}, m_halfSize});
+    m_thresholdShader.setTexelSize(Vector2{1.f / static_cast<float>(m_fullSize.x()), 1.f / static_cast<float>(m_fullSize.y())})
+            .setThreshold(m_threshold)
+            .bindImage(m_sceneColor)
+            .draw(m_fullscreenTri);
+
     GL::AbstractFramebuffer::blit(m_halfFbo, m_blurFboA, Range2Di{{}, m_halfSize}, Range2Di{{}, m_blurSize},
                                    GL::FramebufferBlit::Color, GL::FramebufferBlitFilter::Linear);
 
@@ -131,16 +142,25 @@ void GlowPostProcess::EndSceneAndComposite(GL::AbstractFramebuffer& target, cons
                 .draw(m_fullscreenTri);
     }
 
+    // Glow "breathing": modulate bloom intensity by a few percent with three
+    // incommensurate high-frequency sines (~9-22 Hz), so the halo shimmers
+    // unevenly like unstable phosphor drive — while the sharp scene underneath
+    // stays perfectly still.
+    const float breathe = 0.55f * std::sin(time * 57.f)
+                        + 0.30f * std::sin(time * 91.3f + 1.7f)
+                        + 0.15f * std::sin(time * 139.7f + 4.2f);
+    const float jitteredIntensity = m_intensity * (1.f + 0.12f * breathe);
+
     // Composite sharp scene + intensity * blurred glow into the full-res
     // output target (so the CRT present pass can sample it).
     m_outputFbo.bind();
     m_outputFbo.setViewport(Range2Di{{}, m_fullSize});
-    m_compositeShader.setIntensity(m_intensity)
+    m_compositeShader.setIntensity(jitteredIntensity)
             .bindScene(m_sceneColor)
             .bindGlow(m_blurA)
             .draw(m_fullscreenTri);
 
-    Present(m_outputColor, m_outputFbo, target, windowSize);
+    Present(m_outputColor, m_outputFbo, target, windowSize, time);
 }
 
 } // namespace Gravitaris

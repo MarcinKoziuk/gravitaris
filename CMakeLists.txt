@@ -300,6 +300,8 @@ add_executable(GravitarisNG
     include/gravitaris/cgame/renderer/model-renderer2.hpp
     src/cgame/renderer/model-renderer2.cpp
     include/gravitaris/cgame/camera.hpp
+    include/gravitaris/cgame/renderer/shader/glow-threshold-shader.hpp
+    src/cgame/renderer/shader/glow-threshold-shader.cpp
     include/gravitaris/cgame/renderer/shader/glow-blur-shader.hpp
     src/cgame/renderer/shader/glow-blur-shader.cpp
     include/gravitaris/cgame/renderer/shader/glow-composite-shader.hpp

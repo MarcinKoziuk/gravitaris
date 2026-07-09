@@ -120,7 +120,7 @@ std::vector<LineVertex> BakeGroup(const Model::Group& group, bool forceFaceted)
 // prevents it from tearing down the process; the upload itself still succeeds.
 unsigned long SafeUpload(Magnum::GL::Buffer& buf, const void* data, std::size_t bytes)
 {
-#if defined(_WIN32)
+#if defined(_WIN323)
     __try {
         buf.setData(Containers::ArrayView<const void>{data, bytes});
         return 0;

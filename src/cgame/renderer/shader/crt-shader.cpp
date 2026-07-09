@@ -27,11 +27,11 @@ CrtShader::CrtShader(IFilesystem& fileSystem)
     std::string vertexSource;
     std::string fragmentSource;
 
-    if (!fileSystem.ReadString("shaders/glow-fullscreen.v.glsl", &vertexSource)) {
+    if (!fileSystem.ReadString("shaders/postprocess/glow-fullscreen.v.glsl", &vertexSource)) {
         LOG(error) << "Could not read glow fullscreen vertex shader!";
     }
 
-    if (!fileSystem.ReadString("shaders/crt.f.glsl", &fragmentSource)) {
+    if (!fileSystem.ReadString("shaders/postprocess/crt.f.glsl", &fragmentSource)) {
         LOG(error) << "Could not read crt fragment shader!";
     }
 
@@ -45,6 +45,7 @@ CrtShader::CrtShader(IFilesystem& fileSystem)
 
     u_viewportSize = uniformLocation("viewportSize");
     u_scanlineStrength = uniformLocation("scanlineStrength");
+    u_time = uniformLocation("time");
     setUniform(uniformLocation("image"), u_imageUnit);
 }
 
@@ -57,6 +58,12 @@ CrtShader& CrtShader::setViewportSize(const Vector2& size)
 CrtShader& CrtShader::setScanlineStrength(Magnum::Float strength)
 {
     setUniform(u_scanlineStrength, strength);
+    return *this;
+}
+
+CrtShader& CrtShader::setTime(Magnum::Float time)
+{
+    setUniform(u_time, time);
     return *this;
 }
 

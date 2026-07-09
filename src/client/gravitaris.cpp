@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <chrono>
+#include <cmath>
 
 #include <entt/entt.hpp>
 
@@ -48,6 +49,7 @@ public:
 private:
     double m_prevTime;
     double m_frameTimeAccumulator;
+    double m_startTime;
 
     bool m_uiInWorld = true; // render UI into the scene so it gets bloom + CRT
 
@@ -77,6 +79,7 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     : Magnum::Platform::Application{arguments, CreateConfiguration(arguments), CreateGLConfiguration(arguments)}
     , m_prevTime(GetTime())
     , m_frameTimeAccumulator(0.)
+    , m_startTime(GetTime())
     , m_ui(m_filesystem)
 {
     HasEnteredMain = true;
@@ -150,14 +153,21 @@ void GravitarisApplication::drawEvent()
     const double delta = m_frameTimeAccumulator / Game::PHYSICS_DELTA;
     m_game->Render(delta);
 
+    // Bounded, small-magnitude clock for the CRT wiggle's sin() — NOT raw
+    // wall-clock epoch time, which is large enough that converting to float
+    // loses precision and makes sin() unstable. Wraps every 1000s; the wrap
+    // isn't an exact multiple of the wiggle's period, so there's a
+    // once-every-~16-minutes micro-jump, imperceptible for a cosmetic effect.
+    const float animTime = static_cast<float>(std::fmod(GetTime() - m_startTime, 1000.0));
+
     if (m_uiInWorld) {
         // Draw the UI into the still-bound scene target BEFORE compositing, so
         // its bright cyan lines pick up the same bloom + CRT as the game.
         RenderUi();
-        m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, fbSize);
+        m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, fbSize, animTime);
     } else {
         // Composite first, then draw the UI crisply on top of the result.
-        m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, fbSize);
+        m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, fbSize, animTime);
         RenderUi();
     }
 

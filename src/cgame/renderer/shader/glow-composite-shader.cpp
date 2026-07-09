@@ -27,11 +27,11 @@ GlowCompositeShader::GlowCompositeShader(IFilesystem& fileSystem)
     std::string vertexSource;
     std::string fragmentSource;
 
-    if (!fileSystem.ReadString("shaders/glow-fullscreen.v.glsl", &vertexSource)) {
+    if (!fileSystem.ReadString("shaders/postprocess/glow-fullscreen.v.glsl", &vertexSource)) {
         LOG(error) << "Could not read glow fullscreen vertex shader!";
     }
 
-    if (!fileSystem.ReadString("shaders/glow-composite.f.glsl", &fragmentSource)) {
+    if (!fileSystem.ReadString("shaders/postprocess/glow-composite.f.glsl", &fragmentSource)) {
         LOG(error) << "Could not read glow composite fragment shader!";
     }
 
