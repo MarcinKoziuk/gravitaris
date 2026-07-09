@@ -60,6 +60,15 @@ private:
     void pointerReleaseEvent(PointerEvent& event) override;
     void pointerMoveEvent(PointerMoveEvent& event) override;
 
+    // The real backing-store scale: framebufferSize() / windowSize().
+    // NOT the same as dpiScaling() -- on macOS that stays {1, 1} by default
+    // even when the two sizes genuinely differ (confirmed via [DPI DEBUG]
+    // log: windowSize=1920x1080, framebufferSize=3840x2160, dpiScaling=1,1).
+    Magnum::Vector2 PixelScale() const
+    {
+        return Magnum::Vector2{framebufferSize()} / Magnum::Vector2{windowSize()};
+    }
+
     static int RmlButtonIndex(Pointer pointer);
     void RenderUi();
 };
@@ -129,6 +138,11 @@ void GravitarisApplication::drawEvent()
 
     m_game->SetViewportSize(Magnum::Vector2{fbSize});
     m_ui.SetDimensions(fbSize.x(), fbSize.y());
+    // Context dimensions are physical pixels (fbSize); without a matching
+    // dp-ratio, RCSS px units render at their raw pixel size and end up
+    // visually shrunk by the display's backing-store scale on HiDPI/Retina
+    // screens. Deliberately PixelScale(), not dpiScaling() -- see PixelScale().
+    m_ui.SetDensityIndependentPixelRatio(PixelScale().x());
 
     // Render the game world into the glow pass's offscreen scene target
     // instead of directly onto the screen, so it can be blurred/composited.
@@ -260,7 +274,9 @@ int GravitarisApplication::RmlButtonIndex(Pointer pointer)
 
 void GravitarisApplication::pointerPressEvent(PointerEvent& event)
 {
-    const Vector2 p = event.position();
+    // event.position() is in logical window points; the UI context is sized
+    // in physical framebuffer pixels (see drawEvent), so scale up to match.
+    const Vector2 p = event.position() * PixelScale();
     m_ui.ProcessMouseMove(static_cast<int>(p.x()), static_cast<int>(p.y()));
     if (m_ui.ProcessMouseButton(RmlButtonIndex(event.pointer()), true)) {
         event.setAccepted();
@@ -276,7 +292,8 @@ void GravitarisApplication::pointerReleaseEvent(PointerEvent& event)
 
 void GravitarisApplication::pointerMoveEvent(PointerMoveEvent& event)
 {
-    const Vector2 p = event.position();
+    // See pointerPressEvent: scale logical points up to physical pixels.
+    const Vector2 p = event.position() * PixelScale();
     if (m_ui.ProcessMouseMove(static_cast<int>(p.x()), static_cast<int>(p.y()))) {
         event.setAccepted();
     }

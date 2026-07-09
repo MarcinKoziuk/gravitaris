@@ -87,6 +87,13 @@ void UI::SetDimensions(int width, int height)
     }
 }
 
+void UI::SetDensityIndependentPixelRatio(float ratio)
+{
+    if (m_context) {
+        m_context->SetDensityIndependentPixelRatio(ratio);
+    }
+}
+
 bool UI::ProcessMouseMove(int x, int y)
 {
     if (!m_context) return false;

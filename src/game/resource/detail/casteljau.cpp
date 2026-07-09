@@ -71,7 +71,12 @@ std::vector<Vector2d> Casteljau(const std::vector<Vector2d>& curve, const Matrix
     std::vector<Vector2d> post;
 
     for (const Vector2d& pt : pre) {
-        const Vector2d& tpt = (transform * Vector4d(pt.x(), pt.y(), 1., 1.)).xy();
+        // Copy, NOT a reference: Vector4::xy() returns a Vector2& aliasing the
+        // multiplied temporary's storage. Binding a reference here does not
+        // extend that temporary's lifetime (lifetime extension doesn't reach
+        // through the xy() call), so `tpt` would dangle — benign at -O0 but
+        // reads garbage under -O2, collapsing every path to <3 points.
+        const Vector2d tpt = (transform * Vector4d(pt.x(), pt.y(), 1., 1.)).xy();
 
         if (post.empty() || post.back() != tpt) {
             post.push_back(tpt);
