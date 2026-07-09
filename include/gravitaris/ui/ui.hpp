@@ -43,25 +43,10 @@ public:
 
     bool Init();
 
-    // Keep the RmlUi context + render viewport in sync with the window, so
-    // layout and mouse coordinates are correct (was previously hardcoded).
-    // Callers should pass the real framebuffer size in pixels (not the
-    // window's logical/point size), so the UI stays pixel-accurate on
-    // HiDPI/Retina displays where the two differ.
     void SetDimensions(int width, int height);
 
-    // RmlUi's dp-ratio: how many physical pixels one RCSS "px" covers.
-    // Context dimensions are set in physical pixels (above) so the render
-    // viewport covers the whole framebuffer, but without this, elements
-    // sized in RCSS px render at their physical-pixel size, i.e. visually
-    // shrunk by the display's DPI scale factor on HiDPI/Retina screens.
-    // Pass Sdl2Application::dpiScaling() here to keep visual sizes
-    // consistent across displays.
     void SetDensityIndependentPixelRatio(float ratio);
 
-    // Input forwarding from the application. x/y must be in the same
-    // physical-pixel space as SetDimensions (i.e. pre-scaled by dpiScaling()
-    // if the caller's input events are in logical/window points).
     bool ProcessMouseMove(int x, int y);
     bool ProcessMouseButton(int rmlButtonIndex, bool down);
 

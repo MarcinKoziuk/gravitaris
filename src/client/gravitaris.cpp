@@ -62,10 +62,8 @@ private:
     void pointerReleaseEvent(PointerEvent& event) override;
     void pointerMoveEvent(PointerMoveEvent& event) override;
 
-    // The real backing-store scale: framebufferSize() / windowSize().
-    // NOT the same as dpiScaling() -- on macOS that stays {1, 1} by default
-    // even when the two sizes genuinely differ (confirmed via [DPI DEBUG]
-    // log: windowSize=1920x1080, framebufferSize=3840x2160, dpiScaling=1,1).
+    // framebufferSize() / windowSize(). NOT dpiScaling() -- that stays {1,1}
+    // on macOS even when the two sizes genuinely differ.
     Magnum::Vector2 PixelScale() const
     {
         return Magnum::Vector2{framebufferSize()} / Magnum::Vector2{windowSize()};
@@ -115,9 +113,9 @@ void GravitarisApplication::tickEvent()
         m_frameTimeAccumulator -= Game::PHYSICS_DELTA;
     }
 
-    redraw(); // ?
+    redraw();
 
-    m_ui.Update(); // ? Claude: now the normal game doesn't show any more
+    m_ui.Update();
 }
 
 void GravitarisApplication::RenderUi()
@@ -130,43 +128,28 @@ void GravitarisApplication::RenderUi()
 
 void GravitarisApplication::drawEvent()
 {
-    // Use the real framebuffer size (pixels), not windowSize() (logical
-    // points). On HiDPI/Retina displays the two differ by the DPI scale
-    // factor; sizing viewports/offscreen targets and RmlUi's canvas off the
-    // smaller logical size left the actual framebuffer mostly uninitialized
-    // (visible as a small rendered region in one corner and black
-    // elsewhere), and the postprocess pass sampling across that boundary is
-    // what showed up as glitching once glow was enabled.
+    // framebufferSize(), not windowSize() -- differ on HiDPI/Retina.
     const Magnum::Vector2i fbSize = framebufferSize();
 
     m_game->SetViewportSize(Magnum::Vector2{fbSize});
     m_ui.SetDimensions(fbSize.x(), fbSize.y());
-    // Context dimensions are physical pixels (fbSize); without a matching
-    // dp-ratio, RCSS px units render at their raw pixel size and end up
-    // visually shrunk by the display's backing-store scale on HiDPI/Retina
-    // screens. Deliberately PixelScale(), not dpiScaling() -- see PixelScale().
     m_ui.SetDensityIndependentPixelRatio(PixelScale().x());
 
-    // Render the game world into the glow pass's offscreen scene target
-    // instead of directly onto the screen, so it can be blurred/composited.
+    // Game renders into the glow pass's offscreen target, not the screen,
+    // so it can be blurred/composited.
     m_glow->BeginScene(fbSize);
     const double delta = m_frameTimeAccumulator / Game::PHYSICS_DELTA;
     m_game->Render(delta);
 
-    // Bounded, small-magnitude clock for the CRT wiggle's sin() — NOT raw
-    // wall-clock epoch time, which is large enough that converting to float
-    // loses precision and makes sin() unstable. Wraps every 1000s; the wrap
-    // isn't an exact multiple of the wiggle's period, so there's a
-    // once-every-~16-minutes micro-jump, imperceptible for a cosmetic effect.
+    // Small bounded clock for the CRT shader's sin(); wall-clock epoch time
+    // would lose float precision. Wraps every 1000s.
     const float animTime = static_cast<float>(std::fmod(GetTime() - m_startTime, 1000.0));
 
     if (m_uiInWorld) {
-        // Draw the UI into the still-bound scene target BEFORE compositing, so
-        // its bright cyan lines pick up the same bloom + CRT as the game.
+        // UI into the scene before compositing, so it gets bloom + CRT too.
         RenderUi();
         m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, fbSize, animTime);
     } else {
-        // Composite first, then draw the UI crisply on top of the result.
         m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, fbSize, animTime);
         RenderUi();
     }
@@ -284,8 +267,7 @@ int GravitarisApplication::RmlButtonIndex(Pointer pointer)
 
 void GravitarisApplication::pointerPressEvent(PointerEvent& event)
 {
-    // event.position() is in logical window points; the UI context is sized
-    // in physical framebuffer pixels (see drawEvent), so scale up to match.
+    // event.position() is in logical points; UI context is in physical pixels.
     const Vector2 p = event.position() * PixelScale();
     m_ui.ProcessMouseMove(static_cast<int>(p.x()), static_cast<int>(p.y()));
     if (m_ui.ProcessMouseButton(RmlButtonIndex(event.pointer()), true)) {
@@ -302,7 +284,6 @@ void GravitarisApplication::pointerReleaseEvent(PointerEvent& event)
 
 void GravitarisApplication::pointerMoveEvent(PointerMoveEvent& event)
 {
-    // See pointerPressEvent: scale logical points up to physical pixels.
     const Vector2 p = event.position() * PixelScale();
     if (m_ui.ProcessMouseMove(static_cast<int>(p.x()), static_cast<int>(p.y()))) {
         event.setAccepted();

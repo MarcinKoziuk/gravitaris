@@ -23,7 +23,7 @@ using namespace Magnum;
 
 namespace {
 
-// Interleaved per-vertex layout, must match Line2Shader's attribute strides.
+// Must match Line2Shader's vertex layout.
 struct LineVertex {
     Vector2 pointA;
     Vector2 pointB;
@@ -32,33 +32,28 @@ struct LineVertex {
     Vector3 color;
 };
 
-// Segment quad: (t along A->B, side offset). Mirrors SEGMENT_GEOMETRY in the
-// instanced renderer.
+// Segment quad: t along A->B, side offset.
 constexpr Vector2 SEGMENT[] = {
         {0.f, -0.5f}, {1.f, -0.5f}, {1.f, 0.5f},
         {0.f, -0.5f}, {1.f, 0.5f},  {0.f, 0.5f},
 };
 
-// Miter join corner weights. Mirrors MITER_GEOMETRY in the instanced renderer.
+// Miter corner weights.
 constexpr Vector3 MITER[] = {
         {0.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {0.f, 1.f, 0.f},
         {0.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {0.f, 0.f, 1.f},
 };
 
-// Circle billboard quad, corners in [-1,1]^2; the shader scales it out to
-// cover the circle + stroke width around the center.
+// Circle billboard quad, corners in [-1,1]^2.
 constexpr Vector2 CIRCLE_QUAD[] = {
         {-1.f, -1.f}, {1.f, -1.f}, {1.f, 1.f},
         {-1.f, -1.f}, {1.f, 1.f},  {-1.f, 1.f},
 };
 
-// Expand every line strip in a group into one triangle-vertex buffer. Segments
-// get a quad each; interior vertices get a miter join; strips flagged as an
-// exact circle (see Model::VertexLineStrip::circle) get a single analytic
-// circle billboard instead of faceted segments/joins — unless forceFaceted is
-// set, in which case circles are baked as plain segments/miters too (debug
-// A/B comparison; see ModelRenderer2::SetDebugForceFacetedCircles). Colour is
-// baked per vertex so all strips of a group merge into a single mesh/draw.
+// Bakes a group's strips into one vertex buffer: quad per segment, miter fan
+// per interior vertex, single billboard per circle strip (see
+// Model::VertexLineStrip::circle) unless forceFaceted forces plain
+// segments/miters instead (SetDebugForceFacetedCircles A/B toggle).
 std::vector<LineVertex> BakeGroup(const Model::Group& group, bool forceFaceted)
 {
     std::vector<LineVertex> out;
@@ -114,10 +109,9 @@ std::vector<LineVertex> BakeGroup(const Model::Group& group, bool forceFaceted)
     return out;
 }
 
-// Uploading a static line-vertex buffer via glBufferData occasionally raises a
-// benign first-chance SEH exception inside the NVIDIA driver on this machine
-// (root cause not yet isolated — see memory note). Wrapping the call in SEH
-// prevents it from tearing down the process; the upload itself still succeeds.
+// glBufferData occasionally raises a first-chance SEH exception in the
+// NVIDIA driver on this machine (root cause unknown); catch it so it
+// doesn't kill the process. Upload still succeeds either way.
 unsigned long SafeUpload(Magnum::GL::Buffer& buf, const void* data, std::size_t bytes)
 {
 #if defined(_WIN323)
