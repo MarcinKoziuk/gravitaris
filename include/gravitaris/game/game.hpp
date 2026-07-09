@@ -10,6 +10,7 @@
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
+#include <gravitaris/game/system/bullet-lifetime-system.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
 namespace Gravitaris {
@@ -27,6 +28,8 @@ protected:
     PhysicsSystem m_physicsSystem;
 
     ShipControlsSystem m_shipControlsSystem;
+
+    BulletLifetimeSystem m_bulletLifetimeSystem;
 
     std::uint64_t m_step;
 

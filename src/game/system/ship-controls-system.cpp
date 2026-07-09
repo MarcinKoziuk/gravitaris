@@ -6,12 +6,15 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 
 namespace Gravitaris {
 
 using Magnum::Vector2d;
+
+static constexpr double BULLET_LIFETIME_SECONDS = 3.0;
 
 ShipControlsSystem::ShipControlsSystem(entt::registry& registry, EntitySpawner& entitySpawner)
         : m_registry(registry)
@@ -83,12 +86,13 @@ void ShipControlsSystem::Update(std::uint64_t step)
             scontrols.actionFlags.firePrimary = false;
             std::pair<Vector2d, Vector2d> ret = GetBulletSpawnPosAndVel(transf, phys);
 
-            m_entitySpawner.SpawnBullet("models/bullets/bullet-0"_id, ret.first, ret.second);
+            entt::entity bulletEntity = m_entitySpawner.SpawnBullet("models/bullets/bullet-0"_id, ret.first, ret.second);
+            m_registry.emplace<Bullet>(bulletEntity, BULLET_LIFETIME_SECONDS);
         }
         if (scontrols.actionFlags.fireSecondary) {
             scontrols.actionFlags.fireSecondary = false;
             std::pair<Vector2d, Vector2d> ret = GetBulletSpawnPosAndVel(transf, phys);
-            m_entitySpawner.SpawnBullet("models/doodads/box"_id, ret.first, {});
+            m_entitySpawner.SpawnBullet("models/doodads/box"_id, ret.first, transf.vel);
         }
     }
 }

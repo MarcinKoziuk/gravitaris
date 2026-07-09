@@ -25,7 +25,7 @@ private:
 
     void InitBody(const entt::entity& ent, const Transform& transf, Physics& phys);
 
-    void ApplyGravity(cpSpace* space, double dt);
+    void ApplyGravity(id_t spaceId);
 
     void HandlePhysicsAdded(const entt::entity& ent);
 

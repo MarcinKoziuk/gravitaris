@@ -2,6 +2,7 @@
 
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
+#include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 
 namespace Gravitaris {
@@ -121,44 +122,38 @@ void PhysicsSystem::HandlePhysicsRemoved(const entt::entity& ent)
     // we stil leak spaces here.
 }
 
-void PhysicsSystem::ApplyGravity(cpSpace* space, double dt)
+void PhysicsSystem::ApplyGravity(id_t spaceId)
 {
     const static cpFloat gravityConstant = 20.0;
 
-    struct gcontext {
-        cpSpace* space{};
-        cpBody* tgtBody{};
-    } ctx;
+    auto view = m_registry.view<Physics>();
+    for (auto tgt : view) {
+        const Physics& tgtPhys = view.get<Physics>(tgt);
+        if (tgtPhys.spaceId != spaceId || m_registry.all_of<Bullet>(tgt)) continue;
 
-    ctx.space = space;
+        cpBody* tgtBody = tgtPhys.cp.body.get();
+        const cpFloat tgtMass = cpBodyGetMass(tgtBody);
+        const cpVect tgtPos = cpBodyGetPosition(tgtBody);
+        const cpVect tgtCenter = cpBodyGetCenterOfGravity(tgtBody);
 
-    cpSpaceEachBody(space, [](cpBody* tgtBody, void* ctx_) {
-        auto* ctx = (gcontext*) ctx_;
-        ctx->tgtBody = tgtBody;
+        for (auto src : view) {
+            if (src == tgt) continue;
 
-        cpSpaceEachBody(ctx->space, [](cpBody* srcBody, void* ctx_) {
-            auto* ctx = (gcontext*) ctx_;
+            const Physics& srcPhys = view.get<Physics>(src);
+            if (srcPhys.spaceId != spaceId || m_registry.all_of<Bullet>(src)) continue;
 
-            if (srcBody == ctx->tgtBody) return;
-
-            const cpFloat tgtMass = cpBodyGetMass(ctx->tgtBody);
+            cpBody* srcBody = srcPhys.cp.body.get();
             const cpFloat srcMass = cpBodyGetMass(srcBody);
-            const cpVect tgtPos = cpBodyGetPosition(ctx->tgtBody);
             const cpVect srcPos = cpBodyGetPosition(srcBody);
             const cpFloat dist = cpvdist(srcPos, tgtPos);
-
 
             cpFloat vel = gravityConstant * ((tgtMass * srcMass) / std::pow(dist, 2));
             cpFloat dir = std::atan2(srcPos.y - tgtPos.y, srcPos.x - tgtPos.x);
             cpVect force = cpv(std::cos(dir) * vel, std::sin(dir) * vel);
-            //ctx->force = cpvadd(ctx->force, force);
 
-            const cpVect tgtCenter = cpBodyGetCenterOfGravity(ctx->tgtBody);
-            cpBodyApplyForceAtWorldPoint(ctx->tgtBody, force, cpvadd(tgtPos, tgtCenter));
-        }, ctx);
-
-
-    }, &ctx);
+            cpBodyApplyForceAtWorldPoint(tgtBody, force, cpvadd(tgtPos, tgtCenter));
+        }
+    }
 }
 
 void PhysicsSystem::Simulate(double dt)
@@ -167,7 +162,7 @@ void PhysicsSystem::Simulate(double dt)
         cpSpace* space = p.second.get();
         cpSpaceStep(space, dt);
 
-        ApplyGravity(space, dt);
+        ApplyGravity(p.first);
     }
 }
 
