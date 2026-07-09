@@ -304,6 +304,8 @@ add_executable(GravitarisNG
     src/cgame/renderer/shader/glow-blur-shader.cpp
     include/gravitaris/cgame/renderer/shader/glow-composite-shader.hpp
     src/cgame/renderer/shader/glow-composite-shader.cpp
+    include/gravitaris/cgame/renderer/shader/crt-shader.hpp
+    src/cgame/renderer/shader/crt-shader.cpp
     include/gravitaris/cgame/renderer/glow-post-process.hpp
     src/cgame/renderer/glow-post-process.cpp
     include/gravitaris/cgame/renderer/shader/line-miter-shader.hpp

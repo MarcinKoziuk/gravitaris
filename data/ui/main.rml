@@ -1,0 +1,21 @@
+<rml>
+	<head>
+		<title>Gravitaris</title>
+		<link type="text/template" href="vector-window.rml" />
+		<style>
+			body
+			{
+				width: 220dp;
+				height: 130dp;
+				margin: 60dp;
+			}
+			div#title_bar span#title
+			{
+				/* set per-window title text via the span content below */
+			}
+		</style>
+	</head>
+	<body template="vector-window">
+		<button id="launch_button">LAUNCH</button>
+	</body>
+</rml>

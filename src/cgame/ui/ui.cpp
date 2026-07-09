@@ -1,6 +1,7 @@
 #include <RmlUi/Core.h>
 #include <RmlUi/Debugger.h>
 
+#include <gravitaris/game/logging.hpp>
 #include <gravitaris/ui/ui.hpp>
 
 #include "detail/system-interface.hpp"
@@ -9,12 +10,27 @@
 
 namespace Gravitaris {
 
+namespace {
+
+// Minimal listener that logs button clicks. Placeholder hook — replace the
+// body (or route to a callback) when there's actual UI-driven behaviour.
+class ButtonListener : public Rml::EventListener {
+public:
+    void ProcessEvent(Rml::Event& event) override
+    {
+        Rml::Element* el = event.GetCurrentElement();
+        LOG(info) << "[UI] button clicked: " << (el ? el->GetId() : std::string("?"));
+    }
+};
+
+} // namespace
 
 UI::UI(IFilesystem& filesystem)
     : m_context(nullptr)
     , m_systemInterface(std::make_unique<SystemInterface>())
     , m_fileInterface(std::make_unique<FileInterface>(filesystem))
     , m_renderInterfaceGl3(std::make_unique<RenderInterfaceGL3>())
+    , m_buttonListener(std::make_unique<ButtonListener>())
 {}
 
 UI::~UI()
@@ -34,27 +50,59 @@ bool UI::Init()
 
     if (!Rml::Initialise()) return false;
 
-    // Placeholder size; corrected on the first Render() call to the real
-    // framebuffer size once the window/context is up.
-    m_context = Rml::CreateContext("default", Rml::Vector2i(1280, 720));
+    // Placeholder size; corrected by the first SetDimensions() call once the
+    // window/framebuffer is up.
+    m_context = Rml::CreateContext("default", Rml::Vector2i(m_width, m_height));
 
     Rml::LoadFontFace("ui/LatoLatin-Regular.ttf");
     Rml::LoadFontFace("ui/LatoLatin-Bold.ttf");
     Rml::LoadFontFace("ui/LatoLatin-BoldItalic.ttf");
     Rml::LoadFontFace("ui/LatoLatin-Italic.ttf");
 
-   // m_context->Update();//?
+    m_document = m_context->LoadDocument("ui/main.rml");
+    if (m_document) {
+        m_document->Show();
 
-    Rml::ElementDocument* doc = m_context->LoadDocument("ui/demo.rml");
-    if (doc) doc->Show();
+        if (Rml::Element* button = m_document->GetElementById("launch_button")) {
+            button->AddEventListener("click", m_buttonListener.get());
+        }
+    }
 
     m_context->ProcessMouseMove(0, 0, 0);
 
-    Rml::Debugger::SetVisible(true);
-
-    // tODO unload
+    Rml::Debugger::Initialise(m_context);
+    Rml::Debugger::SetVisible(false);
 
     return true;
+}
+
+void UI::SetDimensions(int width, int height)
+{
+    if (width == m_width && height == m_height) return;
+
+    m_width = width;
+    m_height = height;
+    if (m_context) {
+        m_context->SetDimensions(Rml::Vector2i(width, height));
+    }
+}
+
+bool UI::ProcessMouseMove(int x, int y)
+{
+    if (!m_context) return false;
+    return !m_context->ProcessMouseMove(x, y, 0);
+}
+
+bool UI::ProcessMouseButton(int rmlButtonIndex, bool down)
+{
+    if (!m_context) return false;
+    return down ? !m_context->ProcessMouseButtonDown(rmlButtonIndex, 0)
+                : !m_context->ProcessMouseButtonUp(rmlButtonIndex, 0);
+}
+
+void UI::ToggleDebugger()
+{
+    Rml::Debugger::SetVisible(!Rml::Debugger::IsVisible());
 }
 
 void UI::Update()
@@ -62,14 +110,9 @@ void UI::Update()
     m_context->Update();
 }
 
-void UI::Render(int width, int height)
+void UI::Render()
 {
-    const Rml::Vector2i dimensions{width, height};
-    if (m_context->GetDimensions() != dimensions) {
-        m_context->SetDimensions(dimensions);
-    }
-
-    m_renderInterfaceGl3->SetViewport(width, height);
+    m_renderInterfaceGl3->SetViewport(m_width, m_height);
     m_renderInterfaceGl3->BeginFrame();
 
     m_context->Render();
