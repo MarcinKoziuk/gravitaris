@@ -45,6 +45,10 @@ public:
         m_modelRenderer2.SetViewportSize(size);
     }
 
+    // framebuffer-pixels per logical-pixel; keeps line thickness constant in
+    // logical units across HiDPI/Retina displays.
+    void SetPixelScale(float scale) { m_modelRenderer2.SetPixelScale(scale); }
+
     Camera& GetCamera() { return m_camera; }
 
     void ToggleCameraFollow() { m_cameraFollow = !m_cameraFollow; }

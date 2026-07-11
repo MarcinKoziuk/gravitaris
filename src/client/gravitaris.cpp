@@ -130,14 +130,16 @@ void GravitarisApplication::drawEvent()
 {
     // framebufferSize(), not windowSize() -- differ on HiDPI/Retina.
     const Magnum::Vector2i fbSize = framebufferSize();
+    const Magnum::Vector2i logicalSize = windowSize();
 
     m_game->SetViewportSize(Magnum::Vector2{fbSize});
+    m_game->SetPixelScale(PixelScale().x());
     m_ui.SetDimensions(fbSize.x(), fbSize.y());
     m_ui.SetDensityIndependentPixelRatio(PixelScale().x());
 
     // Game renders into the glow pass's offscreen target, not the screen,
     // so it can be blurred/composited.
-    m_glow->BeginScene(fbSize);
+    m_glow->BeginScene(fbSize, logicalSize);
     const double delta = m_frameTimeAccumulator / Game::PHYSICS_DELTA;
     m_game->Render(delta);
 

@@ -263,7 +263,7 @@ void ModelRenderer2::Render(double)
 
     m_shader.setViewportSize(m_viewportSize)
             .setViewProjection(ViewProjection())
-            .setWidth(m_lineWidthPixels);
+            .setWidth(m_lineWidthPixels * m_pixelScale);
 
     RenderTag("model"_id, {});
 

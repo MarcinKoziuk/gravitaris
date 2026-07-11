@@ -48,21 +48,28 @@ GlowPostProcess::GlowPostProcess(IFilesystem& filesystem)
     m_fullscreenTri.setPrimitive(MeshPrimitive::Triangles).setCount(3);
 }
 
-void GlowPostProcess::Resize(const Vector2i& windowSize)
+void GlowPostProcess::Resize(const Vector2i& framebufferSize, const Vector2i& logicalSize)
 {
-    if (windowSize == m_fullSize || windowSize.x() <= 0 || windowSize.y() <= 0) {
+    if ((framebufferSize == m_fullSize && logicalSize == m_logicalSize)
+            || framebufferSize.x() <= 0 || framebufferSize.y() <= 0) {
         return;
     }
 
-    m_fullSize = windowSize;
-    m_halfSize = Math::max(windowSize / 2, Vector2i{1, 1});
-    m_blurSize = Math::max(windowSize / 4, Vector2i{1, 1});
+    m_fullSize = framebufferSize;
+    m_logicalSize = logicalSize;
+    m_halfSize = Math::max(framebufferSize / 2, Vector2i{1, 1});
+    m_quarterSize = Math::max(framebufferSize / 4, Vector2i{1, 1});
+    // Blur resolution follows the logical size, so the halo is DPI-independent.
+    m_blurSize = Math::max(logicalSize / 4, Vector2i{1, 1});
 
     m_sceneColor = MakeColorTexture(m_fullSize);
     m_sceneFbo = MakeColorFramebuffer(m_fullSize, m_sceneColor);
 
     m_half = MakeColorTexture(m_halfSize);
     m_halfFbo = MakeColorFramebuffer(m_halfSize, m_half);
+
+    m_quarter = MakeColorTexture(m_quarterSize);
+    m_quarterFbo = MakeColorFramebuffer(m_quarterSize, m_quarter);
 
     m_blurA = MakeColorTexture(m_blurSize);
     m_blurB = MakeColorTexture(m_blurSize);
@@ -73,9 +80,9 @@ void GlowPostProcess::Resize(const Vector2i& windowSize)
     m_outputFbo = MakeColorFramebuffer(m_fullSize, m_outputColor);
 }
 
-void GlowPostProcess::BeginScene(const Vector2i& windowSize)
+void GlowPostProcess::BeginScene(const Vector2i& framebufferSize, const Vector2i& logicalSize)
 {
-    Resize(windowSize);
+    Resize(framebufferSize, logicalSize);
 
     m_sceneFbo.bind();
     m_sceneFbo.setViewport(Range2Di{{}, m_fullSize});
@@ -110,12 +117,9 @@ void GlowPostProcess::EndSceneAndComposite(GL::AbstractFramebuffer& target, cons
 
     GL::Renderer::disable(GL::Renderer::Feature::Blending);
 
-    // Bright-pass + downsample: extracts only pixels above m_threshold (so
-    // large dim UI fills don't bloom, see m_threshold's comment) while also
-    // doing the first 2x box-filtered downsample in the same pass. The
-    // second 2x downsample stays a plain blit — the data's already small and
-    // thresholded, so a further box-filtered halving is enough on its own to
-    // avoid the thin-line aliasing a naive 4x jump would cause.
+    // Bright-pass + first 2x downsample in one pass: extracts only pixels
+    // above m_threshold (so large dim UI fills don't bloom, see m_threshold's
+    // comment) while box-filtering full -> 1/2.
     m_halfFbo.bind();
     m_halfFbo.setViewport(Range2Di{{}, m_halfSize});
     m_thresholdShader.setTexelSize(Vector2{1.f / static_cast<float>(m_fullSize.x()), 1.f / static_cast<float>(m_fullSize.y())})
@@ -123,7 +127,13 @@ void GlowPostProcess::EndSceneAndComposite(GL::AbstractFramebuffer& target, cons
             .bindImage(m_sceneColor)
             .draw(m_fullscreenTri);
 
-    GL::AbstractFramebuffer::blit(m_halfFbo, m_blurFboA, Range2Di{{}, m_halfSize}, Range2Di{{}, m_blurSize},
+    // Halve again (1/2 -> 1/4 of the framebuffer), then reach the blur
+    // resolution. On HiDPI m_blurSize < m_quarterSize so this is a real 2x
+    // box step; on 1x it is a 1:1 copy. Each hop stays <=2x so thin lines
+    // never alias against a coarse grid.
+    GL::AbstractFramebuffer::blit(m_halfFbo, m_quarterFbo, Range2Di{{}, m_halfSize}, Range2Di{{}, m_quarterSize},
+                                   GL::FramebufferBlit::Color, GL::FramebufferBlitFilter::Linear);
+    GL::AbstractFramebuffer::blit(m_quarterFbo, m_blurFboA, Range2Di{{}, m_quarterSize}, Range2Di{{}, m_blurSize},
                                    GL::FramebufferBlit::Color, GL::FramebufferBlitFilter::Linear);
 
     // Separable Gaussian at 1/4 res, repeated to widen the glow. Each pass:

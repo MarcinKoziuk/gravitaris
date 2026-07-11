@@ -16,8 +16,8 @@ in highp vec2 uv;
 out lowp vec4 fragmentColor;
 
 const highp float REFERENCE_HEIGHT = 1080.0;
-const highp float LINE_WIDTH_PX = 2.0;  // at the 1080p reference
-const highp float PERIOD_PX = 4.0;      // line + gap, at the 1080p reference
+const highp float LINE_WIDTH_PX = 3.0;  // at the 1080p reference (~2px solid core after AA)
+const highp float PERIOD_PX = 6.0;      // line + gap, at the 1080p reference (~50% duty)
 
 // Analog instability: the image content itself stays put — only the CRT
 // *effects* shimmer. Three subtle, temporally-uneven modulations:

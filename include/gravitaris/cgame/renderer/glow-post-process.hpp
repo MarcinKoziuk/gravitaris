@@ -37,14 +37,17 @@ private:
     Magnum::GL::Texture2D m_sceneColor{Magnum::NoCreate};
     Magnum::GL::Framebuffer m_sceneFbo{Magnum::NoCreate};
 
-    // Intermediate 1/2-res target: downsampling full->1/2->1/4 via two 2x
-    // linear blits is an exact 4x4 box prefilter, which prevents thin lines
-    // from aliasing against the coarse 1/4-res grid (visible as periodic
-    // glow "blobs" along shallow-angle curves if decimating in one 4x jump).
+    // Downsample intermediates, halving each step (full->1/2->1/4->...) down
+    // to the blur resolution. Each 2x step is a box prefilter, preventing thin
+    // lines from aliasing (periodic glow "blobs" along shallow-angle curves if
+    // decimating in one big jump). On HiDPI the scene is >1/4 the blur size, so
+    // an extra halving runs; on 1x the last step is a 1:1 copy.
     Magnum::GL::Texture2D m_half{Magnum::NoCreate};
     Magnum::GL::Framebuffer m_halfFbo{Magnum::NoCreate};
+    Magnum::GL::Texture2D m_quarter{Magnum::NoCreate};
+    Magnum::GL::Framebuffer m_quarterFbo{Magnum::NoCreate};
 
-    // Ping-pong pair at 1/4 resolution for the separable blur.
+    // Ping-pong pair at the blur resolution for the separable blur.
     Magnum::GL::Texture2D m_blurA{Magnum::NoCreate};
     Magnum::GL::Texture2D m_blurB{Magnum::NoCreate};
     Magnum::GL::Framebuffer m_blurFboA{Magnum::NoCreate};
@@ -64,8 +67,14 @@ private:
     // Fullscreen triangle: no vertex buffer, positions come from gl_VertexID.
     Magnum::GL::Mesh m_fullscreenTri;
 
+    // Sharp passes (scene, composite, present) run at m_fullSize (framebuffer
+    // pixels). The blur runs at m_blurSize, derived from the *logical* window
+    // size, so the halo is the same fraction of the screen regardless of HiDPI
+    // backing scale (and cheaper on Retina, where m_fullSize is much larger).
     Vector2i m_fullSize{0, 0};
+    Vector2i m_logicalSize{0, 0};
     Vector2i m_halfSize{0, 0};
+    Vector2i m_quarterSize{0, 0};
     Vector2i m_blurSize{0, 0};
 
     bool m_enabled = true;
@@ -83,7 +92,7 @@ private:
     bool m_crtEnabled = true;
     float m_scanlineStrength = 0.725f; // 50% stronger than the initial 0.35 default
 
-    void Resize(const Vector2i& windowSize);
+    void Resize(const Vector2i& framebufferSize, const Vector2i& logicalSize);
 
     // Present `sourceTex` (in `sourceFbo`) to `target`, through the CRT
     // scanline shader if enabled, else a plain blit.
@@ -110,8 +119,9 @@ public:
     [[nodiscard]] float GetScanlineStrength() const { return m_scanlineStrength; }
 
     // Bind the offscreen scene target and clear it; call before rendering
-    // the normal game scene.
-    void BeginScene(const Vector2i& windowSize);
+    // the normal game scene. framebufferSize is the sharp render resolution;
+    // logicalSize (window points) sets the DPI-independent blur resolution.
+    void BeginScene(const Vector2i& framebufferSize, const Vector2i& logicalSize);
 
     // Blur+composite (or plain blit, if disabled) the scene into `target`.
     // `time` (seconds, any monotonically-increasing small-magnitude clock —

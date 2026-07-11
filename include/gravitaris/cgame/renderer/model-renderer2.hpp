@@ -64,6 +64,7 @@ private:
     float m_pixelsPerUnit = 1.f; // zoom 1.0 matches ModelRenderer's zoom 1.0
     float m_zoom = 1.f;
     float m_lineWidthPixels = 2.f;
+    float m_pixelScale = 1.f; // framebuffer-pixels per logical-pixel (HiDPI)
     bool m_debugForceFacetedCircles = false;
 
     void HandleModelAdded(const Model& model, id_t id);
@@ -82,6 +83,7 @@ public:
     void SetCameraPosition(const Vector2& pos) { m_cameraPos = pos; }
     void SetZoom(float zoom) { m_zoom = zoom; }
     void SetLineWidth(float pixels) { m_lineWidthPixels = pixels; }
+    void SetPixelScale(float scale) { m_pixelScale = scale; }
 
     void SetDebugForceFacetedCircles(bool force) { m_debugForceFacetedCircles = force; }
     [[nodiscard]] bool GetDebugForceFacetedCircles() const { return m_debugForceFacetedCircles; }
