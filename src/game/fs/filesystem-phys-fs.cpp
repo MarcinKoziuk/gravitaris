@@ -51,6 +51,7 @@ bool FilesystemPhysFS::Init()
     mounts += (PHYSFS_mount("./data", "/", true) != 0);
     mounts += (PHYSFS_mount("/mnt/host/GravitarisNG/data", "/", true) != 0);
     mounts += (PHYSFS_mount(R"(C:\Users\marcin\Projects\GravitarisNG\data)", "/", true) != 0);
+    mounts += (PHYSFS_mount("/Users/marcin/projects/gravitaris/data", "/", true) != 0);
 
     if (!mounts) {
         LOG(error) << "Mounting of data directory failed";
