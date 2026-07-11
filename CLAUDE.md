@@ -2,6 +2,10 @@
 
 Retro vector-display arcade game: gravity-well combat and orbital navigation.
 
+Design vision lives in `IDEAS.md`. Reference notes and architecture decision
+records live in `docs/` — consult these before designing gameplay/netcode/ECS
+work.
+
 ## Workflow
 
 - **Work directly on `main`.** Only branch for special/obvious cases (e.g. a
@@ -40,6 +44,11 @@ Eventually the game should be multiplayer, so the game is split into separate mo
   it runs at up to 4x the pixel count of an equivalent 1x display — a likely
   cost driver if frame time regresses on Mac vs. a 1x Windows box on the same
   physical screen.
+- **Magnum swizzles return references**: non-const `Vector4::xy()` returns a
+  `Vector2&` aliasing the vector's own storage. Binding a reference to a
+  swizzle of a temporary dangles — `const Vector2d& p = (m * v).xy();` works
+  in Debug but reads garbage at `-O2`. Always take swizzle results by value.
+  (This class of UB hides in Debug builds; test RelWithDebInfo regularly.)
 
 ## Rendering
 
