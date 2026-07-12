@@ -12,6 +12,16 @@ static const cpTransform tzero = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f };
 PhysicsSystem::PhysicsSystem(flecs::world& registry)
     : m_registry(registry)
 {
+    // Sparse storage = stable component address, never relocated between
+    // archetype tables (mirrors entt's sparse sets, which this code was
+    // written against). Physics owns Chipmunk cpBody/cpShape handles that are
+    // registered by raw pointer in the cpSpace; flecs's default archetype
+    // storage would relocate the component every time another component is
+    // added to the entity (Transform -> +Physics -> +Renderable -> +Bullet
+    // during bullet spawn), and moving the resource-owning component that way
+    // corrupts handle ownership and crashes later in the Chipmunk deleter.
+    m_registry.component<Physics>().add(flecs::Sparse);
+
     // OnSet (not OnAdd) mirrors entt's on_construct: it fires once, after the
     // component's value is already assigned -- entity.emplace<Physics>(...)
     // both adds and constructs in one step, so OnSet is the equivalent point.
