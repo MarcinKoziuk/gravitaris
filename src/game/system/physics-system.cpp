@@ -150,30 +150,39 @@ void PhysicsSystem::ApplyGravity(id_t spaceId)
 {
     const static cpFloat gravityConstant = 20.0;
 
-    m_registry.each<Physics>([&](flecs::entity tgt, Physics& tgtPhys) {
-        if (tgtPhys.spaceId != spaceId || tgt.has<Bullet>()) return;
+    // Gather the space's gravity-participating bodies in a single ECS pass,
+    // then do the O(n^2) pairwise attraction over the plain vector. The
+    // previous version nested one each<Physics>() inside another; since
+    // Physics is a Sparse component, the nested iteration shares the sparse
+    // set's traversal cursor and corrupts the outer loop (crashed in
+    // ApplyGravity). Iterating once into a plain vector avoids that.
+    struct GravBody {
+        cpBody* body;
+        cpFloat mass;
+        cpVect pos;
+        cpVect center;
+    };
+    std::vector<GravBody> bodies;
 
-        cpBody* tgtBody = tgtPhys.cp.body.get();
-        const cpFloat tgtMass = cpBodyGetMass(tgtBody);
-        const cpVect tgtPos = cpBodyGetPosition(tgtBody);
-        const cpVect tgtCenter = cpBodyGetCenterOfGravity(tgtBody);
+    m_registry.each<Physics>([&](flecs::entity ent, Physics& phys) {
+        if (phys.spaceId != spaceId || ent.has<Bullet>()) return;
+        cpBody* body = phys.cp.body.get();
+        bodies.push_back({body, cpBodyGetMass(body), cpBodyGetPosition(body),
+                          cpBodyGetCenterOfGravity(body)});
+    });
 
-        m_registry.each<Physics>([&](flecs::entity src, Physics& srcPhys) {
-            if (src == tgt) return;
-            if (srcPhys.spaceId != spaceId || src.has<Bullet>()) return;
+    for (const GravBody& tgt : bodies) {
+        for (const GravBody& src : bodies) {
+            if (src.body == tgt.body) continue;
 
-            cpBody* srcBody = srcPhys.cp.body.get();
-            const cpFloat srcMass = cpBodyGetMass(srcBody);
-            const cpVect srcPos = cpBodyGetPosition(srcBody);
-            const cpFloat dist = cpvdist(srcPos, tgtPos);
-
-            cpFloat vel = gravityConstant * ((tgtMass * srcMass) / std::pow(dist, 2));
-            cpFloat dir = std::atan2(srcPos.y - tgtPos.y, srcPos.x - tgtPos.x);
+            const cpFloat dist = cpvdist(src.pos, tgt.pos);
+            cpFloat vel = gravityConstant * ((tgt.mass * src.mass) / std::pow(dist, 2));
+            cpFloat dir = std::atan2(src.pos.y - tgt.pos.y, src.pos.x - tgt.pos.x);
             cpVect force = cpv(std::cos(dir) * vel, std::sin(dir) * vel);
 
-            cpBodyApplyForceAtWorldPoint(tgtBody, force, cpvadd(tgtPos, tgtCenter));
-        });
-    });
+            cpBodyApplyForceAtWorldPoint(tgt.body, force, cpvadd(tgt.pos, tgt.center));
+        }
+    }
 }
 
 void PhysicsSystem::Simulate(double dt)
