@@ -62,6 +62,15 @@ void SimpleModelRenderer::HandleModelRemoved(const Model&, const id_t id)
     m_meshes.erase(id);
 }
 
+Matrix3 SimpleModelRenderer::ViewProjection() const
+{
+    // World -> NDC. Extent shrinks as zoom grows, so more pixels per world
+    // unit -- same convention ModelRenderer2 uses (1 px/unit at zoom 1.0).
+    const float ppu = m_pixelsPerUnit * m_zoom;
+    const Vector2 extent = m_viewportSize / ppu;
+    return Matrix3::projection(extent) * Matrix3::translation(-m_cameraPos);
+}
+
 void SimpleModelRenderer::RenderGroup(id_t tag
                                      , std::unordered_map<id_t, std::vector<MeshColor>>& meshGroups
                                      , const Transform& transf)
@@ -70,7 +79,7 @@ void SimpleModelRenderer::RenderGroup(id_t tag
     auto& meshes = meshGroups.at(tag);
 
     Matrix3 matrix =
-            Matrix3::projection({1280/2, 720/2}) *
+            ViewProjection() *
             Matrix3::translation({static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())}) *
             Matrix3::rotation(Rad(transf.rot)) *
             Matrix3::scaling({static_cast<float>(transf.scale.x()), static_cast<float>(transf.scale.y())});

@@ -115,8 +115,13 @@ else { // Use stroustrup if/else style
 ### Comments
 - Comments only if really necessary/a good idea. No "obvious" comments
 - Don't write too long comments or comments as explanation to me as result of a AI coding session
+- Removal test: if deleting the comment wouldn't make the code any less clear
+  to someone already reading it, delete it. A comment should state a hidden
+  constraint, an invariant, or a surprising fact -- not narrate why a refactor
+  was done, that two call sites now share something, or that a session/user
+  asked for a change. That belongs in the commit message, not the source.
 ```c++
-    // BAD EXAMPLE
+    // BAD EXAMPLE (debugging narrative)
 
     // Use the real framebuffer size (pixels), not windowSize() (logical
     // points). On HiDPI/Retina displays the two differ by the DPI scale
@@ -131,4 +136,23 @@ else { // Use stroustrup if/else style
     // framebufferSize() is required on HiDPI displays; windowSize() causes
     // incorrect viewport sizing and postprocess artifacts.
     const Magnum::Vector2i fbSize = framebufferSize();
+```
+```c++
+    // BAD EXAMPLE (justifying a refactor instead of stating a fact)
+
+    // Single source of truth for the tunable defaults below: the member
+    // initializers reference these, and so does the debug UI's "reset to
+    // defaults" buttons (via the getters), so the two can't drift apart.
+    struct Defaults {
+        static constexpr float intensity = 3.0f;
+        // ...
+    };
+
+    // GOOD EXAMPLE
+    // (no comment -- a struct named Defaults, referenced by both the
+    // initializer and the reset button, doesn't need one)
+    struct Defaults {
+        static constexpr float intensity = 3.0f;
+        // ...
+    };
 ```

@@ -33,6 +33,22 @@ using Magnum::Vector2i;
 //      CRT pass is enabled, present through the scanline shader; otherwise
 //      copy straight to `target`.
 class GlowPostProcess {
+public:
+    struct Defaults {
+        static constexpr float intensity = 3.0f;
+        static constexpr float threshold = 0.35f;
+        static constexpr int blurPasses = 3;
+        static constexpr float breatheAmplitude = 0.0f;
+        static constexpr float scanlineStrength = 1.0f;
+        static constexpr float scanlineWidthPx = 2.0f;
+        static constexpr float scanlinePeriodPx = 4.0f;
+        static constexpr float flickerRate = 47.0f;
+        static constexpr float flickerAmplitude = 0.0f;
+        static constexpr float scanJitterRate = 61.0f;
+        static constexpr float scanJitterAmplitude = 0.495f;
+        static constexpr float phaseJitterPx = 0.5f;
+    };
+
 private:
     Magnum::GL::Texture2D m_sceneColor{Magnum::NoCreate};
     Magnum::GL::Framebuffer m_sceneFbo{Magnum::NoCreate};
@@ -78,8 +94,15 @@ private:
     Vector2i m_blurSize{0, 0};
 
     bool m_enabled = true;
-    float m_intensity = 2.2f;
-    int m_blurPasses = 3; // more passes = wider, softer, more present glow
+    float m_intensity = Defaults::intensity;
+    int m_blurPasses = Defaults::blurPasses; // more passes = wider, softer, more present glow
+
+    // Bloom-intensity "breathing": a few-percent wobble driven by three
+    // incommensurate high-frequency sines, so the halo shimmers unevenly like
+    // unstable phosphor drive. This is a SEPARATE temporal effect from the
+    // CRT pass's flicker/jitter uniforms below -- it runs whenever glow is
+    // enabled, independent of whether the CRT pass is on at all.
+    float m_breatheAmplitude = Defaults::breatheAmplitude;
 
     // Bright-pass cutoff before the blur (0-1, in linear-ish 8-bit color
     // units): pixels at/below this don't bloom at all. Without it, blurring a
@@ -87,10 +110,19 @@ private:
     // same color, which the composite then ADDS back on top — inflating
     // brightness across the whole interior regardless of size. Vector lines
     // (near-white/cyan, ~1.0) stay well above this; dim UI panel fills don't.
-    float m_threshold = 0.35f;
+    float m_threshold = Defaults::threshold;
 
     bool m_crtEnabled = true;
-    float m_scanlineStrength = 0.725f; // 50% stronger than the initial 0.35 default
+    float m_scanlineStrength = Defaults::scanlineStrength;
+    // Scanline geometry at the 1080p reference (shader scales by window height).
+    float m_scanlineWidthPx = Defaults::scanlineWidthPx;   // dark-line thickness (~2px core after AA)
+    float m_scanlinePeriodPx = Defaults::scanlinePeriodPx; // line + gap
+    // Temporal instability defaults.
+    float m_flickerRate = Defaults::flickerRate;
+    float m_flickerAmplitude = Defaults::flickerAmplitude;
+    float m_scanJitterRate = Defaults::scanJitterRate;
+    float m_scanJitterAmplitude = Defaults::scanJitterAmplitude;
+    float m_phaseJitterPx = Defaults::phaseJitterPx;
 
     void Resize(const Vector2i& framebufferSize, const Vector2i& logicalSize);
 
@@ -112,11 +144,41 @@ public:
     void SetThreshold(float threshold) { m_threshold = std::max(0.f, threshold); }
     [[nodiscard]] float GetThreshold() const { return m_threshold; }
 
+    void SetBlurPasses(int passes) { m_blurPasses = std::max(0, passes); }
+    [[nodiscard]] int GetBlurPasses() const { return m_blurPasses; }
+
+    // 0 = perfectly steady bloom intensity; see m_breatheAmplitude above.
+    void SetBreatheAmplitude(float amplitude) { m_breatheAmplitude = std::max(0.f, amplitude); }
+    [[nodiscard]] float GetBreatheAmplitude() const { return m_breatheAmplitude; }
+
     void SetCrtEnabled(bool enabled) { m_crtEnabled = enabled; }
     [[nodiscard]] bool IsCrtEnabled() const { return m_crtEnabled; }
 
     void SetScanlineStrength(float strength) { m_scanlineStrength = strength; }
     [[nodiscard]] float GetScanlineStrength() const { return m_scanlineStrength; }
+
+    void SetScanlineWidthPx(float px) { m_scanlineWidthPx = std::max(0.f, px); }
+    [[nodiscard]] float GetScanlineWidthPx() const { return m_scanlineWidthPx; }
+
+    void SetScanlinePeriodPx(float px) { m_scanlinePeriodPx = std::max(0.1f, px); }
+    [[nodiscard]] float GetScanlinePeriodPx() const { return m_scanlinePeriodPx; }
+
+    // Temporal instability -- see the comment above the matching uniforms in
+    // crt.f.glsl for what each one does.
+    void SetFlickerRate(float rate) { m_flickerRate = std::max(0.f, rate); }
+    [[nodiscard]] float GetFlickerRate() const { return m_flickerRate; }
+
+    void SetFlickerAmplitude(float amplitude) { m_flickerAmplitude = std::max(0.f, amplitude); }
+    [[nodiscard]] float GetFlickerAmplitude() const { return m_flickerAmplitude; }
+
+    void SetScanJitterRate(float rate) { m_scanJitterRate = std::max(0.f, rate); }
+    [[nodiscard]] float GetScanJitterRate() const { return m_scanJitterRate; }
+
+    void SetScanJitterAmplitude(float amplitude) { m_scanJitterAmplitude = std::max(0.f, amplitude); }
+    [[nodiscard]] float GetScanJitterAmplitude() const { return m_scanJitterAmplitude; }
+
+    void SetPhaseJitterPx(float px) { m_phaseJitterPx = std::max(0.f, px); }
+    [[nodiscard]] float GetPhaseJitterPx() const { return m_phaseJitterPx; }
 
     // Bind the offscreen scene target and clear it; call before rendering
     // the normal game scene. framebufferSize is the sharp render resolution;

@@ -34,6 +34,8 @@ set(GT_YAMLCPP_TAG    "0.8.0")
 set(GT_FREETYPE_TAG   "VER-2-13-2")
 set(GT_RMLUI_TAG      "6.0")
 set(GT_POLY2TRI_TAG   "master")
+set(GT_IMGUI_TAG      "v1.91.5")
+set(GT_MAGNUMINT_TAG  "master")
 
 # ---------------------------------------------------------------------------
 # Corrade — must be fetched before Magnum; OVERRIDE_FIND_PACKAGE so that
@@ -234,6 +236,40 @@ FetchContent_Declare(poly2tri
 FetchContent_MakeAvailable(poly2tri)
 
 # ---------------------------------------------------------------------------
+# Dear ImGui + Magnum's ImGuiIntegration (dev/debug overlay only)
+# ---------------------------------------------------------------------------
+# ImGui ships no CMakeLists.txt, so it's only populated (not add_subdirectory'd);
+# magnum-integration compiles the needed imgui .cpp itself, given IMGUI_DIR.
+FetchContent_Declare(ImGui
+    GIT_REPOSITORY  https://github.com/ocornut/imgui.git
+    GIT_TAG         ${GT_IMGUI_TAG}
+    GIT_SHALLOW     TRUE
+)
+FetchContent_MakeAvailable(ImGui)
+set(IMGUI_DIR "${imgui_SOURCE_DIR}" CACHE PATH "" FORCE)
+
+# Only the ImGui integration is needed; keep everything else off.
+set(WITH_IMGUI        ON  CACHE BOOL "" FORCE)
+set(MAGNUM_WITH_IMGUI ON  CACHE BOOL "" FORCE)
+
+# magnum-integration's CMakeLists has unconditional install(FILES ...) calls
+# using these dir variables. When Magnum is a fetched subproject they're set
+# only in Magnum's own scope, so they arrive here empty and install() errors
+# out at configure time. We never run `cmake --install`, so just give them
+# Magnum's own default values to keep the install() calls well-formed.
+set(MAGNUM_BINARY_INSTALL_DIR  bin)
+set(MAGNUM_LIBRARY_INSTALL_DIR lib)
+set(MAGNUM_INCLUDE_INSTALL_DIR include/Magnum)
+
+FetchContent_Declare(MagnumIntegration
+    GIT_REPOSITORY  https://github.com/mosra/magnum-integration.git
+    GIT_TAG         ${GT_MAGNUMINT_TAG}
+    GIT_SHALLOW     TRUE
+    OVERRIDE_FIND_PACKAGE
+)
+FetchContent_MakeAvailable(MagnumIntegration)
+
+# ---------------------------------------------------------------------------
 # Main target
 # ---------------------------------------------------------------------------
 add_executable(GravitarisNG
@@ -294,10 +330,6 @@ add_executable(GravitarisNG
     src/game/system/ship-controls-system.cpp
     include/gravitaris/cgame/renderer/shader/simple-line-shader.hpp
     src/cgame/renderer/shader/basic-lines-shader.cpp
-    include/gravitaris/cgame/renderer/shader/line-segments-shader.hpp
-    src/cgame/renderer/shader/line-segments-shader.cpp
-    include/gravitaris/cgame/renderer/model-renderer.hpp
-    src/cgame/renderer/model-renderer.cpp
     include/gravitaris/cgame/renderer/shader/line2-shader.hpp
     src/cgame/renderer/shader/line2-shader.cpp
     include/gravitaris/cgame/renderer/model-renderer2.hpp
@@ -313,8 +345,6 @@ add_executable(GravitarisNG
     src/cgame/renderer/shader/crt-shader.cpp
     include/gravitaris/cgame/renderer/glow-post-process.hpp
     src/cgame/renderer/glow-post-process.cpp
-    include/gravitaris/cgame/renderer/shader/line-miter-shader.hpp
-    src/cgame/renderer/shader/line-miter-shader.cpp
     src/cgame/ui/detail/system-interface.hpp
     src/cgame/ui/detail/system-interface.cpp
     src/cgame/ui/detail/render-interface-gl3.hpp
@@ -323,7 +353,31 @@ add_executable(GravitarisNG
     src/cgame/ui/ui.cpp
     src/cgame/ui/detail/file-interface.hpp
     src/cgame/ui/detail/file-interface.cpp
+    src/cgame/ui/debug/debug-ui.hpp
+    src/cgame/ui/debug/debug-ui.cpp
+    src/cgame/ui/debug/post-process-panel.hpp
+    src/cgame/ui/debug/post-process-panel.cpp
+    src/cgame/ui/debug/renderer-panel.hpp
+    src/cgame/ui/debug/renderer-panel.cpp
+    src/cgame/ui/debug/spawn-panel.hpp
+    src/cgame/ui/debug/spawn-panel.cpp
 )
+
+# DPI-aware manifest, per https://doc.magnum.graphics/magnum/platforms-windows.html --
+# without it, Windows doesn't consider the app DPI-aware and dpiScaling()/
+# framebufferSize() report meaningless values on scaled displays. On MSVC the
+# raw .manifest is listed directly as a source so CMake merges it into the
+# linker's own auto-generated manifest (/MANIFESTINPUT); wrapping it in an
+# RT_MANIFEST .rc resource instead collides with that auto-generated manifest
+# at the same resource ID and silently loses. MinGW has no such auto-manifest,
+# so it uses the .rc route instead.
+if(WIN32)
+    if(MSVC)
+        target_sources(GravitarisNG PRIVATE src/client/windows-hidpi.manifest)
+    elseif(MINGW)
+        target_sources(GravitarisNG PRIVATE src/client/windows-hidpi.rc)
+    endif()
+endif()
 
 target_compile_features(GravitarisNG PRIVATE cxx_std_20)
 
@@ -360,6 +414,8 @@ target_link_libraries(GravitarisNG PRIVATE
     Magnum::GL
     Magnum::Shaders
     Magnum::Sdl2Application
+
+    MagnumIntegration::ImGui
 
     Freetype::Freetype
 

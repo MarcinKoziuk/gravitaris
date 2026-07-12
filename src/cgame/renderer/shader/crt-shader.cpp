@@ -46,6 +46,13 @@ CrtShader::CrtShader(IFilesystem& fileSystem)
     u_viewportSize = uniformLocation("viewportSize");
     u_scanlineStrength = uniformLocation("scanlineStrength");
     u_time = uniformLocation("time");
+    u_lineWidthPx = uniformLocation("lineWidthPx");
+    u_periodPx = uniformLocation("periodPx");
+    u_flickerRate = uniformLocation("flickerRate");
+    u_flickerAmplitude = uniformLocation("flickerAmplitude");
+    u_scanJitterRate = uniformLocation("scanJitterRate");
+    u_scanJitterAmplitude = uniformLocation("scanJitterAmplitude");
+    u_phaseJitterPx = uniformLocation("phaseJitterPx");
     setUniform(uniformLocation("image"), u_imageUnit);
 }
 
@@ -58,6 +65,48 @@ CrtShader& CrtShader::setViewportSize(const Vector2& size)
 CrtShader& CrtShader::setScanlineStrength(Magnum::Float strength)
 {
     setUniform(u_scanlineStrength, strength);
+    return *this;
+}
+
+CrtShader& CrtShader::setLineWidthPx(Magnum::Float px)
+{
+    setUniform(u_lineWidthPx, px);
+    return *this;
+}
+
+CrtShader& CrtShader::setPeriodPx(Magnum::Float px)
+{
+    setUniform(u_periodPx, px);
+    return *this;
+}
+
+CrtShader& CrtShader::setFlickerRate(Magnum::Float rate)
+{
+    setUniform(u_flickerRate, rate);
+    return *this;
+}
+
+CrtShader& CrtShader::setFlickerAmplitude(Magnum::Float amplitude)
+{
+    setUniform(u_flickerAmplitude, amplitude);
+    return *this;
+}
+
+CrtShader& CrtShader::setScanJitterRate(Magnum::Float rate)
+{
+    setUniform(u_scanJitterRate, rate);
+    return *this;
+}
+
+CrtShader& CrtShader::setScanJitterAmplitude(Magnum::Float amplitude)
+{
+    setUniform(u_scanJitterAmplitude, amplitude);
+    return *this;
+}
+
+CrtShader& CrtShader::setPhaseJitterPx(Magnum::Float px)
+{
+    setUniform(u_phaseJitterPx, px);
     return *this;
 }
 

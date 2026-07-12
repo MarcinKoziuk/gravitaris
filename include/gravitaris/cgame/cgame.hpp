@@ -8,16 +8,23 @@
 
 #include <gravitaris/cgame/camera.hpp>
 #include <gravitaris/cgame/renderer/simple-model-renderer.hpp>
-#include <gravitaris/cgame/renderer/model-renderer.hpp>
 #include <gravitaris/cgame/renderer/model-renderer2.hpp>
 
 namespace Gravitaris {
 
+// Which line renderer draws the scene. Mutually exclusive; switchable at
+// runtime from the debug UI for A/B comparison.
+enum class RendererKind {
+    Simple, // SimpleModelRenderer  — GL LineStrip, no thickness control
+    Baked,  // ModelRenderer2       — baked/instanced, pixel-space width
+};
+
 class CGame : public Game {
 protected:
     SimpleModelRenderer m_simpleModelRenderer;
-    ModelRenderer m_modelRenderer;
     ModelRenderer2 m_modelRenderer2;
+
+    RendererKind m_activeRenderer = RendererKind::Baked;
 
     Camera m_camera;
     Magnum::Vector2 m_viewportSize{1280.f, 720.f};
@@ -29,19 +36,25 @@ protected:
 
     // Shared line-thickness setting (pixels), forwarded to whichever
     // renderer is active; each converts it to its own internal units.
-    float m_lineWidthPixels = 2.f;
-    static constexpr float MIN_LINE_WIDTH = 0.5f;
-    static constexpr float MAX_LINE_WIDTH = 16.f;
+    float m_lineWidthPixels = Defaults::lineWidth;
 
     void UpdateCameraFollow();
 
     std::unique_ptr<EntitySpawner> CreateEntitySpawner() override;
 public:
+    struct Defaults {
+        static constexpr float lineWidth = 2.5f;
+    };
+
+    static constexpr float MIN_LINE_WIDTH = 0.5f;
+    static constexpr float MAX_LINE_WIDTH = 16.f;
+
     explicit CGame(IFilesystem& filesystem);
 
     void SetViewportSize(const Magnum::Vector2& size)
     {
         m_viewportSize = size;
+        m_simpleModelRenderer.SetViewportSize(size);
         m_modelRenderer2.SetViewportSize(size);
     }
 
@@ -53,12 +66,17 @@ public:
 
     void ToggleCameraFollow() { m_cameraFollow = !m_cameraFollow; }
 
+    void SetActiveRenderer(RendererKind kind) { m_activeRenderer = kind; }
+    [[nodiscard]] RendererKind GetActiveRenderer() const { return m_activeRenderer; }
+
     [[nodiscard]] float GetLineWidth() const { return m_lineWidthPixels; }
 
-    void AddLineWidth(float deltaPixels)
+    void SetLineWidth(float pixels)
     {
-        m_lineWidthPixels = std::clamp(m_lineWidthPixels + deltaPixels, MIN_LINE_WIDTH, MAX_LINE_WIDTH);
+        m_lineWidthPixels = std::clamp(pixels, MIN_LINE_WIDTH, MAX_LINE_WIDTH);
     }
+
+    void AddLineWidth(float deltaPixels) { SetLineWidth(m_lineWidthPixels + deltaPixels); }
 
     void ToggleDebugForceFacetedCircles()
     {

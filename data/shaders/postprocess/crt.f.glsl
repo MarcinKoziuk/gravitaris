@@ -11,26 +11,32 @@ uniform highp vec2 viewportSize;
 uniform highp float scanlineStrength; // 0 = off, 1 = fully dark troughs
 uniform highp float time;             // seconds, small-magnitude (see CrtShader::setTime)
 
+// Scanline geometry, expressed at the 1080p reference and scaled by the actual
+// window height (see dpiScale below). Runtime-tweakable via the debug UI.
+//   lineWidthPx: dark-line thickness (~2px solid core after AA at the default 3)
+//   periodPx:    line + gap (a "2px line" default of 6 => ~50% duty cycle)
+uniform highp float lineWidthPx;
+uniform highp float periodPx;
+
 in highp vec2 uv;
 
 out lowp vec4 fragmentColor;
 
 const highp float REFERENCE_HEIGHT = 1080.0;
-const highp float LINE_WIDTH_PX = 3.0;  // at the 1080p reference (~2px solid core after AA)
-const highp float PERIOD_PX = 6.0;      // line + gap, at the 1080p reference (~50% duty)
 
 // Analog instability: the image content itself stays put — only the CRT
-// *effects* shimmer. Three subtle, temporally-uneven modulations:
+// *effects* shimmer. Three subtle, temporally-uneven modulations, all
+// runtime-tweakable via the debug UI:
 //   - whole-frame brightness flicker (phosphor/refresh flicker),
 //   - scanline strength jitter, varying per row (unstable beam current),
 //   - sub-pixel scanline phase jitter (raster breathing).
 // "Uneven" comes from value noise (hashed, interpolated) rather than a clean
 // sine, so nothing reads as a rhythmic pulse.
-const highp float FLICKER_RATE = 47.0;    // noise samples/sec (near-refresh)
-const highp float FLICKER_AMPLITUDE = 0.035;
-const highp float SCAN_JITTER_RATE = 61.0;
-const highp float SCAN_JITTER_AMPLITUDE = 0.25;  // fraction of strength
-const highp float PHASE_JITTER_PX = 0.5;         // at the 1080p reference
+uniform highp float flickerRate;       // noise samples/sec (near-refresh)
+uniform highp float flickerAmplitude;
+uniform highp float scanJitterRate;
+uniform highp float scanJitterAmplitude; // fraction of strength
+uniform highp float phaseJitterPx;       // at the 1080p reference
 
 highp float hash(highp float x) {
     return fract(sin(x * 12.9898) * 43758.5453);
@@ -47,13 +53,13 @@ void main() {
     vec3 color = texture(image, uv).rgb;
 
     highp float dpiScale = viewportSize.y / REFERENCE_HEIGHT;
-    highp float period = PERIOD_PX * dpiScale;
-    highp float halfLineWidth = 0.5 * LINE_WIDTH_PX * dpiScale;
+    highp float period = periodPx * dpiScale;
+    highp float halfLineWidth = 0.5 * lineWidthPx * dpiScale;
     highp float aa = max(0.5 * dpiScale, 0.5); // ~1px soft edge, DPI-scaled
 
     // Raster breathing: the scanline grid drifts by a fraction of a pixel.
-    highp float phaseJitter = PHASE_JITTER_PX * dpiScale
-            * (valueNoise(time * SCAN_JITTER_RATE * 0.37) - 0.5);
+    highp float phaseJitter = phaseJitterPx * dpiScale
+            * (valueNoise(time * scanJitterRate * 0.37) - 0.5);
 
     highp float pos = mod(gl_FragCoord.y + phaseJitter, period);
     highp float distToCenter = min(pos, period - pos);
@@ -70,8 +76,8 @@ void main() {
     // Unstable beam current: scanline darkness wavers over time, slightly
     // differently per row so the shimmer doesn't move in lockstep.
     highp float rowSeed = gl_FragCoord.y * 0.013;
-    highp float scanJitter = 1.0 + SCAN_JITTER_AMPLITUDE
-            * (valueNoise(time * SCAN_JITTER_RATE + rowSeed) - 0.5);
+    highp float scanJitter = 1.0 + scanJitterAmplitude
+            * (valueNoise(time * scanJitterRate + rowSeed) - 0.5);
     strength = clamp(strength * scanJitter, 0.0, 1.0);
 
     highp float scan = mix(1.0, 1.0 - dark, strength);
@@ -80,7 +86,7 @@ void main() {
     color *= scan * (1.0 + 0.4 * strength);
 
     // Phosphor/refresh flicker: whole-frame brightness wanders subtly.
-    color *= 1.0 + FLICKER_AMPLITUDE * (valueNoise(time * FLICKER_RATE) - 0.5);
+    color *= 1.0 + flickerAmplitude * (valueNoise(time * flickerRate) - 0.5);
 
     fragmentColor = vec4(color, 1.0);
 }

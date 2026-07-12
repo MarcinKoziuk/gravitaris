@@ -24,6 +24,8 @@
 
 #include <gravitaris/ui/ui.hpp>
 
+#include <cgame/ui/debug/debug-ui.hpp>
+
 namespace Gravitaris {
 
 using Magnum::Platform::Application;
@@ -40,6 +42,7 @@ private:
 
     std::unique_ptr<CGame> m_game;
     std::unique_ptr<GlowPostProcess> m_glow;
+    std::unique_ptr<DebugUi> m_debugUi;
 
     UI m_ui;
 
@@ -55,18 +58,26 @@ private:
 
     void tickEvent() override;
     void drawEvent() override;
+    void viewportEvent(ViewportEvent& event) override;
     void keyPressEvent(KeyEvent& event) override;
     void keyReleaseEvent(KeyEvent& event) override;
+    void textInputEvent(TextInputEvent& event) override;
     void scrollEvent(ScrollEvent& event) override;
     void pointerPressEvent(PointerEvent& event) override;
     void pointerReleaseEvent(PointerEvent& event) override;
     void pointerMoveEvent(PointerMoveEvent& event) override;
 
-    // framebufferSize() / windowSize(). NOT dpiScaling() -- that stays {1,1}
-    // on macOS even when the two sizes genuinely differ.
+    // Real HiDPI scale is reported differently per platform: on macOS,
+    // framebufferSize() differs from windowSize() while dpiScaling() stays
+    // {1,1}; on Windows it's the opposite -- framebufferSize()/windowSize()
+    // are always identical (per Magnum's Sdl2Application docs) and the real
+    // scale (e.g. 1.5 for 150% display scaling) shows up in dpiScaling()
+    // instead. Whichever ratio is platform-meaningless is always 1, so take
+    // the elementwise max of both to get the real scale on either platform.
     Magnum::Vector2 PixelScale() const
     {
-        return Magnum::Vector2{framebufferSize()} / Magnum::Vector2{windowSize()};
+        const Magnum::Vector2 fbRatio = Magnum::Vector2{framebufferSize()} / Magnum::Vector2{windowSize()};
+        return Magnum::Math::max(fbRatio, dpiScaling());
     }
 
     static int RmlButtonIndex(Pointer pointer);
@@ -95,6 +106,11 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     m_game->Start();
 
     m_glow = std::make_unique<GlowPostProcess>(m_filesystem);
+
+    // Dev overlay (hidden until F1). UI size in logical points; framebuffer
+    // size keeps fonts crisp on HiDPI.
+    m_debugUi = std::make_unique<DebugUi>(*m_game, *m_glow,
+                                          Magnum::Vector2{windowSize()}, windowSize(), framebufferSize());
 }
 
 void GravitarisApplication::tickEvent()
@@ -159,12 +175,39 @@ void GravitarisApplication::drawEvent()
     // Restore viewport to full size; RmlUi sets it to its own context size.
     Magnum::GL::defaultFramebuffer.setViewport({{}, fbSize});
 
+    // Dev overlay on top of everything, crisp (drawn after the CRT present).
+    Magnum::GL::defaultFramebuffer.bind();
+    m_debugUi->Draw();
+
     // The context is double-buffered, swap buffers
     swapBuffers();
 }
 
+void GravitarisApplication::viewportEvent(ViewportEvent& event)
+{
+    Magnum::GL::defaultFramebuffer.setViewport({{}, event.framebufferSize()});
+    m_debugUi->Relayout(Magnum::Vector2{event.windowSize()}, event.windowSize(), event.framebufferSize());
+}
+
 void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::KeyEvent& event)
 {
+    // F1 toggles the dev overlay. Text input is enabled only while it's shown
+    // so ImGui text fields work without stealing keystrokes during gameplay.
+    if (event.key() == KeyEvent::Key::F1) {
+        m_debugUi->Toggle();
+        if (m_debugUi->IsVisible()) startTextInput();
+        else stopTextInput();
+        event.setAccepted();
+        return;
+    }
+
+    // When the overlay has keyboard focus (e.g. an active widget), route keys
+    // to it and keep them away from gameplay.
+    if (m_debugUi->HandleKeyPress(event)) {
+        event.setAccepted();
+        return;
+    }
+
     constexpr float LINE_WIDTH_STEP = 0.5f;
     switch (event.key()) {
         case KeyEvent::Key::NumAdd:
@@ -227,6 +270,11 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
 
 void GravitarisApplication::keyReleaseEvent(Magnum::Platform::Sdl2Application::KeyEvent& event)
 {
+    if (m_debugUi->HandleKeyRelease(event)) {
+        event.setAccepted();
+        return;
+    }
+
     std::optional<entt::entity> maybePlayer = m_game->GetPlayer();
     if (!maybePlayer) return;
 
@@ -254,8 +302,20 @@ void GravitarisApplication::keyReleaseEvent(Magnum::Platform::Sdl2Application::K
     }
 }
 
+void GravitarisApplication::textInputEvent(TextInputEvent& event)
+{
+    if (m_debugUi->HandleTextInput(event)) {
+        event.setAccepted();
+    }
+}
+
 void GravitarisApplication::scrollEvent(ScrollEvent& event)
 {
+    if (m_debugUi->HandleScroll(event)) {
+        event.setAccepted();
+        return;
+    }
+
     m_game->GetCamera().AddZoomNotches(event.offset().y());
     event.setAccepted();
 }
@@ -272,6 +332,11 @@ int GravitarisApplication::RmlButtonIndex(Pointer pointer)
 
 void GravitarisApplication::pointerPressEvent(PointerEvent& event)
 {
+    if (m_debugUi->HandlePointerPress(event)) {
+        event.setAccepted();
+        return;
+    }
+
     // event.position() is in logical points; UI context is in physical pixels.
     const Vector2 p = event.position() * PixelScale();
     m_ui.ProcessMouseMove(static_cast<int>(p.x()), static_cast<int>(p.y()));
@@ -282,6 +347,11 @@ void GravitarisApplication::pointerPressEvent(PointerEvent& event)
 
 void GravitarisApplication::pointerReleaseEvent(PointerEvent& event)
 {
+    if (m_debugUi->HandlePointerRelease(event)) {
+        event.setAccepted();
+        return;
+    }
+
     if (m_ui.ProcessMouseButton(RmlButtonIndex(event.pointer()), false)) {
         event.setAccepted();
     }
@@ -289,6 +359,11 @@ void GravitarisApplication::pointerReleaseEvent(PointerEvent& event)
 
 void GravitarisApplication::pointerMoveEvent(PointerMoveEvent& event)
 {
+    if (m_debugUi->HandlePointerMove(event)) {
+        event.setAccepted();
+        return;
+    }
+
     const Vector2 p = event.position() * PixelScale();
     if (m_ui.ProcessMouseMove(static_cast<int>(p.x()), static_cast<int>(p.y()))) {
         event.setAccepted();
@@ -306,7 +381,20 @@ static double GetTime()
 static Application::Configuration CreateConfiguration(const Application::Arguments&)
 {
     Application::Configuration conf;
+#ifdef CORRADE_TARGET_WINDOWS
+    // Force 1:1 scaling so the window/framebuffer is always exactly the
+    // requested 1920x1080, regardless of the display's scaling setting.
+    // Windows' virtual DPI scaling would otherwise inflate the real pixel
+    // size (e.g. to 2880x1620 at 150%), and the line-width/CRT-scanline
+    // DPI compensation would then proportionally thicken everything to
+    // "look the same apparent size" -- which reads as blown up relative to
+    // the reference look tuned at 1920x1080. macOS's Retina scaling (a
+    // genuinely higher-density framebuffer at the *same* window size) is
+    // unaffected by this and keeps using its own Framebuffer DPI policy.
+    conf.setSize({1920, 1080}, Magnum::Vector2{1.0f});
+#else
     conf.setSize({1920, 1080});
+#endif
     conf.setWindowFlags(Application::Configuration::WindowFlag::Resizable);
     return conf;
 }

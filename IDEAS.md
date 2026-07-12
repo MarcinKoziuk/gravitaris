@@ -16,6 +16,8 @@
 - Start actual work on UI
 - Make some hot-reload functionality for resources
   - and maybe gameplay code if practical (less essential)
+- Support WebAssembly as a build target, in line with the goal of being as
+  portable/cross-platform as possible (Windows, macOS, Linux, and web)
 
 ## Gameplay ideas
 The gameplay loop tactile and visual feel should be inspired by the

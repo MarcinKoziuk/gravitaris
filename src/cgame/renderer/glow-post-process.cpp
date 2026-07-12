@@ -98,6 +98,13 @@ void GlowPostProcess::Present(GL::Texture2D& sourceTex, GL::Framebuffer& sourceF
         target.setViewport(Range2Di{{}, windowSize});
         m_crtShader.setViewportSize(Vector2{windowSize})
                 .setScanlineStrength(m_scanlineStrength)
+                .setLineWidthPx(m_scanlineWidthPx)
+                .setPeriodPx(m_scanlinePeriodPx)
+                .setFlickerRate(m_flickerRate)
+                .setFlickerAmplitude(m_flickerAmplitude)
+                .setScanJitterRate(m_scanJitterRate)
+                .setScanJitterAmplitude(m_scanJitterAmplitude)
+                .setPhaseJitterPx(m_phaseJitterPx)
                 .setTime(time)
                 .bindImage(sourceTex)
                 .draw(m_fullscreenTri);
@@ -159,7 +166,7 @@ void GlowPostProcess::EndSceneAndComposite(GL::AbstractFramebuffer& target, cons
     const float breathe = 0.55f * std::sin(time * 57.f)
                         + 0.30f * std::sin(time * 91.3f + 1.7f)
                         + 0.15f * std::sin(time * 139.7f + 4.2f);
-    const float jitteredIntensity = m_intensity * (1.f + 0.12f * breathe);
+    const float jitteredIntensity = m_intensity * (1.f + m_breatheAmplitude * breathe);
 
     // Composite sharp scene + intensity * blurred glow into the full-res
     // output target (so the CRT present pass can sample it).
