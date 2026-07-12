@@ -30,6 +30,7 @@ set(GT_SDL2_TAG       "release-2.28.5")
 set(GT_CHIPMUNK_TAG   "Chipmunk-7.0.3")
 set(GT_PHYSFS_TAG     "release-3.2.0")
 set(GT_ENTT_TAG       "v3.13.2")
+set(GT_FLECS_TAG      "v4.1.6")
 set(GT_YAMLCPP_TAG    "0.8.0")
 set(GT_FREETYPE_TAG   "VER-2-13-2")
 set(GT_RMLUI_TAG      "6.0")
@@ -185,6 +186,7 @@ set(CMAKE_SKIP_RPATH OFF CACHE BOOL "Skip RPATH" FORCE)
 
 # ---------------------------------------------------------------------------
 # EnTT (header-only)
+# TODO(entt-to-flecs): remove once nothing references entt:: anymore.
 # ---------------------------------------------------------------------------
 FetchContent_Declare(EnTT
     GIT_REPOSITORY  https://github.com/skypjack/entt.git
@@ -193,6 +195,21 @@ FetchContent_Declare(EnTT
     OVERRIDE_FIND_PACKAGE
 )
 FetchContent_MakeAvailable(EnTT)
+
+# ---------------------------------------------------------------------------
+# flecs — replacing EnTT as the ECS (see TODO above)
+# ---------------------------------------------------------------------------
+set(FLECS_STATIC ON  CACHE BOOL "" FORCE)
+set(FLECS_SHARED OFF CACHE BOOL "" FORCE)
+set(FLECS_TESTS  OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(flecs
+    GIT_REPOSITORY  https://github.com/SanderMertens/flecs.git
+    GIT_TAG         ${GT_FLECS_TAG}
+    GIT_SHALLOW     TRUE
+    OVERRIDE_FIND_PACKAGE
+)
+FetchContent_MakeAvailable(flecs)
 
 # ---------------------------------------------------------------------------
 # yaml-cpp
@@ -404,6 +421,7 @@ target_include_directories(GravitarisNG PRIVATE
 # ---------------------------------------------------------------------------
 target_link_libraries(GravitarisNG PRIVATE
     EnTT::EnTT
+    flecs::flecs_static
 
     # Chipmunk2D — BUILD_SHARED OFF so only chipmunk_static is built
     chipmunk_static
