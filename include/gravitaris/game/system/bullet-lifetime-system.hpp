@@ -1,15 +1,15 @@
 #pragma once
 
-#include <entt/entity/registry.hpp>
+#include <flecs.h>
 
 namespace Gravitaris {
 
 class BulletLifetimeSystem {
 private:
-    entt::registry& m_registry;
+    flecs::world& m_registry;
 
 public:
-    explicit BulletLifetimeSystem(entt::registry& registry);
+    explicit BulletLifetimeSystem(flecs::world& registry);
 
     void Update(double dt);
 };

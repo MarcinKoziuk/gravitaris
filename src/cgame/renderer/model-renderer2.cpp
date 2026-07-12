@@ -129,7 +129,7 @@ unsigned long SafeUpload(Magnum::GL::Buffer& buf, const void* data, std::size_t 
 
 } // namespace
 
-ModelRenderer2::ModelRenderer2(entt::registry& registry, IFilesystem& filesystem, ResourceLoader& resourceLoader)
+ModelRenderer2::ModelRenderer2(flecs::world& registry, IFilesystem& filesystem, ResourceLoader& resourceLoader)
     : m_registry(registry)
     , m_resourceLoader(resourceLoader)
     , m_shader(filesystem)
@@ -216,28 +216,25 @@ Matrix3 ModelRenderer2::ViewProjection() const
             * Matrix3::translation(-m_cameraPos);
 }
 
-void ModelRenderer2::RenderTag(id_t tag, const std::function<bool(entt::entity)>& filter)
+void ModelRenderer2::RenderTag(id_t tag, const std::function<bool(flecs::entity)>& filter)
 {
     for (auto& [modelId, instances] : m_instanceScratch) instances.clear();
 
-    auto view = m_registry.view<Transform, Renderable>();
-    for (auto entity : view) {
-        if (filter && !filter(entity)) continue;
+    m_registry.each([&](flecs::entity entity, const Transform& t, const Renderable& rend) {
+        if (filter && !filter(entity)) return;
 
-        const Renderable& rend = view.get<Renderable>(entity);
         const id_t modelId = rend.model.Id();
 
         auto bakedIt = m_baked.find(modelId);
-        if (bakedIt == m_baked.end() || !bakedIt->second.contains(tag)) continue;
+        if (bakedIt == m_baked.end() || !bakedIt->second.contains(tag)) return;
 
-        const Transform& t = view.get<Transform>(entity);
         Matrix3 transform =
                 Matrix3::translation({static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())}) *
                 Matrix3::rotation(Rad(t.rot)) *
                 Matrix3::scaling({static_cast<float>(t.scale.x()), static_cast<float>(t.scale.y())});
 
         m_instanceScratch[modelId].push_back(InstanceData{transform, Vector3{1.f, 1.f, 1.f}});
-    }
+    });
 
     for (auto& [modelId, instances] : m_instanceScratch) {
         if (instances.empty()) continue;
@@ -267,8 +264,8 @@ void ModelRenderer2::Render(double)
 
     RenderTag("model"_id, {});
 
-    RenderTag("_thrust"_id, [this](entt::entity entity) {
-        const auto* controls = m_registry.try_get<Controls>(entity);
+    RenderTag("_thrust"_id, [](flecs::entity entity) {
+        const auto* controls = entity.try_get<Controls>();
         return controls && controls->actionFlags.thrustForward;
     });
 }

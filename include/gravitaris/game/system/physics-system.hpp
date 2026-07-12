@@ -3,9 +3,7 @@
 #include <vector>
 #include <unordered_map>
 
-#include <entt/entity/entity.hpp>
-#include <entt/entity/registry.hpp>
-#include <entt/entity/group.hpp>
+#include <flecs.h>
 
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/component/physics.hpp>
@@ -17,21 +15,24 @@ namespace Gravitaris {
 
 class PhysicsSystem {
 private:
-    entt::registry& m_registry;
+    flecs::world& m_registry;
 
     std::unordered_map<id_t, std::shared_ptr<cpSpace>> m_spaces;
 
+    flecs::observer m_physicsAddedObserver;
+    flecs::observer m_physicsRemovedObserver;
+
     void InitSpace(id_t spaceId);
 
-    void InitBody(const entt::entity& ent, const Transform& transf, Physics& phys);
+    void InitBody(flecs::entity ent, const Transform& transf, Physics& phys);
 
     void ApplyGravity(id_t spaceId);
 
-    void HandlePhysicsAdded(const entt::entity& ent);
+    void HandlePhysicsAdded(flecs::entity ent);
 
-    void HandlePhysicsRemoved(const entt::entity& ent);
+    void HandlePhysicsRemoved(flecs::entity ent);
 public:
-    explicit PhysicsSystem(entt::registry& registry);
+    explicit PhysicsSystem(flecs::world& registry);
 
     ~PhysicsSystem();
 

@@ -1,10 +1,10 @@
 #pragma once
 
+#include <functional>
 #include <unordered_map>
 #include <vector>
 
-#include <entt/entity/entity.hpp>
-#include <entt/entity/registry.hpp>
+#include <flecs.h>
 
 #include <Magnum/Magnum.h>
 #include <Magnum/GL/Mesh.h>
@@ -52,7 +52,7 @@ private:
         Vector3 tint;
     };
 
-    entt::registry& m_registry;
+    flecs::world& m_registry;
     ResourceLoader& m_resourceLoader;
     Line2Shader m_shader;
 
@@ -72,10 +72,10 @@ private:
 
     [[nodiscard]] Matrix3 ViewProjection() const;
 
-    void RenderTag(id_t tag, const std::function<bool(entt::entity)>& filter);
+    void RenderTag(id_t tag, const std::function<bool(flecs::entity)>& filter);
 
 public:
-    ModelRenderer2(entt::registry& registry, IFilesystem& filesystem, ResourceLoader& resourceLoader);
+    ModelRenderer2(flecs::world& registry, IFilesystem& filesystem, ResourceLoader& resourceLoader);
 
     ~ModelRenderer2();
 

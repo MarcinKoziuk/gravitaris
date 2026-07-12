@@ -5,7 +5,7 @@
 #include <chrono>
 #include <cmath>
 
-#include <entt/entt.hpp>
+#include <flecs.h>
 
 #include <Magnum/GL/Context.h>
 #include <Magnum/GL/DefaultFramebuffer.h>
@@ -244,11 +244,11 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
             break;
     }
 
-    std::optional<entt::entity> maybePlayer = m_game->GetPlayer();
+    std::optional<flecs::entity> maybePlayer = m_game->GetPlayer();
     if (!maybePlayer) return;
 
-    entt::entity player = *maybePlayer;
-    Controls& playerControls = m_game->GetRegistry().get<Controls>(player);
+    flecs::entity player = *maybePlayer;
+    Controls& playerControls = player.get_mut<Controls>();
 
     switch (event.key()) {
         case KeyEvent::Key::Up:
@@ -275,11 +275,11 @@ void GravitarisApplication::keyReleaseEvent(Magnum::Platform::Sdl2Application::K
         return;
     }
 
-    std::optional<entt::entity> maybePlayer = m_game->GetPlayer();
+    std::optional<flecs::entity> maybePlayer = m_game->GetPlayer();
     if (!maybePlayer) return;
 
-    entt::entity player = *maybePlayer;
-    Controls& playerControls = m_game->GetRegistry().get<Controls>(player);
+    flecs::entity player = *maybePlayer;
+    Controls& playerControls = player.get_mut<Controls>();
 
     switch (event.key()) {
         case KeyEvent::Key::Up:

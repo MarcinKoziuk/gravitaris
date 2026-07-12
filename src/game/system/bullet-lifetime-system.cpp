@@ -5,25 +5,23 @@
 
 namespace Gravitaris {
 
-BulletLifetimeSystem::BulletLifetimeSystem(entt::registry& registry)
+BulletLifetimeSystem::BulletLifetimeSystem(flecs::world& registry)
     : m_registry(registry)
 {}
 
 void BulletLifetimeSystem::Update(double dt)
 {
-    std::vector<entt::entity> expired;
+    std::vector<flecs::entity> expired;
 
-    auto view = m_registry.view<Bullet>();
-    for (auto entity : view) {
-        Bullet& bullet = view.get<Bullet>(entity);
+    m_registry.each([&](flecs::entity entity, Bullet& bullet) {
         bullet.remainingLifetime -= dt;
         if (bullet.remainingLifetime <= 0.) {
             expired.push_back(entity);
         }
-    }
+    });
 
     for (auto entity : expired) {
-        m_registry.destroy(entity);
+        entity.destruct();
     }
 }
 

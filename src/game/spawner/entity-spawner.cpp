@@ -7,49 +7,49 @@
 
 namespace Gravitaris {
 
-EntitySpawner::EntitySpawner(entt::registry& registry, ResourceLoader& resourceLoader)
+EntitySpawner::EntitySpawner(flecs::world& registry, ResourceLoader& resourceLoader)
     : m_registry(registry)
     , m_resourceLoader(resourceLoader)
 {}
 
-entt::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position)
+flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position)
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
 
-    auto entity = m_registry.create();
-    auto& t = m_registry.emplace<Transform>(entity, position);
-    m_registry.emplace<Physics>(entity, "main"_id, body);
-    m_registry.emplace<Controls>(entity);
+    auto entity = m_registry.entity();
+    entity.emplace<Transform>(position);
+    entity.emplace<Physics>("main"_id, body);
+    entity.emplace<Controls>();
     AddRenderable(entity, modelId);
 
     return entity;
 }
 
-entt::entity EntitySpawner::SpawnPlanet(id_t modelId, Vector2d position)
+flecs::entity EntitySpawner::SpawnPlanet(id_t modelId, Vector2d position)
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
 
-    auto entity = m_registry.create();
-    m_registry.emplace<Transform>(entity, position);
-    m_registry.emplace<Physics>(entity, "main"_id, body);
+    auto entity = m_registry.entity();
+    entity.emplace<Transform>(position);
+    entity.emplace<Physics>("main"_id, body);
     AddRenderable(entity, modelId);
 
     return entity;
 }
 
-entt::entity EntitySpawner::SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity)
+flecs::entity EntitySpawner::SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity)
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
 
-    auto entity = m_registry.create();
-    m_registry.emplace<Transform>(entity, position, Radd{0}, Vector2d{ 3., 3. }, velocity);
-    m_registry.emplace<Physics>(entity, "main"_id, body);
+    auto entity = m_registry.entity();
+    entity.emplace<Transform>(position, Radd{0}, Vector2d{ 3., 3. }, velocity);
+    entity.emplace<Physics>("main"_id, body);
     AddRenderable(entity, modelId);
 
     return entity;
 }
 
-void EntitySpawner::AddRenderable(entt::entity entity, id_t modelId)
+void EntitySpawner::AddRenderable(flecs::entity entity, id_t modelId)
 {}
 
 } // namespace Gravitaris

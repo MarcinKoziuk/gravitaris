@@ -3,9 +3,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include <entt/entity/entity.hpp>
-#include <entt/entity/registry.hpp>
-
 #include <Magnum/Magnum.h>
 #include <Magnum/GL/Mesh.h>
 #include <Magnum/GL/AbstractShaderProgram.h>

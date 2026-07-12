@@ -5,14 +5,14 @@
 
 namespace Gravitaris {
 
-CEntitySpawner::CEntitySpawner(entt::registry& registry, ResourceLoader& resourceLoader)
+CEntitySpawner::CEntitySpawner(flecs::world& registry, ResourceLoader& resourceLoader)
     : EntitySpawner(registry, resourceLoader)
 {}
 
-void CEntitySpawner::AddRenderable(entt::entity entity, id_t modelId)
+void CEntitySpawner::AddRenderable(flecs::entity entity, id_t modelId)
 {
     ResourcePtr<const Model> model = m_resourceLoader.Load<Model>(modelId);
-    m_registry.emplace<Renderable>(entity, model);
+    entity.emplace<Renderable>(model);
 }
 
 } // namespace Gravitaris

@@ -12,7 +12,7 @@ namespace Gravitaris {
 
 using namespace Magnum;
 
-SimpleModelRenderer::SimpleModelRenderer(entt::registry& registry, IFilesystem& filesystem, ResourceLoader& resourceLoader)
+SimpleModelRenderer::SimpleModelRenderer(flecs::world& registry, IFilesystem& filesystem, ResourceLoader& resourceLoader)
     : m_registry(registry)
     , m_resourceLoader(resourceLoader)
     , m_shader(filesystem)
@@ -95,26 +95,17 @@ void SimpleModelRenderer::Render(double)
 {
     using Magnum::Matrix3;
 
-    auto view = m_registry.view<Transform, Renderable>();
-    for (auto entity : view) {
-        Transform& transf = view.get<Transform>(entity);
-        Renderable& rend = view.get<Renderable>(entity);
+    m_registry.each([&](flecs::entity, Transform& transf, Renderable& rend) {
         auto& meshGroups = m_meshes.at(rend.model.Id());
         RenderGroup("model"_id, meshGroups, transf);
-    }
+    });
 
-    auto thrustView = m_registry.view<Transform, Renderable, Controls>();
-    for (auto entity : thrustView) {
-        Transform& transf = thrustView.get<Transform>(entity);
-        Renderable& rend = thrustView.get<Renderable>(entity);
-        Controls& controls = thrustView.get<Controls>(entity);
-        if (!controls.actionFlags.thrustForward) continue;
+    m_registry.each([&](flecs::entity, Transform& transf, Renderable& rend, Controls& controls) {
+        if (!controls.actionFlags.thrustForward) return;
 
         auto& meshGroups = m_meshes.at(rend.model.Id());
         RenderGroup("_thrust"_id, meshGroups, transf);
-
-        
-    }
+    });
 }
 
 } // Gravitaris

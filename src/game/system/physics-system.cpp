@@ -9,17 +9,31 @@ namespace Gravitaris {
 
 static const cpTransform tzero = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f };
 
-PhysicsSystem::PhysicsSystem(entt::registry& registry)
+PhysicsSystem::PhysicsSystem(flecs::world& registry)
     : m_registry(registry)
 {
-    m_registry.on_construct<Physics>().connect<&PhysicsSystem::HandlePhysicsAdded>(*this);
-    m_registry.on_destroy<Physics>().connect<&PhysicsSystem::HandlePhysicsRemoved>(*this);
+    // OnSet (not OnAdd) mirrors entt's on_construct: it fires once, after the
+    // component's value is already assigned -- entity.emplace<Physics>(...)
+    // both adds and constructs in one step, so OnSet is the equivalent point.
+    m_physicsAddedObserver = m_registry.observer<Physics>()
+            .event(flecs::OnSet)
+            .each([this](flecs::entity ent, Physics&) { HandlePhysicsAdded(ent); });
+
+    // OnRemove fires both on explicit component removal and on entity
+    // destruction, matching entt's on_destroy.
+    m_physicsRemovedObserver = m_registry.observer<Physics>()
+            .event(flecs::OnRemove)
+            .each([this](flecs::entity ent, Physics&) { HandlePhysicsRemoved(ent); });
 }
 
 PhysicsSystem::~PhysicsSystem()
 {
-    m_registry.on_construct<Physics>().disconnect<&PhysicsSystem::HandlePhysicsAdded>(*this);
-    m_registry.on_destroy<Physics>().disconnect<&PhysicsSystem::HandlePhysicsRemoved>(*this);
+    // Explicit teardown: these observers close over `this`, and must not
+    // outlive it -- the flecs::world (owned by Game, declared before this
+    // system) is destroyed after PhysicsSystem, so without this the world
+    // would still fire into a dangling PhysicsSystem during later teardown.
+    m_physicsAddedObserver.destruct();
+    m_physicsRemovedObserver.destruct();
 }
 
 void PhysicsSystem::InitSpace(id_t spaceId)
@@ -30,7 +44,7 @@ void PhysicsSystem::InitSpace(id_t spaceId)
                     std::shared_ptr<cpSpace>(cpSpaceNew(), cpSpaceDeleter())));
 }
 
-void PhysicsSystem::InitBody(const entt::entity& ent, const Transform& transf, Physics& phys)
+void PhysicsSystem::InitBody(flecs::entity ent, const Transform& transf, Physics& phys)
 {
     const Body& bodyResource = *phys.body;
     cpSpace* space = m_spaces.at(phys.spaceId).get();
@@ -105,10 +119,10 @@ void PhysicsSystem::InitBody(const entt::entity& ent, const Transform& transf, P
     cpBodySetVelocity(body, cpVect(transf.vel));
 }
 
-void PhysicsSystem::HandlePhysicsAdded(const entt::entity& ent)
+void PhysicsSystem::HandlePhysicsAdded(flecs::entity ent)
 {
-    auto& phys = m_registry.get<Physics>(ent);
-    const auto& transf = m_registry.get<Transform>(ent);
+    auto& phys = ent.get_mut<Physics>();
+    const auto& transf = ent.get<Transform>();
 
     if (!m_spaces.count(phys.spaceId)) {
         InitSpace(phys.spaceId);
@@ -117,7 +131,7 @@ void PhysicsSystem::HandlePhysicsAdded(const entt::entity& ent)
     InitBody(ent, transf, phys);
 }
 
-void PhysicsSystem::HandlePhysicsRemoved(const entt::entity& ent)
+void PhysicsSystem::HandlePhysicsRemoved(flecs::entity ent)
 {
     // we stil leak spaces here.
 }
@@ -126,21 +140,17 @@ void PhysicsSystem::ApplyGravity(id_t spaceId)
 {
     const static cpFloat gravityConstant = 20.0;
 
-    auto view = m_registry.view<Physics>();
-    for (auto tgt : view) {
-        const Physics& tgtPhys = view.get<Physics>(tgt);
-        if (tgtPhys.spaceId != spaceId || m_registry.all_of<Bullet>(tgt)) continue;
+    m_registry.each<Physics>([&](flecs::entity tgt, Physics& tgtPhys) {
+        if (tgtPhys.spaceId != spaceId || tgt.has<Bullet>()) return;
 
         cpBody* tgtBody = tgtPhys.cp.body.get();
         const cpFloat tgtMass = cpBodyGetMass(tgtBody);
         const cpVect tgtPos = cpBodyGetPosition(tgtBody);
         const cpVect tgtCenter = cpBodyGetCenterOfGravity(tgtBody);
 
-        for (auto src : view) {
-            if (src == tgt) continue;
-
-            const Physics& srcPhys = view.get<Physics>(src);
-            if (srcPhys.spaceId != spaceId || m_registry.all_of<Bullet>(src)) continue;
+        m_registry.each<Physics>([&](flecs::entity src, Physics& srcPhys) {
+            if (src == tgt) return;
+            if (srcPhys.spaceId != spaceId || src.has<Bullet>()) return;
 
             cpBody* srcBody = srcPhys.cp.body.get();
             const cpFloat srcMass = cpBodyGetMass(srcBody);
@@ -152,8 +162,8 @@ void PhysicsSystem::ApplyGravity(id_t spaceId)
             cpVect force = cpv(std::cos(dir) * vel, std::sin(dir) * vel);
 
             cpBodyApplyForceAtWorldPoint(tgtBody, force, cpvadd(tgtPos, tgtCenter));
-        }
-    }
+        });
+    });
 }
 
 void PhysicsSystem::Simulate(double dt)
@@ -168,17 +178,13 @@ void PhysicsSystem::Simulate(double dt)
 
 void PhysicsSystem::Update()
 {
-    auto view = m_registry.view<Transform, Physics>();
-    for (auto entity : view) {
-        Transform& transf = view.get<Transform>(entity);
-        Physics& phys = view.get<Physics>(entity);
-
+    m_registry.each([](flecs::entity, Transform& transf, Physics& phys) {
         cpBody* body = phys.cp.body.get();
         transf.prevPos = transf.pos;
         transf.pos = Vector2d(cpBodyGetPosition(body));
         transf.rot = Radd(cpvtoangle(cpBodyGetRotation(body)));
         transf.vel = Vector2d(cpBodyGetVelocity(body));
-    }
+    });
 }
 
 } // namespace Gravitaris

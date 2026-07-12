@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <optional>
 
-#include <entt/entity/registry.hpp>
+#include <flecs.h>
 
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
@@ -21,7 +21,7 @@ protected:
 
     ResourceLoader m_resourceLoader;
 
-    entt::registry m_registry;
+    flecs::world m_registry;
 
     std::unique_ptr<EntitySpawner> m_entitySpawner;
 
@@ -33,7 +33,7 @@ protected:
 
     std::uint64_t m_step;
 
-    std::optional<entt::entity> m_player;
+    std::optional<flecs::entity> m_player;
 
     virtual std::unique_ptr<EntitySpawner> CreateEntitySpawner();
 
@@ -46,10 +46,10 @@ public:
 
     void Update();
 
-    entt::registry& GetRegistry()
+    flecs::world& GetRegistry()
     { return m_registry; }
 
-    std::optional<entt::entity> GetPlayer()
+    std::optional<flecs::entity> GetPlayer()
     { return m_player; }
 
     static constexpr double PHYSICS_DELTA = 1. / 60.;

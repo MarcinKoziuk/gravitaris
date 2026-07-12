@@ -22,10 +22,10 @@ void CGame::UpdateCameraFollow()
 {
     if (!m_cameraFollow) return;
 
-    const std::optional<entt::entity> player = GetPlayer();
+    const std::optional<flecs::entity> player = GetPlayer();
     if (!player) return;
 
-    const Transform* transform = m_registry.try_get<Transform>(*player);
+    const Transform* transform = player->try_get<Transform>();
     if (!transform) return;
 
     const Magnum::Vector2 target{static_cast<float>(transform->pos.x()),

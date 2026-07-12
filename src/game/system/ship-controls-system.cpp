@@ -16,7 +16,7 @@ using Magnum::Vector2d;
 
 static constexpr double BULLET_LIFETIME_SECONDS = 3.0;
 
-ShipControlsSystem::ShipControlsSystem(entt::registry& registry, EntitySpawner& entitySpawner)
+ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner)
         : m_registry(registry)
         , m_entitySpawner(entitySpawner)
 {}
@@ -60,12 +60,7 @@ static std::pair<Vector2d, Vector2d> GetBulletSpawnPosAndVel(const Transform& tr
 
 void ShipControlsSystem::Update(std::uint64_t step)
 {
-    auto view = m_registry.view<Transform, Physics, Controls>();
-    for (auto entity : view) {
-        Transform& transf = view.get<Transform>(entity);
-        Physics& phys = view.get<Physics>(entity);
-        Controls& scontrols = view.get<Controls>(entity);
-
+    m_registry.each([&](flecs::entity entity, Transform& transf, Physics& phys, Controls& scontrols) {
         cpBody* body = phys.cp.body.get();
 
         cpFloat ang = cpBodyGetAngularVelocity(body);
@@ -86,15 +81,15 @@ void ShipControlsSystem::Update(std::uint64_t step)
             scontrols.actionFlags.firePrimary = false;
             std::pair<Vector2d, Vector2d> ret = GetBulletSpawnPosAndVel(transf, phys);
 
-            entt::entity bulletEntity = m_entitySpawner.SpawnBullet("models/bullets/bullet-0"_id, ret.first, ret.second);
-            m_registry.emplace<Bullet>(bulletEntity, BULLET_LIFETIME_SECONDS);
+            flecs::entity bulletEntity = m_entitySpawner.SpawnBullet("models/bullets/bullet-0"_id, ret.first, ret.second);
+            bulletEntity.emplace<Bullet>(BULLET_LIFETIME_SECONDS);
         }
         if (scontrols.actionFlags.fireSecondary) {
             scontrols.actionFlags.fireSecondary = false;
             std::pair<Vector2d, Vector2d> ret = GetBulletSpawnPosAndVel(transf, phys);
             m_entitySpawner.SpawnBullet("models/doodads/box"_id, ret.first, transf.vel);
         }
-    }
+    });
 }
 
 

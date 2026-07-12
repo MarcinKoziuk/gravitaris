@@ -3,8 +3,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include <entt/entity/entity.hpp>
-#include <entt/entity/registry.hpp>
+#include <flecs.h>
 
 #include <Magnum/GL/Mesh.h>
 #include <Magnum/Shaders/VertexColor.h>
@@ -31,7 +30,7 @@ private:
         Color3 color;
     };
 
-    entt::registry& m_registry;
+    flecs::world& m_registry;
 
     ResourceLoader& m_resourceLoader;
 
@@ -56,7 +55,7 @@ private:
     void RenderGroup(id_t tag, std::unordered_map<id_t, std::vector<MeshColor>>& m_meshGroup, const Transform& transf);
 
 public:
-    SimpleModelRenderer(entt::registry& registry, IFilesystem& filesystem, ResourceLoader& resourceLoader);
+    SimpleModelRenderer(flecs::world& registry, IFilesystem& filesystem, ResourceLoader& resourceLoader);
 
     ~SimpleModelRenderer();
 

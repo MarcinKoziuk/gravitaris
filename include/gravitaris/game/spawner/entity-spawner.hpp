@@ -1,7 +1,6 @@
 #pragma once
 
-#include <entt/entity/entity.hpp>
-#include <entt/entity/registry.hpp>
+#include <flecs.h>
 
 #include <Magnum/Magnum.h>
 
@@ -14,22 +13,22 @@ using Magnum::Vector2d;
 
 class EntitySpawner {
 protected:
-    entt::registry& m_registry;
+    flecs::world& m_registry;
 
     ResourceLoader& m_resourceLoader;
 
-    virtual void AddRenderable(entt::entity entity, id_t modelId);
+    virtual void AddRenderable(flecs::entity entity, id_t modelId);
 
 public:
-    explicit EntitySpawner(entt::registry& registry, ResourceLoader& resourceLoader);
+    explicit EntitySpawner(flecs::world& registry, ResourceLoader& resourceLoader);
 
     virtual ~EntitySpawner() = default;
 
-    entt::entity SpawnPlayer(id_t modelId, Vector2d position);
+    flecs::entity SpawnPlayer(id_t modelId, Vector2d position);
 
-    entt::entity SpawnPlanet(id_t modelId, Vector2d position);
+    flecs::entity SpawnPlanet(id_t modelId, Vector2d position);
 
-    entt::entity SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity);
+    flecs::entity SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity);
 };
 
 } // namespace Gravitaris

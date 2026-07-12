@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include <entt/entity/registry.hpp>
+#include <flecs.h>
 
 #include <gravitaris/game/fwd.hpp>
 
@@ -10,12 +10,12 @@ namespace Gravitaris {
 
 class ShipControlsSystem {
 private:
-    entt::registry& m_registry;
+    flecs::world& m_registry;
 
     EntitySpawner& m_entitySpawner;
 
 public:
-    explicit ShipControlsSystem(entt::registry& registry, EntitySpawner& entitySpawner);
+    explicit ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner);
 
     ~ShipControlsSystem() = default;
 

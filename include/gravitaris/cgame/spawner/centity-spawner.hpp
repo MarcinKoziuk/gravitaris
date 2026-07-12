@@ -6,10 +6,10 @@ namespace Gravitaris {
 
 class CEntitySpawner : public EntitySpawner {
 protected:
-    void AddRenderable(entt::entity entity, id_t modelId) override;
+    void AddRenderable(flecs::entity entity, id_t modelId) override;
 
 public:
-    explicit CEntitySpawner(entt::registry& registry, ResourceLoader& resourceLoader);
+    explicit CEntitySpawner(flecs::world& registry, ResourceLoader& resourceLoader);
 
     ~CEntitySpawner() override = default;
 };
