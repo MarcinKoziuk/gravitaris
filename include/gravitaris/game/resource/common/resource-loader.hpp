@@ -2,7 +2,7 @@
 
 #include <unordered_map>
 
-#include <entt/signal/sigh.hpp>
+#include <sigslot/signal.hpp>
 
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/fs/ifilesystem.hpp>
@@ -17,8 +17,8 @@ class ResourceLoader {
 private:
     template<IsIResource T>
     struct Signals {
-        entt::sigh<void(const T&, id_t)> create;
-        entt::sigh<void(const T&, id_t)> destroy;
+        sigslot::signal<const T&, id_t> create;
+        sigslot::signal<const T&, id_t> destroy;
     };
 
     IFilesystem& m_filesystem;
@@ -41,10 +41,10 @@ public:
     [[nodiscard]] ResourcePtr<const T> Load(id_t id);
 
     template <IsIResource T>
-    entt::sink<entt::sigh<void(const T&, id_t)>> OnCreate();
+    sigslot::signal<const T&, id_t>& OnCreate();
 
     template <IsIResource T>
-    entt::sink<entt::sigh<void(const T&, id_t)>> OnDestroy();
+    sigslot::signal<const T&, id_t>& OnDestroy();
 };
 
 } // namespace Gravitaris

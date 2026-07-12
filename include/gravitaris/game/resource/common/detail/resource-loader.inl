@@ -32,9 +32,9 @@ ResourcePtr<const T> ResourceLoader::Load(const id_t id)
             auto weakPtr = WeakResourcePtr<const IResource>(abstractPtr);
             m_resourcePtrs.try_emplace(tId, weakPtr);
 
-            SignalsFor<T>(std::type_index(typeid(const T))).create.publish(*ptr, id);
+            SignalsFor<T>(std::type_index(typeid(const T))).create(*ptr, id);
 
-            ptr.OnDestroy().template connect<&ResourceLoader::HandleResourceDestroyed<T>>(*this);
+            ptr.OnDestroy().connect(&ResourceLoader::HandleResourceDestroyed<T>, this);
 
             return ResourcePtr<T>(std::move(ptr));
         } else {
@@ -46,7 +46,7 @@ ResourcePtr<const T> ResourceLoader::Load(const id_t id)
 template<IsIResource T>
 void ResourceLoader::HandleResourceDestroyed(id_t id, const T& instance)
 {
-    SignalsFor<const T>(std::type_index(typeid(const T))).destroy.publish(instance, id);
+    SignalsFor<const T>(std::type_index(typeid(const T))).destroy(instance, id);
 }
 
 template<IsIResource T>
@@ -59,15 +59,15 @@ ResourceLoader::Signals<const T>& ResourceLoader::SignalsFor(std::type_index typ
 }
 
 template <IsIResource T>
-entt::sink<entt::sigh<void(const T&, id_t)>> ResourceLoader::OnCreate()
+sigslot::signal<const T&, id_t>& ResourceLoader::OnCreate()
 {
-    return entt::sink{SignalsFor<const T>(std::type_index(typeid(const T))).create};
+    return SignalsFor<const T>(std::type_index(typeid(const T))).create;
 }
 
 template <IsIResource T>
-entt::sink<entt::sigh<void(const T&, id_t)>> ResourceLoader::OnDestroy()
+sigslot::signal<const T&, id_t>& ResourceLoader::OnDestroy()
 {
-    return entt::sink{SignalsFor<const T>(std::type_index(typeid(const T))).destroy};
+    return SignalsFor<const T>(std::type_index(typeid(const T))).destroy;
 }
 
 

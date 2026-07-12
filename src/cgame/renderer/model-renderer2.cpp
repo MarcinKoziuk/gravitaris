@@ -134,14 +134,14 @@ ModelRenderer2::ModelRenderer2(entt::registry& registry, IFilesystem& filesystem
     , m_resourceLoader(resourceLoader)
     , m_shader(filesystem)
 {
-    m_resourceLoader.OnCreate<Model>().connect<&ModelRenderer2::HandleModelAdded>(*this);
-    m_resourceLoader.OnDestroy<Model>().connect<&ModelRenderer2::HandleModelRemoved>(*this);
+    m_resourceLoader.OnCreate<Model>().connect(&ModelRenderer2::HandleModelAdded, this);
+    m_resourceLoader.OnDestroy<Model>().connect(&ModelRenderer2::HandleModelRemoved, this);
 }
 
 ModelRenderer2::~ModelRenderer2()
 {
-    m_resourceLoader.OnCreate<Model>().disconnect<&ModelRenderer2::HandleModelAdded>(*this);
-    m_resourceLoader.OnDestroy<Model>().disconnect<&ModelRenderer2::HandleModelRemoved>(*this);
+    m_resourceLoader.OnCreate<Model>().disconnect(&ModelRenderer2::HandleModelAdded, this);
+    m_resourceLoader.OnDestroy<Model>().disconnect(&ModelRenderer2::HandleModelRemoved, this);
 }
 
 void ModelRenderer2::HandleModelAdded(const Model& model, const id_t id)

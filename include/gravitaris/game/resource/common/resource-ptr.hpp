@@ -5,7 +5,7 @@
 #include <string>
 #include <type_traits>
 
-#include <entt/signal/sigh.hpp>
+#include <sigslot/signal.hpp>
 
 #include <gravitaris/game/id.hpp>
 
@@ -99,10 +99,10 @@ public:
         return m_ref->Id();
     }
 
-    [[nodiscard]] auto OnDestroy() const
+    [[nodiscard]] auto& OnDestroy() const
     {
         assert(m_ref != nullptr && "Cannot connect uninitialized ResourcePtr!");
-        return entt::sink{m_ref->s_destroy};
+        return m_ref->s_destroy;
     }
 
     template<typename U>

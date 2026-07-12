@@ -1,6 +1,6 @@
 #pragma once
 
-#include <entt/signal/sigh.hpp>
+#include <sigslot/signal.hpp>
 
 #include <gravitaris/game/fwd.hpp>
 
@@ -11,7 +11,7 @@ namespace Gravitaris {
 template<typename T>
 class ResourceWrapper {
 private:
-    entt::sigh<void(id_t, T&)> s_destroy;
+    sigslot::signal<id_t, T&> s_destroy;
     id_t m_id;
     T m_value;
 
@@ -38,7 +38,7 @@ public:
 
     ~ResourceWrapper()
     {
-        s_destroy.publish(m_id, m_value);
+        s_destroy(m_id, m_value);
     }
 
     [[nodiscard]] id_t Id() const

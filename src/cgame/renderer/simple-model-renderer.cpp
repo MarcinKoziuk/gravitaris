@@ -17,14 +17,14 @@ SimpleModelRenderer::SimpleModelRenderer(entt::registry& registry, IFilesystem& 
     , m_resourceLoader(resourceLoader)
     , m_shader(filesystem)
 {
-    m_resourceLoader.OnCreate<Model>().connect<&SimpleModelRenderer::HandleModelAdded>(*this);
-    m_resourceLoader.OnDestroy<Model>().connect<&SimpleModelRenderer::HandleModelRemoved>(*this);
+    m_resourceLoader.OnCreate<Model>().connect(&SimpleModelRenderer::HandleModelAdded, this);
+    m_resourceLoader.OnDestroy<Model>().connect(&SimpleModelRenderer::HandleModelRemoved, this);
 }
 
 SimpleModelRenderer::~SimpleModelRenderer()
 {
-    m_resourceLoader.OnCreate<Model>().disconnect<&SimpleModelRenderer::HandleModelAdded>(*this);
-    m_resourceLoader.OnDestroy<Model>().disconnect<&SimpleModelRenderer::HandleModelRemoved>(*this);
+    m_resourceLoader.OnCreate<Model>().disconnect(&SimpleModelRenderer::HandleModelAdded, this);
+    m_resourceLoader.OnDestroy<Model>().disconnect(&SimpleModelRenderer::HandleModelRemoved, this);
 }
 
 void SimpleModelRenderer::HandleModelAdded(const Model& model, const id_t id)
