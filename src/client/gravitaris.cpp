@@ -17,7 +17,11 @@
 
 #include <gravitaris/gravitaris.hpp>
 #include <gravitaris/game/fs/filesystem-physfs.hpp>
+#include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/input-queue.hpp>
+#include <gravitaris/game/input/input-command.hpp>
+#include <gravitaris/game/input/input-log.hpp>
 
 #include <gravitaris/cgame/cgame.hpp>
 #include <gravitaris/cgame/renderer/glow-post-process.hpp>
@@ -55,6 +59,28 @@ private:
     double m_startTime;
 
     bool m_uiInWorld = true; // render UI into the scene so it gets bloom + CRT
+
+    // --- Input / command queue (phase 0) --------------------------------
+    // Keyboard mutates m_currentInput (the live action state); each sim tick
+    // FeedInput() turns it into one tick-stamped InputCommand and pushes it on
+    // the player's InputQueue. The sim never reads the keyboard directly.
+    ControlFlags m_currentInput{};
+
+    // Record/replay: F5 toggles recording to disk, F6 replays it back, F7 stops.
+    InputLog     m_recordLog;
+    bool         m_recording = false;
+    std::uint64_t m_recordStartTick = 0;
+
+    InputLog     m_replayLog;
+    bool         m_replaying = false;
+    std::size_t  m_replayCursor = 0;
+
+    static constexpr const char* REPLAY_PATH = "input-replay.grinput";
+
+    void FeedInput();
+    void ToggleRecording();
+    void StartReplay();
+    void StopReplay();
 
     void tickEvent() override;
     void drawEvent() override;
@@ -125,6 +151,7 @@ void GravitarisApplication::tickEvent()
     m_frameTimeAccumulator += frameTime;
 
     if (m_frameTimeAccumulator >= Game::PHYSICS_DELTA) {
+        FeedInput();
         m_game->Update();
         m_frameTimeAccumulator -= Game::PHYSICS_DELTA;
     }
@@ -132,6 +159,87 @@ void GravitarisApplication::tickEvent()
     redraw();
 
     m_ui.Update();
+}
+
+// Produce exactly one command for the tick Update() is about to run and push it
+// on the player's InputQueue. This is the single seam the sim consumes input
+// through -- live keyboard, replay, and (later) AI/network all feed it here.
+void GravitarisApplication::FeedInput()
+{
+    std::optional<flecs::entity> maybePlayer = m_game->GetPlayer();
+    if (!maybePlayer) return;
+
+    const std::uint64_t tick = m_game->GetStep();
+
+    InputCommand cmd;
+    cmd.tick = tick;
+
+    if (m_replaying) {
+        if (m_replayCursor >= m_replayLog.Size()) {
+            StopReplay();                 // ran out of recorded input -> go idle
+            cmd.flags = ControlFlags{};
+        } else {
+            cmd.flags = m_replayLog.Commands()[m_replayCursor].flags;
+            ++m_replayCursor;
+        }
+    } else {
+        cmd.flags = m_currentInput;
+    }
+
+    maybePlayer->get_mut<InputQueue>().pending.push_back(cmd);
+
+    if (m_recording) {
+        // Store tick-relative so the log can replay from any starting tick.
+        InputCommand rec = cmd;
+        rec.tick = tick - m_recordStartTick;
+        m_recordLog.Append(rec);
+    }
+
+    // One-shot actions apply only for the tick they were pressed on.
+    m_currentInput.firePrimary = false;
+    m_currentInput.fireSecondary = false;
+}
+
+void GravitarisApplication::ToggleRecording()
+{
+    if (m_recording) {
+        m_recording = false;
+        if (m_recordLog.Save(REPLAY_PATH)) {
+            LOG(info) << "Saved input replay '" << REPLAY_PATH << "' ("
+                      << m_recordLog.Size() << " commands)";
+        } else {
+            LOG(warning) << "Failed to save input replay '" << REPLAY_PATH << "'";
+        }
+    } else {
+        StopReplay();
+        m_recordLog.Clear();
+        m_recordStartTick = m_game->GetStep();
+        m_recording = true;
+        LOG(info) << "Recording input at tick " << m_recordStartTick;
+    }
+}
+
+void GravitarisApplication::StartReplay()
+{
+    if (m_recording) ToggleRecording(); // stop & flush recording first
+
+    if (!m_replayLog.Load(REPLAY_PATH)) {
+        LOG(warning) << "No input replay to load at '" << REPLAY_PATH << "'";
+        return;
+    }
+
+    m_replaying = true;
+    m_replayCursor = 0;
+    m_currentInput = ControlFlags{};     // drop any held keys
+    LOG(info) << "Replaying input '" << REPLAY_PATH << "' ("
+              << m_replayLog.Size() << " commands)";
+}
+
+void GravitarisApplication::StopReplay()
+{
+    if (!m_replaying) return;
+    m_replaying = false;
+    LOG(info) << "Replay stopped";
 }
 
 void GravitarisApplication::RenderUi()
@@ -243,28 +351,38 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         case KeyEvent::Key::F8:
             m_ui.ToggleDebugger();
             return;
+        case KeyEvent::Key::F5:
+            ToggleRecording();
+            return;
+        case KeyEvent::Key::F6:
+            StartReplay();
+            return;
+        case KeyEvent::Key::F7:
+            StopReplay();
+            return;
         default:
             break;
     }
 
-    std::optional<flecs::entity> maybePlayer = m_game->GetPlayer();
-    if (!maybePlayer) return;
-
-    flecs::entity player = *maybePlayer;
-    Controls& playerControls = player.get_mut<Controls>();
+    // While replaying, the recorded command stream drives the ship; ignore
+    // live gameplay keys (debug keys above still work).
+    if (m_replaying) return;
 
     switch (event.key()) {
         case KeyEvent::Key::Up:
-            playerControls.actionFlags.thrustForward = true;
+            m_currentInput.thrustForward = true;
             break;
         case KeyEvent::Key::Right:
-            playerControls.actionFlags.rotateRight = true;
+            m_currentInput.rotateRight = true;
             break;
         case KeyEvent::Key::Left:
-            playerControls.actionFlags.rotateLeft = true;
+            m_currentInput.rotateLeft = true;
+            break;
+        case KeyEvent::Key::Down:
+            m_currentInput.firePrimary = true;   // one-shot, cleared after the tick
             break;
         case KeyEvent::Key::Space:
-            playerControls.actionFlags.fireSecondary = true;
+            m_currentInput.fireSecondary = true; // one-shot, cleared after the tick
             break;
         default:
             (void)0;
@@ -278,27 +396,17 @@ void GravitarisApplication::keyReleaseEvent(Magnum::Platform::Sdl2Application::K
         return;
     }
 
-    std::optional<flecs::entity> maybePlayer = m_game->GetPlayer();
-    if (!maybePlayer) return;
-
-    flecs::entity player = *maybePlayer;
-    Controls& playerControls = player.get_mut<Controls>();
+    if (m_replaying) return;
 
     switch (event.key()) {
         case KeyEvent::Key::Up:
-            playerControls.actionFlags.thrustForward = false;
+            m_currentInput.thrustForward = false;
             break;
         case KeyEvent::Key::Right:
-            playerControls.actionFlags.rotateRight = false;
+            m_currentInput.rotateRight = false;
             break;
         case KeyEvent::Key::Left:
-            playerControls.actionFlags.rotateLeft = false;
-            break;
-        case KeyEvent::Key::Down:
-            playerControls.actionFlags.firePrimary = true;
-            break;
-        case KeyEvent::Key::Space:
-            playerControls.actionFlags.fireSecondary = false;
+            m_currentInput.rotateLeft = false;
             break;
         default:
             (void)0;

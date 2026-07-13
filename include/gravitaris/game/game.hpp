@@ -9,6 +9,7 @@
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
+#include <gravitaris/game/system/input-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 #include <gravitaris/game/system/bullet-lifetime-system.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
@@ -26,6 +27,8 @@ protected:
     std::unique_ptr<EntitySpawner> m_entitySpawner;
 
     PhysicsSystem m_physicsSystem;
+
+    InputSystem m_inputSystem;
 
     ShipControlsSystem m_shipControlsSystem;
 
@@ -51,6 +54,11 @@ public:
 
     std::optional<flecs::entity> GetPlayer()
     { return m_player; }
+
+    // The tick the next Update() will run. Producers stamp commands with this
+    // before calling Update() so InputSystem consumes them on the right tick.
+    std::uint64_t GetStep() const
+    { return m_step; }
 
     static constexpr double PHYSICS_DELTA = 1. / 60.;
 };

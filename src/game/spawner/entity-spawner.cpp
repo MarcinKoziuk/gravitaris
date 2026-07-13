@@ -3,6 +3,7 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
 namespace Gravitaris {
@@ -20,6 +21,7 @@ flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position)
     entity.emplace<Transform>(position);
     entity.emplace<RigidBodyDesc>("main"_id, body);
     entity.emplace<Controls>();
+    entity.emplace<InputQueue>();
     AddRenderable(entity, modelId);
 
     return entity;

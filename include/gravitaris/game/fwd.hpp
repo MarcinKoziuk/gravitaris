@@ -18,10 +18,17 @@ class Body;
 struct RigidBodyDesc;
 struct PhysicsRef;
 struct Transform;
+struct ControlFlags;
 struct Controls;
+struct InputCommand;
+struct InputQueue;
+
+// input
+class InputLog;
 
 // system
 class PhysicsSystem;
+class InputSystem;
 class ShipControlsSystem;
 
 // spawner

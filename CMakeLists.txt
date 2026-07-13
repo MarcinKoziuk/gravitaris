@@ -311,7 +311,13 @@ add_executable(GravitarisNG
     include/gravitaris/game/util/chipmunk-safe.hpp
     include/gravitaris/game/component/physics.hpp
     include/gravitaris/game/component/controls.hpp
+    include/gravitaris/game/component/input-queue.hpp
     include/gravitaris/game/component/bullet.hpp
+    include/gravitaris/game/input/input-command.hpp
+    include/gravitaris/game/input/input-log.hpp
+    src/game/input/input-log.cpp
+    include/gravitaris/game/system/input-system.hpp
+    src/game/system/input-system.cpp
     include/gravitaris/game/system/bullet-lifetime-system.hpp
     src/game/system/bullet-lifetime-system.cpp
     include/gravitaris/game/system/physics-system.hpp
