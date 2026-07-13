@@ -26,6 +26,9 @@ struct InputQueue;
 // input
 class InputLog;
 
+// nav
+class TrajectoryPredictor;
+
 // system
 class PhysicsSystem;
 class InputSystem;

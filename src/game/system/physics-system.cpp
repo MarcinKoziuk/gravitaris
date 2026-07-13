@@ -193,7 +193,7 @@ void PhysicsSystem::UnloadSpace(id_t spaceId)
 
 void PhysicsSystem::ApplyGravity(id_t spaceId)
 {
-    const static cpFloat gravityConstant = 20.0;
+    const static cpFloat gravityConstant = GRAVITY_CONSTANT;
 
     // Gather the space's gravity-participating bodies in a single ECS pass,
     // then do the O(n^2) pairwise attraction over the plain vector.

@@ -64,6 +64,10 @@ public:
 
     Camera& GetCamera() { return m_camera; }
 
+    // Framebuffer pixels; world->screen mapping is ppu = zoom (renderers use
+    // 1 px/unit at zoom 1), camera-centered.
+    [[nodiscard]] const Magnum::Vector2& GetViewportSize() const { return m_viewportSize; }
+
     void ToggleCameraFollow() { m_cameraFollow = !m_cameraFollow; }
 
     void SetActiveRenderer(RendererKind kind) { m_activeRenderer = kind; }

@@ -6,6 +6,7 @@
 #include "post-process-panel.hpp"
 #include "renderer-panel.hpp"
 #include "spawn-panel.hpp"
+#include "trajectory-panel.hpp"
 
 namespace Gravitaris {
 
@@ -16,11 +17,13 @@ DebugUi::DebugUi(CGame& game, GlowPostProcess& glow,
     : m_imgui(uiSize, windowSize, framebufferSize)
     , m_game(game)
     , m_glow(glow)
+    , m_uiSize(uiSize)
 {}
 
 void DebugUi::Relayout(const Vector2& uiSize, const Vector2i& windowSize, const Vector2i& framebufferSize)
 {
     m_imgui.relayout(uiSize, windowSize, framebufferSize);
+    m_uiSize = uiSize;
 }
 
 bool DebugUi::WantsMouse() const
@@ -61,10 +64,18 @@ void DebugUi::BuildFrame()
                 DrawSpawnPanel(m_game);
                 ImGui::EndTabItem();
             }
+            if (ImGui::BeginTabItem("Trajectory")) {
+                DrawTrajectoryPanel(m_game);
+                ImGui::EndTabItem();
+            }
             ImGui::EndTabBar();
         }
     }
     ImGui::End();
+
+    // World-space overlays draw every frame the dev UI is up, regardless of
+    // which tab is selected.
+    DrawTrajectoryOverlay(m_game, m_uiSize);
 }
 
 void DebugUi::Draw()

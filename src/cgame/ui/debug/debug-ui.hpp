@@ -29,6 +29,9 @@ private:
 
     bool m_visible = false;
 
+    // ImGui's logical display size, kept for world->UI overlay drawing.
+    Magnum::Vector2 m_uiSize;
+
     void BuildFrame();
 
 public:

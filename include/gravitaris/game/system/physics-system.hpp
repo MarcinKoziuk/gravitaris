@@ -32,6 +32,11 @@ struct PhysicsBody {
 };
 
 class PhysicsSystem {
+public:
+    // Newtonian F = G*m1*m2/d^2, applied pairwise in ApplyGravity. Public so
+    // TrajectoryPredictor integrates against the exact same field.
+    static constexpr double GRAVITY_CONSTANT = 20.0;
+
 private:
     flecs::world& m_registry;
 

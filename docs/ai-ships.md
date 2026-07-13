@@ -122,7 +122,25 @@ record/replay: dump commands to file, replay them into a fresh `Game`.
   time under load. Harmless for replay (replay is tick-indexed) but worth
   fixing for its own sake.
 
-**Phase 1 — trajectory predictor + debug draw.** `TrajectoryPredictor` in
+**Phase 1 — trajectory predictor + debug draw.**
+*Status: implemented 2026-07-13.* Files: `TrajectoryPredictor`
+(`game/nav/trajectory-predictor.{hpp,cpp}` — nav/ is the GNC navigation
+layer): symplectic Euler against all non-bullet bodies sampled once and held
+static, force law shared with the sim via the now-public
+`PhysicsSystem::GRAVITY_CONSTANT`; owned by `Game`
+(`GetTrajectoryPredictor()`). Debug draw: "Trajectory" tab in the F1 overlay
+(`cgame/ui/debug/trajectory-panel.{hpp,cpp}`) — predicted player path as an
+ImGui background polyline (horizon/stride sliders), drawn whenever the
+overlay is open, plus a **live drift meter** (prediction captured, then
+compared against actual position as ticks elapse — the in-app stand-in for
+the headless drift test). Verified visually: path anchors at the ship and
+runs radially into the planet (correct for a from-rest spawn; predictor has
+no collision, so it passes through — expected divergence at contact). NOT
+done: headless drift regression test (needs a game-lib/test-target CMake
+split first), path rendering outside the debug overlay (player-facing orbit
+preview), moving-source support.
+
+Original phase description: `TrajectoryPredictor` in
 `game/`: forward-integrate a test particle against planet point masses
 (semi-implicit Euler, sim's G and force law), configurable horizon/step,
 returns sampled positions. Render the *player's* predicted path in the F1

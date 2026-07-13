@@ -12,6 +12,7 @@
 #include <gravitaris/game/system/input-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 #include <gravitaris/game/system/bullet-lifetime-system.hpp>
+#include <gravitaris/game/nav/trajectory-predictor.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
 namespace Gravitaris {
@@ -33,6 +34,8 @@ protected:
     ShipControlsSystem m_shipControlsSystem;
 
     BulletLifetimeSystem m_bulletLifetimeSystem;
+
+    TrajectoryPredictor m_trajectoryPredictor;
 
     std::uint64_t m_step;
 
@@ -59,6 +62,9 @@ public:
     // before calling Update() so InputSystem consumes them on the right tick.
     std::uint64_t GetStep() const
     { return m_step; }
+
+    TrajectoryPredictor& GetTrajectoryPredictor()
+    { return m_trajectoryPredictor; }
 
     static constexpr double PHYSICS_DELTA = 1. / 60.;
 };

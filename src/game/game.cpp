@@ -11,6 +11,7 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_inputSystem(m_registry)
         , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem)
         , m_bulletLifetimeSystem(m_registry)
+        , m_trajectoryPredictor(m_registry, m_physicsSystem)
         , m_step(0L)
 {}
 
