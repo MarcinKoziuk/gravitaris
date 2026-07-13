@@ -7,6 +7,7 @@
 
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/control/flight-controller.hpp>
+#include <gravitaris/game/guidance/behaviors.hpp>
 
 #include <gravitaris/cgame/camera.hpp>
 #include <gravitaris/cgame/renderer/simple-model-renderer.hpp>
@@ -27,6 +28,8 @@ enum class AutopilotMode {
     Off,
     KillVelocity, // retro-burn toward zero velocity
     HoldPosition, // hover at the position where engaged
+    GotoPoint,    // fly to the goto target and stop
+    Orbit,        // circle the heaviest gravity source at the engage radius
 };
 
 class CGame : public Game {
@@ -51,6 +54,19 @@ protected:
     AutopilotMode m_autopilotMode = AutopilotMode::Off;
     Magnum::Math::Vector2<double> m_autopilotAnchor;
     FlightControllerParams m_flightParams;
+
+    GuidanceParams m_guidanceParams;
+    Magnum::Math::Vector2<double> m_gotoTarget;
+    Magnum::Math::Vector2<double> m_orbitCenter;
+    double m_orbitMass = 0.0;
+    double m_orbitRadius = 0.0;
+    double m_orbitDirection = 1.0;
+
+    struct GravitySource {
+        Magnum::Math::Vector2<double> pos;
+        double mass;
+    };
+    std::optional<GravitySource> FindHeaviestGravitySource();
 
     void UpdateCameraFollow();
 
@@ -114,6 +130,16 @@ public:
     [[nodiscard]] const Magnum::Math::Vector2<double>& GetAutopilotAnchor() const { return m_autopilotAnchor; }
 
     FlightControllerParams& GetFlightParams() { return m_flightParams; }
+
+    GuidanceParams& GetGuidanceParams() { return m_guidanceParams; }
+
+    [[nodiscard]] const Magnum::Math::Vector2<double>& GetGotoTarget() const { return m_gotoTarget; }
+
+    void SetGotoTarget(const Magnum::Math::Vector2<double>& target) { m_gotoTarget = target; }
+
+    [[nodiscard]] const Magnum::Math::Vector2<double>& GetOrbitCenter() const { return m_orbitCenter; }
+
+    [[nodiscard]] double GetOrbitRadius() const { return m_orbitRadius; }
 
     // This tick's autopilot command, or nullopt when off / no player. Fire
     // bits are false; the caller merges keyboard fire.

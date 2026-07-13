@@ -175,7 +175,28 @@ burn time. Test as a player autopilot on debug keys: "kill velocity" and
 "hold position". This phase is where the feel gets tuned, isolated from AI
 decisions.
 
-**Phase 3 — guidance behaviors.** Each ≈ a pure function
+**Phase 3 — guidance behaviors.**
+*Status: implemented 2026-07-13 (except Land).* Files:
+`game/guidance/behaviors.{hpp,cpp}`: `GotoPoint` (arrive with flip-and-burn
+stopping distance solved from dist = v·flipTime + v²/2a), `OrbitBody`
+(circular-orbit speed √(GM/r) at current radius + clamped radial correction
+toward target radius), `InterceptEntity` (dead-reckoned lead pursuit +
+target velocity; untested until AI ships exist), `EvadeBody` (radial climb
+preserving tangential motion). Gravity is otherwise handled reactively by
+the control layer. `ShipControlsSystem::THRUST_FORCE` made public so
+`CGame` sets `GuidanceParams.accel` from real ship mass on engage. Harness:
+autopilot modes **G** (goto target, editable in Flight tab) and **O**
+(orbit heaviest body at engage radius, keeping current rotation sense);
+overlay markers (target cross, orbit ring, anchor circle) via a shared
+`WorldToUi` helper; guidance sliders in the Flight tab. Verified by
+instrumented run: GotoPoint engaged during a 66 u/s free-fall arrested,
+cruised at the 80 u/s cap, decelerated and held 1.8–4.6 units from the
+target; Orbit held radius 302–307 (target 306) for 15 s at the theoretical
+40 u/s circular speed. NOT done: `Land` (next), predictor-based drift
+compensation in GotoPoint (reactive control suffices so far), headless
+scenario tests (still needs game-lib split).
+
+Original phase description: Each ≈ a pure function
 (world, self, target) → desired velocity: `KillVelocity`, `GotoPoint`
 (gravity-compensated via predictor: aim at drift-corrected point, respect
 stopping distance), `OrbitBody`, `InterceptEntity`, `Evade` (incl. "falling

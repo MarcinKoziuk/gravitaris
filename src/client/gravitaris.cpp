@@ -371,6 +371,12 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         case KeyEvent::Key::P:
             m_game->ToggleAutopilotMode(AutopilotMode::HoldPosition);
             return;
+        case KeyEvent::Key::G:
+            m_game->ToggleAutopilotMode(AutopilotMode::GotoPoint);
+            return;
+        case KeyEvent::Key::O:
+            m_game->ToggleAutopilotMode(AutopilotMode::Orbit);
+            return;
         default:
             break;
     }

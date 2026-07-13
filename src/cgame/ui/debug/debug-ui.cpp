@@ -81,6 +81,7 @@ void DebugUi::BuildFrame()
     // World-space overlays draw every frame the dev UI is up, regardless of
     // which tab is selected.
     DrawTrajectoryOverlay(m_game, m_uiSize);
+    DrawFlightOverlay(m_game, m_uiSize);
 }
 
 void DebugUi::Draw()

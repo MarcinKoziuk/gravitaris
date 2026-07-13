@@ -79,7 +79,7 @@ void ShipControlsSystem::Update(std::uint64_t step)
             cpBodyApplyTorque(body, -20.0);
         }
         if (scontrols.actionFlags.thrustForward) {
-            cpBodyApplyForceAtLocalPoint(body, cpv(0, -140), cpv(0, 0));
+            cpBodyApplyForceAtLocalPoint(body, cpv(0, -ShipControlsSystem::THRUST_FORCE), cpv(0, 0));
         }
         if (scontrols.actionFlags.firePrimary) {
             scontrols.actionFlags.firePrimary = false;

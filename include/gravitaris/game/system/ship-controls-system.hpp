@@ -9,6 +9,11 @@
 namespace Gravitaris {
 
 class ShipControlsSystem {
+public:
+    // Forward thrust force (local -Y). Public so guidance can derive the
+    // ship's available acceleration (force / mass).
+    static constexpr double THRUST_FORCE = 140.0;
+
 private:
     flecs::world& m_registry;
 

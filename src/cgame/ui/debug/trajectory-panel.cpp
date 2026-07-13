@@ -8,6 +8,7 @@
 
 #include <gravitaris/cgame/cgame.hpp>
 
+#include "world-to-ui.hpp"
 #include "trajectory-panel.hpp"
 
 namespace Gravitaris {
@@ -85,19 +86,7 @@ void DrawTrajectoryOverlay(CGame& game, const Magnum::Vector2& uiSize)
 
     if (!s.enabled) return;
 
-    // Camera-centered, ppu = zoom in framebuffer pixels, world +Y up vs.
-    // ImGui +Y down, then framebuffer -> logical UI scale.
-    const Camera& camera = game.GetCamera();
-    const Magnum::Vector2 camPos = camera.GetPosition();
-    const float ppu = camera.GetZoom();
-    const Magnum::Vector2 fbToUi = uiSize / game.GetViewportSize();
-
-    auto worldToUi = [&](const Vector2d& w) -> ImVec2 {
-        const float dx = static_cast<float>(w.x()) - camPos.x();
-        const float dy = static_cast<float>(w.y()) - camPos.y();
-        return ImVec2(uiSize.x() * 0.5f + dx * ppu * fbToUi.x(),
-                      uiSize.y() * 0.5f - dy * ppu * fbToUi.y());
-    };
+    const WorldToUi worldToUi(game, uiSize);
 
     std::vector<ImVec2> points;
     points.reserve(path.size() / static_cast<std::size_t>(s.drawStride) + 2);

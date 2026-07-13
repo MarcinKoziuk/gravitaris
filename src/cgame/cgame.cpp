@@ -4,6 +4,9 @@
 
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/component/transform.hpp>
+#include <gravitaris/game/component/physics.hpp>
+#include <gravitaris/game/component/bullet.hpp>
+#include <gravitaris/game/system/ship-controls-system.hpp>
 
 #include <gravitaris/cgame/spawner/centity-spawner.hpp>
 #include <gravitaris/cgame/cgame.hpp>
@@ -63,14 +66,53 @@ std::unique_ptr<EntitySpawner> CGame::CreateEntitySpawner()
     return std::make_unique<CEntitySpawner>(m_registry, m_resourceLoader);
 }
 
+std::optional<CGame::GravitySource> CGame::FindHeaviestGravitySource()
+{
+    const std::optional<flecs::entity> player = GetPlayer();
+
+    std::optional<GravitySource> best;
+    m_registry.each([&](flecs::entity ent, Transform& transf, PhysicsRef& ref) {
+        if ((player && ent == *player) || ent.has<Bullet>()) return;
+        const double mass = cpBodyGetMass(m_physicsSystem.GetBody(ref).cp.body.get());
+        if (!best || mass > best->mass) {
+            best = GravitySource{transf.pos, mass};
+        }
+    });
+    return best;
+}
+
 void CGame::SetAutopilotMode(AutopilotMode mode)
 {
+    const std::optional<flecs::entity> player = GetPlayer();
+    const Transform* transform = player ? player->try_get<Transform>() : nullptr;
+
+    if (mode != AutopilotMode::Off) {
+        if (!transform) return;
+        const PhysicsRef* ref = player->try_get<PhysicsRef>();
+        if (ref) {
+            const double mass = cpBodyGetMass(m_physicsSystem.GetBody(*ref).cp.body.get());
+            m_guidanceParams.accel = ShipControlsSystem::THRUST_FORCE / mass;
+        }
+    }
+
     if (mode == AutopilotMode::HoldPosition) {
-        const std::optional<flecs::entity> player = GetPlayer();
-        const Transform* transform = player ? player->try_get<Transform>() : nullptr;
-        if (!transform) return; // nothing to anchor to; stay in current mode
         m_autopilotAnchor = transform->pos;
     }
+
+    if (mode == AutopilotMode::Orbit) {
+        const std::optional<GravitySource> source = FindHeaviestGravitySource();
+        if (!source) return;
+        m_orbitCenter = source->pos;
+        m_orbitMass = source->mass;
+
+        const Magnum::Math::Vector2<double> r = transform->pos - m_orbitCenter;
+        m_orbitRadius = r.length();
+
+        // Keep the current sense of rotation; default counter-clockwise.
+        const double cross = r.x() * transform->vel.y() - r.y() * transform->vel.x();
+        m_orbitDirection = (cross < 0.0) ? -1.0 : 1.0;
+    }
+
     m_autopilotMode = mode;
 }
 
@@ -82,10 +124,23 @@ std::optional<ControlFlags> CGame::ComputeAutopilotControls()
     const Transform* transform = player ? player->try_get<Transform>() : nullptr;
     if (!transform) return std::nullopt;
 
-    const Magnum::Math::Vector2<double> desiredVel =
-            (m_autopilotMode == AutopilotMode::KillVelocity)
-                    ? Magnum::Math::Vector2<double>{0.0, 0.0}
-                    : HoldPositionDesiredVelocity(*transform, m_autopilotAnchor, m_flightParams);
+    Magnum::Math::Vector2<double> desiredVel{0.0, 0.0};
+    switch (m_autopilotMode) {
+        case AutopilotMode::KillVelocity:
+            break;
+        case AutopilotMode::HoldPosition:
+            desiredVel = HoldPositionDesiredVelocity(*transform, m_autopilotAnchor, m_flightParams);
+            break;
+        case AutopilotMode::GotoPoint:
+            desiredVel = GotoPoint(*transform, m_gotoTarget, m_guidanceParams);
+            break;
+        case AutopilotMode::Orbit:
+            desiredVel = OrbitBody(*transform, m_orbitCenter, m_orbitMass,
+                                   m_orbitRadius, m_orbitDirection, m_guidanceParams);
+            break;
+        case AutopilotMode::Off:
+            return std::nullopt;
+    }
 
     return FlyToVelocity(*transform, desiredVel, m_flightParams);
 }

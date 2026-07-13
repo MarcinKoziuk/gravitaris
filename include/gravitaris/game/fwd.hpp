@@ -32,6 +32,9 @@ class TrajectoryPredictor;
 // control
 struct FlightControllerParams;
 
+// guidance
+struct GuidanceParams;
+
 // system
 class PhysicsSystem;
 class InputSystem;

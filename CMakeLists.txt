@@ -322,6 +322,8 @@ add_executable(GravitarisNG
     src/game/nav/trajectory-predictor.cpp
     include/gravitaris/game/control/flight-controller.hpp
     src/game/control/flight-controller.cpp
+    include/gravitaris/game/guidance/behaviors.hpp
+    src/game/guidance/behaviors.cpp
     include/gravitaris/game/system/bullet-lifetime-system.hpp
     src/game/system/bullet-lifetime-system.cpp
     include/gravitaris/game/system/physics-system.hpp
@@ -379,6 +381,7 @@ add_executable(GravitarisNG
     src/cgame/ui/debug/trajectory-panel.cpp
     src/cgame/ui/debug/flight-panel.hpp
     src/cgame/ui/debug/flight-panel.cpp
+    src/cgame/ui/debug/world-to-ui.hpp
 )
 
 # DPI-aware manifest, per https://doc.magnum.graphics/magnum/platforms-windows.html --
