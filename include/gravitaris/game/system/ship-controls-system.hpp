@@ -14,8 +14,11 @@ private:
 
     EntitySpawner& m_entitySpawner;
 
+    PhysicsSystem& m_physicsSystem;
+
 public:
-    explicit ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner);
+    explicit ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner,
+                                PhysicsSystem& physicsSystem);
 
     ~ShipControlsSystem() = default;
 

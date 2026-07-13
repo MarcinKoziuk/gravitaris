@@ -18,7 +18,7 @@ flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position)
 
     auto entity = m_registry.entity();
     entity.emplace<Transform>(position);
-    entity.emplace<Physics>("main"_id, body);
+    entity.emplace<RigidBodyDesc>("main"_id, body);
     entity.emplace<Controls>();
     AddRenderable(entity, modelId);
 
@@ -31,7 +31,7 @@ flecs::entity EntitySpawner::SpawnPlanet(id_t modelId, Vector2d position)
 
     auto entity = m_registry.entity();
     entity.emplace<Transform>(position);
-    entity.emplace<Physics>("main"_id, body);
+    entity.emplace<RigidBodyDesc>("main"_id, body);
     AddRenderable(entity, modelId);
 
     return entity;
@@ -43,7 +43,7 @@ flecs::entity EntitySpawner::SpawnBullet(id_t modelId, Vector2d position, Vector
 
     auto entity = m_registry.entity();
     entity.emplace<Transform>(position, Radd{0}, Vector2d{ 3., 3. }, velocity);
-    entity.emplace<Physics>("main"_id, body);
+    entity.emplace<RigidBodyDesc>("main"_id, body);
     AddRenderable(entity, modelId);
 
     return entity;

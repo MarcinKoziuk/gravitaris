@@ -47,7 +47,8 @@ thumb: replicated components are POD, reference other entities only by
 
 | Component | Purpose |
 |---|---|
-| `PhysicsBody` | chipmunk body/shape handles (currently `Physics` — rename in the split) |
+| `PhysicsRef` | EXISTS — generational handle into PhysicsSystem's slot storage, which owns the chipmunk body/shape handles (see docs/adr/0002-physics-ownership.md) |
+| `RigidBodyDesc` | EXISTS — spawn intent (spaceId + Body resource), consumed by PhysicsSystem's observer |
 | `InputQueue` | tick-stamped commands per controlled ship (human or AI both feed this) |
 | `AIPilot` | flight behavior state (intercept/orbit/evade). WARNING: gravity-aware pilot AI is the highest-risk item in the slice — prototype before building strategy AI on top |
 | `AIStrategy` | build/attack decisions (slice-one) |
@@ -84,7 +85,7 @@ constraints honest from day one.
 sun
 planet (GravityWell)
 ├── base (OrbitAnchor or surface Transform)
-ship (PhysicsBody, Subsystems, ...)
+ship (PhysicsRef, Subsystems, ...)
 ├── mount[0] (WeaponMount, LocalTransform)   <- ChildOf ship
 ├── mount[1] ...
 ```

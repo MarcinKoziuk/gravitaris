@@ -15,7 +15,8 @@ template <typename T> class ResourcePtr;
 class Body;
 
 // component
-struct Physics;
+struct RigidBodyDesc;
+struct PhysicsRef;
 struct Transform;
 struct Controls;
 

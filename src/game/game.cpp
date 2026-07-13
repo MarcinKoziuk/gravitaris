@@ -8,7 +8,7 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_resourceLoader(filesystem)
         , m_entitySpawner(std::move(entitySpawner))
         , m_physicsSystem(m_registry)
-        , m_shipControlsSystem(m_registry, *m_entitySpawner)
+        , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem)
         , m_bulletLifetimeSystem(m_registry)
         , m_step(0L)
 {}

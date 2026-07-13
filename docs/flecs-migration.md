@@ -79,11 +79,17 @@ v3→v4 renamed several calls (`get_mut`/`ensure` etc.). Pin a release tag in
   its main loop. Either call `world.progress(dt)` from our tick, or (v1 of
   the port) just keep plain functions that run cached queries — systems and
   pipelines can come later. Leave flecs multithreading OFF initially.
-- **Chipmunk owns motion**: `Physics` holds a body handle; transforms are
-  written back from chipmunk each tick. flecs relationships don't change
-  that — a `ChildOf` scene graph must not fight the physics for entities
-  that have bodies (hardpoints/turrets: children with LOCAL transforms,
-  composed onto the physics-driven parent transform at render/aim time).
+- **Never store resource-owning types in components.** Learned the hard way
+  during this migration: Chipmunk-handle-owning `Physics` crashed under
+  archetype relocation, and the `flecs::Sparse` opt-out traded that for
+  sparse-iteration crashes. Resolution: handle + system-owned storage
+  (`RigidBodyDesc`/`PhysicsRef`/`PhysicsBody`), see
+  docs/adr/0002-physics-ownership.md.
+- **Chipmunk owns motion**: transforms are written back from chipmunk each
+  tick. flecs relationships don't change that — a `ChildOf` scene graph must
+  not fight the physics for entities that have bodies (hardpoints/turrets:
+  children with LOCAL transforms, composed onto the physics-driven parent
+  transform at render/aim time).
 
 ## Scene graph (the new capability, after the port)
 

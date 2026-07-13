@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cassert>
 
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
@@ -12,28 +13,18 @@ static const cpTransform tzero = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f };
 PhysicsSystem::PhysicsSystem(flecs::world& registry)
     : m_registry(registry)
 {
-    // Sparse storage = stable component address, never relocated between
-    // archetype tables (mirrors entt's sparse sets, which this code was
-    // written against). Physics owns Chipmunk cpBody/cpShape handles that are
-    // registered by raw pointer in the cpSpace; flecs's default archetype
-    // storage would relocate the component every time another component is
-    // added to the entity (Transform -> +Physics -> +Renderable -> +Bullet
-    // during bullet spawn), and moving the resource-owning component that way
-    // corrupts handle ownership and crashes later in the Chipmunk deleter.
-    m_registry.component<Physics>().add(flecs::Sparse);
-
     // OnSet (not OnAdd) mirrors entt's on_construct: it fires once, after the
-    // component's value is already assigned -- entity.emplace<Physics>(...)
+    // component's value is already assigned -- entity.emplace<RigidBodyDesc>()
     // both adds and constructs in one step, so OnSet is the equivalent point.
-    m_physicsAddedObserver = m_registry.observer<Physics>()
+    m_bodyAddedObserver = m_registry.observer<RigidBodyDesc>()
             .event(flecs::OnSet)
-            .each([this](flecs::entity ent, Physics&) { HandlePhysicsAdded(ent); });
+            .each([this](flecs::entity ent, RigidBodyDesc& desc) { HandleBodyAdded(ent, desc); });
 
     // OnRemove fires both on explicit component removal and on entity
     // destruction, matching entt's on_destroy.
-    m_physicsRemovedObserver = m_registry.observer<Physics>()
+    m_bodyRemovedObserver = m_registry.observer<PhysicsRef>()
             .event(flecs::OnRemove)
-            .each([this](flecs::entity ent, Physics&) { HandlePhysicsRemoved(ent); });
+            .each([this](flecs::entity, PhysicsRef& ref) { HandleBodyRemoved(ref); });
 }
 
 PhysicsSystem::~PhysicsSystem()
@@ -42,8 +33,27 @@ PhysicsSystem::~PhysicsSystem()
     // outlive it -- the flecs::world (owned by Game, declared before this
     // system) is destroyed after PhysicsSystem, so without this the world
     // would still fire into a dangling PhysicsSystem during later teardown.
-    m_physicsAddedObserver.destruct();
-    m_physicsRemovedObserver.destruct();
+    m_bodyAddedObserver.destruct();
+    m_bodyRemovedObserver.destruct();
+}
+
+PhysicsBody& PhysicsSystem::GetBody(const PhysicsRef& ref)
+{
+    PhysicsBody& slot = m_bodies.at(ref.index);
+    assert(slot.generation == ref.generation && slot.IsAlive());
+    return slot;
+}
+
+std::uint32_t PhysicsSystem::Allocate()
+{
+    if (!m_freeList.empty()) {
+        std::uint32_t index = m_freeList.back();
+        m_freeList.pop_back();
+        return index;
+    }
+
+    m_bodies.emplace_back();
+    return static_cast<std::uint32_t>(m_bodies.size() - 1);
 }
 
 void PhysicsSystem::InitSpace(id_t spaceId)
@@ -54,15 +64,15 @@ void PhysicsSystem::InitSpace(id_t spaceId)
                     std::shared_ptr<cpSpace>(cpSpaceNew(), cpSpaceDeleter())));
 }
 
-void PhysicsSystem::InitBody(flecs::entity ent, const Transform& transf, Physics& phys)
+void PhysicsSystem::InitBody(PhysicsBody& slot, const Transform& transf)
 {
-    const Body& bodyResource = *phys.body;
-    cpSpace* space = m_spaces.at(phys.spaceId).get();
+    const Body& bodyResource = *slot.body;
+    cpSpace* space = m_spaces.at(slot.spaceId).get();
 
-    phys.cp.body.reset(cpBodyNew(1.0, 1.0));
-    phys.cp.space = m_spaces.at(phys.spaceId);
+    slot.cp.body.reset(cpBodyNew(1.0, 1.0));
+    slot.cp.space = m_spaces.at(slot.spaceId);
 
-    cpBody* body = phys.cp.body.get();
+    cpBody* body = slot.cp.body.get();
 
     cpFloat moment = 0.0;
     cpFloat mass = bodyResource.GetMass();
@@ -85,30 +95,24 @@ void PhysicsSystem::InitBody(flecs::entity ent, const Transform& transf, Physics
                 trans,
                 0.0
         );
-        /*cpShapeSetMass(shape, 1.0);
-        cpShapeSetDensity(shape, 1.0);
-        cpShapeSetDensity(shape, 1.0);
-        cpShapeSetFriction(shape, 0.0);*/
 
-        phys.cp.shapes.emplace_back(cpShapeUniquePtr(shape));
+        slot.cp.shapes.emplace_back(cpShapeUniquePtr(shape));
     }
     for (const Body::CircleShape& circle : bodyResource.GetCircleShapes()) {
         const cpVect offs = cpVect(circle.pos * transf.scale);
         moment += cpMomentForCircle(mass, 0.f, circle.radius, offs);
         cpShape* shape = cpCircleShapeNew(body, circle.radius * transf.scale.x(), offs);
-        auto* cshape = (cpCircleShape*)shape;
-        phys.cp.shapes.emplace_back(cpShapeUniquePtr(shape));
+        slot.cp.shapes.emplace_back(cpShapeUniquePtr(shape));
     }
 
     if (moment != 0.) cpBodySetMoment(body, moment);
     if (mass != 0.) cpBodySetMass(body, mass);
 
-
     cpSpaceAddBody(space, body);
-    for (auto& it : phys.cp.shapes) {
+    for (auto& it : slot.cp.shapes) {
         cpShape* shape = it.get();
 
-        const cpFloat friction = phys.body->GetFriction();
+        const cpFloat friction = slot.body->GetFriction();
         if (friction != 0.) {
             cpShapeSetFriction(shape, friction);
         }
@@ -117,33 +121,74 @@ void PhysicsSystem::InitBody(flecs::entity ent, const Transform& transf, Physics
         }
 
         cpSpaceAddShape(space, shape);
-
     }
 
     cpBodySetAngle(body, cpFloat(transf.rot));
     cpBodySetPosition(body, cpv(transf.pos.x(), transf.pos.y()));
 
-
-
-    //cpBodyApplyForceAtWorldPoint(body, to_cpv(transf.vel), cpvzero);
     cpBodySetVelocity(body, cpVect(transf.vel));
 }
 
-void PhysicsSystem::HandlePhysicsAdded(flecs::entity ent)
+void PhysicsSystem::HandleBodyAdded(flecs::entity ent, const RigidBodyDesc& desc)
 {
-    auto& phys = ent.get_mut<Physics>();
     const auto& transf = ent.get<Transform>();
 
-    if (!m_spaces.count(phys.spaceId)) {
-        InitSpace(phys.spaceId);
+    if (!m_spaces.count(desc.spaceId)) {
+        InitSpace(desc.spaceId);
     }
 
-    InitBody(ent, transf, phys);
+    const std::uint32_t index = Allocate();
+    PhysicsBody& slot = m_bodies[index];
+    slot.spaceId = desc.spaceId;
+    slot.body = desc.body;
+
+    InitBody(slot, transf);
+
+    ent.set<PhysicsRef>({index, slot.generation});
 }
 
-void PhysicsSystem::HandlePhysicsRemoved(flecs::entity ent)
+void PhysicsSystem::HandleBodyRemoved(const PhysicsRef& ref)
 {
-    // we stil leak spaces here.
+    PhysicsBody& slot = m_bodies.at(ref.index);
+
+    // Stale ref: the slot was already bulk-freed by UnloadSpace (or recycled
+    // since). Nothing to do.
+    if (slot.generation != ref.generation || !slot.IsAlive()) {
+        return;
+    }
+
+    // Individual teardown: the space stays alive, so the deleters' per-object
+    // cpSpaceRemove* is required here.
+    slot.cp.shapes.clear();
+    slot.cp.body.reset();
+    slot.cp.space.reset();
+    slot.body = {};
+
+    slot.generation++;
+    m_freeList.push_back(ref.index);
+}
+
+void PhysicsSystem::UnloadSpace(id_t spaceId)
+{
+    for (std::uint32_t i = 0; i < m_bodies.size(); ++i) {
+        PhysicsBody& slot = m_bodies[i];
+        if (!slot.IsAlive() || slot.spaceId != spaceId) continue;
+
+        // The whole space dies right after: free raw, skipping the deleters'
+        // per-object cpSpaceRemove*.
+        for (auto& shape : slot.cp.shapes) {
+            cpShapeFree(shape.release());
+        }
+        slot.cp.shapes.clear();
+        cpBodyFree(slot.cp.body.release());
+        slot.cp.space.reset();
+        slot.body = {};
+
+        slot.generation++;
+        m_freeList.push_back(i);
+    }
+
+    m_spaces.erase(spaceId);
 }
 
 void PhysicsSystem::ApplyGravity(id_t spaceId)
@@ -151,11 +196,7 @@ void PhysicsSystem::ApplyGravity(id_t spaceId)
     const static cpFloat gravityConstant = 20.0;
 
     // Gather the space's gravity-participating bodies in a single ECS pass,
-    // then do the O(n^2) pairwise attraction over the plain vector. The
-    // previous version nested one each<Physics>() inside another; since
-    // Physics is a Sparse component, the nested iteration shares the sparse
-    // set's traversal cursor and corrupts the outer loop (crashed in
-    // ApplyGravity). Iterating once into a plain vector avoids that.
+    // then do the O(n^2) pairwise attraction over the plain vector.
     struct GravBody {
         cpBody* body;
         cpFloat mass;
@@ -164,9 +205,10 @@ void PhysicsSystem::ApplyGravity(id_t spaceId)
     };
     std::vector<GravBody> bodies;
 
-    m_registry.each<Physics>([&](flecs::entity ent, Physics& phys) {
-        if (phys.spaceId != spaceId || ent.has<Bullet>()) return;
-        cpBody* body = phys.cp.body.get();
+    m_registry.each<PhysicsRef>([&](flecs::entity ent, PhysicsRef& ref) {
+        PhysicsBody& slot = GetBody(ref);
+        if (slot.spaceId != spaceId || ent.has<Bullet>()) return;
+        cpBody* body = slot.cp.body.get();
         bodies.push_back({body, cpBodyGetMass(body), cpBodyGetPosition(body),
                           cpBodyGetCenterOfGravity(body)});
     });
@@ -197,8 +239,8 @@ void PhysicsSystem::Simulate(double dt)
 
 void PhysicsSystem::Update()
 {
-    m_registry.each([](flecs::entity, Transform& transf, Physics& phys) {
-        cpBody* body = phys.cp.body.get();
+    m_registry.each([this](flecs::entity, Transform& transf, PhysicsRef& ref) {
+        cpBody* body = GetBody(ref).cp.body.get();
         transf.prevPos = transf.pos;
         transf.pos = Vector2d(cpBodyGetPosition(body));
         transf.rot = Radd(cpvtoangle(cpBodyGetRotation(body)));

@@ -8,6 +8,7 @@
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
+#include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 
 namespace Gravitaris {
@@ -16,9 +17,11 @@ using Magnum::Vector2d;
 
 static constexpr double BULLET_LIFETIME_SECONDS = 3.0;
 
-ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner)
+ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner,
+                                       PhysicsSystem& physicsSystem)
         : m_registry(registry)
         , m_entitySpawner(entitySpawner)
+        , m_physicsSystem(physicsSystem)
 {}
 
 static inline void
@@ -30,7 +33,7 @@ cpBodyApplyTorque(cpBody *body, cpFloat torque)
     cpBodyApplyImpulseAtLocalPoint(body, cpv(0.0, -torque), cpv(-1.0 + c.x, c.y));
 }
 
-static std::pair<Vector2d, Vector2d> GetBulletSpawnPosAndVel(const Transform& transf, const Physics& phys)
+static std::pair<Vector2d, Vector2d> GetBulletSpawnPosAndVel(const Transform& transf, const PhysicsBody& phys)
 {
     if (!phys.body->GetHardpoints().empty()) {
         Body::Hardpoint hp = phys.body->GetHardpoints().front();
@@ -60,7 +63,8 @@ static std::pair<Vector2d, Vector2d> GetBulletSpawnPosAndVel(const Transform& tr
 
 void ShipControlsSystem::Update(std::uint64_t step)
 {
-    m_registry.each([&](flecs::entity entity, Transform& transf, Physics& phys, Controls& scontrols) {
+    m_registry.each([&](flecs::entity entity, Transform& transf, PhysicsRef& ref, Controls& scontrols) {
+        PhysicsBody& phys = m_physicsSystem.GetBody(ref);
         cpBody* body = phys.cp.body.get();
 
         cpFloat ang = cpBodyGetAngularVelocity(body);
