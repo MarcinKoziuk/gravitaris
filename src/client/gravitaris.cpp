@@ -184,6 +184,12 @@ void GravitarisApplication::FeedInput()
         }
     } else {
         cmd.flags = m_currentInput;
+        // Autopilot (phase 2 tuning harness) overrides movement but not fire.
+        if (std::optional<ControlFlags> autopilot = m_game->ComputeAutopilotControls()) {
+            cmd.flags = *autopilot;
+            cmd.flags.firePrimary = m_currentInput.firePrimary;
+            cmd.flags.fireSecondary = m_currentInput.fireSecondary;
+        }
     }
 
     maybePlayer->get_mut<InputQueue>().pending.push_back(cmd);
@@ -360,6 +366,12 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         case KeyEvent::Key::F7:
             StopReplay();
             return;
+        case KeyEvent::Key::K:
+            m_game->ToggleAutopilotMode(AutopilotMode::KillVelocity);
+            return;
+        case KeyEvent::Key::P:
+            m_game->ToggleAutopilotMode(AutopilotMode::HoldPosition);
+            return;
         default:
             break;
     }
@@ -369,13 +381,17 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
     if (m_replaying) return;
 
     switch (event.key()) {
+        // Manual movement input disengages the autopilot.
         case KeyEvent::Key::Up:
+            m_game->SetAutopilotMode(AutopilotMode::Off);
             m_currentInput.thrustForward = true;
             break;
         case KeyEvent::Key::Right:
+            m_game->SetAutopilotMode(AutopilotMode::Off);
             m_currentInput.rotateRight = true;
             break;
         case KeyEvent::Key::Left:
+            m_game->SetAutopilotMode(AutopilotMode::Off);
             m_currentInput.rotateLeft = true;
             break;
         case KeyEvent::Key::Down:

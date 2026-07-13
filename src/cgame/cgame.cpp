@@ -63,4 +63,31 @@ std::unique_ptr<EntitySpawner> CGame::CreateEntitySpawner()
     return std::make_unique<CEntitySpawner>(m_registry, m_resourceLoader);
 }
 
+void CGame::SetAutopilotMode(AutopilotMode mode)
+{
+    if (mode == AutopilotMode::HoldPosition) {
+        const std::optional<flecs::entity> player = GetPlayer();
+        const Transform* transform = player ? player->try_get<Transform>() : nullptr;
+        if (!transform) return; // nothing to anchor to; stay in current mode
+        m_autopilotAnchor = transform->pos;
+    }
+    m_autopilotMode = mode;
+}
+
+std::optional<ControlFlags> CGame::ComputeAutopilotControls()
+{
+    if (m_autopilotMode == AutopilotMode::Off) return std::nullopt;
+
+    const std::optional<flecs::entity> player = GetPlayer();
+    const Transform* transform = player ? player->try_get<Transform>() : nullptr;
+    if (!transform) return std::nullopt;
+
+    const Magnum::Math::Vector2<double> desiredVel =
+            (m_autopilotMode == AutopilotMode::KillVelocity)
+                    ? Magnum::Math::Vector2<double>{0.0, 0.0}
+                    : HoldPositionDesiredVelocity(*transform, m_autopilotAnchor, m_flightParams);
+
+    return FlyToVelocity(*transform, desiredVel, m_flightParams);
+}
+
 } // Gravitaris

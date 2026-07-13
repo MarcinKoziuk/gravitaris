@@ -16,6 +16,7 @@ struct Transform {
     Radd rot;
     Vector2d scale;
     Vector2d vel;
+    double angVel = 0.0; // rad/s, synced from physics like pos/rot/vel
 
     Transform()
             : scale(1., 1.)

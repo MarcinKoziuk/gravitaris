@@ -7,6 +7,7 @@
 #include "renderer-panel.hpp"
 #include "spawn-panel.hpp"
 #include "trajectory-panel.hpp"
+#include "flight-panel.hpp"
 
 namespace Gravitaris {
 
@@ -66,6 +67,10 @@ void DebugUi::BuildFrame()
             }
             if (ImGui::BeginTabItem("Trajectory")) {
                 DrawTrajectoryPanel(m_game);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Flight")) {
+                DrawFlightPanel(m_game);
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();

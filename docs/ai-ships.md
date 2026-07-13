@@ -148,7 +148,25 @@ debug overlay (cgame reads the samples; doubles as a future player-facing
 orbit preview). Eyeball predicted-vs-actual drift here before any AI exists;
 add a headless test asserting bounded drift over ~2 s for a ballistic ship.
 
-**Phase 2 — control layer.** `FlightController` (plain function/struct, no
+**Phase 2 — control layer.**
+*Status: implemented 2026-07-13.* Files: `FlyToVelocity` +
+`HoldPositionDesiredVelocity` (`game/control/flight-controller.{hpp,cpp}` —
+control/ is the GNC control layer): pure functions (state, target, params) →
+`ControlFlags`; PD on heading error (bang-bang rotate bits via turn
+deadband), thrust gated on aim tolerance + velocity deadband. `Transform`
+gained `angVel` (synced from Chipmunk) so the controller needs no physics
+access. Player autopilot harness: `AutopilotMode` (Off/KillVelocity/
+HoldPosition) on `CGame`, toggled with **K**/**P** in game (manual movement
+input disengages), autopilot overrides movement bits but keyboard fire still
+merges. "Flight" tab in the F1 overlay: mode radio + live sliders for all
+gains + speed/angVel/anchor-distance telemetry. Verified by instrumented
+run: engaged KillVelocity during a 66 u/s free-fall — arrested to 0.3 u/s
+within 1 s, then hovered 14 s deep in the well with a 0.1–1.8 u/s bang-bang
+limit cycle and ~1.5 units total drift. NOT done: flip-and-burn stopping-
+distance awareness (deferred to GotoPoint in phase 3, where it matters),
+desired-velocity vector overlay draw.
+
+Original phase description: `FlightController` (plain function/struct, no
 system yet): (current state, desired velocity) → command bits. PD on heading
 error (tuned against the existing torque/damping model), thrust when heading
 is within tolerance and velocity error exceeds a deadband. Includes

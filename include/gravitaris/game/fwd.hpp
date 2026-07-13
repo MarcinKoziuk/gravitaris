@@ -29,6 +29,9 @@ class InputLog;
 // nav
 class TrajectoryPredictor;
 
+// control
+struct FlightControllerParams;
+
 // system
 class PhysicsSystem;
 class InputSystem;

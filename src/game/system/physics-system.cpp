@@ -245,6 +245,7 @@ void PhysicsSystem::Update()
         transf.pos = Vector2d(cpBodyGetPosition(body));
         transf.rot = Radd(cpvtoangle(cpBodyGetRotation(body)));
         transf.vel = Vector2d(cpBodyGetVelocity(body));
+        transf.angVel = cpBodyGetAngularVelocity(body);
     });
 }
 
