@@ -7,9 +7,7 @@
 namespace Gravitaris {
 
 // Moves the current tick's command from each entity's InputQueue into its
-// Controls, so ShipControlsSystem (and anything downstream) reads a single
-// resolved control state without knowing where the command came from. Runs
-// before ShipControlsSystem in the tick (slice-components step 1).
+// Controls. Runs before ShipControlsSystem in the tick.
 class InputSystem {
 private:
     flecs::world& m_registry;

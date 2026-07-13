@@ -6,18 +6,9 @@ namespace Gravitaris {
 
 using Magnum::Vector2d;
 
-namespace {
+static constexpr double PI = 3.14159265358979323846;
 
-constexpr double PI = 3.14159265358979323846;
-
-double WrapToPi(double angle)
-{
-    angle = std::fmod(angle + PI, 2.0 * PI);
-    if (angle < 0.0) angle += 2.0 * PI;
-    return angle - PI;
-}
-
-} // namespace
+static double WrapToPi(double angle);
 
 ControlFlags FlyToVelocity(const Transform& ship, const Vector2d& desiredVel,
                            const FlightControllerParams& params)
@@ -25,17 +16,12 @@ ControlFlags FlyToVelocity(const Transform& ship, const Vector2d& desiredVel,
     ControlFlags flags{};
 
     const Vector2d velError = desiredVel - ship.vel;
-    const double errorMagnitude = velError.length();
-
-    if (errorMagnitude < params.velocityDeadband) {
-        // Close enough; also stop any residual spin (the actuator's own
-        // angular damping does the work once we stop commanding turns).
+    if (velError.length() < params.velocityDeadband) {
         return flags;
     }
 
-    // Ship forward is local -Y (ShipControlsSystem thrust/bullet spawn), so
-    // its world heading is rot - pi/2. Positive turn command = CCW =
-    // rotateLeft (+torque increases the Chipmunk angle).
+    // Ship forward is local -Y (see ShipControlsSystem), so world heading is
+    // rot - pi/2. Positive turn = CCW = rotateLeft (+torque).
     const double targetHeading = std::atan2(velError.y(), velError.x());
     const double currentHeading = static_cast<double>(ship.rot) - PI / 2.0;
     const double headingError = WrapToPi(targetHeading - currentHeading);
@@ -43,7 +29,8 @@ ControlFlags FlyToVelocity(const Transform& ship, const Vector2d& desiredVel,
     const double turn = params.headingKp * headingError - params.headingKd * ship.angVel;
     if (turn > params.turnDeadband) {
         flags.rotateLeft = true;
-    } else if (turn < -params.turnDeadband) {
+    }
+    else if (turn < -params.turnDeadband) {
         flags.rotateRight = true;
     }
 
@@ -63,6 +50,13 @@ Vector2d HoldPositionDesiredVelocity(const Transform& ship, const Vector2d& anch
         desired *= params.maxApproachSpeed / speed;
     }
     return desired;
+}
+
+static double WrapToPi(double angle)
+{
+    angle = std::fmod(angle + PI, 2.0 * PI);
+    if (angle < 0.0) angle += 2.0 * PI;
+    return angle - PI;
 }
 
 } // namespace Gravitaris

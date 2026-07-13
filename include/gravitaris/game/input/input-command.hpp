@@ -6,17 +6,16 @@
 
 namespace Gravitaris {
 
-// A tick-stamped control command — the unit of input the simulation consumes.
-// Per ADR 0001, stepping is a pure function of (state, commands, dt); this is
-// the "command". Keyboard input, AI pilots, network peers, and replays all
-// ultimately produce these and push them onto an entity's InputQueue.
+// The unit of input the sim consumes (ADR 0001: stepping is a pure function
+// of state + commands). Keyboard, AI pilots, network peers and replays all
+// produce these.
 struct InputCommand {
     std::uint64_t tick = 0;
     ControlFlags flags{};
 };
 
-// Compact 1-byte packing of the action bits, for replay files and (later) the
-// network wire format. Keep in sync with ControlFlags.
+// 1-byte packing for replay files and the future wire format. Keep in sync
+// with ControlFlags.
 inline std::uint8_t PackControlFlags(const ControlFlags& f)
 {
     return static_cast<std::uint8_t>(

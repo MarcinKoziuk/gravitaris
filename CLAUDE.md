@@ -111,6 +111,34 @@ else { // Use stroustrup if/else style
     then;
 }
 ```
+- order of stuff
+```c++
+#include <includes>
+
+#include "local.hpp"
+
+// Constants usually on top
+static constexpr float constant = 1.f;
+
+// Ok to have more than one if they have a relationship
+// (weigh it carefully)
+struct Types {};
+
+// Usually only 1 class per file
+class Classes {};
+
+// Exported functions and methods above
+Class::Class()
+        : m_mass(1.f)
+        , m_friction(0.f)
+        , m_identInitializersLikeThis("cool")
+{}
+
+// Helpers always below
+// Prefer this over anon. namespace
+static void HelperFunction()
+{}
+```
 
 ### Comments
 - Comments only if really necessary/a good idea. No "obvious" comments

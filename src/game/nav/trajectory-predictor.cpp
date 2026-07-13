@@ -20,9 +20,6 @@ std::vector<Vector2d> TrajectoryPredictor::Predict(flecs::entity ship, int steps
     const Transform* shipTransf = ship.try_get<Transform>();
     if (!shipTransf) return {};
 
-    // Sample the gravity sources once and hold them static over the horizon:
-    // the same set ApplyGravity attracts (every non-bullet body), minus the
-    // ship itself.
     struct Source {
         Vector2d pos;
         double mass;
@@ -47,17 +44,13 @@ std::vector<Vector2d> TrajectoryPredictor::Predict(flecs::entity ship, int steps
         for (const Source& src : sources) {
             const Vector2d d = src.pos - pos;
             const double distSq = d.dot();
-            // The sim has no softening either; this guard only avoids inf/NaN
-            // at near-contact, where the prediction is meaningless anyway
-            // (collision response takes over in the real sim).
+            // Guard against inf/NaN at near-contact; the sim has no softening
+            // either, but there collision response takes over.
             if (distSq < 1e-6) continue;
-            // a = F/m_ship = G * m_src / d^2, directed at the source --
-            // d / |d| * (G*m/d^2) folded into one multiply.
+            // a = G * m_src / d^2 toward the source (unit(d) folded in).
             accel += d * (PhysicsSystem::GRAVITY_CONSTANT * src.mass / (distSq * std::sqrt(distSq)));
         }
 
-        // Symplectic Euler, matching the effective integration of the sim's
-        // cpSpaceStep + apply-forces-after-step sequence.
         vel += accel * dt;
         pos += vel * dt;
         path.push_back(pos);

@@ -60,10 +60,8 @@ private:
 
     bool m_uiInWorld = true; // render UI into the scene so it gets bloom + CRT
 
-    // --- Input / command queue (phase 0) --------------------------------
-    // Keyboard mutates m_currentInput (the live action state); each sim tick
-    // FeedInput() turns it into one tick-stamped InputCommand and pushes it on
-    // the player's InputQueue. The sim never reads the keyboard directly.
+    // Live keyboard action state; FeedInput() turns it into one tick-stamped
+    // command per sim tick. The sim never reads the keyboard directly.
     ControlFlags m_currentInput{};
 
     // Record/replay: F5 toggles recording to disk, F6 replays it back, F7 stops.
@@ -161,9 +159,8 @@ void GravitarisApplication::tickEvent()
     m_ui.Update();
 }
 
-// Produce exactly one command for the tick Update() is about to run and push it
-// on the player's InputQueue. This is the single seam the sim consumes input
-// through -- live keyboard, replay, and (later) AI/network all feed it here.
+// One command for the tick Update() is about to run: keyboard, autopilot and
+// replay all feed the player's InputQueue here.
 void GravitarisApplication::FeedInput()
 {
     std::optional<flecs::entity> maybePlayer = m_game->GetPlayer();
@@ -176,15 +173,17 @@ void GravitarisApplication::FeedInput()
 
     if (m_replaying) {
         if (m_replayCursor >= m_replayLog.Size()) {
-            StopReplay();                 // ran out of recorded input -> go idle
+            StopReplay();
             cmd.flags = ControlFlags{};
-        } else {
+        }
+        else {
             cmd.flags = m_replayLog.Commands()[m_replayCursor].flags;
             ++m_replayCursor;
         }
-    } else {
+    }
+    else {
         cmd.flags = m_currentInput;
-        // Autopilot (phase 2 tuning harness) overrides movement but not fire.
+        // Autopilot overrides movement but not fire.
         if (std::optional<ControlFlags> autopilot = m_game->ComputeAutopilotControls()) {
             cmd.flags = *autopilot;
             cmd.flags.firePrimary = m_currentInput.firePrimary;

@@ -8,14 +8,11 @@
 
 namespace Gravitaris {
 
-// An ordered stream of InputCommands for one controlled ship — the record/
-// replay artifact. Commands are stored tick-relative (the first recorded tick
-// is 0) so a replay can be re-based onto any starting tick.
+// Recorded command stream for one controlled ship. Ticks are stored relative
+// to the first recorded tick so a replay can re-base onto any starting tick.
 //
-// NOTE: replaying a log only reproduces the original run when fed into an
-// identically-started sim on the same build/machine — Chipmunk runs in floats
-// and ADR 0001 accepts cross-platform non-determinism. This is a debugging aid,
-// not a canonical (e.g. e-sport) recording format.
+// Replays only reproduce a run on the same build/machine (float
+// non-determinism, ADR 0001) -- a debugging aid, not a canonical format.
 class InputLog {
 public:
     void Clear();
@@ -28,7 +25,6 @@ public:
 
     [[nodiscard]] const std::vector<InputCommand>& Commands() const { return m_commands; }
 
-    // Binary (de)serialization. Return false on I/O or format error.
     [[nodiscard]] bool Save(const std::string& path) const;
 
     [[nodiscard]] bool Load(const std::string& path);

@@ -1,6 +1,6 @@
-#include <cmath>
-
 #include <imgui.h>
+
+#include <Magnum/Math/Angle.h>
 
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/control/flight-controller.hpp>
@@ -10,6 +10,9 @@
 #include "flight-panel.hpp"
 
 namespace Gravitaris {
+
+using Magnum::Degd;
+using Magnum::Radd;
 
 void DrawFlightPanel(CGame& game)
 {
@@ -34,7 +37,7 @@ void DrawFlightPanel(CGame& game)
     float headingKp = static_cast<float>(p.headingKp);
     float headingKd = static_cast<float>(p.headingKd);
     float turnDeadband = static_cast<float>(p.turnDeadband);
-    float aimToleranceDeg = static_cast<float>(p.aimTolerance * 180.0 / 3.14159265358979323846);
+    float aimToleranceDeg = static_cast<float>(static_cast<double>(Degd(Radd(p.aimTolerance))));
     float velocityDeadband = static_cast<float>(p.velocityDeadband);
 
     ImGui::SetNextItemWidth(160.f);
@@ -45,7 +48,7 @@ void DrawFlightPanel(CGame& game)
     if (ImGui::SliderFloat("Turn deadband", &turnDeadband, 0.f, 2.f, "%.2f")) p.turnDeadband = turnDeadband;
     ImGui::SetNextItemWidth(160.f);
     if (ImGui::SliderFloat("Aim tolerance (deg)", &aimToleranceDeg, 1.f, 90.f, "%.0f")) {
-        p.aimTolerance = aimToleranceDeg * 3.14159265358979323846 / 180.0;
+        p.aimTolerance = static_cast<double>(Radd(Degd(aimToleranceDeg)));
     }
     ImGui::SetNextItemWidth(160.f);
     if (ImGui::SliderFloat("Velocity deadband", &velocityDeadband, 0.f, 10.f, "%.1f")) {

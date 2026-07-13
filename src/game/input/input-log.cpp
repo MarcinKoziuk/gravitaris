@@ -7,24 +7,20 @@
 
 namespace Gravitaris {
 
-namespace {
-
-constexpr char          kMagic[4] = {'G', 'R', 'P', 'L'}; // "GRaVitaris rePLay"
-constexpr std::uint32_t kVersion  = 1;
+static constexpr char          REPLAY_MAGIC[4] = {'G', 'R', 'P', 'L'};
+static constexpr std::uint32_t REPLAY_VERSION  = 1;
 
 template <typename T>
-void WritePod(std::ostream& os, const T& value)
+static void WritePod(std::ostream& os, const T& value)
 {
     os.write(reinterpret_cast<const char*>(&value), sizeof(T));
 }
 
 template <typename T>
-bool ReadPod(std::istream& is, T& value)
+static bool ReadPod(std::istream& is, T& value)
 {
     return static_cast<bool>(is.read(reinterpret_cast<char*>(&value), sizeof(T)));
 }
-
-} // namespace
 
 void InputLog::Clear()
 {
@@ -41,8 +37,8 @@ bool InputLog::Save(const std::string& path) const
     std::ofstream os(path, std::ios::binary);
     if (!os) return false;
 
-    os.write(kMagic, sizeof(kMagic));
-    WritePod(os, kVersion);
+    os.write(REPLAY_MAGIC, sizeof(REPLAY_MAGIC));
+    WritePod(os, REPLAY_VERSION);
     WritePod(os, static_cast<std::uint64_t>(m_commands.size()));
 
     for (const InputCommand& cmd : m_commands) {
@@ -61,11 +57,11 @@ bool InputLog::Load(const std::string& path)
     char magic[4];
     if (!is.read(magic, sizeof(magic))) return false;
     for (std::size_t i = 0; i < sizeof(magic); ++i) {
-        if (magic[i] != kMagic[i]) return false;
+        if (magic[i] != REPLAY_MAGIC[i]) return false;
     }
 
     std::uint32_t version = 0;
-    if (!ReadPod(is, version) || version != kVersion) return false;
+    if (!ReadPod(is, version) || version != REPLAY_VERSION) return false;
 
     std::uint64_t count = 0;
     if (!ReadPod(is, count)) return false;

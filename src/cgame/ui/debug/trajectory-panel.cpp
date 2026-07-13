@@ -15,25 +15,20 @@ namespace Gravitaris {
 using Magnum::Vector2d;
 
 // Shared between the tab (settings + readout) and the per-frame overlay.
-namespace {
-
 struct TrajectoryState {
     bool enabled = true;
     float horizonSeconds = 5.f;
-    int drawStride = 2; // draw every Nth sample; prediction still runs per-tick
+    int drawStride = 2; // draw every Nth sample; prediction runs per-tick
 
-    // Live drift meter: a prediction captured at `baselineTick` is compared
-    // against the ship's actual position as the sim catches up to it -- an
-    // in-app stand-in for the headless drift test (docs/ai-ships.md phase 1).
+    // Drift meter: a captured prediction compared against actual positions as
+    // the sim catches up to it.
     std::vector<Vector2d> baseline;
     std::uint64_t baselineTick = 0;
     double lastDrift = 0.0;
     double lastDriftAge = 0.0;
 };
 
-TrajectoryState s_state;
-
-} // namespace
+static TrajectoryState s_state;
 
 void DrawTrajectoryPanel(CGame& game)
 {
@@ -52,8 +47,8 @@ void DrawTrajectoryPanel(CGame& game)
     ImGui::SeparatorText("Prediction vs. reality");
     if (s.baseline.empty()) {
         ImGui::TextDisabled("No baseline yet.");
-    } else {
-        // Drift resets whenever the baseline is re-captured (each horizon).
+    }
+    else {
         ImGui::Text("Drift: %.3f units after %.2f s", s.lastDrift, s.lastDriftAge);
         ImGui::TextDisabled("Ballistic flight isolates integrator error;\nthrusting invalidates the baseline by design.");
     }
@@ -76,8 +71,6 @@ void DrawTrajectoryOverlay(CGame& game, const Magnum::Vector2& uiSize)
     std::vector<Vector2d> path = game.GetTrajectoryPredictor().Predict(*maybePlayer, steps, Game::PHYSICS_DELTA);
     if (path.empty()) return;
 
-    // Drift meter bookkeeping: hold a captured prediction and compare the
-    // actual position against it as ticks elapse; re-capture once exhausted.
     const std::uint64_t tick = game.GetStep();
     if (s.baseline.empty() || tick < s.baselineTick
             || tick - s.baselineTick >= s.baseline.size()) {
@@ -92,9 +85,8 @@ void DrawTrajectoryOverlay(CGame& game, const Magnum::Vector2& uiSize)
 
     if (!s.enabled) return;
 
-    // World -> ImGui coordinates: camera-centered, ppu = zoom in framebuffer
-    // pixels (see CGame::GetViewportSize), world +Y up vs. ImGui +Y down,
-    // then framebuffer -> logical UI scale.
+    // Camera-centered, ppu = zoom in framebuffer pixels, world +Y up vs.
+    // ImGui +Y down, then framebuffer -> logical UI scale.
     const Camera& camera = game.GetCamera();
     const Magnum::Vector2 camPos = camera.GetPosition();
     const float ppu = camera.GetZoom();
@@ -113,14 +105,12 @@ void DrawTrajectoryOverlay(CGame& game, const Magnum::Vector2& uiSize)
         points.push_back(worldToUi(path[i]));
     }
     if ((path.size() - 1) % static_cast<std::size_t>(s.drawStride) != 0) {
-        points.push_back(worldToUi(path.back())); // keep the true endpoint
+        points.push_back(worldToUi(path.back()));
     }
 
     ImDrawList* drawList = ImGui::GetBackgroundDrawList();
     drawList->AddPolyline(points.data(), static_cast<int>(points.size()),
                           IM_COL32(80, 255, 190, 170), ImDrawFlags_None, 1.5f);
-    // Mark the horizon end so the path visibly terminates rather than fading
-    // into ambiguity.
     drawList->AddCircle(points.back(), 4.f, IM_COL32(80, 255, 190, 170), 0, 1.5f);
 }
 

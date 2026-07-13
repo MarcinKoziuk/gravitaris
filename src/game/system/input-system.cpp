@@ -11,9 +11,6 @@ InputSystem::InputSystem(flecs::world& registry)
 void InputSystem::Update(std::uint64_t step)
 {
     m_registry.each([&](InputQueue& queue, Controls& controls) {
-        // Drop stale commands that were never consumed (only happens if the
-        // producer ran ahead of the sim, e.g. dropped ticks). The current
-        // tick's command, if present, is then at the front.
         while (!queue.pending.empty() && queue.pending.front().tick < step) {
             queue.pending.pop_front();
         }
@@ -22,9 +19,8 @@ void InputSystem::Update(std::uint64_t step)
             controls.actionFlags = queue.pending.front().flags;
             queue.pending.pop_front();
         }
-        // If no command matches this tick, Controls keeps its previous value
-        // (repeat-last-command, quake3-style). In single-player a command is
-        // always supplied for the current tick, so this never triggers there.
+        // No command for this tick: Controls keeps its previous value
+        // (repeat-last-command, quake3-style).
     });
 }
 
