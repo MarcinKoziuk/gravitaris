@@ -6,8 +6,8 @@
 #include <Magnum/Math/Vector2.h>
 
 #include <gravitaris/game/game.hpp>
-#include <gravitaris/game/gnc/flight-controller.hpp>
-#include <gravitaris/game/gnc/behaviors.hpp>
+#include <gravitaris/game/gnc/control/flight-controller.hpp>
+#include <gravitaris/game/gnc/guidance/behaviors.hpp>
 
 #include <gravitaris/cgame/camera.hpp>
 #include <gravitaris/cgame/renderer/simple-model-renderer.hpp>

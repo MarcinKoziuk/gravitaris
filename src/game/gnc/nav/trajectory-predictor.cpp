@@ -4,7 +4,7 @@
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
-#include <gravitaris/game/gnc/trajectory-predictor.hpp>
+#include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
 
 namespace Gravitaris {
 

@@ -318,12 +318,12 @@ add_executable(GravitarisNG
     src/game/input/input-log.cpp
     include/gravitaris/game/system/input-system.hpp
     src/game/system/input-system.cpp
-    include/gravitaris/game/gnc/trajectory-predictor.hpp
-    src/game/gnc/trajectory-predictor.cpp
-    include/gravitaris/game/gnc/flight-controller.hpp
-    src/game/gnc/flight-controller.cpp
-    include/gravitaris/game/gnc/behaviors.hpp
-    src/game/gnc/behaviors.cpp
+    include/gravitaris/game/gnc/nav/trajectory-predictor.hpp
+    src/game/gnc/nav/trajectory-predictor.cpp
+    include/gravitaris/game/gnc/control/flight-controller.hpp
+    src/game/gnc/control/flight-controller.cpp
+    include/gravitaris/game/gnc/guidance/behaviors.hpp
+    src/game/gnc/guidance/behaviors.cpp
     include/gravitaris/game/system/bullet-lifetime-system.hpp
     src/game/system/bullet-lifetime-system.cpp
     include/gravitaris/game/system/physics-system.hpp
