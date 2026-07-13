@@ -30,7 +30,13 @@ ResourcePtr<const T> ResourceLoader::Load(const id_t id)
         if (ptr) {
             ResourcePtr<const IResource> abstractPtr = ptr.template As<const IResource>();
             auto weakPtr = WeakResourcePtr<const IResource>(abstractPtr);
-            m_resourcePtrs.try_emplace(tId, weakPtr);
+            // insert_or_assign, NOT try_emplace: on reload after the previous
+            // instance died, the expired cache entry is still present and
+            // try_emplace keeps it -- every later Load then creates another
+            // duplicate live instance of the same id, and the first duplicate
+            // to die erases the renderers' shared per-id caches out from
+            // under the survivors.
+            m_resourcePtrs.insert_or_assign(tId, weakPtr);
 
             SignalsFor<T>(std::type_index(typeid(const T))).create(*ptr, id);
 

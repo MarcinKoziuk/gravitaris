@@ -95,16 +95,21 @@ void SimpleModelRenderer::Render(double)
 {
     using Magnum::Matrix3;
 
+    // find + skip (not .at()): a Renderable can reference a model with no
+    // baked meshes, e.g. a failed load's placeholder. ModelRenderer2 skips
+    // those the same way.
     m_registry.each([&](flecs::entity, Transform& transf, Renderable& rend) {
-        auto& meshGroups = m_meshes.at(rend.model.Id());
-        RenderGroup("model"_id, meshGroups, transf);
+        auto it = m_meshes.find(rend.model.Id());
+        if (it == m_meshes.end()) return;
+        RenderGroup("model"_id, it->second, transf);
     });
 
     m_registry.each([&](flecs::entity, Transform& transf, Renderable& rend, Controls& controls) {
         if (!controls.actionFlags.thrustForward) return;
 
-        auto& meshGroups = m_meshes.at(rend.model.Id());
-        RenderGroup("_thrust"_id, meshGroups, transf);
+        auto it = m_meshes.find(rend.model.Id());
+        if (it == m_meshes.end()) return;
+        RenderGroup("_thrust"_id, it->second, transf);
     });
 }
 

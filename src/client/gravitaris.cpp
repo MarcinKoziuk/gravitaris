@@ -191,9 +191,12 @@ void GravitarisApplication::viewportEvent(ViewportEvent& event)
 
 void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::KeyEvent& event)
 {
-    // F1 toggles the dev overlay. Text input is enabled only while it's shown
-    // so ImGui text fields work without stealing keystrokes during gameplay.
-    if (event.key() == KeyEvent::Key::F1) {
+    // F1 toggles the dev overlay; H is an alternate on the same action, since
+    // bare F1 is a hardware brightness key on Mac laptops and never reaches
+    // the app without holding Fn. Text input is enabled only while the
+    // overlay is shown so ImGui text fields work without stealing keystrokes
+    // during gameplay.
+    if (event.key() == KeyEvent::Key::F1 || event.key() == KeyEvent::Key::H) {
         m_debugUi->Toggle();
         if (m_debugUi->IsVisible()) startTextInput();
         else stopTextInput();
