@@ -12,7 +12,7 @@
 #include <gravitaris/game/system/input-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 #include <gravitaris/game/system/bullet-lifetime-system.hpp>
-#include <gravitaris/game/nav/trajectory-predictor.hpp>
+#include <gravitaris/game/gnc/trajectory-predictor.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
 namespace Gravitaris {

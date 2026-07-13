@@ -4,7 +4,7 @@
 #include <imgui.h>
 
 #include <gravitaris/game/component/transform.hpp>
-#include <gravitaris/game/nav/trajectory-predictor.hpp>
+#include <gravitaris/game/gnc/trajectory-predictor.hpp>
 
 #include <gravitaris/cgame/cgame.hpp>
 

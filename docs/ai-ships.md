@@ -124,8 +124,8 @@ record/replay: dump commands to file, replay them into a fresh `Game`.
 
 **Phase 1 — trajectory predictor + debug draw.**
 *Status: implemented 2026-07-13.* Files: `TrajectoryPredictor`
-(`game/nav/trajectory-predictor.{hpp,cpp}` — nav/ is the GNC navigation
-layer): symplectic Euler against all non-bullet bodies sampled once and held
+(`game/gnc/trajectory-predictor.{hpp,cpp}` — game/gnc/ is the GNC
+navigation/guidance/control code): symplectic Euler against all non-bullet bodies sampled once and held
 static, force law shared with the sim via the now-public
 `PhysicsSystem::GRAVITY_CONSTANT`; owned by `Game`
 (`GetTrajectoryPredictor()`). Debug draw: "Trajectory" tab in the F1 overlay
@@ -150,8 +150,8 @@ add a headless test asserting bounded drift over ~2 s for a ballistic ship.
 
 **Phase 2 — control layer.**
 *Status: implemented 2026-07-13.* Files: `FlyToVelocity` +
-`HoldPositionDesiredVelocity` (`game/control/flight-controller.{hpp,cpp}` —
-control/ is the GNC control layer): pure functions (state, target, params) →
+`HoldPositionDesiredVelocity` (`game/gnc/flight-controller.{hpp,cpp}`):
+pure functions (state, target, params) →
 `ControlFlags`; PD on heading error (bang-bang rotate bits via turn
 deadband), thrust gated on aim tolerance + velocity deadband. `Transform`
 gained `angVel` (synced from Chipmunk) so the controller needs no physics
@@ -177,7 +177,7 @@ decisions.
 
 **Phase 3 — guidance behaviors.**
 *Status: implemented 2026-07-13 (except Land).* Files:
-`game/guidance/behaviors.{hpp,cpp}`: `GotoPoint` (arrive with flip-and-burn
+`game/gnc/behaviors.{hpp,cpp}`: `GotoPoint` (arrive with flip-and-burn
 stopping distance solved from dist = v·flipTime + v²/2a), `OrbitBody`
 (circular-orbit speed √(GM/r) at current radius + clamped radial correction
 toward target radius), `InterceptEntity` (dead-reckoned lead pursuit +

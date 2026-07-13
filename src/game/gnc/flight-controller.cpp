@@ -1,6 +1,6 @@
 #include <cmath>
 
-#include <gravitaris/game/control/flight-controller.hpp>
+#include <gravitaris/game/gnc/flight-controller.hpp>
 
 namespace Gravitaris {
 

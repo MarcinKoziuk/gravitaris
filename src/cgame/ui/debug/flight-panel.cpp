@@ -3,8 +3,8 @@
 #include <Magnum/Math/Angle.h>
 
 #include <gravitaris/game/component/transform.hpp>
-#include <gravitaris/game/control/flight-controller.hpp>
-#include <gravitaris/game/guidance/behaviors.hpp>
+#include <gravitaris/game/gnc/flight-controller.hpp>
+#include <gravitaris/game/gnc/behaviors.hpp>
 
 #include <gravitaris/cgame/cgame.hpp>
 
