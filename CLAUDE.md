@@ -22,6 +22,7 @@ work.
 - PhysFS (vfs)
 - RmlUI (game ui)
 - nanosvg (svg parsing)
+- ankerl::unordered_dense (open-addressing hash map/set, vendored in `extlibs/ankerl/`)
 - TODO: Dear ImGui for dev/debug UI
 - Config parsing: yaml-cpp, but we need to switch to something better
 
