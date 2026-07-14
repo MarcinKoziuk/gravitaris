@@ -13,12 +13,17 @@ namespace Gravitaris {
 struct RigidBodyDesc {
     id_t spaceId{};
     ResourcePtr<Body> body;
+    // true: shapes get no physical collision response (still queryable) --
+    // bullets use this since hits are resolved by DamageSystem's swept
+    // segment query rather than Chipmunk's own collision resolution.
+    bool sensor = false;
 
     RigidBodyDesc() = default;
 
-    RigidBodyDesc(id_t spaceId, const ResourcePtr<Body>& body)
+    RigidBodyDesc(id_t spaceId, const ResourcePtr<Body>& body, bool sensor = false)
             : spaceId(spaceId)
             , body(body)
+            , sensor(sensor)
     {}
 };
 

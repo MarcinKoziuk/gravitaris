@@ -23,6 +23,7 @@ inline Magnum::Color3 TeamColor(TeamId id)
         case TeamId::Yellow:  return {1.00f, 0.80f, 0.10f};
         case TeamId::Magenta: return {1.00f, 0.20f, 0.85f};
         case TeamId::Cyan:    return {0.15f, 0.90f, 1.00f};
+        case TeamId::None:    return {1.00f, 1.00f, 1.00f};
     }
     return {1.00f, 1.00f, 1.00f};
 }

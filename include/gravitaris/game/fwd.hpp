@@ -24,6 +24,8 @@ struct InputCommand;
 struct InputQueue;
 struct AIPilot;
 struct Team;
+struct Bullet;
+struct Damageable;
 
 // input
 class InputLog;
@@ -42,6 +44,8 @@ class PhysicsSystem;
 class InputSystem;
 class ShipControlsSystem;
 class AIPilotSystem;
+class DamageSystem;
+class DeathSystem;
 
 // spawner
 class EntitySpawner;

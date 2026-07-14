@@ -1,5 +1,6 @@
 #include <cmath>
 #include <cassert>
+#include <cstdint>
 
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
@@ -9,6 +10,10 @@
 namespace Gravitaris {
 
 static const cpTransform tzero = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f };
+
+// A body counts as landing "upright" if its legs (local +Y) point within
+// this cosine of the contact direction; below it the landing is a tip-over.
+static constexpr cpFloat UPRIGHT_DOT_THRESHOLD = 0.82; // ~35 degrees
 
 PhysicsSystem::PhysicsSystem(flecs::world& registry)
     : m_registry(registry)
@@ -58,10 +63,58 @@ std::uint32_t PhysicsSystem::Allocate()
 
 void PhysicsSystem::InitSpace(id_t spaceId)
 {
-    m_spaces.insert(
-            std::make_pair(
-                    spaceId,
-                    std::shared_ptr<cpSpace>(cpSpaceNew(), cpSpaceDeleter())));
+    auto space = std::shared_ptr<cpSpace>(cpSpaceNew(), cpSpaceDeleter());
+
+    // Wildcard handler for landing/ram damage. Sensor pairs (bullets) never
+    // reach postSolve, so this only sees real, impulse-carrying contacts.
+    cpCollisionHandler* handler = cpSpaceAddDefaultCollisionHandler(space.get());
+    handler->postSolveFunc = &PhysicsSystem::PostSolveImpact;
+    handler->userData = this;
+
+    m_spaces.insert(std::make_pair(spaceId, std::move(space)));
+}
+
+void PhysicsSystem::PostSolveImpact(cpArbiter* arb, cpSpace*, cpDataPointer userData)
+{
+    // One event per contact pair, on the step it begins, so a ship resting on
+    // a planet under gravity doesn't accrue damage every frame.
+    if (!cpArbiterIsFirstContact(arb)) return;
+
+    const cpFloat impulse = cpvlength(cpArbiterTotalImpulse(arb));
+    if (impulse <= 0.0) return;
+
+    auto* self = static_cast<PhysicsSystem*>(userData);
+
+    cpShape *shapeA, *shapeB;
+    cpArbiterGetShapes(arb, &shapeA, &shapeB);
+    cpBody *bodyA, *bodyB;
+    cpArbiterGetBodies(arb, &bodyA, &bodyB);
+    const cpVect contact = cpArbiterGetPointA(arb, 0);
+
+    self->RecordImpact(shapeA, bodyA, impulse, contact);
+    self->RecordImpact(shapeB, bodyB, impulse, contact);
+}
+
+void PhysicsSystem::RecordImpact(cpShape* shape, cpBody* body, cpFloat impulse, cpVect contact)
+{
+    const cpFloat mass = cpBodyGetMass(body);
+    if (mass <= 0.0) return;
+
+    // Legs are local +Y (thrust pushes local -Y); a landing is upright when
+    // they point toward the surface the body just hit.
+    const cpVect legs = cpvrotate(cpBodyGetRotation(body), cpv(0.0, 1.0));
+    const cpVect toContact = cpvnormalize(cpvsub(contact, cpBodyGetPosition(body)));
+    const bool upright = cpvdot(legs, toContact) > UPRIGHT_DOT_THRESHOLD;
+
+    const auto raw = reinterpret_cast<std::uintptr_t>(cpShapeGetUserData(shape));
+    m_impacts.push_back(ImpactEvent{static_cast<flecs::entity_t>(raw), impulse / mass, upright});
+}
+
+std::vector<ImpactEvent> PhysicsSystem::DrainImpacts()
+{
+    std::vector<ImpactEvent> out = std::move(m_impacts);
+    m_impacts.clear();
+    return out;
 }
 
 void PhysicsSystem::InitBody(PhysicsBody& slot, const Transform& transf)
@@ -144,7 +197,28 @@ void PhysicsSystem::HandleBodyAdded(flecs::entity ent, const RigidBodyDesc& desc
 
     InitBody(slot, transf);
 
+    // Tag each shape with its owning entity (for GetEntityForShape) and
+    // apply the sensor flag requested by the spawner (see RigidBodyDesc).
+    for (auto& shapePtr : slot.cp.shapes) {
+        cpShape* shape = shapePtr.get();
+        cpShapeSetUserData(shape, reinterpret_cast<void*>(static_cast<std::uintptr_t>(ent.id())));
+        if (desc.sensor) {
+            cpShapeSetSensor(shape, cpTrue);
+            cpShapeSetFilter(shape, cpShapeFilterNew(BULLET_GROUP, CP_ALL_CATEGORIES, CP_ALL_CATEGORIES));
+        }
+    }
+
+    // Seed prevPos so a freshly spawned body's first swept query (see
+    // DamageSystem) is zero-length until Update() has synced a real motion.
+    ent.get_mut<Transform>().prevPos = transf.pos;
+
     ent.set<PhysicsRef>({index, slot.generation});
+}
+
+flecs::entity PhysicsSystem::GetEntityForShape(const cpShape* shape)
+{
+    const auto raw = reinterpret_cast<std::uintptr_t>(cpShapeGetUserData(shape));
+    return flecs::entity(m_registry, static_cast<flecs::entity_t>(raw));
 }
 
 void PhysicsSystem::HandleBodyRemoved(const PhysicsRef& ref)

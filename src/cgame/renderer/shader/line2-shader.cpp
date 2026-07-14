@@ -52,6 +52,7 @@ Line2Shader::Line2Shader(IFilesystem& fileSystem)
     bindAttributeLocation(Line2Shader::TeamWeight::Location, "teamWeight");
     bindAttributeLocation(Line2Shader::InstanceTransform::Location, "instanceTransform");
     bindAttributeLocation(Line2Shader::InstanceTeamColor::Location, "instanceTeamColor");
+    bindAttributeLocation(Line2Shader::InstanceFlash::Location, "instanceFlash");
 
     link();
 

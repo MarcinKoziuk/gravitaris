@@ -35,9 +35,10 @@ public:
     typedef Magnum::GL::Attribute<5, Magnum::Float> TeamWeight;
 
     // Per-instance (dynamic, one entry per drawn entity). A Matrix3 attribute
-    // occupies locations 6, 7 and 8; the team color follows at location 9.
+    // occupies locations 6, 7 and 8; team color and hit-flash follow.
     typedef Magnum::GL::Attribute<6, Matrix3> InstanceTransform;
     typedef Magnum::GL::Attribute<9, Vector3> InstanceTeamColor;
+    typedef Magnum::GL::Attribute<10, Magnum::Float> InstanceFlash;
 
     explicit Line2Shader(IFilesystem& fileSystem);
 

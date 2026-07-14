@@ -7,6 +7,7 @@
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/bullet.hpp>
+#include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
@@ -16,6 +17,7 @@ namespace Gravitaris {
 using Magnum::Vector2d;
 
 static constexpr double BULLET_LIFETIME_SECONDS = 3.0;
+static constexpr float BULLET_DAMAGE = 10.f;
 
 ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner,
                                        PhysicsSystem& physicsSystem)
@@ -90,8 +92,12 @@ void ShipControlsSystem::Update(std::uint64_t step)
             scontrols.fireCooldown = ShipControlsSystem::FIRE_COOLDOWN_TICKS;
             std::pair<Vector2d, Vector2d> ret = GetBulletSpawnPosAndVel(transf, phys);
 
-            flecs::entity bulletEntity = m_entitySpawner.SpawnBullet("models/bullets/bullet-0"_id, ret.first, ret.second);
-            bulletEntity.emplace<Bullet>(BULLET_LIFETIME_SECONDS);
+            const Team* shooterTeam = entity.try_get<Team>();
+            flecs::entity bulletEntity = m_entitySpawner.SpawnBullet(
+                    "models/bullets/bullet-0"_id, ret.first, ret.second, /*sensor=*/true);
+            bulletEntity.emplace<Bullet>(BULLET_LIFETIME_SECONDS,
+                                         shooterTeam ? shooterTeam->id : TeamId::Blue,
+                                         BULLET_DAMAGE);
         }
         if (scontrols.actionFlags.fireSecondary) {
             scontrols.actionFlags.fireSecondary = false;

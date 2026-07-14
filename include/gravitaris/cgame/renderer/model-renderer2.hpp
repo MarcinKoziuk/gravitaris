@@ -46,10 +46,12 @@ private:
         Magnum::Int debugFacetedVertexCount = 0;
     };
 
-    // Matches Line2Shader's per-instance layout (Matrix3 transform + team color).
+    // Matches Line2Shader's per-instance layout (Matrix3 transform + team
+    // color + hit-flash amount).
     struct InstanceData {
         Matrix3 transform;
         Vector3 teamColor;
+        float flash;
     };
 
     flecs::world& m_registry;

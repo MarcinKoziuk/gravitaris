@@ -29,6 +29,19 @@ work.
 ## Architecture
 Eventually the game should be multiplayer, so the game is split into separate modules for client and server (like quake3).
 
+### ECS component design (flecs)
+- Prefer a **field or flag on an existing component** over adding/removing a
+  separate tag/marker component at runtime. flecs stores entities by
+  archetype, so each add/remove moves the entity to a new table — cheap once,
+  but churny for state that toggles often on many entities per tick (hit
+  flashes, transient status effects, per-frame "dirty" marks). Example:
+  `Damageable::flashAmount` is a plain float decremented in place each tick,
+  not a `DamageFlash` tag added on hit and removed when it fades.
+- Reserve real components for **stable membership** (does this entity have
+  physics? is it a bullet? is it damageable?) where the archetype rarely
+  changes over the entity's life. Use fields for **frequently-changing
+  per-entity state**.
+
 ## Game assets
 - Ships/bodies are authored as SVG + YAML, parsed via nanosvg and converted
   to Chipmunk shapes (see `src/game/resource/`).

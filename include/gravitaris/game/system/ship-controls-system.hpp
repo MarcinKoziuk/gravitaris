@@ -15,7 +15,8 @@ public:
     static constexpr double THRUST_FORCE = 140.0;
 
     // Ticks between shots while firePrimary is held (weapon cadence).
-    static constexpr std::uint32_t FIRE_COOLDOWN_TICKS = 10;
+    // 7 (was 10) is ~50% more bullets/sec (8.6 vs 6).
+    static constexpr std::uint32_t FIRE_COOLDOWN_TICKS = 7;
 
 private:
     flecs::world& m_registry;

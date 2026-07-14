@@ -31,11 +31,25 @@ struct PhysicsBody {
     [[nodiscard]] bool IsAlive() const { return cp.body != nullptr; }
 };
 
+// A resolved hard contact affecting one body, recorded during the physics
+// step and drained afterward by DamageSystem (mutating the ECS mid-step is
+// unsafe). deltaV = collision impulse / body mass, i.e. the speed change the
+// impact imparted; upright is whether the body's legs faced the contact.
+struct ImpactEvent {
+    flecs::entity_t entity;
+    double deltaV;
+    bool upright;
+};
+
 class PhysicsSystem {
 public:
     // Newtonian F = G*m1*m2/d^2, applied pairwise in ApplyGravity. Public so
     // TrajectoryPredictor integrates against the exact same field.
     static constexpr double GRAVITY_CONSTANT = 20.0;
+
+    // Shared filter group for bullet (sensor) shapes so a bullet's swept
+    // segment query skips other bullets rather than being blocked by them.
+    static constexpr cpGroup BULLET_GROUP = 1;
 
 private:
     flecs::world& m_registry;
@@ -48,10 +62,20 @@ private:
     std::vector<PhysicsBody> m_bodies;
     std::vector<std::uint32_t> m_freeList;
 
+    // Hard contacts accumulated during Simulate's cpSpaceStep (see
+    // PostSolveImpact), drained by DamageSystem the same tick.
+    std::vector<ImpactEvent> m_impacts;
+
     flecs::observer m_bodyAddedObserver;
     flecs::observer m_bodyRemovedObserver;
 
     void InitSpace(id_t spaceId);
+
+    // Chipmunk postSolve callback (wildcard). Records ImpactEvents for the
+    // colliding bodies; static because Chipmunk calls it with C linkage.
+    static void PostSolveImpact(cpArbiter* arb, cpSpace* space, cpDataPointer userData);
+
+    void RecordImpact(cpShape* shape, cpBody* body, cpFloat impulse, cpVect contact);
 
     void InitBody(PhysicsBody& slot, const Transform& transf);
 
@@ -70,6 +94,11 @@ public:
 
     [[nodiscard]] PhysicsBody& GetBody(const PhysicsRef& ref);
 
+    // Maps a Chipmunk shape back to its owning entity (tagged at shape
+    // creation, see HandleBodyAdded), for segment-query hit detection.
+    // Returns a dead/invalid entity for an untagged or stale shape.
+    [[nodiscard]] flecs::entity GetEntityForShape(const cpShape* shape);
+
     // Arena-style level teardown: frees every body/shape in the space and
     // the space itself in one pass, skipping the per-object cpSpaceRemove*
     // the deleters do (pointless when the whole space dies). Stale
@@ -79,6 +108,10 @@ public:
     void Simulate(double dt);
 
     void Update();
+
+    // Moves out the impacts recorded during the last Simulate; caller applies
+    // damage from them. Leaves the buffer empty for the next step.
+    [[nodiscard]] std::vector<ImpactEvent> DrainImpacts();
 };
 
 } // namespace Gravitaris

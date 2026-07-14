@@ -30,7 +30,9 @@ public:
 
     flecs::entity SpawnPlanet(id_t modelId, Vector2d position);
 
-    flecs::entity SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity);
+    // sensor: true for bullets whose hits are resolved by DamageSystem's
+    // segment query rather than Chipmunk collision response (see RigidBodyDesc).
+    flecs::entity SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity, bool sensor = false);
 };
 
 } // namespace Gravitaris

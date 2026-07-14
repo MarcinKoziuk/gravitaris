@@ -14,6 +14,7 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/team.hpp>
+#include <gravitaris/game/component/damageable.hpp>
 
 #include <gravitaris/cgame/component/renderable.hpp>
 #include <gravitaris/cgame/team-color.hpp>
@@ -176,7 +177,8 @@ void ModelRenderer2::HandleModelAdded(const Model& model, const id_t id)
                                  Line2Shader::TeamWeight{})
                 .addVertexBufferInstanced(baked.instanceBuffer, 1, 0,
                                           Line2Shader::InstanceTransform{},
-                                          Line2Shader::InstanceTeamColor{});
+                                          Line2Shader::InstanceTeamColor{},
+                                          Line2Shader::InstanceFlash{});
 
         const bool hasCircle = std::any_of(group.lineStrips.begin(), group.lineStrips.end(),
                                             [](const Model::VertexLineStrip& strip) { return strip.circle.has_value(); });
@@ -200,7 +202,8 @@ void ModelRenderer2::HandleModelAdded(const Model& model, const id_t id)
                                          Line2Shader::TeamWeight{})
                         .addVertexBufferInstanced(baked.instanceBuffer, 1, 0,
                                                   Line2Shader::InstanceTransform{},
-                                                  Line2Shader::InstanceTeamColor{});
+                                                  Line2Shader::InstanceTeamColor{},
+                                                  Line2Shader::InstanceFlash{});
             }
         }
 
@@ -244,7 +247,10 @@ void ModelRenderer2::RenderTag(id_t tag, const std::function<bool(flecs::entity)
         const Team* team = entity.try_get<Team>();
         const Vector3 teamColor = team ? Vector3{TeamColor(team->id)} : Vector3{1.f, 1.f, 1.f};
 
-        m_instanceScratch[modelId].push_back(InstanceData{transform, teamColor});
+        const Damageable* dmg = entity.try_get<Damageable>();
+        const float flash = dmg ? dmg->flashAmount : 0.f;
+
+        m_instanceScratch[modelId].push_back(InstanceData{transform, teamColor, flash});
     });
 
     for (auto& [modelId, instances] : m_instanceScratch) {

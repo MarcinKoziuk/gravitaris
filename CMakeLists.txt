@@ -314,6 +314,7 @@ add_executable(GravitarisNG
     include/gravitaris/game/component/input-queue.hpp
     include/gravitaris/game/component/team.hpp
     include/gravitaris/game/component/bullet.hpp
+    include/gravitaris/game/component/damageable.hpp
     include/gravitaris/game/input/input-command.hpp
     include/gravitaris/game/input/input-log.hpp
     src/game/input/input-log.cpp
@@ -330,6 +331,10 @@ add_executable(GravitarisNG
     src/game/gnc/guidance/behaviors.cpp
     include/gravitaris/game/system/bullet-lifetime-system.hpp
     src/game/system/bullet-lifetime-system.cpp
+    include/gravitaris/game/system/damage-system.hpp
+    src/game/system/damage-system.cpp
+    include/gravitaris/game/system/death-system.hpp
+    src/game/system/death-system.cpp
     include/gravitaris/game/system/physics-system.hpp
     src/game/system/physics-system.cpp
     src/game/game.cpp

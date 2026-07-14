@@ -6,6 +6,7 @@
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/component/ai-pilot.hpp>
 #include <gravitaris/game/component/team.hpp>
+#include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
 namespace Gravitaris {
@@ -25,6 +26,7 @@ flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position)
     entity.emplace<Controls>();
     entity.emplace<InputQueue>();
     entity.emplace<Team>(TeamId::Blue);
+    entity.emplace<Damageable>();
     AddRenderable(entity, modelId);
 
     return entity;
@@ -41,6 +43,7 @@ flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position)
     entity.emplace<InputQueue>();
     entity.emplace<AIPilot>();
     entity.emplace<Team>(TeamId::Red);
+    entity.emplace<Damageable>();
     AddRenderable(entity, modelId);
 
     return entity;
@@ -58,13 +61,13 @@ flecs::entity EntitySpawner::SpawnPlanet(id_t modelId, Vector2d position)
     return entity;
 }
 
-flecs::entity EntitySpawner::SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity)
+flecs::entity EntitySpawner::SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity, bool sensor)
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
 
     auto entity = m_registry.entity();
     entity.emplace<Transform>(position, Radd{0}, Vector2d{ 3., 3. }, velocity);
-    entity.emplace<RigidBodyDesc>("main"_id, body);
+    entity.emplace<RigidBodyDesc>("main"_id, body, sensor);
     AddRenderable(entity, modelId);
 
     return entity;

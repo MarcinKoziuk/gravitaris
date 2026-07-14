@@ -6,12 +6,16 @@
 
 #include <flecs.h>
 
+#include <Magnum/Math/Vector2.h>
+
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/input-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 #include <gravitaris/game/system/bullet-lifetime-system.hpp>
+#include <gravitaris/game/system/damage-system.hpp>
+#include <gravitaris/game/system/death-system.hpp>
 #include <gravitaris/game/system/ai-pilot-system.hpp>
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
@@ -36,6 +40,10 @@ protected:
 
     BulletLifetimeSystem m_bulletLifetimeSystem;
 
+    DamageSystem m_damageSystem;
+
+    DeathSystem m_deathSystem;
+
     TrajectoryPredictor m_trajectoryPredictor;
 
     AIPilotSystem m_aiPilotSystem;
@@ -43,6 +51,14 @@ protected:
     std::uint64_t m_step;
 
     std::optional<flecs::entity> m_player;
+
+    // Where to (re)spawn the player, and the countdown after a death. -1 means
+    // no respawn pending (alive, or permanently gone).
+    Magnum::Vector2d m_playerSpawnPos{1., 1.};
+    int m_playerRespawnTimer = -1;
+    static constexpr int RESPAWN_DELAY_TICKS = 90; // 1.5 s at the fixed tick
+
+    void HandlePlayerRespawn();
 
     virtual std::unique_ptr<EntitySpawner> CreateEntitySpawner();
 

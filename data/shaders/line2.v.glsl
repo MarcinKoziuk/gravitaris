@@ -16,6 +16,7 @@ in highp float teamWeight;       // 1 = stroke authored in team placeholder colo
 
 in highp mat3 instanceTransform; // per-entity model matrix (locations 6,7,8)
 in highp vec3 instanceTeamColor; // per-entity team color (location 9)
+in highp float instanceFlash;    // per-entity hit-flash amount, 0..1 (location 10)
 
 out lowp vec4 interpolatedColor;
 // Which analytic-AA path the fragment shader should take; mirrors param.w.
@@ -103,6 +104,8 @@ void main() {
     vec2 ndc = pix / (0.5 * viewportSize);
     gl_Position = vec4(ndc, 0.0, 1.0);
     // Placeholder-authored strokes take the instance's team color; all other
-    // strokes keep their baked SVG color (StarCraft-style team mask).
-    interpolatedColor = vec4(mix(color, instanceTeamColor, teamWeight), 1.0);
+    // strokes keep their baked SVG color (StarCraft-style team mask). Hit
+    // flash then whitens the whole result on top, team color and all.
+    vec3 teamMixed = mix(color, instanceTeamColor, teamWeight);
+    interpolatedColor = vec4(mix(teamMixed, vec3(1.0), instanceFlash), 1.0);
 }
