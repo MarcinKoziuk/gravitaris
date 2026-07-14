@@ -2,6 +2,10 @@
 #include <functional>
 #include <vector>
 
+#if defined(_WIN32)
+#include <windows.h> // SEH only (EXCEPTION_EXECUTE_HANDLER, GetExceptionCode), see SafeUpload
+#endif
+
 #include <Corrade/Containers/ArrayView.h>
 
 #include <Magnum/Mesh.h>
@@ -119,7 +123,7 @@ std::vector<LineVertex> BakeGroup(const Model::Group& group, bool forceFaceted)
 // doesn't kill the process. Upload still succeeds either way.
 unsigned long SafeUpload(Magnum::GL::Buffer& buf, const void* data, std::size_t bytes)
 {
-#if defined(_WIN323)
+#if defined(_WIN32)
     __try {
         buf.setData(Containers::ArrayView<const void>{data, bytes});
         return 0;
@@ -257,8 +261,12 @@ void ModelRenderer2::RenderTag(id_t tag, const std::function<bool(flecs::entity)
         if (instances.empty()) continue;
 
         auto& baked = m_baked.at(modelId).at(tag);
-        baked.instanceBuffer.setData(Containers::ArrayView<const void>{
-                instances.data(), instances.size() * sizeof(InstanceData)});
+        if (unsigned long ex = SafeUpload(baked.instanceBuffer, instances.data(),
+                                          instances.size() * sizeof(InstanceData))) {
+            LOG(error) << "[MR2] instance buffer upload raised exception 0x" << std::hex << ex
+                       << " for model " << modelId << " tag " << tag;
+            continue;
+        }
 
         const bool useDebugMesh = m_debugForceFacetedCircles && baked.debugFacetedVertexCount > 0;
         GL::Mesh& meshToDraw = useDebugMesh ? baked.debugFacetedMesh : baked.mesh;
