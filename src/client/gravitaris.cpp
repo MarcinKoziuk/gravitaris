@@ -201,7 +201,7 @@ void GravitarisApplication::FeedInput()
     }
 
     // One-shot actions apply only for the tick they were pressed on.
-    m_currentInput.firePrimary = false;
+    // (firePrimary is held; released on key-up.)
     m_currentInput.fireSecondary = false;
 }
 
@@ -400,7 +400,7 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
             m_currentInput.rotateLeft = true;
             break;
         case KeyEvent::Key::Down:
-            m_currentInput.firePrimary = true;   // one-shot, cleared after the tick
+            m_currentInput.firePrimary = true;   // held; cadence paced by the sim
             break;
         case KeyEvent::Key::Space:
             m_currentInput.fireSecondary = true; // one-shot, cleared after the tick
@@ -428,6 +428,9 @@ void GravitarisApplication::keyReleaseEvent(Magnum::Platform::Sdl2Application::K
             break;
         case KeyEvent::Key::Left:
             m_currentInput.rotateLeft = false;
+            break;
+        case KeyEvent::Key::Down:
+            m_currentInput.firePrimary = false;
             break;
         default:
             (void)0;

@@ -81,8 +81,13 @@ void ShipControlsSystem::Update(std::uint64_t step)
         if (scontrols.actionFlags.thrustForward) {
             cpBodyApplyForceAtLocalPoint(body, cpv(0, -ShipControlsSystem::THRUST_FORCE), cpv(0, 0));
         }
-        if (scontrols.actionFlags.firePrimary) {
-            scontrols.actionFlags.firePrimary = false;
+        if (scontrols.fireCooldown > 0) {
+            --scontrols.fireCooldown;
+        }
+        // firePrimary is held, not one-shot; the cooldown paces the fire rate
+        // so holding the button auto-fires at a fixed cadence.
+        if (scontrols.actionFlags.firePrimary && scontrols.fireCooldown == 0) {
+            scontrols.fireCooldown = ShipControlsSystem::FIRE_COOLDOWN_TICKS;
             std::pair<Vector2d, Vector2d> ret = GetBulletSpawnPosAndVel(transf, phys);
 
             flecs::entity bulletEntity = m_entitySpawner.SpawnBullet("models/bullets/bullet-0"_id, ret.first, ret.second);

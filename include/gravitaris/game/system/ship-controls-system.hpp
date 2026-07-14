@@ -14,6 +14,9 @@ public:
     // ship's available acceleration (force / mass).
     static constexpr double THRUST_FORCE = 140.0;
 
+    // Ticks between shots while firePrimary is held (weapon cadence).
+    static constexpr std::uint32_t FIRE_COOLDOWN_TICKS = 10;
+
 private:
     flecs::world& m_registry;
 
