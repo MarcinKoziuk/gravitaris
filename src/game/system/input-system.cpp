@@ -11,13 +11,13 @@ InputSystem::InputSystem(flecs::world& registry)
 void InputSystem::Update(std::uint64_t step)
 {
     m_registry.each([&](InputQueue& queue, Controls& controls) {
-        while (!queue.pending.empty() && queue.pending.front().tick < step) {
-            queue.pending.pop_front();
+        while (!queue.Empty() && queue.Front().tick < step) {
+            queue.PopFront();
         }
 
-        if (!queue.pending.empty() && queue.pending.front().tick == step) {
-            controls.actionFlags = queue.pending.front().flags;
-            queue.pending.pop_front();
+        if (!queue.Empty() && queue.Front().tick == step) {
+            controls.actionFlags = queue.Front().flags;
+            queue.PopFront();
         }
         // No command for this tick: Controls keeps its previous value
         // (repeat-last-command, quake3-style).

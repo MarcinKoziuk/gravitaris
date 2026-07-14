@@ -191,7 +191,7 @@ void GravitarisApplication::FeedInput()
         }
     }
 
-    maybePlayer->get_mut<InputQueue>().pending.push_back(cmd);
+    maybePlayer->get_mut<InputQueue>().Push(cmd);
 
     if (m_recording) {
         // Store tick-relative so the log can replay from any starting tick.

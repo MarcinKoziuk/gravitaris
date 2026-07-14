@@ -110,13 +110,12 @@ New files must be added to the explicit source list in `CMakeLists.txt`.
 
 ## Open questions parked (do NOT resolve silently — discuss first)
 
-1. **`std::deque` in `InputQueue`**: works with flecs (type hooks call
-   move/copy ctors on archetype moves — non-POD components are legal), but
-   MSVC's deque uses degenerate 16-byte blocks (≈1 `InputCommand` per heap
-   allocation). Likely replacement: fixed-capacity ring buffer
-   (`std::array<InputCommand, 16>` + head/count), which is also trivially
-   copyable and serializable — the quake `CMD_BACKUP` pattern. Decision
-   deferred.
+1. ~~`std::deque` in `InputQueue`~~ **RESOLVED 2026-07-14**: swapped to a
+   fixed-capacity (64 = quake `CMD_BACKUP`) ring buffer in
+   `component/input-queue.hpp` (`std::array` + head/count, `Push`/`Front`/
+   `PopFront`); `static_assert(is_trivially_copyable_v<InputQueue>)` guards
+   the flecs memcpy-relocation fast path. Verified: kill-velocity autopilot
+   run reproduced the phase-2 numbers exactly across ~6 ring wraparounds.
 2. **Per-entity vs per-controller/global input queue**: per-entity matches
    the current single-player shape; quake-likes hang the cmd ring off the
    *client/connection* object, not the entity; lockstep games use a global
