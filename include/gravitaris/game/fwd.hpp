@@ -22,6 +22,7 @@ struct ControlFlags;
 struct Controls;
 struct InputCommand;
 struct InputQueue;
+struct AIPilot;
 
 // input
 class InputLog;
@@ -39,6 +40,7 @@ struct GuidanceParams;
 class PhysicsSystem;
 class InputSystem;
 class ShipControlsSystem;
+class AIPilotSystem;
 
 // spawner
 class EntitySpawner;

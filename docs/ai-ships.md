@@ -205,7 +205,29 @@ skill, hardest behavior; fine to defer past phase 5). Headless tests: scripted
 scenarios asserting "reaches point within R by tick N", "doesn't crash into
 planet".
 
-**Phase 4 — first real AI ship.** `AIPilot` component (behavior enum + state
+**Phase 4 — first real AI ship.**
+*Status: implemented 2026-07-14.* Files: `AIPilot` component
+(`component/ai-pilot.hpp` — behavior enum, target entity, fire/decision
+cooldowns, per-ship flight+guidance params) and `AIPilotSystem`
+(`system/ai-pilot-system.{hpp,cpp}`), running in `Game::Update()` between
+physics write-back and `InputSystem` so its tick-stamped command is consumed
+the same tick. Utility selector on a 15-tick decision interval: predictor
+lookahead (2 s) flags well danger → `EvadeBody`; target inside 500 units →
+`InterceptEntity` (with a 50-unit standoff arrive radius); else `OrbitBody`
+patrol at the engage radius; else idle. Firing: quadratic lead solution vs.
+the 200 u/s muzzle speed, gated on ±0.12 rad alignment, 250-unit range and a
+30-tick cooldown owned by the pilot. `EntitySpawner::SpawnAIShip` +
+"Spawn AI fighter near player" button in the debug Spawn panel
+(`Game::GetEntitySpawner()` exposed). Verified by instrumented 40 s run:
+spawned 292 units out, intercepted at ~98 u/s, chased the free-falling
+player into the well, broke off when the predictor flagged danger (planet
+distance bottomed at 68, never crashed), re-engaged repeatedly closing to
+16–20 units, and fired when aligned (bullet count pulsing 0→1 with the
+3 s lifetime). NOT done: damage/health (bullets bounce — slice work),
+`Orbit` patrol untested in-log (player always in engage range), difficulty
+knobs (phase 5), routing AI target refs through NetId.
+
+Original phase description: `AIPilot` component (behavior enum + state
 + target NetId) and `AIPilotSystem` in `Game::Update()` before the command
 drain. Utility selector v1: crashing into well → Evade; player in range →
 Intercept + lead-pursuit firing; else patrol/orbit. Feed commands through
@@ -238,3 +260,22 @@ stale predictions, so this is a drop-in optimization, not a redesign.
   *and* predictor; consider adding an epsilon in both when it first bites.
 - Tuning constants (PD gains, deadbands, replan interval) should live in one
   struct, tweakable via the F1 overlay, or iteration will be miserable.
+
+## Parked decisions (from the phase-4 hand-off, folded back 2026-07-14)
+
+- **Per-entity vs per-controller/global input queue**: per-entity matches the
+  single-player shape; quake-likes hang the cmd ring off the
+  client/connection object, lockstep games use a global tick→commands log.
+  Revisit when netcode starts (per-connection is the likely landing spot).
+  Note: AI pilots are pure functions of sim state, so replays never need to
+  record AI commands — only human input.
+- **`Land` guidance** (phase 3 remainder): suicide-burn retro-thrust descent,
+  the hardest behavior; predictor gives time-to-impact, controller holds
+  retrograde, burn starts when stopping distance ≈ altitude, gentle terminal
+  phase below some altitude.
+- **Predictor-based drift compensation in `GotoPoint`**: reactive control has
+  been sufficient; revisit if AI ships visibly miss in stronger wells.
+- **Verification practice**: no test target exists yet (needs a game-lib
+  CMake split); phases 0–4 were verified with temporary instrumented runs
+  (`LOG(info)` + stdout redirect via `Start-Process`), since window
+  automation doesn't reliably reach the app (Windows foreground lock).

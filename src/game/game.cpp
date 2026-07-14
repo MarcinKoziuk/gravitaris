@@ -12,6 +12,7 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem)
         , m_bulletLifetimeSystem(m_registry)
         , m_trajectoryPredictor(m_registry, m_physicsSystem)
+        , m_aiPilotSystem(m_registry, m_physicsSystem, m_trajectoryPredictor)
         , m_step(0L)
 {}
 
@@ -29,6 +30,7 @@ void Game::Update()
 {
     m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
     m_physicsSystem.Update();
+    m_aiPilotSystem.Update(m_step, m_player);
     m_inputSystem.Update(m_step);
     m_shipControlsSystem.Update(m_step);
     m_bulletLifetimeSystem.Update(Game::PHYSICS_DELTA);

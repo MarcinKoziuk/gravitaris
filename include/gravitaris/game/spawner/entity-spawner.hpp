@@ -26,6 +26,8 @@ public:
 
     flecs::entity SpawnPlayer(id_t modelId, Vector2d position);
 
+    flecs::entity SpawnAIShip(id_t modelId, Vector2d position);
+
     flecs::entity SpawnPlanet(id_t modelId, Vector2d position);
 
     flecs::entity SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity);

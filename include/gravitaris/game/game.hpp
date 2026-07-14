@@ -12,6 +12,7 @@
 #include <gravitaris/game/system/input-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 #include <gravitaris/game/system/bullet-lifetime-system.hpp>
+#include <gravitaris/game/system/ai-pilot-system.hpp>
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
@@ -36,6 +37,8 @@ protected:
     BulletLifetimeSystem m_bulletLifetimeSystem;
 
     TrajectoryPredictor m_trajectoryPredictor;
+
+    AIPilotSystem m_aiPilotSystem;
 
     std::uint64_t m_step;
 
@@ -65,6 +68,9 @@ public:
 
     TrajectoryPredictor& GetTrajectoryPredictor()
     { return m_trajectoryPredictor; }
+
+    EntitySpawner& GetEntitySpawner()
+    { return *m_entitySpawner; }
 
     static constexpr double PHYSICS_DELTA = 1. / 60.;
 };

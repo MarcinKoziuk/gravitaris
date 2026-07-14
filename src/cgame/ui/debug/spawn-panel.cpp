@@ -1,21 +1,34 @@
 #include <imgui.h>
 
+#include <gravitaris/game/id.hpp>
+#include <gravitaris/game/component/transform.hpp>
+#include <gravitaris/game/component/ai-pilot.hpp>
+#include <gravitaris/game/spawner/entity-spawner.hpp>
+
+#include <gravitaris/cgame/cgame.hpp>
+
 #include "spawn-panel.hpp"
 
 namespace Gravitaris {
 
-// TODO(debug-ui): wire up actual spawning. The pieces already exist:
-//   - EntitySpawner::SpawnPlayer / SpawnPlanet / SpawnBullet(id_t modelId, ...)
-//   - CEntitySpawner is created by CGame::CreateEntitySpawner()
-// To implement: expose the spawner (and a list of loaded model ids) from CGame,
-// then add model picker + position/velocity inputs + spawn buttons here.
-void DrawSpawnPanel(CGame& /*game*/)
+void DrawSpawnPanel(CGame& game)
 {
-    ImGui::SeparatorText("Spawn test objects");
-    ImGui::TextDisabled("Coming soon.");
-    ImGui::TextWrapped(
-        "Will let you spawn players / planets / bullets at a chosen position "
-        "from the loaded model set. Not wired up yet.");
+    ImGui::SeparatorText("AI ships");
+
+    if (ImGui::Button("Spawn AI fighter near player")) {
+        Vector2d pos{300.0, 200.0};
+        const std::optional<flecs::entity> player = game.GetPlayer();
+        const Transform* transform = player ? player->try_get<Transform>() : nullptr;
+        if (transform) {
+            pos = transform->pos + Vector2d{250.0, 150.0};
+        }
+        game.GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, pos);
+    }
+
+    ImGui::Text("AI ships alive: %d", game.GetRegistry().count<AIPilot>());
+
+    // TODO(debug-ui): generic spawning (model picker + position/velocity
+    // inputs) for players / planets / bullets.
 }
 
 } // namespace Gravitaris

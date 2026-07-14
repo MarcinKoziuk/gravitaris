@@ -318,6 +318,9 @@ add_executable(GravitarisNG
     src/game/input/input-log.cpp
     include/gravitaris/game/system/input-system.hpp
     src/game/system/input-system.cpp
+    include/gravitaris/game/component/ai-pilot.hpp
+    include/gravitaris/game/system/ai-pilot-system.hpp
+    src/game/system/ai-pilot-system.cpp
     include/gravitaris/game/gnc/nav/trajectory-predictor.hpp
     src/game/gnc/nav/trajectory-predictor.cpp
     include/gravitaris/game/gnc/control/flight-controller.hpp
