@@ -17,6 +17,7 @@ CGame::CGame(IFilesystem &filesystem)
     : Game(filesystem, CreateEntitySpawner())
     , m_simpleModelRenderer(m_registry, filesystem, m_resourceLoader)
     , m_modelRenderer2(m_registry, filesystem, m_resourceLoader)
+    , m_audioSystem(m_registry, filesystem)
 {
     m_camera.SetZoom(2.f);
 }
@@ -59,6 +60,8 @@ void CGame::Render(double delta)
             m_modelRenderer2.Render(delta);
             break;
     }
+
+    m_audioSystem.Update(m_camera.GetPosition());
 }
 
 std::unique_ptr<EntitySpawner> CGame::CreateEntitySpawner()

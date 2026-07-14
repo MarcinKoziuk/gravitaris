@@ -12,6 +12,7 @@
 #include <gravitaris/cgame/camera.hpp>
 #include <gravitaris/cgame/renderer/simple-model-renderer.hpp>
 #include <gravitaris/cgame/renderer/model-renderer2.hpp>
+#include <gravitaris/cgame/audio/audio-system.hpp>
 
 namespace Gravitaris {
 
@@ -36,6 +37,7 @@ class CGame : public Game {
 protected:
     SimpleModelRenderer m_simpleModelRenderer;
     ModelRenderer2 m_modelRenderer2;
+    AudioSystem m_audioSystem;
 
     RendererKind m_activeRenderer = RendererKind::Baked;
 
