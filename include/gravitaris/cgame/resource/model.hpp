@@ -39,6 +39,9 @@ public:
         std::size_t offset;
         std::size_t count;
         std::optional<CircleHint> circle;
+        // Authored in TEAM_COLOR_PLACEHOLDER: render with the entity's team
+        // color instead of `color`.
+        bool teamColor = false;
     };
 
     struct Group {

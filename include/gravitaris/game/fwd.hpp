@@ -23,6 +23,7 @@ struct Controls;
 struct InputCommand;
 struct InputQueue;
 struct AIPilot;
+struct Team;
 
 // input
 class InputLog;

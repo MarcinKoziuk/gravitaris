@@ -1,5 +1,6 @@
 #include <numeric>
 #include <gravitaris/cgame/resource/model.hpp>
+#include <gravitaris/cgame/team-color.hpp>
 
 namespace Gravitaris {
 
@@ -78,7 +79,8 @@ void Model::InitFromShape(const Shape& shape)
             .color  = path.style.color.rgb(),
             .offset = offset,
             .count  = newOffset - offset,
-            .circle = circleHint});
+            .circle = circleHint,
+            .teamColor = path.style.color.rgb() == TEAM_COLOR_PLACEHOLDER});
         offsets[tag] = newOffset;
     }
 

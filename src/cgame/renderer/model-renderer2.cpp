@@ -13,8 +13,10 @@
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/team.hpp>
 
 #include <gravitaris/cgame/component/renderable.hpp>
+#include <gravitaris/cgame/team-color.hpp>
 #include <gravitaris/cgame/renderer/model-renderer2.hpp>
 
 namespace Gravitaris {
@@ -30,6 +32,7 @@ struct LineVertex {
     Vector2 pointC;
     Vector4 param; // xyz weights, w = type (0 segment, 1 join, 2 circle)
     Vector3 color;
+    float teamWeight; // 1 = replace color with the instance's team color
 };
 
 // Segment quad: t along A->B, side offset.
@@ -72,13 +75,14 @@ std::vector<LineVertex> BakeGroup(const Model::Group& group, bool forceFaceted)
 
     for (const auto& strip : group.lineStrips) {
         const Vector3 color = strip.color.toSrgb();
+        const float teamWeight = strip.teamColor ? 1.f : 0.f;
 
         if (strip.circle && !forceFaceted) {
             const Vector2& center = strip.circle->center;
             const Vector2 radiusCarrier{strip.circle->radius, 0.f};
             for (const Vector2& corner : CIRCLE_QUAD) {
                 out.push_back(LineVertex{center, radiusCarrier, Vector2{},
-                                          Vector4{corner.x(), corner.y(), 0.f, 2.f}, color});
+                                          Vector4{corner.x(), corner.y(), 0.f, 2.f}, color, teamWeight});
             }
             continue;
         }
@@ -91,7 +95,7 @@ std::vector<LineVertex> BakeGroup(const Model::Group& group, bool forceFaceted)
             const Vector2 a = pts[i];
             const Vector2 b = pts[i + 1];
             for (const Vector2& g : SEGMENT) {
-                out.push_back(LineVertex{a, b, Vector2{}, Vector4{g.x(), g.y(), 0.f, 0.f}, color});
+                out.push_back(LineVertex{a, b, Vector2{}, Vector4{g.x(), g.y(), 0.f, 0.f}, color, teamWeight});
             }
         }
 
@@ -101,7 +105,7 @@ std::vector<LineVertex> BakeGroup(const Model::Group& group, bool forceFaceted)
             const Vector2 b = pts[i + 1];
             const Vector2 c = pts[i + 2];
             for (const Vector3& g : MITER) {
-                out.push_back(LineVertex{a, b, c, Vector4{g.x(), g.y(), g.z(), 1.f}, color});
+                out.push_back(LineVertex{a, b, c, Vector4{g.x(), g.y(), g.z(), 1.f}, color, teamWeight});
             }
         }
     }
@@ -168,10 +172,11 @@ void ModelRenderer2::HandleModelAdded(const Model& model, const id_t id)
                                  Line2Shader::PointB{},
                                  Line2Shader::PointC{},
                                  Line2Shader::Param{},
-                                 Line2Shader::VertexColor{})
+                                 Line2Shader::VertexColor{},
+                                 Line2Shader::TeamWeight{})
                 .addVertexBufferInstanced(baked.instanceBuffer, 1, 0,
                                           Line2Shader::InstanceTransform{},
-                                          Line2Shader::InstanceTint{});
+                                          Line2Shader::InstanceTeamColor{});
 
         const bool hasCircle = std::any_of(group.lineStrips.begin(), group.lineStrips.end(),
                                             [](const Model::VertexLineStrip& strip) { return strip.circle.has_value(); });
@@ -191,10 +196,11 @@ void ModelRenderer2::HandleModelAdded(const Model& model, const id_t id)
                                          Line2Shader::PointB{},
                                          Line2Shader::PointC{},
                                          Line2Shader::Param{},
-                                         Line2Shader::VertexColor{})
+                                         Line2Shader::VertexColor{},
+                                         Line2Shader::TeamWeight{})
                         .addVertexBufferInstanced(baked.instanceBuffer, 1, 0,
                                                   Line2Shader::InstanceTransform{},
-                                                  Line2Shader::InstanceTint{});
+                                                  Line2Shader::InstanceTeamColor{});
             }
         }
 
@@ -233,7 +239,12 @@ void ModelRenderer2::RenderTag(id_t tag, const std::function<bool(flecs::entity)
                 Matrix3::rotation(Rad(t.rot)) *
                 Matrix3::scaling({static_cast<float>(t.scale.x()), static_cast<float>(t.scale.y())});
 
-        m_instanceScratch[modelId].push_back(InstanceData{transform, Vector3{1.f, 1.f, 1.f}});
+        // Only placeholder-authored strokes take this color (team mask);
+        // unteamed entities render those strokes white.
+        const Team* team = entity.try_get<Team>();
+        const Vector3 teamColor = team ? Vector3{TeamColor(team->id)} : Vector3{1.f, 1.f, 1.f};
+
+        m_instanceScratch[modelId].push_back(InstanceData{transform, teamColor});
     });
 
     for (auto& [modelId, instances] : m_instanceScratch) {

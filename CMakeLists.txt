@@ -312,6 +312,7 @@ add_executable(GravitarisNG
     include/gravitaris/game/component/physics.hpp
     include/gravitaris/game/component/controls.hpp
     include/gravitaris/game/component/input-queue.hpp
+    include/gravitaris/game/component/team.hpp
     include/gravitaris/game/component/bullet.hpp
     include/gravitaris/game/input/input-command.hpp
     include/gravitaris/game/input/input-log.hpp
@@ -333,6 +334,7 @@ add_executable(GravitarisNG
     src/game/system/physics-system.cpp
     src/game/game.cpp
     include/gravitaris/cgame/cgame.hpp
+    include/gravitaris/cgame/team-color.hpp
     src/cgame/cgame.cpp
     include/gravitaris/cgame/resource/model.hpp
     src/cgame/resource/model.cpp

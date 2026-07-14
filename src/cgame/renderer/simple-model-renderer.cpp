@@ -48,7 +48,8 @@ void SimpleModelRenderer::HandleModelAdded(const Model& model, const id_t id)
                     .setCount(static_cast<Int>(lineStrip.count))
                     .addVertexBuffer(std::move(buf), static_cast<Int>(lineStrip.offset * sizeof(vertexBuffer[0])),
                                      Shaders::VertexColor2D::Position{});
-            meshColor.color = lineStrip.color;
+            // No per-entity team data here; show placeholder strokes as white.
+            meshColor.color = lineStrip.teamColor ? Color3{1.f} : lineStrip.color;
 
             meshList.emplace_back(std::move(meshColor));
         }

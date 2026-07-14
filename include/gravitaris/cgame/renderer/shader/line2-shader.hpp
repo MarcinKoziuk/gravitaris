@@ -25,17 +25,19 @@ protected:
     Magnum::Int u_viewProjection;
 
 public:
-    // Per-vertex (static, baked once per model).
+    // Per-vertex (static, baked once per model). teamWeight is 1 for strokes
+    // authored in the team-color placeholder, 0 otherwise.
     typedef Magnum::GL::Attribute<0, Vector2> PointA;
     typedef Magnum::GL::Attribute<1, Vector2> PointB;
     typedef Magnum::GL::Attribute<2, Vector2> PointC;
     typedef Magnum::GL::Attribute<3, Vector4> Param;
     typedef Magnum::GL::Attribute<4, Vector3> VertexColor;
+    typedef Magnum::GL::Attribute<5, Magnum::Float> TeamWeight;
 
     // Per-instance (dynamic, one entry per drawn entity). A Matrix3 attribute
-    // occupies locations 5, 6 and 7; the tint follows at location 8.
-    typedef Magnum::GL::Attribute<5, Matrix3> InstanceTransform;
-    typedef Magnum::GL::Attribute<8, Vector3> InstanceTint;
+    // occupies locations 6, 7 and 8; the team color follows at location 9.
+    typedef Magnum::GL::Attribute<6, Matrix3> InstanceTransform;
+    typedef Magnum::GL::Attribute<9, Vector3> InstanceTeamColor;
 
     explicit Line2Shader(IFilesystem& fileSystem);
 

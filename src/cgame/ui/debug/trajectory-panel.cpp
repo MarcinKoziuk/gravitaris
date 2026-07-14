@@ -17,7 +17,7 @@ using Magnum::Vector2d;
 
 // Shared between the tab (settings + readout) and the per-frame overlay.
 struct TrajectoryState {
-    bool enabled = true;
+    bool enabled = false;
     float horizonSeconds = 5.f;
     int drawStride = 2; // draw every Nth sample; prediction runs per-tick
 

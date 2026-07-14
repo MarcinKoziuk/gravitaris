@@ -58,7 +58,7 @@
      id_t="layer1"
      style="display:inline">
     <path
-       style="fill:none;fill-rule:evenodd;stroke:#ffffff;stroke-width:1.6582495px;stroke-linecap:butt;stroke-linejoin:join;stroke-opacity:1"
+       style="fill:none;fill-rule:evenodd;stroke:#ff00ff;stroke-width:1.6582495px;stroke-linecap:butt;stroke-linejoin:join;stroke-opacity:1"
        d="m 373.6421,326.73703 -25.59765,-44.31222 -44.21413,43.42598 -40.33569,0 60.50354,-140.91288 28.7004,45.19847 20.94353,-169.27271 22.4949,171.0452 30.25177,-46.97096 56.62511,143.57161 -42.66275,-1.77249 -38.00863,-43.42598 z"
        id_t="path4143"
        inkscape:connector-curvature="0"

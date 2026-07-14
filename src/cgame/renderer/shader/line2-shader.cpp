@@ -49,8 +49,9 @@ Line2Shader::Line2Shader(IFilesystem& fileSystem)
     bindAttributeLocation(Line2Shader::PointC::Location, "pointC");
     bindAttributeLocation(Line2Shader::Param::Location, "param");
     bindAttributeLocation(Line2Shader::VertexColor::Location, "color");
+    bindAttributeLocation(Line2Shader::TeamWeight::Location, "teamWeight");
     bindAttributeLocation(Line2Shader::InstanceTransform::Location, "instanceTransform");
-    bindAttributeLocation(Line2Shader::InstanceTint::Location, "instanceTint");
+    bindAttributeLocation(Line2Shader::InstanceTeamColor::Location, "instanceTeamColor");
 
     link();
 

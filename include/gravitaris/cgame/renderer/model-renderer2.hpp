@@ -46,10 +46,10 @@ private:
         Magnum::Int debugFacetedVertexCount = 0;
     };
 
-    // Matches Line2Shader's per-instance layout (Matrix3 transform + tint).
+    // Matches Line2Shader's per-instance layout (Matrix3 transform + team color).
     struct InstanceData {
         Matrix3 transform;
-        Vector3 tint;
+        Vector3 teamColor;
     };
 
     flecs::world& m_registry;

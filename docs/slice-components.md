@@ -20,7 +20,7 @@ thumb: replicated components are POD, reference other entities only by
 | `NetId` | `u32 id` | server-assigned, stable; never serialize ECS ids |
 | `Transform` | pos, rot, scale | EXISTS |
 | `Kinematics` | vel, angVel | extracted from chipmunk each tick for replication; chipmunk body itself is not replicated |
-| `Team` | `u8 team` | owner/faction |
+| `Team` | `TeamId team` | owner/faction; EXISTS (drives team-color rendering, see cgame `team-color.hpp`) |
 | `ShipClass` | enum / prefab ref | fighter, interceptor, shuttle, artillery, capital |
 | `Subsystems` | hull, engines, weapons, shields: {hp, max} | IDEAS damage model: subsystem-local damage, repairable over time |
 | `EnergyDist` | weapons/shields/engines weights, backup | power distribution, not a battery |
