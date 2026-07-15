@@ -34,6 +34,22 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader)
     m_resourceLoader.OnCreate<AudioClip>().connect(&AudioSystem::HandleClipAdded, this);
     m_resourceLoader.OnDestroy<AudioClip>().connect(&AudioSystem::HandleClipRemoved, this);
 
+    // Loaded unconditionally, before any backend exists: Update()/
+    // PlayOneShotById dereference these clips' Id() every frame with no null
+    // check, and SetBackendPreference() can enable audio later even if this
+    // constructor's own backend attempt below fails -- both need these to
+    // always be valid ResourcePtrs (real or Placeholder), never the
+    // default-constructed empty state. A failed load silently substitutes
+    // AudioClip::Placeholder() (an empty clip) -- same graceful-degrade
+    // convention as Model/Body; that one clip just plays silence.
+    //
+    // HandleClipAdded (connected just above) fires synchronously here but
+    // no-ops since m_backend doesn't exist yet -- uploaded explicitly below
+    // once (if) one does.
+    m_laserClip  = m_resourceLoader.Load<AudioClip>("sounds/laser-1.wav"_id);
+    m_thrustClip = m_resourceLoader.Load<AudioClip>("sounds/thrust-1.wav"_id);
+    m_hitClip    = m_resourceLoader.Load<AudioClip>("sounds/hit-1.wav"_id);
+
     m_backendPreference = ResolveAudioBackendPreference(m_backendPreference);
     m_backend = CreateAudioBackend(m_backendPreference);
     m_enabled = bool(m_backend);
@@ -42,14 +58,9 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader)
         return;
     }
 
-    // Load() synchronously fires OnCreate<AudioClip> (connected above), which
-    // uploads into m_backend via HandleClipAdded. A failed load silently
-    // substitutes AudioClip::Placeholder() (an empty clip) rather than
-    // failing outright -- same graceful-degrade convention as Model/Body;
-    // that one clip just plays silence instead of disabling all audio.
-    m_laserClip  = m_resourceLoader.Load<AudioClip>("sounds/laser-1.wav"_id);
-    m_thrustClip = m_resourceLoader.Load<AudioClip>("sounds/thrust-1.wav"_id);
-    m_hitClip    = m_resourceLoader.Load<AudioClip>("sounds/hit-1.wav"_id);
+    HandleClipAdded(*m_laserClip, m_laserClip.Id());
+    HandleClipAdded(*m_thrustClip, m_thrustClip.Id());
+    HandleClipAdded(*m_hitClip, m_hitClip.Id());
 
     AcquireVoicePool();
 

@@ -11,14 +11,20 @@ AudioBackendPreference ResolveAudioBackendPreference(AudioBackendPreference pref
 {
     if (preference != AudioBackendPreference::Auto) return preference;
 
-#if defined(__APPLE__)
-    // MagnumOpenALBackend::Init() reliably fails here (see
-    // docs/adr/0003-audio-backend.md); skip straight to miniaudio rather
-    // than pay the failed-attempt cost on every launch.
+    // miniaudio on every platform, not just __APPLE__: MagnumOpenALBackend
+    // is split across two link units (MagnumAudio-d.dll makes the real
+    // Buffer/Source/Renderer AL calls; our own Init() -- after the ALC
+    // rework -- makes its device-current calls from GravitarisNG.exe).
+    // Static-linked OpenAL Soft means each unit gets its OWN copy of ALC's
+    // global "current context" state, so the exe's context is never the one
+    // the DLL's AL calls actually see -- Init() reports success while every
+    // real playback call silently fails with AL_INVALID_OPERATION. This
+    // reproduces on Windows, not just the macOS/CoreAudio setup the ADR
+    // originally (and, it turned out, incorrectly) attributed the symptom
+    // to. See docs/adr/0003-audio-backend.md's "Update" section.
+    // OpenAL stays selectable via the debug UI's Audio tab for comparison/
+    // debugging, just not as the automatic default.
     return AudioBackendPreference::PreferMiniaudio;
-#else
-    return AudioBackendPreference::PreferOpenAL;
-#endif
 }
 
 std::unique_ptr<IAudioBackend> CreateAudioBackend(AudioBackendPreference preference)

@@ -31,23 +31,59 @@ void ConfigurePositional(Audio::Source& source)
 
 bool MagnumOpenALBackend::Init()
 {
-    m_context.emplace(Magnum::NoCreate);
-    if (!m_context->tryCreate(Audio::Context::Configuration{})) {
+    // Deliberately not Magnum::Audio::Context::tryCreate(): instrumentation
+    // this session proved it, not the platform, is the problem -- on this
+    // machine tryCreate() reports success and alcMakeContextCurrent() is
+    // even called with a genuinely valid context, yet alcGetCurrentContext()
+    // reads back null immediately after, and every subsequent AL call then
+    // fails with AL_INVALID_OPERATION (the same symptom the ADR originally
+    // attributed to macOS/CoreAudio only -- it reproduces on Windows too).
+    // A hand-rolled ALC sequence with the identical device specifier and
+    // attribute list Magnum's tryCreate() uses does not exhibit this, so we
+    // own the device/context ourselves; Audio::Buffer/Audio::Source don't go
+    // through Context::tryCreate() at all and are unaffected.
+    const ALCchar* deviceSpecifier = alcGetString(nullptr, ALC_DEFAULT_DEVICE_SPECIFIER);
+    m_device = alcOpenDevice(deviceSpecifier);
+    if (!m_device) {
         LOG(warning) << "[audio][openal] no OpenAL device";
-        m_context.reset();
         return false;
     }
 
-    // Context::tryCreate() calls alcMakeContextCurrent() but never checks its
-    // return value (see class comment) -- verify directly rather than
-    // trusting Magnum's own bookkeeping.
-    if (alcGetCurrentContext() == nullptr) {
+    m_alContext = alcCreateContext(m_device, nullptr);
+    if (!m_alContext) {
+        LOG(warning) << "[audio][openal] cannot create context";
+        alcCloseDevice(m_device);
+        m_device = nullptr;
+        return false;
+    }
+
+    alcMakeContextCurrent(m_alContext);
+    if (alcGetCurrentContext() != m_alContext) {
         LOG(warning) << "[audio][openal] context did not become current";
-        m_context.reset();
+        alcDestroyContext(m_alContext);
+        alcCloseDevice(m_device);
+        m_alContext = nullptr;
+        m_device = nullptr;
         return false;
     }
 
     return true;
+}
+
+MagnumOpenALBackend::~MagnumOpenALBackend()
+{
+    // Buffers/Sources must be destroyed (they call alDeleteBuffers/Sources)
+    // while their context is still current; both vectors are members
+    // destructed before this body runs would be too late, so clear them
+    // explicitly first.
+    m_buffers.clear();
+    m_voices.clear();
+
+    if (m_alContext) {
+        alcMakeContextCurrent(nullptr);
+        alcDestroyContext(m_alContext);
+    }
+    if (m_device) alcCloseDevice(m_device);
 }
 
 SoundBufferHandle MagnumOpenALBackend::UploadBuffer(
