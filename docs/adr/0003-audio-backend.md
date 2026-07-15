@@ -13,15 +13,14 @@ directly. It goes through `IAudioBackend`, an interface of opaque handles
 - `MiniaudioBackend` — miniaudio (single vendored header, `extlibs/miniaudio/`).
 
 `CreateAudioBackend(AudioBackendPreference)` constructs exactly one backend,
-no fallback: `Auto` always resolves to miniaudio (see "Final diagnosis"
-below -- OpenAL is unusable as an automatic default on *any* platform in this
-project's current link topology) and if that backend's `Init()` fails, audio
-disables outright rather than silently substituting a different backend the
-caller didn't ask for. `PreferOpenAL`/`PreferMiniaudio` force one explicitly,
-same no-fallback rule; OpenAL stays reachable this way for testing/comparison
-via the debug UI's "Audio" tab (`AudioSystem::SetBackendPreference`), which
-tears down the current backend and rebuilds it, re-uploading every still-live
-`AudioClip`.
+no fallback: `Auto` resolves once to a platform-fixed choice (miniaudio on
+`__APPLE__`, OpenAL elsewhere -- see "Final diagnosis" below) and if that
+backend's `Init()` fails, audio disables outright rather than silently
+substituting a different backend the caller didn't ask for.
+`PreferOpenAL`/`PreferMiniaudio` force one explicitly, same no-fallback rule;
+selectable at runtime via the debug UI's "Audio" tab
+(`AudioSystem::SetBackendPreference`), which tears down the current backend
+and rebuilds it, re-uploading every still-live `AudioClip`.
 
 ## Why
 
@@ -47,73 +46,62 @@ going through `Magnum::Audio::Context` -- which "fixed" the false-negative
 `Init()` check, but playback was still silent, because the actual bug is one
 level further down.
 
-## Final diagnosis: OpenAL Soft is static, and static state doesn't cross a DLL boundary
+## Final diagnosis: `Init()` must create the context via `Context::tryCreate()`, not raw `alc*`
 
 `Magnum::Audio` is built as `MagnumAudio-d.dll` (a shared library); OpenAL
-Soft is statically linked, per this project's own choice (see "Decision" in
-the OpenAL section of `CMakeLists.txt`) to dodge the `OpenAL32.dll`-name
-collision with a legacy Creative router present in `System32` on some
-machines (this one included). Static-linking a library into two *separate*
-binaries gives each binary its own private copy of that library's global
-state. OpenAL Soft's ALC layer keeps exactly that kind of global state (which
-context is "current"). So:
+Soft is statically linked, per this project's own choice (see the OpenAL
+section of `CMakeLists.txt`) to dodge the `OpenAL32.dll`-name collision with a
+legacy Creative router present in `System32` on some machines (this one
+included). Statically linking a library into two separate binaries is
+generally expected to give each binary its own private copy of that library's
+process state -- the working hypothesis this and the prior session operated
+under, and the reason `MagnumOpenALBackend::Init()` was reworked to open the
+device and make the context current via raw `alc*` calls issued directly
+from `GravitarisNG.exe`, matching (in theory) wherever `Audio::Buffer`/
+`Audio::Source`'s inline playback calls also execute.
 
-- `MagnumAudio-d.dll` has its own copy of OpenAL Soft, and it's this copy
-  that every real `Audio::Buffer`/`Audio::Source`/`Audio::Renderer` call
-  executes against (they're implemented inside the DLL).
-- `GravitarisNG.exe` -- once `MagnumOpenALBackend::Init()` started calling
-  `alc*` functions directly (the previous session's rework) -- has its
-  *own, separate* copy, and that's the one `alcOpenDevice`/`alcCreateContext`/
-  `alcMakeContextCurrent`/`alcGetCurrentContext` in `Init()` were operating
-  on.
+That rework compiled, ran, and `alcGetCurrentContext()` echoed the expected
+pointer right after -- yet playback was silent. Reverting `Init()` to
+`Magnum::Audio::Context::tryCreate()` (compiled into `MagnumAudio-d.dll`,
+*not* the exe) and dropping the `alcGetCurrentContext()` post-check entirely
+restored working audio, confirmed by ear. This is the exact code path the
+original, pre-refactor `AudioSystem` used -- the last point this reliably
+worked -- so `MagnumOpenALBackend::Init()` now simply calls `tryCreate()` and
+trusts its result, same as that original code.
 
-Both copies "worked" in isolation -- that's exactly why the hand-rolled ALC
-sequence in `Init()` reported success. But a context made current in the
-exe's copy is invisible to the DLL's copy, and vice versa: whichever module
-actually made a context current, the *other* module's AL calls see no
-context at all and every one of them silently fails with
-`AL_INVALID_OPERATION`. This is precisely the failure class "Why miniaudio"
-below already named ("two independent link units disagree about backend
-state") -- it just wasn't yet understood to also explain *this* symptom when
-that section was written.
+**Open question, deliberately not chased further:** the empirical result
+(`tryCreate()` in the DLL works; raw `alc*` in the exe doesn't, despite
+`alcGetCurrentContext()` agreeing right after either one) doesn't fully square
+with the "two independent copies of static state" theory -- if that were the
+whole story, the DLL's copy should be just as unreachable from the exe's
+inline `Buffer`/`Source` calls as the reverse. Something about this specific
+Magnum/Corrade/OpenAL-Soft/MSVC combination makes `tryCreate()`'s route work
+and the hand-rolled one not, and that isn't understood. Don't spend more time
+on it than reading this paragraph: if OpenAL misbehaves again, the first thing
+to check is whether `Init()` still goes through `Context::tryCreate()` rather
+than any hand-rolled ALC sequence -- don't reintroduce that path without a
+strong, tested reason, and if you do, verify by ear (log lines alone were
+misleading both times this was tried).
 
-This also retroactively explains why the original, pre-refactor code (a
-single `AudioSystem` that never called raw `alc*` functions itself, only
-`Magnum::Audio::Context::tryCreate()`) worked: with no direct ALC calls from
-the exe, only the DLL's copy of OpenAL Soft was ever touched, so there was
-only one copy of the global state in play, and it was self-consistent.
-
-**Consequence**: `MagnumOpenALBackend` cannot be made reliable through any
-amount of ALC-sequence fixing in `Init()` -- the bug is the split itself, not
-which sequence of calls populates either copy. Fixing it for real means
-either (a) never calling `alc*` directly from the exe (revert to trusting
-`Magnum::Audio::Context::tryCreate()`, accepting its own unresolved
-false-success quirk from the original diagnosis above), (b) building Magnum
-statically so there's only one binary and thus one copy of OpenAL Soft's
-state, or (c) not defaulting to OpenAL at all. This session took (c): `Auto`
-now always resolves to miniaudio (single link unit, all calls originate from
-the exe, no split possible), on every platform, not just `__APPLE__`.
-`MagnumOpenALBackend` is left in place, reachable via the debug UI, for
-whoever eventually pursues (a) or (b) -- see "When to remove this".
-
-## Why miniaudio as the default (not just "disable audio")
+## Why miniaudio as the macOS default (not just "disable audio on macOS")
 
 Single-file, public-domain, no build-system surface (drop-in header +
 `MINIAUDIO_IMPLEMENTATION` translation unit, no FetchContent, no separate
-dylib) -- which directly rules out the "two independent link units disagree
-about backend state" class of bug this session confirmed is the actual root
-cause (see "Final diagnosis" above). Native backends cover macOS, iOS,
-Windows, Linux, Android in one dependency. See the session's chat log for the
-fuller backend comparison (SoLoud, FMOD, SDL2 audio) that led here; miniaudio
-won on "zero packaging surface" + broad platform coverage + no license to
-track.
+dylib) -- sidesteps whatever exact mechanism is behind "Final diagnosis"
+above entirely, since there's only one binary and one copy of miniaudio's
+state, however that class of bug actually works. Native backends cover
+macOS, iOS, Windows, Linux, Android in one dependency. See the session's chat
+log for the fuller backend comparison (SoLoud, FMOD, SDL2 audio) that led
+here; miniaudio won on "zero packaging surface" + broad platform coverage
++ no license to track.
 
 No silent fallback: trying OpenAL first and falling back to miniaudio on
-failure meant paying a failed-`Init()` cost on every launch for a backend
-known not to work as an automatic default, and it made "what's actually
-running" one step removed from what was asked for. `Auto` resolves once, up
-front, to miniaudio; if that fails, audio disables rather than quietly
-landing on a different backend.
+failure meant paying a failed-`Init()` cost on every macOS launch for a
+backend known not to work there (unverified whether "Final diagnosis"'s fix
+also resolves the original macOS symptom -- no Mac available to test), and it
+made "what's actually running" one step removed from what was asked for.
+`Auto` resolves the platform choice once, up front; if that specific backend
+fails, audio disables rather than quietly landing on a different one.
 
 ## API-shape differences that mattered for the implementation
 
@@ -180,12 +168,9 @@ second parallel system.
 ## When to remove this
 
 This abstraction is scaffolding, not a permanent two-backend commitment.
-`MagnumOpenALBackend` cannot become a reliable default without first fixing
-the underlying split (see "Final diagnosis"): either building Magnum
-statically (one binary, one copy of OpenAL Soft's state) or reverting
-`Init()` to never call `alc*` directly (trusting `Context::tryCreate()`,
-which has its own unresolved false-success quirk from the original
-diagnosis). Absent that work, once miniaudio is confirmed solid across every
-target platform, just delete `MagnumOpenALBackend`, `AudioBackendPreference`,
-`CreateAudioBackend`, and the debug UI's backend picker; `AudioSystem` keeps
-just `IAudioBackend` and `MiniaudioBackend`.
+Once miniaudio is confirmed solid across target platforms (including
+verifying it still covers macOS, where OpenAL remains the default-off
+backend -- see "Why miniaudio as the macOS default"), delete
+`MagnumOpenALBackend`, `AudioBackendPreference`, `CreateAudioBackend`, and the
+debug UI's backend picker; `AudioSystem` keeps just `IAudioBackend` and
+whichever single implementation remains.

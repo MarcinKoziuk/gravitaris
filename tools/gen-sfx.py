@@ -15,6 +15,18 @@ RATE = 44100
 random.seed(1337)  # reproducible assets
 
 
+def fade_tail(samples, ms=5.0):
+    """Ramp the last `ms` to exact zero so one-shot playback never cuts off
+    mid-amplitude -- an exponential envelope alone can still leave an audible
+    click at the buffer boundary (e.g. a square wave's abrupt edge)."""
+    n = len(samples)
+    fade = min(n, int(RATE * ms / 1000.0))
+    out = list(samples)
+    for i in range(fade):
+        out[n - fade + i] *= 1.0 - (i + 1) / fade
+    return out
+
+
 def write_wav(path, samples):
     peak = max(1e-9, max(abs(s) for s in samples))
     scale = 0.8 / peak  # normalize to -2 dBFS-ish
@@ -88,9 +100,10 @@ def hit():
 
 def main():
     outdir = sys.argv[1] if len(sys.argv) > 1 else "."
-    write_wav(f"{outdir}/laser-1.wav", laser())
+    write_wav(f"{outdir}/laser-1.wav", fade_tail(laser()))
+    # thrust loops seamlessly (crossfaded head/tail) -- no fade-out wanted.
     write_wav(f"{outdir}/thrust-1.wav", thrust())
-    write_wav(f"{outdir}/hit-1.wav", hit())
+    write_wav(f"{outdir}/hit-1.wav", fade_tail(hit()))
 
 
 if __name__ == "__main__":

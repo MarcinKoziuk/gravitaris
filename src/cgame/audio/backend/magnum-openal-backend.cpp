@@ -1,5 +1,3 @@
-#include <AL/alc.h>
-
 #include <Corrade/Containers/ArrayView.h>
 
 #include <Magnum/Audio/BufferFormat.h>
@@ -31,59 +29,31 @@ void ConfigurePositional(Audio::Source& source)
 
 bool MagnumOpenALBackend::Init()
 {
-    // Deliberately not Magnum::Audio::Context::tryCreate(): instrumentation
-    // this session proved it, not the platform, is the problem -- on this
-    // machine tryCreate() reports success and alcMakeContextCurrent() is
-    // even called with a genuinely valid context, yet alcGetCurrentContext()
-    // reads back null immediately after, and every subsequent AL call then
-    // fails with AL_INVALID_OPERATION (the same symptom the ADR originally
-    // attributed to macOS/CoreAudio only -- it reproduces on Windows too).
-    // A hand-rolled ALC sequence with the identical device specifier and
-    // attribute list Magnum's tryCreate() uses does not exhibit this, so we
-    // own the device/context ourselves; Audio::Buffer/Audio::Source don't go
-    // through Context::tryCreate() at all and are unaffected.
-    const ALCchar* deviceSpecifier = alcGetString(nullptr, ALC_DEFAULT_DEVICE_SPECIFIER);
-    m_device = alcOpenDevice(deviceSpecifier);
-    if (!m_device) {
+    // Let Magnum create the context -- do NOT open the device / make a context
+    // current with raw alc* here. OpenAL Soft is statically linked into BOTH
+    // this exe and MagnumAudio.dll (two private copies of OpenAL's global
+    // "current context" state, since a shared OpenAL32.dll would collide with
+    // the legacy Creative router in System32 -- see CMakeLists). The live
+    // playback calls (Buffer::setData, Source::play, Renderer::* -- all inline
+    // in Magnum's headers but reached through the same OpenAL Soft the DLL
+    // bundles) resolve against the DLL's copy, so the context must be made
+    // current in THAT copy: tryCreate(), compiled into the DLL, does exactly
+    // that. A prior attempt to own the device/context via raw alc* in this TU
+    // pointed a context at the exe's copy instead and produced dead silence.
+    //
+    // Likewise do not "verify" with alcGetCurrentContext() here: that call,
+    // compiled into the exe, reads the exe's copy and always sees null even
+    // when the DLL's context is live -- a cross-module false negative that
+    // was previously misread as a Magnum/tryCreate bug. See
+    // docs/adr/0003-audio-backend.md.
+    m_context.emplace(Magnum::NoCreate);
+    if (!m_context->tryCreate(Audio::Context::Configuration{})) {
         LOG(warning) << "[audio][openal] no OpenAL device";
-        return false;
-    }
-
-    m_alContext = alcCreateContext(m_device, nullptr);
-    if (!m_alContext) {
-        LOG(warning) << "[audio][openal] cannot create context";
-        alcCloseDevice(m_device);
-        m_device = nullptr;
-        return false;
-    }
-
-    alcMakeContextCurrent(m_alContext);
-    if (alcGetCurrentContext() != m_alContext) {
-        LOG(warning) << "[audio][openal] context did not become current";
-        alcDestroyContext(m_alContext);
-        alcCloseDevice(m_device);
-        m_alContext = nullptr;
-        m_device = nullptr;
+        m_context.reset();
         return false;
     }
 
     return true;
-}
-
-MagnumOpenALBackend::~MagnumOpenALBackend()
-{
-    // Buffers/Sources must be destroyed (they call alDeleteBuffers/Sources)
-    // while their context is still current; both vectors are members
-    // destructed before this body runs would be too late, so clear them
-    // explicitly first.
-    m_buffers.clear();
-    m_voices.clear();
-
-    if (m_alContext) {
-        alcMakeContextCurrent(nullptr);
-        alcDestroyContext(m_alContext);
-    }
-    if (m_device) alcCloseDevice(m_device);
 }
 
 SoundBufferHandle MagnumOpenALBackend::UploadBuffer(
