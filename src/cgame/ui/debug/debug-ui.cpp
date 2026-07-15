@@ -5,6 +5,7 @@
 #include "debug-ui.hpp"
 #include "post-process-panel.hpp"
 #include "renderer-panel.hpp"
+#include "audio-panel.hpp"
 #include "spawn-panel.hpp"
 #include "trajectory-panel.hpp"
 #include "flight-panel.hpp"
@@ -59,6 +60,10 @@ void DebugUi::BuildFrame()
             }
             if (ImGui::BeginTabItem("Renderer")) {
                 DrawRendererPanel(m_game);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Audio")) {
+                DrawAudioPanel(m_game);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Spawn")) {

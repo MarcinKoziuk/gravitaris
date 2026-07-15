@@ -17,7 +17,7 @@ CGame::CGame(IFilesystem &filesystem)
     : Game(filesystem, CreateEntitySpawner())
     , m_simpleModelRenderer(m_registry, filesystem, m_resourceLoader)
     , m_modelRenderer2(m_registry, filesystem, m_resourceLoader)
-    , m_audioSystem(m_registry, filesystem)
+    , m_audioSystem(m_registry, m_resourceLoader)
 {
     m_camera.SetZoom(2.f);
 }

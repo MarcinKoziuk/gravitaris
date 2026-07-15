@@ -8,6 +8,7 @@ class CGame;
 
 // resource
 class Model;
+class AudioClip;
 
 // component
 struct Renderable;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include <optional>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -9,45 +9,58 @@
 
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Vector2.h>
-#include <Magnum/Audio/Context.h>
-#include <Magnum/Audio/Buffer.h>
-#include <Magnum/Audio/Source.h>
 
 #include <gravitaris/game/fwd.hpp>
+#include <gravitaris/game/resource/common/resource-ptr.hpp>
+
+#include <gravitaris/cgame/fwd.hpp>
+#include <gravitaris/cgame/audio/audio-backend.hpp>
+#include <gravitaris/cgame/audio/audio-backend-factory.hpp>
 
 namespace Gravitaris {
 
 using Magnum::Vector2;
 
-// Client-side positional audio (OpenAL via Magnum::Audio). The 2D world maps
-// to OpenAL's 3D space with the listener hovering above the camera position,
-// so left/right panning and distance attenuation fall out of the plane
-// geometry. Event sources:
+// Client-side positional audio, backend-agnostic (see IAudioBackend and
+// docs/adr/0003-audio-backend.md). The 2D world maps to the backend's 3D
+// space with the listener hovering above the camera position, so left/right
+// panning and distance attenuation fall out of the plane geometry. Sound
+// assets are AudioClip resources, loaded reactively through ResourceLoader
+// (mirrors ModelRenderer2's OnCreate<Model>/OnDestroy<Model> pattern) rather
+// than read/parsed ad hoc. Event sources:
 //  - gunshots: flecs observer on Bullet creation (frag shrapnel, TeamId::None,
 //    is skipped -- it's debris, not a gun),
 //  - hits: rising edge of Damageable::flashAmount (set to 1 on every hit),
-//  - thrust: looping per-entity source while Controls::thrustForward is held.
+//  - thrust: looping per-entity voice while Controls::thrustForward is held.
 class AudioSystem {
 private:
     struct ThrusterLoop {
-        Magnum::Audio::Source source;
+        VoiceHandle voice;
         bool seen = false;
     };
 
     flecs::world& m_registry;
+    ResourceLoader& m_resourceLoader;
 
-    Magnum::Audio::Context m_context;
+    std::unique_ptr<IAudioBackend> m_backend;
+    AudioBackendPreference m_backendPreference = AudioBackendPreference::Auto;
     bool m_enabled = false;
 
-    // Optional because Audio::Buffer's constructor calls alGenBuffers, which
-    // needs a current AL context -- these must be created after tryCreate(),
-    // not as eagerly-constructed members.
-    std::optional<Magnum::Audio::Buffer> m_laserBuffer;
-    std::optional<Magnum::Audio::Buffer> m_thrustBuffer;
-    std::optional<Magnum::Audio::Buffer> m_hitBuffer;
+    // Reactive cache: AudioClip resource id -> uploaded buffer handle in the
+    // CURRENT backend. Populated by HandleClipAdded (ResourceLoader's
+    // OnCreate<AudioClip>), erased by HandleClipRemoved (OnDestroy). Mirrors
+    // ModelRenderer2::m_baked.
+    std::unordered_map<id_t, SoundBufferHandle> m_buffers;
 
-    // Round-robin pool for one-shot sounds (shots, hits).
-    std::vector<Magnum::Audio::Source> m_oneShotPool;
+    // Kept alive (and used to re-upload on a backend switch -- OnCreate only
+    // fires once per resource lifetime, not every time the backend changes).
+    // Only three named clips exist today; if/when sounds become dynamically
+    // spawned like Models, generalize this into an id_t-keyed map instead.
+    ResourcePtr<const AudioClip> m_laserClip;
+    ResourcePtr<const AudioClip> m_thrustClip;
+    ResourcePtr<const AudioClip> m_hitClip;
+
+    std::vector<VoiceHandle> m_oneShotPool;
     std::size_t m_poolCursor = 0;
 
     std::unordered_map<flecs::entity_t, ThrusterLoop> m_thrusters;
@@ -60,15 +73,25 @@ private:
     flecs::observer m_bulletObserver;
     std::vector<Vector2> m_pendingShots;
 
-    bool LoadBuffer(IFilesystem& filesystem, const char* path,
-                    std::optional<Magnum::Audio::Buffer>& buffer);
+    void HandleClipAdded(const AudioClip& clip, id_t id);
+    void HandleClipRemoved(const AudioClip& clip, id_t id);
 
-    void PlayOneShot(Magnum::Audio::Buffer& buffer, const Vector2& pos, float gain);
+    void PlayOneShotById(id_t clipId, const Vector2& pos, float gain);
+
+    void AcquireVoicePool();
 
 public:
-    AudioSystem(flecs::world& registry, IFilesystem& filesystem);
+    AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader);
 
     ~AudioSystem();
+
+    // Tears down the current backend (releasing its voices/buffers) and
+    // creates a new one per `preference`, re-uploading every still-live clip
+    // into it. Safe to call at runtime (the debug UI's backend dropdown does).
+    void SetBackendPreference(AudioBackendPreference preference);
+    [[nodiscard]] AudioBackendPreference GetBackendPreference() const { return m_backendPreference; }
+    [[nodiscard]] const char* GetBackendName() const { return m_backend ? m_backend->Name() : "none"; }
+    [[nodiscard]] bool IsEnabled() const { return m_enabled; }
 
     // Drives everything: listener follows the camera, queued shots play,
     // hit flashes trigger, thruster loops start/stop/move. Call once per

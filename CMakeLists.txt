@@ -369,6 +369,16 @@ add_executable(GravitarisNG
     src/cgame/cgame.cpp
     include/gravitaris/cgame/audio/audio-system.hpp
     src/cgame/audio/audio-system.cpp
+    include/gravitaris/cgame/audio/audio-backend.hpp
+    include/gravitaris/cgame/audio/audio-backend-factory.hpp
+    src/cgame/audio/audio-backend-factory.cpp
+    include/gravitaris/cgame/audio/backend/magnum-openal-backend.hpp
+    src/cgame/audio/backend/magnum-openal-backend.cpp
+    include/gravitaris/cgame/audio/backend/miniaudio-backend.hpp
+    src/cgame/audio/backend/miniaudio-backend.cpp
+    extlibs/miniaudio/miniaudio_impl.c
+    include/gravitaris/cgame/resource/audio-clip.hpp
+    src/cgame/resource/audio-clip.cpp
     include/gravitaris/cgame/resource/model.hpp
     src/cgame/resource/model.cpp
     include/gravitaris/cgame/renderer/simple-model-renderer.hpp
@@ -411,6 +421,8 @@ add_executable(GravitarisNG
     src/cgame/ui/debug/debug-ui.cpp
     src/cgame/ui/debug/post-process-panel.hpp
     src/cgame/ui/debug/post-process-panel.cpp
+    src/cgame/ui/debug/audio-panel.hpp
+    src/cgame/ui/debug/audio-panel.cpp
     src/cgame/ui/debug/renderer-panel.hpp
     src/cgame/ui/debug/renderer-panel.cpp
     src/cgame/ui/debug/spawn-panel.hpp
