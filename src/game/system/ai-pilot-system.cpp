@@ -23,7 +23,7 @@ using Magnum::Vector2d;
 
 static constexpr double PI = 3.14159265358979323846;
 
-static constexpr double BULLET_SPEED = 200.0; // matches ship-controls-system muzzle speed
+static constexpr double BULLET_SPEED = 300.0; // matches ship-controls-system's BULLET_MUZZLE_SPEED
 
 static double WrapToPi(double angle);
 static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Vector2d& relVel,
@@ -207,16 +207,29 @@ void AIPilotSystem::Update(std::uint64_t step, std::optional<flecs::entity> play
                     const Vector2d aim = relPos + relVel * (*t);
                     const double aimHeading = std::atan2(aim.y(), aim.x());
                     const double heading = static_cast<double>(transf.rot) - PI / 2.0;
-                    double tolerance = personality.fireTolerance;
-                    if (personality.aimJitter > 0.0) {
-                        tolerance += (NextUnit(rng) - 0.5) * 2.0 * personality.aimJitter;
+
+                    // Rolled once per firing opportunity (not every tick) and
+                    // held steady while waiting for an aligned shot -- a
+                    // sloppy shot is then a real, fixed aiming error rather
+                    // than the fire threshold flickering randomly tick to
+                    // tick (which would look like the gun spraying).
+                    if (personality.aimJitter > 0.0 && !pilot.aimBiasRolled) {
+                        pilot.aimBias = (NextUnit(rng) - 0.5) * 2.0 * personality.aimJitter;
+                        pilot.aimBiasRolled = true;
                     }
+                    const double tolerance = personality.fireTolerance
+                            + (personality.aimJitter > 0.0 ? pilot.aimBias : 0.0);
+
                     if (std::abs(WrapToPi(aimHeading - heading)) < tolerance) {
                         flags.firePrimary = true;
                         pilot.fireCooldown = personality.fireInterval;
+                        pilot.aimBiasRolled = false; // roll fresh for the next shot
                     }
                 }
             }
+        }
+        else {
+            pilot.aimBiasRolled = false; // no live shot attempt -- clear for next time
         }
 
         queue.Push(InputCommand{step, flags});

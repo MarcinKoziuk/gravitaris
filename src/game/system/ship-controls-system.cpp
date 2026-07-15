@@ -18,6 +18,7 @@ using Magnum::Vector2d;
 
 static constexpr double BULLET_LIFETIME_SECONDS = 3.0;
 static constexpr float BULLET_DAMAGE = 10.f;
+static constexpr double BULLET_MUZZLE_SPEED = 300.0; // matches ai-pilot-system's BULLET_SPEED
 
 ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner,
                                        PhysicsSystem& physicsSystem)
@@ -50,8 +51,8 @@ static std::pair<Vector2d, Vector2d> GetBulletSpawnPosAndVel(const Transform& tr
         pos += transf.pos;
 
         Vector2d vel(
-                200.0 * std::cos(double(transf.rot - Radd(1.5708))),
-                200.0 * std::sin(double(transf.rot - Radd(1.5708)))
+                BULLET_MUZZLE_SPEED * std::cos(double(transf.rot - Radd(1.5708))),
+                BULLET_MUZZLE_SPEED * std::sin(double(transf.rot - Radd(1.5708)))
         );
 
         vel += transf.vel;

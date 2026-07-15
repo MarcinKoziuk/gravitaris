@@ -23,7 +23,7 @@ enum class AIBehavior {
 struct AIPersonality {
     double engageRange = 500.0;      // pursue the target inside this
     double standoffDistance = 50.0;  // desired range to hold during Intercept
-    double fireRange = 250.0;
+    double fireRange = 350.0;        // opens fire this far out (was 250)
     double fireTolerance = 0.12;     // rad off the lead solution, still fires
 
     // Gravity-well danger avoidance. A predicted approach inside evadeRadius
@@ -34,12 +34,12 @@ struct AIPersonality {
     int dangerLookaheadSteps = 120;  // ~2s at the fixed tick
 
     std::uint32_t decisionInterval = 15; // ticks between tactical re-evaluations
-    std::uint32_t fireInterval = 30;     // ticks between shots
+    std::uint32_t fireInterval = 15;     // ticks between shots (was 30 -- 2x rate)
 
     // "Fuzzy"/character knobs -- 0 disables each. Deterministic per (entity,
     // tick) seed (see AIPilotSystem), so replays stay bit-exact.
     double reactionJitter = 0.0;     // +/- fraction of decisionInterval
-    double aimJitter = 0.0;          // +/- rad added to fireTolerance per shot
+    double aimJitter = 0.05;         // +/- rad added to fireTolerance per shot
     double dangerIgnoreChance = 0.0; // odds [0,1) of shrugging off a fresh
                                      // danger episode entirely (Reckless) --
                                      // rolled once per episode, not every
@@ -70,6 +70,13 @@ struct AIPilot {
     // not part of the personality itself.
     bool wasInDanger = false;
     bool dangerSuppressed = false;
+
+    // Transient per-shot-attempt aim bias for AIPersonality::aimJitter: rolled
+    // once when a firing opportunity opens and held steady while waiting for
+    // an aligned shot, so a "sloppy" shot is a real, fixed aiming error rather
+    // than the fire threshold flickering randomly tick to tick.
+    double aimBias = 0.0;
+    bool aimBiasRolled = false;
 };
 
 } // namespace Gravitaris
