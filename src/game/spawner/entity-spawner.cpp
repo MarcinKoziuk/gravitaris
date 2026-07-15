@@ -32,7 +32,7 @@ flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position)
     return entity;
 }
 
-flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position)
+flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, AIPersonalityPreset preset)
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
 
@@ -44,6 +44,7 @@ flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position)
     entity.emplace<AIPilot>();
     entity.emplace<Team>(TeamId::Red);
     entity.emplace<Damageable>();
+    ApplyAIPersonalityPreset(entity.get_mut<AIPilot>(), preset);
     AddRenderable(entity, modelId);
 
     return entity;

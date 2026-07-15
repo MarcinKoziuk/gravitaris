@@ -23,19 +23,23 @@ using Magnum::Vector2d;
 
 static constexpr double PI = 3.14159265358979323846;
 
-static constexpr double ENGAGE_RANGE = 500.0;   // pursue the target inside this
-static constexpr double STANDOFF_DISTANCE = 50.0;
-static constexpr double FIRE_RANGE = 250.0;
-static constexpr double FIRE_TOLERANCE = 0.12;  // rad off the lead solution
-static constexpr double EVADE_RADIUS = 90.0;    // distance to a well considered dangerous
-static constexpr double BULLET_SPEED = 200.0;   // matches ship-controls-system muzzle speed
-static constexpr std::uint32_t DECISION_INTERVAL = 15;
-static constexpr std::uint32_t FIRE_INTERVAL = 30;
-static constexpr int DANGER_LOOKAHEAD_STEPS = 120; // 2 s at the fixed tick
+static constexpr double BULLET_SPEED = 200.0; // matches ship-controls-system muzzle speed
 
 static double WrapToPi(double angle);
 static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Vector2d& relVel,
                                                 double projectileSpeed);
+
+// SplitMix64 -> a double in [0, 1). Deterministic per (tick, entity) seed, no
+// global RNG state, so replays stay bit-identical (same pattern as
+// death-system.cpp's frag scatter).
+static double NextUnit(std::uint64_t& state)
+{
+    std::uint64_t z = (state += 0x9E3779B97F4A7C15ull);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    z = z ^ (z >> 31);
+    return (z >> 11) * (1.0 / 9007199254740992.0); // 53-bit mantissa
+}
 
 AIPilotSystem::AIPilotSystem(flecs::world& registry, PhysicsSystem& physicsSystem,
                              TrajectoryPredictor& predictor)
@@ -61,6 +65,12 @@ void AIPilotSystem::Update(std::uint64_t step, std::optional<flecs::entity> play
 
     m_registry.each([&](flecs::entity ent, Transform& transf, PhysicsRef& ref,
                         AIPilot& pilot, InputQueue& queue) {
+        const AIPersonality& personality = pilot.personality;
+
+        // Deterministic per-(tick, entity) seed for this pilot's jitter/
+        // danger-ignore rolls below -- same value every replay of this tick.
+        std::uint64_t rng = step * 0x9E3779B97F4A7C15ull ^ (ent.id() + 0x632BE59Bull);
+
         const Source* well = nullptr;
         for (const Source& src : sources) {
             if (src.entity == ent) continue;
@@ -73,39 +83,36 @@ void AIPilotSystem::Update(std::uint64_t step, std::optional<flecs::entity> play
         const Transform* targetTransf =
                 pilot.target.is_alive() ? pilot.target.try_get<Transform>() : nullptr;
 
+        const AIBehavior previous = pilot.behavior;
+
         if (pilot.decisionCooldown > 0) {
             --pilot.decisionCooldown;
         }
         else {
-            pilot.decisionCooldown = DECISION_INTERVAL;
+            if (personality.reactionJitter > 0.0) {
+                const double jitter = (NextUnit(rng) - 0.5) * 2.0
+                        * personality.reactionJitter * personality.decisionInterval;
+                pilot.decisionCooldown = static_cast<std::uint32_t>(
+                        std::max(1.0, static_cast<double>(personality.decisionInterval) + jitter));
+            }
+            else {
+                pilot.decisionCooldown = personality.decisionInterval;
+            }
 
             pilot.guidance.accel = ShipControlsSystem::THRUST_FORCE
                     / cpBodyGetMass(m_physicsSystem.GetBody(ref).cp.body.get());
 
-            bool danger = false;
-            if (well) {
-                const std::vector<Vector2d> path =
-                        m_predictor.Predict(ent, DANGER_LOOKAHEAD_STEPS, Game::PHYSICS_DELTA);
-                for (const Vector2d& p : path) {
-                    if ((p - well->pos).length() < EVADE_RADIUS) {
-                        danger = true;
-                        break;
-                    }
-                }
-            }
-
-            const AIBehavior previous = pilot.behavior;
-            if (danger) {
-                pilot.behavior = AIBehavior::Evade;
-            }
-            else if (targetTransf && (targetTransf->pos - transf.pos).length() < ENGAGE_RANGE) {
+            // Tactical pick among Intercept/Orbit/Idle; the danger check below
+            // (which runs every tick, not just on this slower cadence) can
+            // still override this with Evade regardless of what's picked here.
+            if (targetTransf && (targetTransf->pos - transf.pos).length() < personality.engageRange) {
                 pilot.behavior = AIBehavior::Intercept;
             }
             else if (well) {
                 pilot.behavior = AIBehavior::Orbit;
                 if (previous != AIBehavior::Orbit) {
                     const Vector2d r = transf.pos - well->pos;
-                    pilot.patrolRadius = std::max(r.length(), EVADE_RADIUS * 2.0);
+                    pilot.patrolRadius = std::max(r.length(), personality.evadeRadius * 2.0);
                     const double cross = r.x() * transf.vel.y() - r.y() * transf.vel.x();
                     pilot.patrolDirection = (cross < 0.0) ? -1.0 : 1.0;
                 }
@@ -115,17 +122,65 @@ void AIPilotSystem::Update(std::uint64_t step, std::optional<flecs::entity> play
             }
         }
 
+        // Danger check: every tick, not gated behind decisionCooldown. A
+        // pursuit/orbit path is actively thrust-driven and can curve toward a
+        // well between decision points; TrajectoryPredictor only coasts
+        // (gravity, no thrust -- see its class comment), so checking every
+        // tick means the moment the ship's actual velocity starts curving
+        // into danger, it's caught within a tick instead of up to
+        // decisionInterval ticks late.
+        bool predictedDanger = false;
+        if (well) {
+            const std::vector<Vector2d> path =
+                    m_predictor.Predict(ent, personality.dangerLookaheadSteps, Game::PHYSICS_DELTA);
+            for (const Vector2d& p : path) {
+                if ((p - well->pos).length() < personality.evadeRadius) {
+                    predictedDanger = true;
+                    break;
+                }
+            }
+        }
+
+        // Roll once per fresh danger episode (not every tick it persists) so
+        // a Reckless ship that shrugs off a warning actually commits to the
+        // risky path rather than re-rolling itself into evading a tick later.
+        if (predictedDanger && !pilot.wasInDanger) {
+            pilot.dangerSuppressed = personality.dangerIgnoreChance > 0.0
+                    && NextUnit(rng) < personality.dangerIgnoreChance;
+        }
+        if (!predictedDanger) {
+            pilot.dangerSuppressed = false;
+        }
+        pilot.wasInDanger = predictedDanger;
+
+        const bool effectiveDanger = predictedDanger && !pilot.dangerSuppressed;
+
+        if (effectiveDanger) {
+            pilot.behavior = AIBehavior::Evade;
+        }
+        else if (pilot.behavior == AIBehavior::Evade) {
+            // Hysteresis: don't hand control back the instant the prediction
+            // clears -- wait until genuinely clear of the well, or this would
+            // flap Evade/Intercept right at the trigger boundary.
+            const bool clear = !well
+                    || (transf.pos - well->pos).length() > personality.evadeRadius * personality.evadeMargin;
+            if (clear) {
+                pilot.decisionCooldown = 0; // re-pick a tactical behavior next tick
+            }
+        }
+
         Vector2d desiredVel = transf.vel; // Idle: no correction
         switch (pilot.behavior) {
             case AIBehavior::Evade:
                 if (well) {
-                    desiredVel = EvadeBody(transf, well->pos, EVADE_RADIUS * 1.5, pilot.guidance);
+                    desiredVel = EvadeBody(transf, well->pos,
+                                          personality.evadeRadius * personality.evadeMargin, pilot.guidance);
                 }
                 break;
             case AIBehavior::Intercept:
                 if (targetTransf) {
                     GuidanceParams standoff = pilot.guidance;
-                    standoff.arriveRadius = STANDOFF_DISTANCE;
+                    standoff.arriveRadius = personality.standoffDistance;
                     desiredVel = InterceptEntity(transf, *targetTransf, standoff);
                 }
                 break;
@@ -147,14 +202,18 @@ void AIPilotSystem::Update(std::uint64_t step, std::optional<flecs::entity> play
         else if (pilot.behavior == AIBehavior::Intercept && targetTransf) {
             const Vector2d relPos = targetTransf->pos - transf.pos;
             const Vector2d relVel = targetTransf->vel - transf.vel;
-            if (relPos.length() < FIRE_RANGE) {
+            if (relPos.length() < personality.fireRange) {
                 if (std::optional<double> t = SolveInterceptTime(relPos, relVel, BULLET_SPEED)) {
                     const Vector2d aim = relPos + relVel * (*t);
                     const double aimHeading = std::atan2(aim.y(), aim.x());
                     const double heading = static_cast<double>(transf.rot) - PI / 2.0;
-                    if (std::abs(WrapToPi(aimHeading - heading)) < FIRE_TOLERANCE) {
+                    double tolerance = personality.fireTolerance;
+                    if (personality.aimJitter > 0.0) {
+                        tolerance += (NextUnit(rng) - 0.5) * 2.0 * personality.aimJitter;
+                    }
+                    if (std::abs(WrapToPi(aimHeading - heading)) < tolerance) {
                         flags.firePrimary = true;
-                        pilot.fireCooldown = FIRE_INTERVAL;
+                        pilot.fireCooldown = personality.fireInterval;
                     }
                 }
             }

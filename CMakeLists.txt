@@ -355,6 +355,8 @@ add_executable(GravitarisNG
     src/game/gnc/control/flight-controller.cpp
     include/gravitaris/game/gnc/guidance/behaviors.hpp
     src/game/gnc/guidance/behaviors.cpp
+    include/gravitaris/game/gnc/ai-personality-presets.hpp
+    src/game/gnc/ai-personality-presets.cpp
     include/gravitaris/game/system/bullet-lifetime-system.hpp
     src/game/system/bullet-lifetime-system.cpp
     include/gravitaris/game/system/damage-system.hpp

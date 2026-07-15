@@ -6,6 +6,7 @@
 
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/id.hpp>
+#include <gravitaris/game/gnc/ai-personality-presets.hpp>
 
 namespace Gravitaris {
 
@@ -26,7 +27,8 @@ public:
 
     flecs::entity SpawnPlayer(id_t modelId, Vector2d position);
 
-    flecs::entity SpawnAIShip(id_t modelId, Vector2d position);
+    flecs::entity SpawnAIShip(id_t modelId, Vector2d position,
+                              AIPersonalityPreset preset = AIPersonalityPreset::Balanced);
 
     flecs::entity SpawnPlanet(id_t modelId, Vector2d position);
 

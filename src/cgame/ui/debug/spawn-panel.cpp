@@ -3,6 +3,7 @@
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/ai-pilot.hpp>
+#include <gravitaris/game/gnc/ai-personality-presets.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
 #include <gravitaris/cgame/cgame.hpp>
@@ -11,9 +12,22 @@
 
 namespace Gravitaris {
 
+namespace {
+
+constexpr const char* PRESET_NAMES[] = {"Balanced", "Aggressive", "Cautious", "Sniper", "Reckless"};
+constexpr AIPersonalityPreset PRESETS[] = {
+        AIPersonalityPreset::Balanced, AIPersonalityPreset::Aggressive, AIPersonalityPreset::Cautious,
+        AIPersonalityPreset::Sniper, AIPersonalityPreset::Reckless,
+};
+
+} // namespace
+
 void DrawSpawnPanel(CGame& game)
 {
     ImGui::SeparatorText("AI ships");
+
+    static int presetIndex = 0;
+    ImGui::Combo("Personality", &presetIndex, PRESET_NAMES, IM_ARRAYSIZE(PRESET_NAMES));
 
     if (ImGui::Button("Spawn AI fighter near player")) {
         Vector2d pos{300.0, 200.0};
@@ -22,7 +36,7 @@ void DrawSpawnPanel(CGame& game)
         if (transform) {
             pos = transform->pos + Vector2d{250.0, 150.0};
         }
-        game.GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, pos);
+        game.GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, pos, PRESETS[presetIndex]);
     }
 
     ImGui::Text("AI ships alive: %d", game.GetRegistry().count<AIPilot>());
