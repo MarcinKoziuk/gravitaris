@@ -44,7 +44,8 @@ void CGame::NudgeManualZoom(float notches)
     m_manualZoomGraceRemaining = m_cameraParams.manualHold;
 }
 
-std::optional<Magnum::Vector2> CGame::SelectFramedEnemy(const Magnum::Vector2& from, TeamId playerTeam)
+std::optional<Magnum::Vector2> CGame::SelectFramedEnemy(const Magnum::Vector2& from, TeamId playerTeam,
+                                                        float& outCoverDist)
 {
     const float radiusSq = m_cameraParams.enemyRadius * m_cameraParams.enemyRadius;
 
@@ -54,6 +55,9 @@ std::optional<Magnum::Vector2> CGame::SelectFramedEnemy(const Magnum::Vector2& f
 
     std::optional<Magnum::Vector2> currentPos;
     float currentSq = 0.f;
+
+    // Farthest in-range enemy, so the zoom-fit can hold the whole group.
+    float maxInRangeSq = 0.f;
 
     // Enemy = damageable (a ship, not a bullet) on a real opposing team
     // (excludes neutral planets, which have no Team, and None-team shrapnel).
@@ -67,6 +71,9 @@ std::optional<Magnum::Vector2> CGame::SelectFramedEnemy(const Magnum::Vector2& f
             currentPos = pos;
             currentSq = distSq;
         }
+        if (distSq < radiusSq && distSq > maxInRangeSq) {
+            maxInRangeSq = distSq;
+        }
         if (distSq < nearestSq) {
             nearestSq = distSq;
             nearestPos = pos;
@@ -77,6 +84,8 @@ std::optional<Magnum::Vector2> CGame::SelectFramedEnemy(const Magnum::Vector2& f
     // Sticky selection: keep the current target while it's alive and inside
     // the (slightly enlarged, exit-hysteresis) radius, unless the nearest
     // rival is decisively closer -- see FRAMING_SWITCH_FACTOR's comment.
+    std::optional<Magnum::Vector2> framedPos;
+    float framedSq = 0.f;
     if (m_framedEnemy.is_valid() && m_framedEnemy.is_alive() && currentPos) {
         const float exitRadius = m_cameraParams.enemyRadius * FRAMING_EXIT_RADIUS_FACTOR;
         const bool currentInRange = currentSq <= exitRadius * exitRadius;
@@ -85,13 +94,22 @@ std::optional<Magnum::Vector2> CGame::SelectFramedEnemy(const Magnum::Vector2& f
                 nearestSq < currentSq * (FRAMING_SWITCH_FACTOR * FRAMING_SWITCH_FACTOR);
 
         if (currentInRange && !rivalDecisivelyCloser) {
-            return currentPos;
+            framedPos = currentPos;
+            framedSq = currentSq;
+        }
+    }
+    if (!framedPos) {
+        m_framedEnemy = nearest;
+        if (nearest) {
+            framedPos = nearestPos;
+            framedSq = nearestSq;
         }
     }
 
-    m_framedEnemy = nearest;
-    if (!nearest) return std::nullopt;
-    return nearestPos;
+    // Cover the farthest in-range enemy and the framed one (which may be held
+    // slightly beyond the radius by the exit hysteresis).
+    outCoverDist = std::sqrt(std::max(maxInRangeSq, framedPos ? framedSq : 0.f));
+    return framedPos;
 }
 
 void CGame::UpdateCamera(float dtSeconds)
@@ -112,8 +130,9 @@ void CGame::UpdateCamera(float dtSeconds)
 
     const Team* playerTeamComp = player->try_get<Team>();
     const TeamId playerTeam = playerTeamComp ? playerTeamComp->id : TeamId::Blue;
+    float coverDist = 0.f;
     const std::optional<Magnum::Vector2> enemy =
-            m_cameraParams.enemyFraming ? SelectFramedEnemy(playerPos, playerTeam) : std::nullopt;
+            m_cameraParams.enemyFraming ? SelectFramedEnemy(playerPos, playerTeam, coverDist) : std::nullopt;
 
     // Cancel a manual zoom override once the player actively flies the ship
     // (thrust/rotate), past the post-nudge grace period -- see field comment.
@@ -143,8 +162,10 @@ void CGame::UpdateCamera(float dtSeconds)
         const Magnum::Vector2 targetOffset = *enemy - playerPos;
         if (m_framingAmount < 0.05f) {
             m_framedEnemyOffset = targetOffset;
+            m_framedReach = coverDist;
         } else {
             m_framedEnemyOffset += (targetOffset - m_framedEnemyOffset) * framingAlpha;
+            m_framedReach += (coverDist - m_framedReach) * framingAlpha;
         }
     }
     const Magnum::Vector2& enemyOffset = m_framedEnemyOffset;
@@ -166,11 +187,13 @@ void CGame::UpdateCamera(float dtSeconds)
         // Faster -> zoomed out. Monotone, smooth, bounded.
         zoomTarget = m_cameraParams.maxZoom / (1.f + speed / m_cameraParams.speedFalloff);
 
-        // Zoom out further if needed to fit the enemy alongside the player,
-        // fading the requirement in/out with the same framing amount so it
-        // doesn't yank the zoom target before the pan has caught up.
+        // Zoom out further if needed to fit every nearby enemy alongside the
+        // player (m_framedReach covers the farthest in-range one), fading the
+        // requirement in/out with the same framing amount so it doesn't yank
+        // the zoom target before the pan has caught up. The minZoom clamp below
+        // still caps how far out this can go.
         if (m_framingAmount > 0.f) {
-            const float span = enemyOffset.length() + 2.f * m_cameraParams.framingMargin;
+            const float span = m_framedReach + 2.f * m_cameraParams.framingMargin;
             const float fitZoom = std::min(m_viewportSize.x(), m_viewportSize.y()) / std::max(span, 1.f);
             zoomTarget += (std::min(zoomTarget, fitZoom) - zoomTarget) * m_framingAmount;
         }

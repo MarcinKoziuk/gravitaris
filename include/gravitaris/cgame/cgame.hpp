@@ -85,12 +85,17 @@ protected:
     // (FRAMING_SWITCH_FACTOR) -- pure nearest-wins would snap the pan target
     // between ships every few frames.
     flecs::entity m_framedEnemy{};
-    // Eased enemy-relative offset (world units) actually used for the pan
-    // bias and zoom-fit. Smoothed toward the framed enemy's true offset so a
-    // target switch that does happen glides instead of stepping; kept after
-    // the enemy leaves range so the bias fades back out along the direction
-    // it faded in from.
+    // Eased enemy-relative offset (world units) used for the pan bias.
+    // Smoothed toward the framed enemy's true offset so a target switch that
+    // does happen glides instead of stepping; kept after the enemy leaves
+    // range so the bias fades back out along the direction it faded in from.
     Magnum::Vector2 m_framedEnemyOffset{0.f, 0.f};
+    // Eased distance (world units) from the player to the farthest in-range
+    // enemy, driving the zoom-fit so *all* nearby enemies fit in view (not
+    // just the framed one). Separate from the offset: pan follows one sticky
+    // target, zoom must contain the whole group. Smoothed so a far enemy
+    // entering/leaving range doesn't snap the zoom.
+    float m_framedReach = 0.f;
 
     // A rival enemy must be closer than (this * current target's distance)
     // to steal the framing. Exit hysteresis: the current target is kept
@@ -146,8 +151,11 @@ protected:
 
     // Updates m_framedEnemy (sticky nearest hostile, see field comment) and
     // returns the framed enemy's current position, or nullopt when nothing is
-    // in range. Will also feed the planned enemy/planet arrow indicators.
-    std::optional<Magnum::Vector2> SelectFramedEnemy(const Magnum::Vector2& from, TeamId playerTeam);
+    // in range. `outCoverDist` receives the distance to the farthest in-range
+    // enemy (0 if none), for the group zoom-fit. Will also feed the planned
+    // enemy/planet arrow indicators.
+    std::optional<Magnum::Vector2> SelectFramedEnemy(const Magnum::Vector2& from, TeamId playerTeam,
+                                                     float& outCoverDist);
 
     // Per-frame camera director: eases position (with enemy framing) and zoom
     // (speed-driven, enemy-fit, or manual override) toward their targets.
