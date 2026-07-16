@@ -44,27 +44,54 @@ void CGame::NudgeManualZoom(float notches)
     m_manualZoomGraceRemaining = m_cameraParams.manualHold;
 }
 
-std::optional<Magnum::Vector2> CGame::FindNearestEnemy(const Magnum::Vector2& from, TeamId playerTeam)
+std::optional<Magnum::Vector2> CGame::SelectFramedEnemy(const Magnum::Vector2& from, TeamId playerTeam)
 {
     const float radiusSq = m_cameraParams.enemyRadius * m_cameraParams.enemyRadius;
 
-    std::optional<Magnum::Vector2> nearest;
+    flecs::entity nearest{};
+    Magnum::Vector2 nearestPos{};
     float nearestSq = radiusSq;
+
+    std::optional<Magnum::Vector2> currentPos;
+    float currentSq = 0.f;
 
     // Enemy = damageable (a ship, not a bullet) on a real opposing team
     // (excludes neutral planets, which have no Team, and None-team shrapnel).
-    m_registry.each([&](flecs::entity, const Transform& t, const Team& team, const Damageable&) {
+    m_registry.each([&](flecs::entity entity, const Transform& t, const Team& team, const Damageable&) {
         if (team.id == playerTeam || team.id == TeamId::None) return;
 
         const Magnum::Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
         const float distSq = (pos - from).dot();
+
+        if (entity == m_framedEnemy) {
+            currentPos = pos;
+            currentSq = distSq;
+        }
         if (distSq < nearestSq) {
             nearestSq = distSq;
-            nearest = pos;
+            nearestPos = pos;
+            nearest = entity;
         }
     });
 
-    return nearest;
+    // Sticky selection: keep the current target while it's alive and inside
+    // the (slightly enlarged, exit-hysteresis) radius, unless the nearest
+    // rival is decisively closer -- see FRAMING_SWITCH_FACTOR's comment.
+    if (m_framedEnemy.is_valid() && m_framedEnemy.is_alive() && currentPos) {
+        const float exitRadius = m_cameraParams.enemyRadius * FRAMING_EXIT_RADIUS_FACTOR;
+        const bool currentInRange = currentSq <= exitRadius * exitRadius;
+        const bool rivalDecisivelyCloser =
+                nearest && nearest != m_framedEnemy &&
+                nearestSq < currentSq * (FRAMING_SWITCH_FACTOR * FRAMING_SWITCH_FACTOR);
+
+        if (currentInRange && !rivalDecisivelyCloser) {
+            return currentPos;
+        }
+    }
+
+    m_framedEnemy = nearest;
+    if (!nearest) return std::nullopt;
+    return nearestPos;
 }
 
 void CGame::UpdateCamera(float dtSeconds)
@@ -86,7 +113,7 @@ void CGame::UpdateCamera(float dtSeconds)
     const Team* playerTeamComp = player->try_get<Team>();
     const TeamId playerTeam = playerTeamComp ? playerTeamComp->id : TeamId::Blue;
     const std::optional<Magnum::Vector2> enemy =
-            m_cameraParams.enemyFraming ? FindNearestEnemy(playerPos, playerTeam) : std::nullopt;
+            m_cameraParams.enemyFraming ? SelectFramedEnemy(playerPos, playerTeam) : std::nullopt;
 
     // Cancel a manual zoom override once the player actively flies the ship
     // (thrust/rotate), past the post-nudge grace period -- see field comment.
@@ -108,8 +135,19 @@ void CGame::UpdateCamera(float dtSeconds)
     const float framingGoal = enemy ? 1.f : 0.f;
     m_framingAmount += (framingGoal - m_framingAmount) * framingAlpha;
 
-    if (enemy) m_lastEnemyOffset = *enemy - playerPos;
-    const Magnum::Vector2& enemyOffset = m_lastEnemyOffset;
+    // Ease the offset vector too: a framed-target switch (or the enemy's own
+    // motion) then glides rather than stepping. While framing is still nearly
+    // disengaged, snap instead -- the bias is invisible at ~0 and this avoids
+    // sweeping in from a stale offset left by an earlier fight.
+    if (enemy) {
+        const Magnum::Vector2 targetOffset = *enemy - playerPos;
+        if (m_framingAmount < 0.05f) {
+            m_framedEnemyOffset = targetOffset;
+        } else {
+            m_framedEnemyOffset += (targetOffset - m_framedEnemyOffset) * framingAlpha;
+        }
+    }
+    const Magnum::Vector2& enemyOffset = m_framedEnemyOffset;
 
     // --- Position target: bias toward the enemy when framing, and shrink the
     //     dead zone so the pair is actually tracked rather than drifting. ---

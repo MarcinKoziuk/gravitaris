@@ -79,10 +79,25 @@ protected:
     // instead means both the framing bias and the dead-zone shrink ramp in
     // smoothly, and FollowWithDeadZone's per-frame correction stays small.
     float m_framingAmount = 0.f;
-    // Last enemy-relative offset (world units); kept after the enemy leaves
-    // range so the bias fades back out along the direction it faded in from,
-    // rather than snapping to zero the instant no enemy is found.
-    Magnum::Vector2 m_lastEnemyOffset{0.f, 0.f};
+    // Which enemy the camera is framing. Sticky: with several enemies in
+    // range the raw "nearest" flips identity constantly as ships orbit, so
+    // the framed target only switches when a rival is decisively closer
+    // (FRAMING_SWITCH_FACTOR) -- pure nearest-wins would snap the pan target
+    // between ships every few frames.
+    flecs::entity m_framedEnemy{};
+    // Eased enemy-relative offset (world units) actually used for the pan
+    // bias and zoom-fit. Smoothed toward the framed enemy's true offset so a
+    // target switch that does happen glides instead of stepping; kept after
+    // the enemy leaves range so the bias fades back out along the direction
+    // it faded in from.
+    Magnum::Vector2 m_framedEnemyOffset{0.f, 0.f};
+
+    // A rival enemy must be closer than (this * current target's distance)
+    // to steal the framing. Exit hysteresis: the current target is kept
+    // until it exceeds enemyRadius by 15%, so a ship hovering right at the
+    // radius doesn't strobe the framing on/off.
+    static constexpr float FRAMING_SWITCH_FACTOR = 0.7f;
+    static constexpr float FRAMING_EXIT_RADIUS_FACTOR = 1.15f;
 
 public:
     // Tunables for the camera director (exposed in the Camera debug tab).
@@ -129,10 +144,10 @@ protected:
     };
     std::optional<GravitySource> FindHeaviestGravitySource();
 
-    // Nearest hostile ship (real enemy team, damageable) within
-    // m_cameraParams.enemyRadius of `from`, or nullopt. Used for camera
-    // framing; will also feed the planned enemy/planet arrow indicators.
-    std::optional<Magnum::Vector2> FindNearestEnemy(const Magnum::Vector2& from, TeamId playerTeam);
+    // Updates m_framedEnemy (sticky nearest hostile, see field comment) and
+    // returns the framed enemy's current position, or nullopt when nothing is
+    // in range. Will also feed the planned enemy/planet arrow indicators.
+    std::optional<Magnum::Vector2> SelectFramedEnemy(const Magnum::Vector2& from, TeamId playerTeam);
 
     // Per-frame camera director: eases position (with enemy framing) and zoom
     // (speed-driven, enemy-fit, or manual override) toward their targets.
