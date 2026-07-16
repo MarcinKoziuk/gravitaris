@@ -18,6 +18,7 @@
 #include <gravitaris/gravitaris.hpp>
 #include <gravitaris/game/fs/filesystem-physfs.hpp>
 #include <gravitaris/game/logging.hpp>
+#include <gravitaris/game/perf-monitor.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/input/input-command.hpp>
@@ -140,9 +141,15 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
 void GravitarisApplication::tickEvent()
 {
     const double curTime = GetTime();
+    const double rawFrameTime = curTime - m_prevTime;
+
+    // Real (unclamped) wall-clock delta between ticks -- the FPS the
+    // performance overlay reports, as opposed to the clamped delta below that
+    // protects the physics step from a lag spike.
+    m_game->GetPerfMonitor().Record("Frame", static_cast<float>(rawFrameTime * 1000.0));
 
     // Prevent too big physics step on lag
-    const double frameTime = std::min(curTime - m_prevTime, .25);
+    const double frameTime = std::min(rawFrameTime, .25);
 
     m_prevTime = curTime;
 
@@ -156,7 +163,10 @@ void GravitarisApplication::tickEvent()
 
     redraw();
 
-    m_ui.Update();
+    {
+        ScopedPerfTimer timer(m_game->GetPerfMonitor(), "UI Update");
+        m_ui.Update();
+    }
 }
 
 // One command for the tick Update() is about to run: keyboard, autopilot and
@@ -249,6 +259,8 @@ void GravitarisApplication::StopReplay()
 
 void GravitarisApplication::RenderUi()
 {
+    ScopedPerfTimer timer(m_game->GetPerfMonitor(), "UI Render");
+
     // RmlUi uses raw OpenGL calls that bypass Magnum's state cache.
     Magnum::GL::Context::current().resetState(Magnum::GL::Context::State::EnterExternal);
     m_ui.Render();
@@ -266,9 +278,14 @@ void GravitarisApplication::drawEvent()
     m_ui.SetDimensions(fbSize.x(), fbSize.y());
     m_ui.SetDensityIndependentPixelRatio(PixelScale().x());
 
+    PerfMonitor& perf = m_game->GetPerfMonitor();
+
     // Game renders into the glow pass's offscreen target, not the screen,
     // so it can be blurred/composited.
-    m_glow->BeginScene(fbSize, logicalSize);
+    {
+        ScopedPerfTimer timer(perf, "Post-process Begin");
+        m_glow->BeginScene(fbSize, logicalSize);
+    }
     const double delta = m_frameTimeAccumulator / Game::PHYSICS_DELTA;
     m_game->Render(delta);
 
@@ -279,9 +296,13 @@ void GravitarisApplication::drawEvent()
     if (m_uiInWorld) {
         // UI into the scene before compositing, so it gets bloom + CRT too.
         RenderUi();
+        ScopedPerfTimer timer(perf, "Post-process Composite");
         m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, fbSize, animTime);
     } else {
-        m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, fbSize, animTime);
+        {
+            ScopedPerfTimer timer(perf, "Post-process Composite");
+            m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, fbSize, animTime);
+        }
         RenderUi();
     }
 
@@ -290,7 +311,10 @@ void GravitarisApplication::drawEvent()
 
     // Dev overlay on top of everything, crisp (drawn after the CRT present).
     Magnum::GL::defaultFramebuffer.bind();
-    m_debugUi->Draw();
+    {
+        ScopedPerfTimer timer(perf, "Debug UI");
+        m_debugUi->Draw();
+    }
 
     // The context is double-buffered, swap buffers
     swapBuffers();

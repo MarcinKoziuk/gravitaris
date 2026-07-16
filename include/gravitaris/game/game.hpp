@@ -9,6 +9,7 @@
 #include <Magnum/Math/Vector2.h>
 
 #include <gravitaris/game/fwd.hpp>
+#include <gravitaris/game/perf-monitor.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/input-system.hpp>
@@ -48,6 +49,10 @@ protected:
 
     AIPilotSystem m_aiPilotSystem;
 
+    // Dev performance overlay's timing data; sections are recorded from
+    // Game::Update() (physics/game logic) and, in CGame, from Render() too.
+    PerfMonitor m_perfMonitor;
+
     std::uint64_t m_step;
 
     std::optional<flecs::entity> m_player;
@@ -84,6 +89,9 @@ public:
 
     TrajectoryPredictor& GetTrajectoryPredictor()
     { return m_trajectoryPredictor; }
+
+    PerfMonitor& GetPerfMonitor()
+    { return m_perfMonitor; }
 
     EntitySpawner& GetEntitySpawner()
     { return *m_entitySpawner; }

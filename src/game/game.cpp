@@ -30,18 +30,25 @@ Game::Game(IFilesystem& filesystem)
 
 void Game::Update()
 {
-    m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
-    m_physicsSystem.Update();
-    // DamageSystem applies this step's bullet hits and landing impacts, so
-    // DeathSystem (next) sees final hp and can explode ships the same tick.
-    m_damageSystem.Update();
-    m_deathSystem.Update(m_step);
-    // Detect a player death from DeathSystem before any system reads m_player.
-    HandlePlayerRespawn();
-    m_aiPilotSystem.Update(m_step, m_player);
-    m_inputSystem.Update(m_step);
-    m_shipControlsSystem.Update(m_step);
-    m_bulletLifetimeSystem.Update(Game::PHYSICS_DELTA);
+    {
+        ScopedPerfTimer timer(m_perfMonitor, "Physics");
+        m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
+        m_physicsSystem.Update();
+    }
+
+    {
+        ScopedPerfTimer timer(m_perfMonitor, "Game Logic");
+        // DamageSystem applies this step's bullet hits and landing impacts, so
+        // DeathSystem (next) sees final hp and can explode ships the same tick.
+        m_damageSystem.Update();
+        m_deathSystem.Update(m_step);
+        // Detect a player death from DeathSystem before any system reads m_player.
+        HandlePlayerRespawn();
+        m_aiPilotSystem.Update(m_step, m_player);
+        m_inputSystem.Update(m_step);
+        m_shipControlsSystem.Update(m_step);
+        m_bulletLifetimeSystem.Update(Game::PHYSICS_DELTA);
+    }
 
     m_step++;
 }

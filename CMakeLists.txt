@@ -365,6 +365,8 @@ add_executable(GravitarisNG
     src/game/system/death-system.cpp
     include/gravitaris/game/system/physics-system.hpp
     src/game/system/physics-system.cpp
+    include/gravitaris/game/perf-monitor.hpp
+    src/game/perf-monitor.cpp
     src/game/game.cpp
     include/gravitaris/cgame/cgame.hpp
     include/gravitaris/cgame/team-color.hpp
@@ -433,6 +435,8 @@ add_executable(GravitarisNG
     src/cgame/ui/debug/trajectory-panel.cpp
     src/cgame/ui/debug/flight-panel.hpp
     src/cgame/ui/debug/flight-panel.cpp
+    src/cgame/ui/debug/perf-panel.hpp
+    src/cgame/ui/debug/perf-panel.cpp
     src/cgame/ui/debug/world-to-ui.hpp
 )
 
