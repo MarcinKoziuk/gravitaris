@@ -33,6 +33,10 @@ using namespace Magnum;
 
 namespace {
 
+// The visual group every model carries; SubmitOverlay's instances join this
+// pass (see RenderTag).
+const id_t OVERLAY_TAG = "model"_id;
+
 // Must match Line2Shader's vertex layout.
 struct LineVertex {
     Vector2 pointA;
@@ -310,6 +314,11 @@ Matrix3 ModelRenderer2::ViewProjection() const
             * Matrix3::translation(-m_cameraPos);
 }
 
+void ModelRenderer2::SubmitOverlay(id_t modelId, const Matrix3& transform, const Vector3& color, float flash)
+{
+    m_overlayScratch[modelId].push_back(InstanceData{transform, color, flash});
+}
+
 void ModelRenderer2::RenderTag(id_t tag, const std::function<bool(flecs::entity)>& filter)
 {
     for (auto& [modelId, instances] : m_instanceScratch) instances.clear();
@@ -337,6 +346,19 @@ void ModelRenderer2::RenderTag(id_t tag, const std::function<bool(flecs::entity)
 
         m_instanceScratch[modelId].push_back(InstanceData{transform, teamColor, flash});
     });
+
+    // Overlays are plain extra instances of the same baked group, so they only
+    // join the "model" pass -- they have no thruster/other tagged groups.
+    if (tag == OVERLAY_TAG) {
+        for (const auto& [modelId, overlays] : m_overlayScratch) {
+            if (overlays.empty()) continue;
+            const auto bakedIt = m_baked.find(modelId);
+            if (bakedIt == m_baked.end() || !bakedIt->second.contains(tag)) continue;
+
+            std::vector<InstanceData>& dst = m_instanceScratch[modelId];
+            dst.insert(dst.end(), overlays.begin(), overlays.end());
+        }
+    }
 
     for (auto& [modelId, instances] : m_instanceScratch) {
         if (instances.empty()) continue;
@@ -374,12 +396,15 @@ void ModelRenderer2::Render(double)
             .setViewProjection(ViewProjection())
             .setWidth(m_lineWidthPixels * m_pixelScale * zoomScale);
 
-    RenderTag("model"_id, {});
+    RenderTag(OVERLAY_TAG, {});
 
     RenderTag("_thrust"_id, [](flecs::entity entity) {
         const auto* controls = entity.try_get<Controls>();
         return controls && controls->actionFlags.thrustForward;
     });
+
+    // Submissions are per-frame: whoever wants an overlay next frame re-submits.
+    for (auto& [modelId, overlays] : m_overlayScratch) overlays.clear();
 }
 
 } // namespace Gravitaris

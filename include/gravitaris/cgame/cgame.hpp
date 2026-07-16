@@ -121,8 +121,43 @@ public:
         float framingTau = 1.2f;    // time constant for easing framing in/out as an enemy appears/leaves
     };
 
+    // Tunables for the off-screen target arrows (exposed in the HUD debug tab).
+    // Distances are world units; sizes are logical pixels (scaled by the HiDPI
+    // pixel scale like line width is).
+    struct IndicatorParams {
+        bool enabled = true;
+        float ringRadiusPx = 120.f;  // arrow ring radius around screen center
+        float arrowSizePx = 13.f;    // arrow width, and height at long range (see maxHeightFactor)
+        float enemyRange = 2500.f;   // show enemies within this
+        float planetRange = 6000.f;  // show planets within this (they're big, matter farther out)
+        float edgeMarginPx = 24.f;   // treat as off-screen this far inside the view edge
+        float fadeBandPx = 90.f;     // px past the edge over which an arrow fades fully in
+        float minStrength = 0.35f;   // brightness floor at max range (never fully invisible while in range)
+        // Height-only stretch at point-blank range (width never changes with
+        // distance, only with the edge-appear fade) -- 1 = no stretch, taller
+        // as the target closes in. Intentionally allowed to look "squished".
+        float maxHeightFactor = 2.5f;
+        // Multiplies the proximity fed into the height stretch, so it reaches
+        // maxHeightFactor within a 1/heightRampFactor fraction of the range --
+        // arrows stay flat over most of the range and only stretch tall right
+        // at the end, instead of ramping linearly across the whole range.
+        float heightRampFactor = 4.f;
+        int maxEnemies = 8;
+        int maxPlanets = 4;
+    };
+
 protected:
     CameraParams m_cameraParams;
+    IndicatorParams m_indicatorParams;
+
+    // Kept alive so the arrow glyph stays baked in ModelRenderer2 (loading a
+    // Model is what fires the renderer's OnCreate<Model>); overlays aren't
+    // entities, so nothing else holds a reference to it.
+    ResourcePtr<const Model> m_arrowModel;
+
+    // framebuffer-pixels per logical-pixel; needed here (not just forwarded to
+    // the renderers) to size the HiDPI-independent indicator ring/arrows.
+    float m_pixelScale = 1.f;
 
     // Shared line-thickness setting (pixels), forwarded to whichever
     // renderer is active; each converts it to its own internal units.
@@ -161,6 +196,11 @@ protected:
     // (speed-driven, enemy-fit, or manual override) toward their targets.
     void UpdateCamera(float dtSeconds);
 
+    // Submits an arrow overlay per nearby-but-off-screen enemy/planet, on a
+    // ring around screen center, pointing at the target. Call after UpdateCamera
+    // (needs the final camera pos/zoom) and before the renderer draws.
+    void UpdateIndicators();
+
     std::unique_ptr<EntitySpawner> CreateEntitySpawner() override;
 public:
     struct Defaults {
@@ -190,6 +230,7 @@ public:
     // logical units across HiDPI/Retina displays.
     void SetPixelScale(float scale)
     {
+        m_pixelScale = scale;
         m_modelRenderer2.SetPixelScale(scale);
         m_starfieldRenderer.SetPixelScale(scale);
     }
@@ -199,6 +240,7 @@ public:
     Camera& GetCamera() { return m_camera; }
 
     CameraParams& GetCameraParams() { return m_cameraParams; }
+    IndicatorParams& GetIndicatorParams() { return m_indicatorParams; }
     [[nodiscard]] float GetCameraZoom() const { return m_cameraZoom; }
     [[nodiscard]] bool IsManualZoomActive() const { return m_manualZoomActive; }
 

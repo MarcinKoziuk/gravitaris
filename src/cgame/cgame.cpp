@@ -13,12 +13,22 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 
 #include <gravitaris/cgame/spawner/centity-spawner.hpp>
+#include <gravitaris/cgame/team-color.hpp>
 #include <gravitaris/cgame/cgame.hpp>
 
 namespace Gravitaris {
+
+namespace {
+
+// Planets have no team; their arrows get a fixed neutral tint that reads as
+// "terrain", distinct from any team color.
+const Magnum::Vector3 PLANET_INDICATOR_COLOR{0.55f, 0.75f, 0.9f};
+
+} // namespace
 
 CGame::CGame(IFilesystem &filesystem)
     : Game(filesystem, CreateEntitySpawner())
@@ -29,6 +39,10 @@ CGame::CGame(IFilesystem &filesystem)
 {
     m_camera.SetZoom(Defaults::cameraZoom);
     m_modelRenderer2.SetReferenceZoom(Defaults::cameraZoom);
+
+    // Loading it is what bakes it into m_modelRenderer2 (via OnCreate<Model>);
+    // the ResourcePtr member then keeps it baked -- see m_arrowModel.
+    m_arrowModel = m_resourceLoader.Load<Model>("models/ui/arrow-1"_id);
 }
 
 void CGame::NudgeManualZoom(float notches)
@@ -209,6 +223,120 @@ void CGame::UpdateCamera(float dtSeconds)
     m_camera.SetZoom(m_cameraZoom);
 }
 
+void CGame::UpdateIndicators()
+{
+    if (!m_indicatorParams.enabled || !m_arrowModel) return;
+
+    const std::optional<flecs::entity> player = GetPlayer();
+    if (!player) return;
+    const Transform* playerTransf = player->try_get<Transform>();
+    if (!playerTransf) return;
+
+    const Team* playerTeamComp = player->try_get<Team>();
+    const TeamId playerTeam = playerTeamComp ? playerTeamComp->id : TeamId::Blue;
+
+    const Magnum::Vector2 playerPos{static_cast<float>(playerTransf->pos.x()),
+                                    static_cast<float>(playerTransf->pos.y())};
+    const Magnum::Vector2 cameraPos = m_camera.GetPosition();
+    const float zoom = m_camera.GetZoom();
+    if (zoom <= 0.f) return;
+
+    // The renderers map world->screen at `zoom` px per world unit, camera-
+    // centered (see ModelRenderer2::ViewProjection), so screen offsets are just
+    // world offsets from the camera scaled by zoom.
+    const Magnum::Vector2 halfExtentPx = m_viewportSize * 0.5f;
+    const float ringWorld = m_indicatorParams.ringRadiusPx * m_pixelScale / zoom;
+    const float arrowWorld = m_indicatorParams.arrowSizePx * m_pixelScale / zoom;
+
+    struct Candidate {
+        Magnum::Vector2 pos;
+        Magnum::Vector3 color;
+        float distance;
+    };
+    std::vector<Candidate> enemies;
+    std::vector<Candidate> planets;
+
+    // Enemy = damageable ship on a real opposing team -- same notion
+    // SelectFramedEnemy uses for the camera.
+    m_registry.each([&](flecs::entity, const Transform& t, const Team& team, const Damageable&) {
+        if (team.id == playerTeam || team.id == TeamId::None) return;
+        const Magnum::Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
+        const float dist = (pos - playerPos).length();
+        if (dist > m_indicatorParams.enemyRange) return;
+        enemies.push_back({pos, Magnum::Vector3{TeamColor(team.id)}, dist});
+    });
+
+    m_registry.each([&](flecs::entity entity, const Transform& t) {
+        if (!entity.has<Planet>()) return;
+        const Magnum::Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
+        const float dist = (pos - playerPos).length();
+        if (dist > m_indicatorParams.planetRange) return;
+        planets.push_back({pos, PLANET_INDICATOR_COLOR, dist});
+    });
+
+    // Nearest-first, then cap: with a crowded field the closest threats are the
+    // ones worth the screen space.
+    const auto byDistance = [](const Candidate& a, const Candidate& b) { return a.distance < b.distance; };
+    std::sort(enemies.begin(), enemies.end(), byDistance);
+    std::sort(planets.begin(), planets.end(), byDistance);
+    enemies.resize(std::min<std::size_t>(enemies.size(), m_indicatorParams.maxEnemies));
+    planets.resize(std::min<std::size_t>(planets.size(), m_indicatorParams.maxPlanets));
+
+    const auto submit = [&](const Candidate& c, float range) {
+        const Magnum::Vector2 fromCamera = c.pos - cameraPos;
+
+        // How far outside the view the target is, in px past the (inset) edge.
+        // Ramping the arrow in over fadeBandPx instead of switching it on at the
+        // boundary keeps a target that's drifting across the edge from popping.
+        const Magnum::Vector2 screenPx = fromCamera * zoom;
+        const Magnum::Vector2 inset = halfExtentPx - Magnum::Vector2{m_indicatorParams.edgeMarginPx * m_pixelScale};
+        const float past = std::max(std::abs(screenPx.x()) - std::max(inset.x(), 1.f),
+                                    std::abs(screenPx.y()) - std::max(inset.y(), 1.f));
+        if (past <= 0.f) return; // comfortably on screen: the target speaks for itself
+        const float edgeFade = std::clamp(past / std::max(m_indicatorParams.fadeBandPx * m_pixelScale, 1.f), 0.f, 1.f);
+
+        // Near targets read loud, distant ones stay legible but recede; also
+        // fades an arrow out as its target leaves range, so nothing blinks off.
+        const float nearness = std::clamp(1.f - c.distance / std::max(range, 1.f), 0.f, 1.f);
+        const float strength = edgeFade * (m_indicatorParams.minStrength
+                                           + (1.f - m_indicatorParams.minStrength) * nearness);
+        if (strength <= 0.01f) return;
+
+        // Ring center and pointing direction are player-relative, not camera-
+        // relative: enemy framing can offset the camera from the player, and
+        // the arrows should read as "which way from my ship", staying anchored
+        // on the player's screen position rather than the viewport's.
+        const Magnum::Vector2 fromPlayer = c.pos - playerPos;
+        const float len = fromPlayer.length();
+        if (len < 1e-3f) return;
+        const Magnum::Vector2 dir = fromPlayer / len;
+
+        // rot 0 points the glyph along -Y (ship convention, see arrow-1.svg), so
+        // adding a quarter turn to the direction's angle aims it outward.
+        const float rot = std::atan2(dir.y(), dir.x()) + Magnum::Constants::piHalf();
+
+        // Width only fades in/out at the screen edge (edgeFade), never shrinks
+        // with distance; height additionally stretches as the target closes
+        // in, so proximity reads as "taller", not "bigger" -- the local X/Y
+        // scaling is pre-rotation, so this is the arrow's own width/height
+        // regardless of which way it's pointing.
+        const float widthScale = arrowWorld * edgeFade;
+        const float heightNearness = std::clamp(nearness * m_indicatorParams.heightRampFactor, 0.f, 1.f);
+        const float heightScale = widthScale * (1.f + (m_indicatorParams.maxHeightFactor - 1.f) * heightNearness);
+
+        const Matrix3 transform = Matrix3::translation(playerPos + dir * ringWorld)
+                                * Matrix3::rotation(Magnum::Rad(rot))
+                                * Matrix3::scaling({widthScale, heightScale});
+
+        // No alpha in the line shader: on the black backdrop, scaling the color
+        // toward black is the fade.
+        m_modelRenderer2.SubmitOverlay(m_arrowModel.Id(), transform, c.color * strength);
+    };
+
+    for (const Candidate& c : planets) submit(c, m_indicatorParams.planetRange);
+    for (const Candidate& c : enemies) submit(c, m_indicatorParams.enemyRange);
+}
+
 void CGame::Render(double delta)
 {
     // Real wall-clock dt for the camera director (Render's `delta` is a fixed-
@@ -234,6 +362,10 @@ void CGame::Render(double delta)
 
     m_starfieldRenderer.SetZoom(m_camera.GetZoom());
     m_starfieldRenderer.SetCameraPosition(m_camera.GetPosition());
+
+    // Overlays ride the model renderer's instanced draw, so they must be
+    // submitted before it runs (and after UpdateCamera settles the view).
+    UpdateIndicators();
 
     {
         ScopedPerfTimer timer(m_perfMonitor, "Starfield");

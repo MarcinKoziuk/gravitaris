@@ -341,6 +341,7 @@ add_executable(GravitarisNG
     include/gravitaris/game/component/team.hpp
     include/gravitaris/game/component/bullet.hpp
     include/gravitaris/game/component/damageable.hpp
+    include/gravitaris/game/component/planet.hpp
     include/gravitaris/game/input/input-command.hpp
     include/gravitaris/game/input/input-log.hpp
     src/game/input/input-log.cpp
@@ -445,6 +446,8 @@ add_executable(GravitarisNG
     src/cgame/ui/debug/starfield-panel.cpp
     src/cgame/ui/debug/camera-panel.hpp
     src/cgame/ui/debug/camera-panel.cpp
+    src/cgame/ui/debug/hud-panel.hpp
+    src/cgame/ui/debug/hud-panel.cpp
     src/cgame/ui/debug/world-to-ui.hpp
 )
 

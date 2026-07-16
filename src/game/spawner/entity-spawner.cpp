@@ -7,6 +7,7 @@
 #include <gravitaris/game/component/ai-pilot.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
 namespace Gravitaris {
@@ -57,6 +58,7 @@ flecs::entity EntitySpawner::SpawnPlanet(id_t modelId, Vector2d position)
     auto entity = m_registry.entity();
     entity.emplace<Transform>(position);
     entity.emplace<RigidBodyDesc>("main"_id, body);
+    entity.add<Planet>();
     AddRenderable(entity, modelId);
 
     return entity;

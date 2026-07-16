@@ -68,6 +68,11 @@ private:
     std::unordered_map<id_t, std::unordered_map<id_t, BakedGroup>> m_baked;
     std::unordered_map<id_t, std::vector<InstanceData>> m_instanceScratch;
 
+    // Per-frame, non-entity instances (HUD arrows etc.), keyed by model id.
+    // Merged into the "model" group's pass alongside real entities and cleared
+    // at the end of Render(); see SubmitOverlay.
+    std::unordered_map<id_t, std::vector<InstanceData>> m_overlayScratch;
+
     Vector2 m_viewportSize{1280.f, 720.f};
     Vector2 m_cameraPos{0.f, 0.f};
     float m_pixelsPerUnit = 1.f; // zoom 1.0 matches ModelRenderer's zoom 1.0
@@ -103,6 +108,17 @@ public:
 
     void SetDebugForceFacetedCircles(bool force) { m_debugForceFacetedCircles = force; }
     [[nodiscard]] bool GetDebugForceFacetedCircles() const { return m_debugForceFacetedCircles; }
+
+    // Draws `modelId`'s "model" group once more this frame with an arbitrary
+    // transform, for things that aren't entities (HUD arrows, markers). Rides
+    // the same instanced draw as real entities, so overlays get the same line
+    // width and glow for free. `transform` is world space -- a caller wanting
+    // screen-anchored placement converts px to world itself (see
+    // CGame::UpdateIndicators). `color` fills the same slot as an entity's team
+    // color, i.e. it only reaches strokes/fills authored in
+    // TEAM_COLOR_PLACEHOLDER. Submissions last one frame: call every frame the
+    // overlay should be visible, before Render().
+    void SubmitOverlay(id_t modelId, const Matrix3& transform, const Vector3& color, float flash = 0.f);
 
     void Render(double delta);
 };

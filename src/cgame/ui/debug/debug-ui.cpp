@@ -12,6 +12,7 @@
 #include "perf-panel.hpp"
 #include "starfield-panel.hpp"
 #include "camera-panel.hpp"
+#include "hud-panel.hpp"
 
 namespace Gravitaris {
 
@@ -83,6 +84,10 @@ void DebugUi::BuildFrame()
             }
             if (ImGui::BeginTabItem("Camera")) {
                 DrawCameraPanel(m_game);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("HUD")) {
+                DrawHudPanel(m_game);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Starfield")) {
