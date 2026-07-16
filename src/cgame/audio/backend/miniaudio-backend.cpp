@@ -168,6 +168,13 @@ void MiniaudioBackend::SetVoicePosition(VoiceHandle voice, const Vector2& pos)
     if (v.initialized) ma_sound_set_position(v.sound.get(), pos.x(), pos.y(), 0.f);
 }
 
+void MiniaudioBackend::SetVoiceGain(VoiceHandle voice, float gain)
+{
+    if (voice.id == 0) return;
+    VoiceSlot& v = m_voices[voice.id - 1];
+    if (v.initialized) ma_sound_set_volume(v.sound.get(), gain);
+}
+
 bool MiniaudioBackend::IsVoicePlaying(VoiceHandle voice) const
 {
     if (voice.id == 0) return false;

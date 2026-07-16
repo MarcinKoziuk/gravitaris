@@ -39,6 +39,14 @@ private:
         bool seen = false;
     };
 
+    // A looping voice whose owner stopped thrusting: ramped down over a few
+    // frames before release, because hard-stopping a rumble mid-waveform
+    // clicks.
+    struct FadingVoice {
+        VoiceHandle voice;
+        float gain = 0.f;
+    };
+
     flecs::world& m_registry;
     ResourceLoader& m_resourceLoader;
 
@@ -64,6 +72,7 @@ private:
     std::size_t m_poolCursor = 0;
 
     std::unordered_map<flecs::entity_t, ThrusterLoop> m_thrusters;
+    std::vector<FadingVoice> m_fadingVoices;
 
     // Rising-edge tracking for Damageable::flashAmount; double-buffered so
     // entries for dead entities don't accumulate.

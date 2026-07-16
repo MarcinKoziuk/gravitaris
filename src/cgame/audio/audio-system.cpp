@@ -19,7 +19,14 @@ namespace {
 // panning gentle for nearby sources and doubles as the minimum distance.
 constexpr float LISTENER_HEIGHT = 250.f;
 
-constexpr std::size_t ONE_SHOT_POOL_SIZE = 8;
+// Sized so that simultaneous laser/hit one-shots (~0.15s each) from several
+// AI ships at full fire rate rarely exhaust it: stealing a voice that's still
+// mid-clip hard-cuts a near-full-scale waveform, which is an audible click.
+constexpr std::size_t ONE_SHOT_POOL_SIZE = 24;
+
+// Released thruster loops ramp to silence over this many frames instead of
+// hard-stopping mid-waveform (Update() has no dt; at 60 fps this is ~100 ms).
+constexpr float THRUST_FADE_FRAMES = 6.f;
 
 constexpr float LASER_GAIN = 0.5f;
 constexpr float HIT_GAIN = 0.85f;
@@ -115,10 +122,12 @@ void AudioSystem::SetBackendPreference(AudioBackendPreference preference)
     if (m_backend) {
         for (const VoiceHandle& voice : m_oneShotPool) m_backend->ReleaseVoice(voice);
         for (auto& [id, loop] : m_thrusters) m_backend->ReleaseVoice(loop.voice);
+        for (const FadingVoice& fading : m_fadingVoices) m_backend->ReleaseVoice(fading.voice);
         for (auto& [id, handle] : m_buffers) m_backend->ReleaseBuffer(handle);
     }
     m_oneShotPool.clear();
     m_thrusters.clear(); // still-thrusting entities re-acquire a fresh voice next Update()
+    m_fadingVoices.clear();
     m_buffers.clear();
 
     m_backendPreference = ResolveAudioBackendPreference(preference);
@@ -142,9 +151,18 @@ void AudioSystem::PlayOneShotById(id_t clipId, const Vector2& pos, float gain)
     const auto it = m_buffers.find(clipId);
     if (it == m_buffers.end()) return;
 
-    const VoiceHandle voice = m_oneShotPool[m_poolCursor];
-    m_poolCursor = (m_poolCursor + 1) % m_oneShotPool.size();
-    m_backend->PlayOneShot(voice, it->second, pos, gain);
+    // Prefer an idle voice; steal one that's still playing (a click -- see
+    // ONE_SHOT_POOL_SIZE) only when the whole pool is busy.
+    std::size_t chosen = m_poolCursor;
+    for (std::size_t i = 0; i < m_oneShotPool.size(); ++i) {
+        const std::size_t candidate = (m_poolCursor + i) % m_oneShotPool.size();
+        if (!m_backend->IsVoicePlaying(m_oneShotPool[candidate])) {
+            chosen = candidate;
+            break;
+        }
+    }
+    m_poolCursor = (chosen + 1) % m_oneShotPool.size();
+    m_backend->PlayOneShot(m_oneShotPool[chosen], it->second, pos, gain);
 }
 
 void AudioSystem::Update(const Vector2& cameraPos)
@@ -199,13 +217,27 @@ void AudioSystem::Update(const Vector2& cameraPos)
         }
     });
 
-    // Entities that stopped thrusting (or died) this frame.
+    // Entities that stopped thrusting (or died) this frame: hand the voice to
+    // the fade-out list rather than releasing (= hard-stopping) it here.
     for (auto it = m_thrusters.begin(); it != m_thrusters.end();) {
         if (!it->second.seen) {
-            m_backend->ReleaseVoice(it->second.voice);
+            m_fadingVoices.push_back({it->second.voice, THRUST_GAIN});
             it = m_thrusters.erase(it);
         }
         else {
+            ++it;
+        }
+    }
+
+    const float fadeStep = THRUST_GAIN / THRUST_FADE_FRAMES;
+    for (auto it = m_fadingVoices.begin(); it != m_fadingVoices.end();) {
+        it->gain -= fadeStep;
+        if (it->gain <= 0.f) {
+            m_backend->ReleaseVoice(it->voice);
+            it = m_fadingVoices.erase(it);
+        }
+        else {
+            m_backend->SetVoiceGain(it->voice, it->gain);
             ++it;
         }
     }

@@ -71,15 +71,18 @@ def thrust():
         brown *= 0.997  # leak so it doesn't wander off
         lp += 0.08 * (brown - lp)  # ~560 Hz one-pole lowpass
         raw.append(lp)
-    # Crossfade tail into head so the loop point is seamless
+    # Crossfade the tail into the HEAD and drop it, so the loop's last sample
+    # (raw[m-1]) wraps to its first (~raw[m], the fully-blended tail start) --
+    # sample-continuous at the loop point. Blending the tail in place instead
+    # left last-sample ~raw[fade-1] jumping to first-sample raw[0]: an audible
+    # tick every loop iteration.
     fade = int(RATE * 0.1)
-    out = raw[:n - fade]
+    m = n - fade
+    out = list(raw[:m])
     for i in range(fade):
-        a = raw[n - fade + i]
-        b = raw[i]
-        t = i / fade
-        out.append(a * (1.0 - t) + b * t)
-    return out[:n - fade] + out[n - fade:]
+        t = (i + 1) / fade
+        out[i] = raw[i] * t + raw[m + i] * (1.0 - t)
+    return out
 
 
 def hit():

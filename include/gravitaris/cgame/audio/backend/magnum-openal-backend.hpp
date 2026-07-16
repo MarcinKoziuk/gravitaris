@@ -60,6 +60,7 @@ public:
     void PlayLooping(VoiceHandle voice, SoundBufferHandle buffer, const Vector2& pos, float gain) override;
     void StopVoice(VoiceHandle voice) override;
     void SetVoicePosition(VoiceHandle voice, const Vector2& pos) override;
+    void SetVoiceGain(VoiceHandle voice, float gain) override;
     [[nodiscard]] bool IsVoicePlaying(VoiceHandle voice) const override;
 
     void SetListenerPosition(const Vector2& pos, float height) override;

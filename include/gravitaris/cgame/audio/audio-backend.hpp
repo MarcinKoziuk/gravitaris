@@ -38,6 +38,7 @@ public:
     virtual void PlayLooping(VoiceHandle voice, SoundBufferHandle buffer, const Vector2& pos, float gain) = 0;
     virtual void StopVoice(VoiceHandle voice) = 0;
     virtual void SetVoicePosition(VoiceHandle voice, const Vector2& pos) = 0;
+    virtual void SetVoiceGain(VoiceHandle voice, float gain) = 0;
     [[nodiscard]] virtual bool IsVoicePlaying(VoiceHandle voice) const = 0;
 
     virtual void SetListenerPosition(const Vector2& pos, float height) = 0;

@@ -137,6 +137,12 @@ void MagnumOpenALBackend::SetVoicePosition(VoiceHandle voice, const Vector2& pos
     m_voices[voice.id - 1].setPosition(Vector3{pos.x(), pos.y(), 0.f});
 }
 
+void MagnumOpenALBackend::SetVoiceGain(VoiceHandle voice, float gain)
+{
+    if (voice.id == 0) return;
+    m_voices[voice.id - 1].setGain(gain);
+}
+
 bool MagnumOpenALBackend::IsVoicePlaying(VoiceHandle voice) const
 {
     if (voice.id == 0) return false;
