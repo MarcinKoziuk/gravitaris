@@ -19,7 +19,8 @@ CGame::CGame(IFilesystem &filesystem)
     , m_modelRenderer2(m_registry, filesystem, m_resourceLoader)
     , m_audioSystem(m_registry, m_resourceLoader)
 {
-    m_camera.SetZoom(2.f);
+    m_camera.SetZoom(Defaults::cameraZoom);
+    m_modelRenderer2.SetReferenceZoom(Defaults::cameraZoom);
 }
 
 void CGame::UpdateCameraFollow()
@@ -50,18 +51,25 @@ void CGame::Render(double delta)
     m_modelRenderer2.SetZoom(m_camera.GetZoom());
     m_modelRenderer2.SetCameraPosition(m_camera.GetPosition());
     m_modelRenderer2.SetLineWidth(m_lineWidthPixels);
+    m_modelRenderer2.SetZoomWidthFactor(m_zoomWidthFactor);
 
-    // Renderers are mutually exclusive; the debug UI picks the active one.
-    switch (m_activeRenderer) {
-        case RendererKind::Simple:
-            m_simpleModelRenderer.Render(delta);
-            break;
-        case RendererKind::Baked:
-            m_modelRenderer2.Render(delta);
-            break;
+    {
+        ScopedPerfTimer timer(m_perfMonitor, "Rendering");
+        // Renderers are mutually exclusive; the debug UI picks the active one.
+        switch (m_activeRenderer) {
+            case RendererKind::Simple:
+                m_simpleModelRenderer.Render(delta);
+                break;
+            case RendererKind::Baked:
+                m_modelRenderer2.Render(delta);
+                break;
+        }
     }
 
-    m_audioSystem.Update(m_camera.GetPosition());
+    {
+        ScopedPerfTimer timer(m_perfMonitor, "Audio");
+        m_audioSystem.Update(m_camera.GetPosition());
+    }
 }
 
 std::unique_ptr<EntitySpawner> CGame::CreateEntitySpawner()

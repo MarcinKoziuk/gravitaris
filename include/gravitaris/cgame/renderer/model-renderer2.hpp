@@ -28,8 +28,15 @@ using Magnum::Vector3;
 
 // Baked/instanced line renderer: line->triangle expansion happens once per
 // model at load time (static mesh), so instancing is free for per-entity
-// transforms. Width is resolved in the shader in pixel space, so thickness
-// stays constant across zoom.
+// transforms. Width is resolved in the shader in pixel space.
+//
+// zoomWidthFactor controls how much the pixel width tracks zoom, normalized so
+// that at referenceZoom the line is exactly lineWidthPixels wide regardless of
+// the factor (so tuning the factor never changes appearance at the normal zoom
+// level). Away from referenceZoom:
+//   pixelWidth = lineWidthPixels * (zoom / referenceZoom)^zoomWidthFactor
+// 0 = constant pixel width across zoom; 1 = constant world-space width (pixel
+// width scales linearly with zoom). See SetZoomWidthFactor / SetReferenceZoom.
 //
 // Kept alongside ModelRenderer/SimpleModelRenderer for comparison; remove
 // those once this is validated.
@@ -66,6 +73,8 @@ private:
     float m_pixelsPerUnit = 1.f; // zoom 1.0 matches ModelRenderer's zoom 1.0
     float m_zoom = 1.f;
     float m_lineWidthPixels = 2.f;
+    float m_zoomWidthFactor = 0.f; // 0 = width constant across zoom, 1 = width scales linearly with zoom
+    float m_referenceZoom = 1.f;   // zoom at which lineWidthPixels is the literal pixel width
     float m_pixelScale = 1.f; // framebuffer-pixels per logical-pixel (HiDPI)
     bool m_debugForceFacetedCircles = false;
 
@@ -85,6 +94,11 @@ public:
     void SetCameraPosition(const Vector2& pos) { m_cameraPos = pos; }
     void SetZoom(float zoom) { m_zoom = zoom; }
     void SetLineWidth(float pixels) { m_lineWidthPixels = pixels; }
+    // See class comment: 0 keeps pixel width constant across zoom, 1 makes it scale linearly with zoom.
+    void SetZoomWidthFactor(float factor) { m_zoomWidthFactor = factor; }
+    [[nodiscard]] float GetZoomWidthFactor() const { return m_zoomWidthFactor; }
+    // Zoom at which the width matches lineWidthPixels exactly (usually the default camera zoom).
+    void SetReferenceZoom(float zoom) { m_referenceZoom = zoom; }
     void SetPixelScale(float scale) { m_pixelScale = scale; }
 
     void SetDebugForceFacetedCircles(bool force) { m_debugForceFacetedCircles = force; }

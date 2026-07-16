@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <vector>
 
@@ -283,9 +284,15 @@ void ModelRenderer2::Render(double)
     GL::Renderer::setBlendFunction(GL::Renderer::BlendFunction::SourceAlpha,
                                     GL::Renderer::BlendFunction::OneMinusSourceAlpha);
 
+    // Normalized around referenceZoom so the factor never changes the width at
+    // the normal zoom level; it only sets how much thicker (zoomed in) or
+    // thinner (zoomed out) the line gets. factor=0 -> constant pixel width;
+    // factor=1 -> constant world-space width (pixel width tracks zoom 1:1).
+    const float refZoom = m_referenceZoom > 0.f ? m_referenceZoom : 1.f;
+    const float zoomScale = std::pow(m_zoom / refZoom, m_zoomWidthFactor);
     m_shader.setViewportSize(m_viewportSize)
             .setViewProjection(ViewProjection())
-            .setWidth(m_lineWidthPixels * m_pixelScale);
+            .setWidth(m_lineWidthPixels * m_pixelScale * zoomScale);
 
     RenderTag("model"_id, {});
 

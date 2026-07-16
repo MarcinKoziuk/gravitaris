@@ -53,6 +53,10 @@ protected:
     // renderer is active; each converts it to its own internal units.
     float m_lineWidthPixels = Defaults::lineWidth;
 
+    // How much ModelRenderer2's line width grows with zoom: 0 = constant
+    // pixel width, 1 = constant world-space width (scales linearly with zoom).
+    float m_zoomWidthFactor = Defaults::zoomWidthFactor;
+
     AutopilotMode m_autopilotMode = AutopilotMode::Off;
     Magnum::Math::Vector2<double> m_autopilotAnchor;
     FlightControllerParams m_flightParams;
@@ -76,10 +80,16 @@ protected:
 public:
     struct Defaults {
         static constexpr float lineWidth = 2.5f;
+        static constexpr float zoomWidthFactor = 0.5f;
+        // Startup zoom, and the reference at which lineWidth is literal pixels.
+        static constexpr float cameraZoom = 2.f;
     };
 
     static constexpr float MIN_LINE_WIDTH = 0.5f;
     static constexpr float MAX_LINE_WIDTH = 16.f;
+
+    static constexpr float MIN_ZOOM_WIDTH_FACTOR = 0.f;
+    static constexpr float MAX_ZOOM_WIDTH_FACTOR = 1.f;
 
     explicit CGame(IFilesystem& filesystem);
 
@@ -120,6 +130,13 @@ public:
     }
 
     void AddLineWidth(float deltaPixels) { SetLineWidth(m_lineWidthPixels + deltaPixels); }
+
+    [[nodiscard]] float GetZoomWidthFactor() const { return m_zoomWidthFactor; }
+
+    void SetZoomWidthFactor(float factor)
+    {
+        m_zoomWidthFactor = std::clamp(factor, MIN_ZOOM_WIDTH_FACTOR, MAX_ZOOM_WIDTH_FACTOR);
+    }
 
     void ToggleDebugForceFacetedCircles()
     {
