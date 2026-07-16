@@ -50,6 +50,9 @@ void DrawCameraPanel(CGame& game)
     ImGui::SetNextItemWidth(220.f);
     ImGui::DragFloat("Fit margin", &params.framingMargin, 1.f, 0.f, 2000.f, "%.0f");
     ImGui::SetItemTooltip("Extra world units kept around the framed pair.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Framing smoothing (s)", &params.framingTau, 0.05f, 2.4f, "%.2f");
+    ImGui::SetItemTooltip("Time constant for easing the pan/zoom-fit in and out as an enemy enters/leaves range.");
     ImGui::EndDisabled();
 }
 

@@ -102,14 +102,20 @@ void CGame::UpdateCamera(float dtSeconds)
         }
     }
 
+    // Ease the framing amount in/out instead of snapping it the instant an
+    // enemy enters/leaves radius -- see m_framingAmount's field comment.
+    const float framingAlpha = 1.f - std::exp(-dtSeconds / std::max(m_cameraParams.framingTau, 1e-3f));
+    const float framingGoal = enemy ? 1.f : 0.f;
+    m_framingAmount += (framingGoal - m_framingAmount) * framingAlpha;
+
+    if (enemy) m_lastEnemyOffset = *enemy - playerPos;
+    const Magnum::Vector2& enemyOffset = m_lastEnemyOffset;
+
     // --- Position target: bias toward the enemy when framing, and shrink the
     //     dead zone so the pair is actually tracked rather than drifting. ---
-    Magnum::Vector2 posTarget = playerPos;
-    float deadZoneFraction = DEAD_ZONE_FRACTION;
-    if (enemy) {
-        posTarget = playerPos + (*enemy - playerPos) * m_cameraParams.framingBias;
-        deadZoneFraction = DEAD_ZONE_FRACTION_FRAMING;
-    }
+    const Magnum::Vector2 posTarget = playerPos + enemyOffset * (m_cameraParams.framingBias * m_framingAmount);
+    const float deadZoneFraction =
+            DEAD_ZONE_FRACTION + (DEAD_ZONE_FRACTION_FRAMING - DEAD_ZONE_FRACTION) * m_framingAmount;
     const Magnum::Vector2 halfExtent = m_viewportSize / (2.f * m_cameraZoom);
     m_camera.FollowWithDeadZone(posTarget, halfExtent * deadZoneFraction);
 
@@ -122,11 +128,13 @@ void CGame::UpdateCamera(float dtSeconds)
         // Faster -> zoomed out. Monotone, smooth, bounded.
         zoomTarget = m_cameraParams.maxZoom / (1.f + speed / m_cameraParams.speedFalloff);
 
-        // Zoom out further if needed to fit the enemy alongside the player.
-        if (enemy) {
-            const float span = (*enemy - playerPos).length() + 2.f * m_cameraParams.framingMargin;
+        // Zoom out further if needed to fit the enemy alongside the player,
+        // fading the requirement in/out with the same framing amount so it
+        // doesn't yank the zoom target before the pan has caught up.
+        if (m_framingAmount > 0.f) {
+            const float span = enemyOffset.length() + 2.f * m_cameraParams.framingMargin;
             const float fitZoom = std::min(m_viewportSize.x(), m_viewportSize.y()) / std::max(span, 1.f);
-            zoomTarget = std::min(zoomTarget, fitZoom);
+            zoomTarget += (std::min(zoomTarget, fitZoom) - zoomTarget) * m_framingAmount;
         }
         zoomTarget = std::clamp(zoomTarget, m_cameraParams.minZoom, m_cameraParams.maxZoom);
     } else {

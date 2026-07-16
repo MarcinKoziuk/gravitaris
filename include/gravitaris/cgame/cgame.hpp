@@ -72,6 +72,18 @@ protected:
     std::chrono::steady_clock::time_point m_lastCameraTime{};
     bool m_cameraTimeValid = false;
 
+    // Eased 0..1: how "framed" the view currently is. FollowWithDeadZone moves
+    // the camera instantly to keep its target inside the dead zone, so feeding
+    // it a target/dead-zone-size that itself jumps (enemy appears/leaves
+    // radius) would snap the camera in one frame. Easing this amount in/out
+    // instead means both the framing bias and the dead-zone shrink ramp in
+    // smoothly, and FollowWithDeadZone's per-frame correction stays small.
+    float m_framingAmount = 0.f;
+    // Last enemy-relative offset (world units); kept after the enemy leaves
+    // range so the bias fades back out along the direction it faded in from,
+    // rather than snapping to zero the instant no enemy is found.
+    Magnum::Vector2 m_lastEnemyOffset{0.f, 0.f};
+
 public:
     // Tunables for the camera director (exposed in the Camera debug tab).
     struct CameraParams {
@@ -86,6 +98,7 @@ public:
         float enemyRadius = 1100.f; // consider enemies within this for framing
         float framingBias = 0.35f;  // 0 = stay on player, 1 = midpoint between player and enemy
         float framingMargin = 220.f;// extra world units kept around the framed pair
+        float framingTau = 1.2f;    // time constant for easing framing in/out as an enemy appears/leaves
     };
 
 protected:
