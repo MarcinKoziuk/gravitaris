@@ -24,11 +24,17 @@ using Magnum::Matrix4d;
 class Shape : public IResource {
 public:
     struct Style {
-        Color4 color;
+        Color4 color;      // stroke color
         float thickness;
         bool useTeamColor;
+        // Interior fill (SVG `fill`). Closed filled paths get a solid fill
+        // baked behind their stroke -- e.g. black planet interiors that block
+        // the starfield, or ship-body fills. hasFill stays false for
+        // stroke-only paths.
+        Color4 fillColor;
+        bool hasFill;
 
-        Style() : thickness(1.f), useTeamColor(true) {}
+        Style() : thickness(1.f), useTeamColor(true), fillColor(0.f, 0.f, 0.f, 1.f), hasFill(false) {}
     };
 
     // Present only when the path is (within tolerance) an exact circle, as

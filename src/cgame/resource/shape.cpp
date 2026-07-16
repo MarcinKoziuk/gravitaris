@@ -70,6 +70,13 @@ void Shape::AddPaths(const NSVGshape* shape, const Matrix4d& transform, id_t gro
         }
     }
 
+    // Fill is read verbatim -- unlike the stroke above, black is meaningful
+    // (a black planet interior that blocks the starfield), so it isn't skipped.
+    if (shape->fill.type == NSVG_PAINT_COLOR) {
+        style.fillColor = Hex3ToNormalizedColor4(shape->fill.color, shape->opacity);
+        style.hasFill = true;
+    }
+
     const auto paths = ShapeToPaths(shape, style, transform, group);
     m_paths.insert(m_paths.end(), paths.begin(), paths.end());
 }

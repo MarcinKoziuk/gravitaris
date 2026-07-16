@@ -42,6 +42,13 @@ public:
         // Authored in TEAM_COLOR_PLACEHOLDER: render with the entity's team
         // color instead of `color`.
         bool teamColor = false;
+        // Closed path with an SVG fill: the renderer triangulates the interior
+        // (circle -> fan, polygon -> poly2tri) and draws it behind the stroke.
+        // The polygon uses this strip's own offset/count points; a circle uses
+        // `circle`.
+        bool filled = false;
+        Color3 fillColor;
+        bool fillTeamColor = false;
     };
 
     struct Group {

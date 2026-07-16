@@ -87,17 +87,31 @@ void main() {
         vec2 p2 = 0.5 * width * sigma * (sigma < 0.0 ? cbNorm : abNorm);
 
         pix = b + param.x * p0 + param.y * p1 + param.z * p2;
-    } else {
-        // Circle billboard. pointA = center (a), pointB.x = radius in local
-        // units (not a real point — measure it in pixel space by comparing
-        // the transformed center to a point `radius` away along local X, so
-        // rotation/zoom/instance scale are all accounted for). param.xy are
-        // the quad corner directions in [-1,1].
+    } else if (param.w < 2.5) {
+        // Circle ring billboard. pointA = center (a), pointB.x = radius in
+        // local units (not a real point — measure it in pixel space by
+        // comparing the transformed center to a point `radius` away along
+        // local X, so rotation/zoom/instance scale are all accounted for).
+        // param.xy are the quad corner directions in [-1,1].
         vec2 edgePix = toPixel(m, pointA + vec2(pointB.x, 0.0));
         circleCenterPix = a;
         circleRadiusPix = length(edgePix - a);
 
         float extent = circleRadiusPix + width * 0.5 + AA_FEATHER;
+        pix = a + param.xy * extent;
+    } else if (param.w < 3.5) {
+        // Polygon fill triangle: pointA is the vertex position, transformed
+        // straight to pixel space with no expansion. Flat opaque coverage.
+        pix = a;
+    } else {
+        // Filled disc: same radius measurement as the ring, but the quad only
+        // needs to cover the disc itself (+AA), and the fragment shader fills
+        // the interior instead of the ring.
+        vec2 edgePix = toPixel(m, pointA + vec2(pointB.x, 0.0));
+        circleCenterPix = a;
+        circleRadiusPix = length(edgePix - a);
+
+        float extent = circleRadiusPix + AA_FEATHER;
         pix = a + param.xy * extent;
     }
 

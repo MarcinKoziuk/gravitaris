@@ -75,12 +75,18 @@ void Model::InitFromShape(const Shape& shape)
                 static_cast<float>(path.circle->radius)};
         }
 
+        const bool filled = path.closed && path.style.hasFill;
+        const Color3 fillColor = path.style.fillColor.rgb();
+
         modelGroup.lineStrips.emplace_back(VertexLineStrip{
             .color  = path.style.color.rgb(),
             .offset = offset,
             .count  = newOffset - offset,
             .circle = circleHint,
-            .teamColor = path.style.color.rgb() == TEAM_COLOR_PLACEHOLDER});
+            .teamColor = path.style.color.rgb() == TEAM_COLOR_PLACEHOLDER,
+            .filled = filled,
+            .fillColor = fillColor,
+            .fillTeamColor = filled && fillColor == TEAM_COLOR_PLACEHOLDER});
         offsets[tag] = newOffset;
     }
 

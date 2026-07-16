@@ -54,7 +54,7 @@
      inkscape:label="@body"
      style="display:inline">
     <circle
-       style="fill:none;stroke:#00ffff;stroke-width:2.00337839"
+       style="fill:#000000;stroke:#00ffff;stroke-width:2.00337839"
        id_t="path3416"
        cx="321.71329"
        cy="470.00925"
@@ -66,7 +66,7 @@
      id_t="g3418"
      inkscape:groupmode="layer">
     <circle
-       style="display:inline;fill:none;stroke:#00ffff;stroke-width:2.00337839"
+       style="display:inline;fill:#000000;stroke:#00ffff;stroke-width:2.00337839"
        id_t="path3416-9"
        cx="322.23865"
        cy="469.52451"

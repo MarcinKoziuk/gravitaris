@@ -7,6 +7,8 @@
 #include <windows.h> // SEH only (EXCEPTION_EXECUTE_HANDLER, GetExceptionCode), see SafeUpload
 #endif
 
+#include <poly2tri/poly2tri.h>
+
 #include <Corrade/Containers/ArrayView.h>
 
 #include <Magnum/Mesh.h>
@@ -36,10 +38,77 @@ struct LineVertex {
     Vector2 pointA;
     Vector2 pointB;
     Vector2 pointC;
-    Vector4 param; // xyz weights, w = type (0 segment, 1 join, 2 circle)
+    Vector4 param; // xyz weights, w = type (0 segment, 1 join, 2 ring, 3 poly-fill, 4 disc-fill)
     Vector3 color;
     float teamWeight; // 1 = replace color with the instance's team color
 };
+
+// Circle billboard quad, corners in [-1,1]^2. Shared by the ring stroke and
+// the disc fill.
+constexpr Vector2 CIRCLE_QUAD[] = {
+        {-1.f, -1.f}, {1.f, -1.f}, {1.f, 1.f},
+        {-1.f, -1.f}, {1.f, 1.f},  {-1.f, 1.f},
+};
+
+// param.w primitive tags for fills. Polygon fills are flat triangles whose
+// pointA carries the position; disc fills reuse the circle billboard's
+// analytic-radius machinery so a filled circle matches its stroke ring exactly
+// at any zoom (no faceting seam against the ring).
+constexpr float PRIM_POLY_FILL = 3.f;
+constexpr float PRIM_DISC_FILL = 4.f;
+
+// Filled disc, emitted exactly like the circle-ring billboard (center + radius
+// carrier + [-1,1] quad corners); the shader fills the interior instead of the
+// ring. Perfect circle at any zoom, coincident with the stroke ring's radius.
+void EmitCircleFill(std::vector<LineVertex>& out, const Vector2& center, float radius,
+                    const Vector3& color, float teamWeight)
+{
+    const Vector2 radiusCarrier{radius, 0.f};
+    for (const Vector2& corner : CIRCLE_QUAD) {
+        out.push_back(LineVertex{center, radiusCarrier, Vector2{},
+                                 Vector4{corner.x(), corner.y(), 0.f, PRIM_DISC_FILL}, color, teamWeight});
+    }
+}
+
+// Filled simple polygon via constrained Delaunay triangulation (poly2tri).
+// `pts`/`count` are the strip's baked points, whose last point duplicates the
+// first for closed paths -- dropped here. Bad input (self-intersecting/near-
+// degenerate paths poly2tri chokes on) degrades to no fill rather than crashing.
+void EmitPolygonFill(std::vector<LineVertex>& out, const Vector2* pts, std::size_t count,
+                     const Vector3& color, float teamWeight)
+{
+    std::size_t n = count;
+    if (n >= 2 && pts[0] == pts[n - 1]) --n;
+    if (n < 3) return;
+
+    std::vector<p2t::Point> storage;
+    storage.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        storage.emplace_back(static_cast<double>(pts[i].x()), static_cast<double>(pts[i].y()));
+    }
+
+    std::vector<p2t::Point*> polyline;
+    polyline.reserve(n);
+    for (p2t::Point& p : storage) polyline.push_back(&p);
+
+    const auto emitFill = [&](const Vector2& pos) {
+        out.push_back(LineVertex{pos, Vector2{}, Vector2{},
+                                 Vector4{0.f, 0.f, 0.f, PRIM_POLY_FILL}, color, teamWeight});
+    };
+
+    try {
+        p2t::CDT cdt(polyline);
+        cdt.Triangulate();
+        for (p2t::Triangle* tri : cdt.GetTriangles()) {
+            for (int k = 0; k < 3; ++k) {
+                const p2t::Point* p = tri->GetPoint(k);
+                emitFill(Vector2{static_cast<float>(p->x), static_cast<float>(p->y)});
+            }
+        }
+    } catch (...) {
+        LOG(warning) << "[MR2] polygon fill triangulation failed (" << n << " pts); skipping fill";
+    }
+}
 
 // Segment quad: t along A->B, side offset.
 constexpr Vector2 SEGMENT[] = {
@@ -51,12 +120,6 @@ constexpr Vector2 SEGMENT[] = {
 constexpr Vector3 MITER[] = {
         {0.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {0.f, 1.f, 0.f},
         {0.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {0.f, 0.f, 1.f},
-};
-
-// Circle billboard quad, corners in [-1,1]^2.
-constexpr Vector2 CIRCLE_QUAD[] = {
-        {-1.f, -1.f}, {1.f, -1.f}, {1.f, 1.f},
-        {-1.f, -1.f}, {1.f, 1.f},  {-1.f, 1.f},
 };
 
 // Bakes a group's strips into one vertex buffer: quad per segment, miter fan
@@ -78,6 +141,23 @@ std::vector<LineVertex> BakeGroup(const Model::Group& group, bool forceFaceted)
         }
     }
     out.reserve(total);
+
+    // Fill pass first, so fills sit underneath the strokes drawn after them
+    // (single draw call: primitive order within it is the paint order). A
+    // black planet fill thus blocks the starfield, its outline glows on top.
+    for (const auto& strip : group.lineStrips) {
+        if (!strip.filled) continue;
+
+        const Vector3 fillColor = strip.fillColor.toSrgb();
+        const float fillTeamWeight = strip.fillTeamColor ? 1.f : 0.f;
+
+        if (strip.circle) {
+            EmitCircleFill(out, strip.circle->center, strip.circle->radius, fillColor, fillTeamWeight);
+        } else if (strip.count >= 3) {
+            EmitPolygonFill(out, group.vertexBuffer.data() + strip.offset, strip.count,
+                            fillColor, fillTeamWeight);
+        }
+    }
 
     for (const auto& strip : group.lineStrips) {
         const Vector3 color = strip.color.toSrgb();

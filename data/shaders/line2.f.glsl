@@ -46,12 +46,20 @@ void main() {
     } else if (primType < 1.5) {
         // Miter join
         coverage = 1.0;
-    } else {
-        // Circle: radial distance from the ring's true edge, using the
+    } else if (primType < 2.5) {
+        // Circle ring: radial distance from the ring's true edge, using the
         // rasterizer-provided fragment position instead of an interpolated one.
         highp vec2 fragPix = gl_FragCoord.xy - 0.5 * viewportSize;
         highp float dist = distance(fragPix, circleCenterPix) - circleRadiusPix;
         coverage = coverageFromSignedDistance(halfWidth - abs(dist));
+    } else if (primType < 3.5) {
+        // Polygon fill triangle: flat, fully opaque interior.
+        coverage = 1.0;
+    } else {
+        // Filled disc: opaque inside the radius, AA-fading across the edge.
+        highp vec2 fragPix = gl_FragCoord.xy - 0.5 * viewportSize;
+        highp float insideDistance = circleRadiusPix - distance(fragPix, circleCenterPix);
+        coverage = coverageFromSignedDistance(insideDistance);
     }
 
     fragmentColor = vec4(interpolatedColor.rgb, interpolatedColor.a * coverage);
