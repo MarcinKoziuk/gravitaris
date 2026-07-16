@@ -209,6 +209,10 @@ public:
         m_modelRenderer2.SetDebugForceFacetedCircles(!m_modelRenderer2.GetDebugForceFacetedCircles());
     }
 
+    // Spawns an AI fighter near the player with a random personality preset;
+    // shared by the Spawn debug tab's button and the J shortcut.
+    void SpawnRandomAIShip();
+
     [[nodiscard]] AutopilotMode GetAutopilotMode() const { return m_autopilotMode; }
 
     // Engaging HoldPosition captures the player's current position as anchor.

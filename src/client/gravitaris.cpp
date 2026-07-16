@@ -401,6 +401,9 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         case KeyEvent::Key::O:
             m_game->ToggleAutopilotMode(AutopilotMode::Orbit);
             return;
+        case KeyEvent::Key::J:
+            m_game->SpawnRandomAIShip();
+            return;
         default:
             break;
     }

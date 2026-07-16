@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <iterator>
 #include <optional>
 
 #include <gravitaris/game/logging.hpp>
@@ -191,6 +193,24 @@ void CGame::Render(double delta)
 std::unique_ptr<EntitySpawner> CGame::CreateEntitySpawner()
 {
     return std::make_unique<CEntitySpawner>(m_registry, m_resourceLoader);
+}
+
+void CGame::SpawnRandomAIShip()
+{
+    static constexpr AIPersonalityPreset PRESETS[] = {
+            AIPersonalityPreset::Balanced, AIPersonalityPreset::Aggressive, AIPersonalityPreset::Cautious,
+            AIPersonalityPreset::Sniper, AIPersonalityPreset::Reckless,
+    };
+
+    Vector2d pos{300.0, 200.0};
+    const std::optional<flecs::entity> player = GetPlayer();
+    const Transform* transform = player ? player->try_get<Transform>() : nullptr;
+    if (transform) {
+        pos = transform->pos + Vector2d{250.0, 150.0};
+    }
+
+    const AIPersonalityPreset preset = PRESETS[std::rand() % std::size(PRESETS)];
+    GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, pos, preset);
 }
 
 std::optional<CGame::GravitySource> CGame::FindHeaviestGravitySource()

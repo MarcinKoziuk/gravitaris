@@ -1,5 +1,3 @@
-#include <cstdlib>
-
 #include <imgui.h>
 
 #include <gravitaris/game/id.hpp>
@@ -22,6 +20,8 @@ constexpr AIPersonalityPreset PRESETS[] = {
         AIPersonalityPreset::Sniper, AIPersonalityPreset::Reckless,
 };
 
+// Only for the dropdown-selected preset; the random button uses
+// CGame::SpawnRandomAIShip() directly, shared with the J shortcut.
 void SpawnAINearPlayer(CGame& game, AIPersonalityPreset preset)
 {
     Vector2d pos{300.0, 200.0};
@@ -47,9 +47,10 @@ void DrawSpawnPanel(CGame& game)
     }
 
     if (ImGui::Button("Spawn AI fighter (random personality)")) {
-        const int randomIndex = std::rand() % IM_ARRAYSIZE(PRESETS);
-        SpawnAINearPlayer(game, PRESETS[randomIndex]);
+        game.SpawnRandomAIShip();
     }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(J)");
 
     ImGui::Text("AI ships alive: %d", game.GetRegistry().count<AIPilot>());
 
