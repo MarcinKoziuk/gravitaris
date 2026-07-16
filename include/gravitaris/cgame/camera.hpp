@@ -1,7 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <cmath>
 
 #include <Magnum/Math/Vector2.h>
 
@@ -14,10 +13,10 @@ private:
     Vector2 m_position{0.f, 0.f};
     float m_zoom = 1.f;
 
+public:
     static constexpr float MIN_ZOOM = 0.1f;
     static constexpr float MAX_ZOOM = 8.f;
 
-public:
     [[nodiscard]] const Vector2& GetPosition() const { return m_position; }
 
     void SetPosition(const Vector2& position) { m_position = position; }
@@ -25,8 +24,6 @@ public:
     [[nodiscard]] float GetZoom() const { return m_zoom; }
 
     void SetZoom(float zoom) { m_zoom = std::clamp(zoom, MIN_ZOOM, MAX_ZOOM); }
-
-    void AddZoomNotches(float notches) { SetZoom(m_zoom * std::pow(1.15f, notches)); }
 
     // Move the camera the minimum amount to keep `target` inside a centered
     // dead-zone rectangle of half-size `deadZoneHalf` (world units). The

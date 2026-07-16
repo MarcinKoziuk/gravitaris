@@ -8,6 +8,7 @@
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/team.hpp>
+#include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
@@ -19,6 +20,7 @@ using Magnum::Vector2d;
 static constexpr double BULLET_LIFETIME_SECONDS = 3.0;
 static constexpr float BULLET_DAMAGE = 10.f;
 static constexpr double BULLET_MUZZLE_SPEED = 300.0; // matches ai-pilot-system's BULLET_SPEED
+static constexpr float BOX_HP = 30.f; // a couple of primary hits or one ram
 
 ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner,
                                        PhysicsSystem& physicsSystem)
@@ -103,7 +105,8 @@ void ShipControlsSystem::Update(std::uint64_t step)
         if (scontrols.actionFlags.fireSecondary) {
             scontrols.actionFlags.fireSecondary = false;
             std::pair<Vector2d, Vector2d> ret = GetBulletSpawnPosAndVel(transf, phys);
-            m_entitySpawner.SpawnBullet("models/doodads/box"_id, ret.first, transf.vel);
+            flecs::entity box = m_entitySpawner.SpawnBullet("models/doodads/box"_id, ret.first, transf.vel);
+            box.emplace<Damageable>(Damageable{BOX_HP, BOX_HP});
         }
     });
 }

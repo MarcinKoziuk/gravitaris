@@ -402,6 +402,10 @@ add_executable(GravitarisNG
     src/cgame/renderer/shader/line2-shader.cpp
     include/gravitaris/cgame/renderer/model-renderer2.hpp
     src/cgame/renderer/model-renderer2.cpp
+    include/gravitaris/cgame/renderer/shader/starfield-shader.hpp
+    src/cgame/renderer/shader/starfield-shader.cpp
+    include/gravitaris/cgame/renderer/starfield-renderer.hpp
+    src/cgame/renderer/starfield-renderer.cpp
     include/gravitaris/cgame/camera.hpp
     include/gravitaris/cgame/renderer/shader/glow-threshold-shader.hpp
     src/cgame/renderer/shader/glow-threshold-shader.cpp
@@ -437,6 +441,10 @@ add_executable(GravitarisNG
     src/cgame/ui/debug/flight-panel.cpp
     src/cgame/ui/debug/perf-panel.hpp
     src/cgame/ui/debug/perf-panel.cpp
+    src/cgame/ui/debug/starfield-panel.hpp
+    src/cgame/ui/debug/starfield-panel.cpp
+    src/cgame/ui/debug/camera-panel.hpp
+    src/cgame/ui/debug/camera-panel.cpp
     src/cgame/ui/debug/world-to-ui.hpp
 )
 

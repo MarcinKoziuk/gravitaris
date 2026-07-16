@@ -1,3 +1,5 @@
+#include <cstdlib>
+
 #include <imgui.h>
 
 #include <gravitaris/game/id.hpp>
@@ -20,6 +22,17 @@ constexpr AIPersonalityPreset PRESETS[] = {
         AIPersonalityPreset::Sniper, AIPersonalityPreset::Reckless,
 };
 
+void SpawnAINearPlayer(CGame& game, AIPersonalityPreset preset)
+{
+    Vector2d pos{300.0, 200.0};
+    const std::optional<flecs::entity> player = game.GetPlayer();
+    const Transform* transform = player ? player->try_get<Transform>() : nullptr;
+    if (transform) {
+        pos = transform->pos + Vector2d{250.0, 150.0};
+    }
+    game.GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, pos, preset);
+}
+
 } // namespace
 
 void DrawSpawnPanel(CGame& game)
@@ -30,13 +43,12 @@ void DrawSpawnPanel(CGame& game)
     ImGui::Combo("Personality", &presetIndex, PRESET_NAMES, IM_ARRAYSIZE(PRESET_NAMES));
 
     if (ImGui::Button("Spawn AI fighter near player")) {
-        Vector2d pos{300.0, 200.0};
-        const std::optional<flecs::entity> player = game.GetPlayer();
-        const Transform* transform = player ? player->try_get<Transform>() : nullptr;
-        if (transform) {
-            pos = transform->pos + Vector2d{250.0, 150.0};
-        }
-        game.GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, pos, PRESETS[presetIndex]);
+        SpawnAINearPlayer(game, PRESETS[presetIndex]);
+    }
+
+    if (ImGui::Button("Spawn AI fighter (random personality)")) {
+        const int randomIndex = std::rand() % IM_ARRAYSIZE(PRESETS);
+        SpawnAINearPlayer(game, PRESETS[randomIndex]);
     }
 
     ImGui::Text("AI ships alive: %d", game.GetRegistry().count<AIPilot>());

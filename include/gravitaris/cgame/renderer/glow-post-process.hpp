@@ -112,7 +112,7 @@ private:
     // (near-white/cyan, ~1.0) stay well above this; dim UI panel fills don't.
     float m_threshold = Defaults::threshold;
 
-    bool m_crtEnabled = true;
+    bool m_crtEnabled = false;
     float m_scanlineStrength = Defaults::scanlineStrength;
     // Scanline geometry at the 1080p reference (shader scales by window height).
     float m_scanlineWidthPx = Defaults::scanlineWidthPx;   // dark-line thickness (~2px core after AA)

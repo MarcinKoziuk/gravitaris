@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cmath>
 #include <optional>
 
 #include <gravitaris/game/logging.hpp>
@@ -6,6 +8,9 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/bullet.hpp>
+#include <gravitaris/game/component/team.hpp>
+#include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 
 #include <gravitaris/cgame/spawner/centity-spawner.hpp>
@@ -17,13 +22,50 @@ CGame::CGame(IFilesystem &filesystem)
     : Game(filesystem, CreateEntitySpawner())
     , m_simpleModelRenderer(m_registry, filesystem, m_resourceLoader)
     , m_modelRenderer2(m_registry, filesystem, m_resourceLoader)
+    , m_starfieldRenderer(filesystem)
     , m_audioSystem(m_registry, m_resourceLoader)
 {
     m_camera.SetZoom(Defaults::cameraZoom);
     m_modelRenderer2.SetReferenceZoom(Defaults::cameraZoom);
 }
 
-void CGame::UpdateCameraFollow()
+void CGame::NudgeManualZoom(float notches)
+{
+    // Start the manual override from wherever the camera currently sits, so
+    // the first scroll doesn't jump.
+    if (!m_manualZoomActive) {
+        m_manualZoom = m_cameraZoom;
+    }
+    m_manualZoom = std::clamp(m_manualZoom * std::pow(1.15f, notches),
+                              Camera::MIN_ZOOM, Camera::MAX_ZOOM);
+    m_manualZoomActive = true;
+    m_manualZoomGraceRemaining = m_cameraParams.manualHold;
+}
+
+std::optional<Magnum::Vector2> CGame::FindNearestEnemy(const Magnum::Vector2& from, TeamId playerTeam)
+{
+    const float radiusSq = m_cameraParams.enemyRadius * m_cameraParams.enemyRadius;
+
+    std::optional<Magnum::Vector2> nearest;
+    float nearestSq = radiusSq;
+
+    // Enemy = damageable (a ship, not a bullet) on a real opposing team
+    // (excludes neutral planets, which have no Team, and None-team shrapnel).
+    m_registry.each([&](flecs::entity, const Transform& t, const Team& team, const Damageable&) {
+        if (team.id == playerTeam || team.id == TeamId::None) return;
+
+        const Magnum::Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
+        const float distSq = (pos - from).dot();
+        if (distSq < nearestSq) {
+            nearestSq = distSq;
+            nearest = pos;
+        }
+    });
+
+    return nearest;
+}
+
+void CGame::UpdateCamera(float dtSeconds)
 {
     if (!m_cameraFollow) return;
 
@@ -33,18 +75,84 @@ void CGame::UpdateCameraFollow()
     const Transform* transform = player->try_get<Transform>();
     if (!transform) return;
 
-    const Magnum::Vector2 target{static_cast<float>(transform->pos.x()),
-                                 static_cast<float>(transform->pos.y())};
+    const Magnum::Vector2 playerPos{static_cast<float>(transform->pos.x()),
+                                    static_cast<float>(transform->pos.y())};
+    const Magnum::Vector2 playerVel{static_cast<float>(transform->vel.x()),
+                                    static_cast<float>(transform->vel.y())};
+    const float speed = playerVel.length();
 
-    // Visible half-extent in world units (ModelRenderer2 uses 1 px/unit at
-    // zoom 1). Dead zone is a fraction of it.
-    const Magnum::Vector2 halfExtent = m_viewportSize / (2.f * m_camera.GetZoom());
-    m_camera.FollowWithDeadZone(target, halfExtent * DEAD_ZONE_FRACTION);
+    const Team* playerTeamComp = player->try_get<Team>();
+    const TeamId playerTeam = playerTeamComp ? playerTeamComp->id : TeamId::Blue;
+    const std::optional<Magnum::Vector2> enemy =
+            m_cameraParams.enemyFraming ? FindNearestEnemy(playerPos, playerTeam) : std::nullopt;
+
+    // Cancel a manual zoom override once the player actively flies the ship
+    // (thrust/rotate), past the post-nudge grace period -- see field comment.
+    if (m_manualZoomActive) {
+        if (m_manualZoomGraceRemaining > 0.f) {
+            m_manualZoomGraceRemaining -= dtSeconds;
+        } else {
+            const Controls* controls = player->try_get<Controls>();
+            const bool flying = controls && (controls->actionFlags.thrustForward ||
+                                              controls->actionFlags.rotateLeft ||
+                                              controls->actionFlags.rotateRight);
+            if (flying) m_manualZoomActive = false;
+        }
+    }
+
+    // --- Position target: bias toward the enemy when framing, and shrink the
+    //     dead zone so the pair is actually tracked rather than drifting. ---
+    Magnum::Vector2 posTarget = playerPos;
+    float deadZoneFraction = DEAD_ZONE_FRACTION;
+    if (enemy) {
+        posTarget = playerPos + (*enemy - playerPos) * m_cameraParams.framingBias;
+        deadZoneFraction = DEAD_ZONE_FRACTION_FRAMING;
+    }
+    const Magnum::Vector2 halfExtent = m_viewportSize / (2.f * m_cameraZoom);
+    m_camera.FollowWithDeadZone(posTarget, halfExtent * deadZoneFraction);
+
+    // --- Zoom target. ---
+    float zoomTarget;
+    if (m_manualZoomActive) {
+        // Wheel override: hold exactly at the user's zoom until they fly.
+        zoomTarget = m_manualZoom;
+    } else if (m_cameraParams.dynamicZoom) {
+        // Faster -> zoomed out. Monotone, smooth, bounded.
+        zoomTarget = m_cameraParams.maxZoom / (1.f + speed / m_cameraParams.speedFalloff);
+
+        // Zoom out further if needed to fit the enemy alongside the player.
+        if (enemy) {
+            const float span = (*enemy - playerPos).length() + 2.f * m_cameraParams.framingMargin;
+            const float fitZoom = std::min(m_viewportSize.x(), m_viewportSize.y()) / std::max(span, 1.f);
+            zoomTarget = std::min(zoomTarget, fitZoom);
+        }
+        zoomTarget = std::clamp(zoomTarget, m_cameraParams.minZoom, m_cameraParams.maxZoom);
+    } else {
+        zoomTarget = m_cameraParams.maxZoom;
+    }
+
+    // Exponential smoothing toward the target: frame-rate independent, and it
+    // gives the free "interpolate back" when the manual override expires.
+    const float alpha = 1.f - std::exp(-dtSeconds / std::max(m_cameraParams.zoomTau, 1e-3f));
+    m_cameraZoom += (zoomTarget - m_cameraZoom) * alpha;
+    m_camera.SetZoom(m_cameraZoom);
 }
 
 void CGame::Render(double delta)
 {
-    UpdateCameraFollow();
+    // Real wall-clock dt for the camera director (Render's `delta` is a fixed-
+    // step interpolation fraction, not seconds). Clamped so a stall doesn't
+    // snap the camera.
+    const auto now = std::chrono::steady_clock::now();
+    float dtSeconds = 1.f / 60.f;
+    if (m_cameraTimeValid) {
+        dtSeconds = std::chrono::duration<float>(now - m_lastCameraTime).count();
+        dtSeconds = std::clamp(dtSeconds, 0.f, 0.1f);
+    }
+    m_lastCameraTime = now;
+    m_cameraTimeValid = true;
+
+    UpdateCamera(dtSeconds);
 
     m_simpleModelRenderer.SetZoom(m_camera.GetZoom());
     m_simpleModelRenderer.SetCameraPosition(m_camera.GetPosition());
@@ -52,6 +160,14 @@ void CGame::Render(double delta)
     m_modelRenderer2.SetCameraPosition(m_camera.GetPosition());
     m_modelRenderer2.SetLineWidth(m_lineWidthPixels);
     m_modelRenderer2.SetZoomWidthFactor(m_zoomWidthFactor);
+
+    m_starfieldRenderer.SetZoom(m_camera.GetZoom());
+    m_starfieldRenderer.SetCameraPosition(m_camera.GetPosition());
+
+    {
+        ScopedPerfTimer timer(m_perfMonitor, "Starfield");
+        m_starfieldRenderer.Render();
+    }
 
     {
         ScopedPerfTimer timer(m_perfMonitor, "Rendering");

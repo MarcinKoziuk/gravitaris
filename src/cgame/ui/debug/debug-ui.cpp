@@ -10,6 +10,8 @@
 #include "trajectory-panel.hpp"
 #include "flight-panel.hpp"
 #include "perf-panel.hpp"
+#include "starfield-panel.hpp"
+#include "camera-panel.hpp"
 
 namespace Gravitaris {
 
@@ -77,6 +79,14 @@ void DebugUi::BuildFrame()
             }
             if (ImGui::BeginTabItem("Flight")) {
                 DrawFlightPanel(m_game);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Camera")) {
+                DrawCameraPanel(m_game);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Starfield")) {
+                DrawStarfieldPanel(m_game);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Performance")) {

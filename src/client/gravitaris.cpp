@@ -475,7 +475,7 @@ void GravitarisApplication::scrollEvent(ScrollEvent& event)
         return;
     }
 
-    m_game->GetCamera().AddZoomNotches(event.offset().y());
+    m_game->NudgeManualZoom(event.offset().y());
     event.setAccepted();
 }
 
