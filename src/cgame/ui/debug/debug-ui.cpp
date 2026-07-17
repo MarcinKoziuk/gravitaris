@@ -13,6 +13,7 @@
 #include "starfield-panel.hpp"
 #include "camera-panel.hpp"
 #include "hud-panel.hpp"
+#include "physics-panel.hpp"
 
 namespace Gravitaris {
 
@@ -80,6 +81,10 @@ void DebugUi::BuildFrame()
             }
             if (ImGui::BeginTabItem("Flight")) {
                 DrawFlightPanel(m_game);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Physics")) {
+                DrawPhysicsPanel(m_game);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Camera")) {

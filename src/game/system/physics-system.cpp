@@ -117,6 +117,13 @@ std::vector<ImpactEvent> PhysicsSystem::DrainImpacts()
     return out;
 }
 
+void PhysicsSystem::SetMassMultiplier(const PhysicsRef& ref, float multiplier)
+{
+    PhysicsBody& slot = GetBody(ref);
+    if (slot.baseMass <= 0.0) return;
+    cpBodySetMass(slot.cp.body.get(), slot.baseMass * multiplier);
+}
+
 void PhysicsSystem::InitBody(PhysicsBody& slot, const Transform& transf)
 {
     const Body& bodyResource = *slot.body;
@@ -129,6 +136,7 @@ void PhysicsSystem::InitBody(PhysicsBody& slot, const Transform& transf)
 
     cpFloat moment = 0.0;
     cpFloat mass = bodyResource.GetMass();
+    slot.baseMass = mass;
     for (const auto& poly : bodyResource.GetPolygonShapes()) {
         moment += cpMomentForPoly(
                 mass,
@@ -292,7 +300,7 @@ void PhysicsSystem::ApplyGravity(id_t spaceId)
             if (src.body == tgt.body) continue;
 
             const cpFloat dist = cpvdist(src.pos, tgt.pos);
-            cpFloat vel = gravityConstant * ((tgt.mass * src.mass) / std::pow(dist, 2));
+            cpFloat vel = gravityConstant * m_gravityMultiplier * ((tgt.mass * src.mass) / std::pow(dist, 2));
             cpFloat dir = std::atan2(src.pos.y - tgt.pos.y, src.pos.x - tgt.pos.x);
             cpVect force = cpv(std::cos(dir) * vel, std::sin(dir) * vel);
 

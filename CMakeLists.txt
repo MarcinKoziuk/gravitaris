@@ -445,6 +445,8 @@ add_executable(GravitarisNG
     src/cgame/ui/debug/trajectory-panel.cpp
     src/cgame/ui/debug/flight-panel.hpp
     src/cgame/ui/debug/flight-panel.cpp
+    src/cgame/ui/debug/physics-panel.hpp
+    src/cgame/ui/debug/physics-panel.cpp
     src/cgame/ui/debug/perf-panel.hpp
     src/cgame/ui/debug/perf-panel.cpp
     src/cgame/ui/debug/starfield-panel.hpp

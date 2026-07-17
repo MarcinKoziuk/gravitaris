@@ -367,6 +367,15 @@ void CGame::Render(double delta)
 
     UpdateCamera(dtSeconds);
 
+    // Debug/tuning only: reapplies every frame (cheap, one cpBodySetMass
+    // call) so it stays in effect across a respawn's fresh body without
+    // extra bookkeeping -- see m_shipWeightMultiplier's field comment.
+    if (const std::optional<flecs::entity> player = GetPlayer()) {
+        if (const PhysicsRef* ref = player->try_get<PhysicsRef>()) {
+            m_physicsSystem.SetMassMultiplier(*ref, m_shipWeightMultiplier);
+        }
+    }
+
     m_simpleModelRenderer.SetZoom(m_camera.GetZoom());
     m_simpleModelRenderer.SetCameraPosition(m_camera.GetPosition());
     m_modelRenderer2.SetZoom(m_camera.GetZoom());

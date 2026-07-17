@@ -22,6 +22,11 @@ struct PhysicsBody {
     ResourcePtr<Body> body;
     std::uint32_t generation = 0;
 
+    // Resource-authored mass, captured at InitBody time -- the reference point
+    // SetMassMultiplier scales from, so repeated calls with a changing
+    // multiplier never compound.
+    cpFloat baseMass = 0.0;
+
     struct {
         std::shared_ptr<cpSpace> space;
         cpBodyUniquePtr body;
@@ -69,6 +74,8 @@ private:
     flecs::observer m_bodyAddedObserver;
     flecs::observer m_bodyRemovedObserver;
 
+    float m_gravityMultiplier = 1.f;
+
     void InitSpace(id_t spaceId);
 
     // Chipmunk postSolve callback (wildcard). Records ImpactEvents for the
@@ -112,6 +119,20 @@ public:
     // Moves out the impacts recorded during the last Simulate; caller applies
     // damage from them. Leaves the buffer empty for the next step.
     [[nodiscard]] std::vector<ImpactEvent> DrainImpacts();
+
+    // --- Debug/tuning knobs (temporary, for calibrating gameplay feel) ---
+
+    // Scales the force ApplyGravity computes for every source/target pair.
+    // 1 = unmodified (GRAVITY_CONSTANT as authored).
+    void SetGravityMultiplier(float multiplier) { m_gravityMultiplier = multiplier; }
+    [[nodiscard]] float GetGravityMultiplier() const { return m_gravityMultiplier; }
+
+    // Sets a body's live Chipmunk mass to its resource-authored base mass
+    // (captured at spawn) times `multiplier`. 1 = unmodified. Safe to call
+    // every frame with the same value -- it recomputes from the stored base
+    // each time rather than compounding, and a fresh body from a respawn
+    // picks up whatever the caller applies next.
+    void SetMassMultiplier(const PhysicsRef& ref, float multiplier);
 };
 
 } // namespace Gravitaris

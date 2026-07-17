@@ -175,6 +175,15 @@ protected:
     // within one tick still diverge.
     std::uint32_t m_randomAIShipSpawnCount = 0;
 
+    // Debug/tuning only (temporary, for calibrating gameplay feel -- see the
+    // Physics debug tab). 1 = unmodified in both cases.
+    // Gravity is a PhysicsSystem-wide setting, applied every ApplyGravity
+    // call; ship weight scales the player's live Chipmunk mass off its
+    // resource-authored base (PhysicsSystem::SetMassMultiplier), reapplied
+    // every Render() call so it survives a respawn's fresh body without
+    // extra bookkeeping.
+    float m_shipWeightMultiplier = 1.f;
+
     AutopilotMode m_autopilotMode = AutopilotMode::Off;
     Magnum::Math::Vector2<double> m_autopilotAnchor;
     FlightControllerParams m_flightParams;
@@ -288,6 +297,14 @@ public:
     }
 
     void AddLineWidth(float deltaPixels) { SetLineWidth(m_lineWidthPixels + deltaPixels); }
+
+    // --- Debug/tuning: gravity + ship weight multipliers (see field comments) ---
+
+    [[nodiscard]] float GetGravityMultiplier() const { return m_physicsSystem.GetGravityMultiplier(); }
+    void SetGravityMultiplier(float multiplier) { m_physicsSystem.SetGravityMultiplier(multiplier); }
+
+    [[nodiscard]] float GetShipWeightMultiplier() const { return m_shipWeightMultiplier; }
+    void SetShipWeightMultiplier(float multiplier) { m_shipWeightMultiplier = multiplier; }
 
     [[nodiscard]] float GetZoomWidthFactor() const { return m_zoomWidthFactor; }
 
