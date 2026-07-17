@@ -11,14 +11,13 @@ AudioBackendPreference ResolveAudioBackendPreference(AudioBackendPreference pref
 {
     if (preference != AudioBackendPreference::Auto) return preference;
 
-#if defined(__APPLE__)
-    // OpenAL's context-current problem was never confirmed fixed on macOS
-    // (no Mac to test); miniaudio is the safe default there. See
-    // docs/adr/0003-audio-backend.md.
+    // miniaudio everywhere by default: the OpenAL backend still emits sharp
+    // high-pitched pops on this machine (root cause unresolved -- possibly a
+    // memory-safety issue rather than a backend bug; investigation open), and
+    // miniaudio is clean. OpenAL stays available via an explicit
+    // PreferOpenAL from the debug UI's Audio tab for A/B comparison.
+    // See docs/adr/0003-audio-backend.md.
     return AudioBackendPreference::PreferMiniaudio;
-#else
-    return AudioBackendPreference::PreferOpenAL;
-#endif
 }
 
 std::unique_ptr<IAudioBackend> CreateAudioBackend(AudioBackendPreference preference)
