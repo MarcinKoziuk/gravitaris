@@ -407,6 +407,9 @@ add_executable(GravitarisNG
     src/cgame/renderer/shader/starfield-shader.cpp
     include/gravitaris/cgame/renderer/starfield-renderer.hpp
     src/cgame/renderer/starfield-renderer.cpp
+    include/gravitaris/cgame/renderer/gl-safe-upload.hpp
+    include/gravitaris/cgame/renderer/minimap-renderer.hpp
+    src/cgame/renderer/minimap-renderer.cpp
     include/gravitaris/cgame/camera.hpp
     include/gravitaris/cgame/renderer/shader/glow-threshold-shader.hpp
     src/cgame/renderer/shader/glow-threshold-shader.cpp

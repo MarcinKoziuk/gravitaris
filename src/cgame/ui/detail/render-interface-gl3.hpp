@@ -1,5 +1,8 @@
 #pragma once
 
+#include <unordered_map>
+#include <unordered_set>
+
 #include <RmlUi/Core/RenderInterface.h>
 #include <RmlUi/Core/Types.h>
 
@@ -57,6 +60,13 @@ public:
     // Can be passed to RenderGeometry() to enable texture rendering without changing the bound texture.
     static const Rml::TextureHandle TextureEnableWithoutBinding = Rml::TextureHandle(-1);
 
+    // Live-texture bridge: registers an engine-owned GL texture under `name`
+    // so RCSS/RML can reference it as src="live://name" (the minimap FBO
+    // does). LoadTexture resolves the name to this id instead of reading a
+    // file, and ReleaseTexture will never delete it -- the engine side owns
+    // the texture's lifetime and may re-render its contents every frame.
+    void RegisterLiveTexture(const Rml::String& name, unsigned glTextureId, Rml::Vector2i dimensions);
+
 private:
     enum class ProgramId {
         None, Texture = 1, Color = 2, All = (Texture | Color)
@@ -75,6 +85,15 @@ private:
 
     int viewport_width = 0;
     int viewport_height = 0;
+
+    struct LiveTexture {
+        unsigned glTextureId;
+        Rml::Vector2i dimensions;
+    };
+    std::unordered_map<Rml::String, LiveTexture> m_liveTextures;
+    // Handles LoadTexture returned for live textures; ReleaseTexture must not
+    // glDeleteTextures these (the engine owns them).
+    std::unordered_set<Rml::TextureHandle> m_liveHandles;
 
     Rml::UniquePtr<Gfx::ShadersData> shaders;
 };

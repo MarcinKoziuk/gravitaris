@@ -35,6 +35,7 @@ CGame::CGame(IFilesystem &filesystem)
     , m_simpleModelRenderer(m_registry, filesystem, m_resourceLoader)
     , m_modelRenderer2(m_registry, filesystem, m_resourceLoader)
     , m_starfieldRenderer(filesystem)
+    , m_minimapRenderer(m_registry, m_physicsSystem, filesystem)
     , m_audioSystem(m_registry, m_resourceLoader)
 {
     m_camera.SetZoom(Defaults::cameraZoom);
@@ -335,6 +336,19 @@ void CGame::UpdateIndicators()
 
     for (const Candidate& c : planets) submit(c, m_indicatorParams.planetRange);
     for (const Candidate& c : enemies) submit(c, m_indicatorParams.enemyRange);
+}
+
+void CGame::RenderMinimap()
+{
+    const std::optional<flecs::entity> player = GetPlayer();
+    const Transform* transform = player ? player->try_get<Transform>() : nullptr;
+    if (!transform) return; // between death and respawn: freeze the last frame
+
+    const Magnum::Vector2 playerPos{static_cast<float>(transform->pos.x()),
+                                    static_cast<float>(transform->pos.y())};
+    const Magnum::Vector2 viewHalfExtent = m_viewportSize / (2.f * std::max(m_cameraZoom, 1e-3f));
+
+    m_minimapRenderer.Render(playerPos, m_camera.GetPosition(), viewHalfExtent);
 }
 
 void CGame::Render(double delta)

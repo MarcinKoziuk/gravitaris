@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include <gravitaris/game/fs/ifilesystem.hpp>
 
@@ -49,6 +50,11 @@ public:
 
     bool ProcessMouseMove(int x, int y);
     bool ProcessMouseButton(int rmlButtonIndex, bool down);
+
+    // Exposes an engine-owned GL texture to RML/RCSS as src="live://name"
+    // (see RenderInterfaceGL3::RegisterLiveTexture). Register before the
+    // first frame that renders a document referencing it.
+    void RegisterLiveTexture(const std::string& name, unsigned glTextureId, int width, int height);
 
     void ToggleDebugger();
 };

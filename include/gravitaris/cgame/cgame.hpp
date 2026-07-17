@@ -15,6 +15,7 @@
 #include <gravitaris/cgame/renderer/simple-model-renderer.hpp>
 #include <gravitaris/cgame/renderer/model-renderer2.hpp>
 #include <gravitaris/cgame/renderer/starfield-renderer.hpp>
+#include <gravitaris/cgame/renderer/minimap-renderer.hpp>
 #include <gravitaris/cgame/audio/audio-system.hpp>
 
 namespace Gravitaris {
@@ -41,6 +42,7 @@ protected:
     SimpleModelRenderer m_simpleModelRenderer;
     ModelRenderer2 m_modelRenderer2;
     StarfieldRenderer m_starfieldRenderer;
+    MinimapRenderer m_minimapRenderer;
     AudioSystem m_audioSystem;
 
     RendererKind m_activeRenderer = RendererKind::Baked;
@@ -236,6 +238,12 @@ public:
     }
 
     StarfieldRenderer& GetStarfieldRenderer() { return m_starfieldRenderer; }
+    MinimapRenderer& GetMinimapRenderer() { return m_minimapRenderer; }
+
+    // Renders the minimap into its offscreen texture. Runs its own
+    // framebuffer pass, so the app calls it before the glow pass claims the
+    // scene target (not from within Render()).
+    void RenderMinimap();
 
     Camera& GetCamera() { return m_camera; }
 

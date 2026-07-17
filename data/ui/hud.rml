@@ -1,0 +1,36 @@
+<rml>
+	<head>
+		<title>HUD</title>
+		<style>
+			/* Full-screen, click-through overlay: gameplay elements only, no
+			   chrome. pointer-events: none keeps it from swallowing mouse
+			   input meant for the game or the draggable windows above it. */
+			body
+			{
+				width: 100%;
+				height: 100%;
+				pointer-events: none;
+			}
+
+			/* The minimap texture is rendered by the engine every frame (see
+			   MinimapRenderer) and projected here via the live-texture bridge.
+			   Everything visual about the panel -- placement, size, frame --
+			   is styled right here in RCSS. */
+			img#minimap
+			{
+				position: absolute;
+				bottom: 16dp;
+				right: 16dp;
+				width: 170dp;
+				height: 170dp;
+
+				border-width: 2dp;
+				border-color: #0ff;
+				pointer-events: none;
+			}
+		</style>
+	</head>
+	<body>
+		<img id="minimap" src="live://minimap"/>
+	</body>
+</rml>

@@ -59,6 +59,11 @@ bool UI::Init()
     Rml::LoadFontFace("ui/LatoLatin-BoldItalic.ttf");
     Rml::LoadFontFace("ui/LatoLatin-Italic.ttf");
 
+    // HUD first so interactive windows loaded after it stack on top of it.
+    if (Rml::ElementDocument* hud = m_context->LoadDocument("ui/hud.rml")) {
+        hud->Show();
+    }
+
     m_document = m_context->LoadDocument("ui/main.rml");
     if (m_document) {
         m_document->Show();
@@ -105,6 +110,11 @@ bool UI::ProcessMouseButton(int rmlButtonIndex, bool down)
     if (!m_context) return false;
     return down ? !m_context->ProcessMouseButtonDown(rmlButtonIndex, 0)
                 : !m_context->ProcessMouseButtonUp(rmlButtonIndex, 0);
+}
+
+void UI::RegisterLiveTexture(const std::string& name, unsigned glTextureId, int width, int height)
+{
+    m_renderInterfaceGl3->RegisterLiveTexture(name, glTextureId, Rml::Vector2i(width, height));
 }
 
 void UI::ToggleDebugger()

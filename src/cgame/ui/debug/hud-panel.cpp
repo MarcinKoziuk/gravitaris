@@ -59,6 +59,27 @@ void DrawHudPanel(CGame& game)
                           "instead of vanishing. Default 0.35.");
 
     ImGui::EndDisabled();
+
+    MinimapRenderer::Params& minimap = game.GetMinimapRenderer().GetParams();
+
+    ImGui::SeparatorText("Minimap");
+    ImGui::Checkbox("Minimap enabled", &minimap.enabled);
+    ImGui::SetItemTooltip("Blank panel when off; hide/restyle the panel itself in ui/hud.rml.");
+
+    ImGui::BeginDisabled(!minimap.enabled);
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("World radius", &minimap.worldRadius, 25.f, 500.f, 30000.f, "%.0f");
+    ImGui::SetItemTooltip("World units from the player to the map edge. Default 3000.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Ship dot (px)", &minimap.shipDotPx, 0.1f, 1.f, 12.f, "%.1f");
+    ImGui::SetItemTooltip("Ship dot radius in minimap texture pixels. Default 3.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Planet min (px)", &minimap.planetMinPx, 0.1f, 1.f, 24.f, "%.1f");
+    ImGui::SetItemTooltip("Smallest ring a planet can shrink to; real world radius is used when it maps "
+                          "bigger than this. Default 4.");
+    ImGui::Checkbox("Show view rectangle", &minimap.showViewRect);
+    ImGui::SetItemTooltip("Outline the main camera's visible extent on the map.");
+    ImGui::EndDisabled();
 }
 
 } // namespace Gravitaris
