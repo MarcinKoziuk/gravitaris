@@ -33,6 +33,8 @@ Currently tested on Windows and MacOS (apple silicon).
     inspiration game's documented mechanics.
   - [`docs/slice-components.md`](docs/slice-components.md) — component &
     system inventory for the first vertical slice.
+  - [`docs/networking-plan.md`](docs/networking-plan.md) — phased multiplayer
+    execution plan (event queue, snapshots, transport, prediction).
   - [`docs/flecs-migration.md`](docs/flecs-migration.md) — entt → flecs
     migration recipe and rationale.
   - [`docs/adr/`](docs/adr) — architecture decision records (e.g.
