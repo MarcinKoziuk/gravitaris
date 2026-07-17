@@ -9,16 +9,18 @@ namespace Gravitaris {
 
 AudioBackendPreference ResolveAudioBackendPreference(AudioBackendPreference preference)
 {
-    if (preference != AudioBackendPreference::Auto) return preference;
-
-#if defined(__APPLE__)
-    // OpenAL's context-current problem was never confirmed fixed on macOS
-    // (no Mac to test); miniaudio is the safe default there. See
-    // docs/adr/0003-audio-backend.md.
     return AudioBackendPreference::PreferMiniaudio;
-#else
-    return AudioBackendPreference::PreferOpenAL;
-#endif
+
+//     if (preference != AudioBackendPreference::Auto) return preference;
+//
+// #if defined(__APPLE__)
+//     // OpenAL's context-current problem was never confirmed fixed on macOS
+//     // (no Mac to test); miniaudio is the safe default there. See
+//     // docs/adr/0003-audio-backend.md.
+//     return AudioBackendPreference::PreferMiniaudio;
+// #else
+//     return AudioBackendPreference::PreferOpenAL;
+// #endif
 }
 
 std::unique_ptr<IAudioBackend> CreateAudioBackend(AudioBackendPreference preference)

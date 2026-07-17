@@ -3,10 +3,6 @@
 #include <functional>
 #include <vector>
 
-#if defined(_WIN32)
-#include <windows.h> // SEH only (EXCEPTION_EXECUTE_HANDLER, GetExceptionCode), see SafeUpload
-#endif
-
 #include <poly2tri/poly2tri.h>
 
 #include <Corrade/Containers/ArrayView.h>
@@ -25,6 +21,7 @@
 
 #include <gravitaris/cgame/component/renderable.hpp>
 #include <gravitaris/cgame/team-color.hpp>
+#include <gravitaris/cgame/renderer/gl-safe-upload.hpp>
 #include <gravitaris/cgame/renderer/model-renderer2.hpp>
 
 namespace Gravitaris {
@@ -201,24 +198,6 @@ std::vector<LineVertex> BakeGroup(const Model::Group& group, bool forceFaceted)
     }
 
     return out;
-}
-
-// glBufferData occasionally raises a first-chance SEH exception in the
-// NVIDIA driver on this machine (root cause unknown); catch it so it
-// doesn't kill the process. Upload still succeeds either way.
-unsigned long SafeUpload(Magnum::GL::Buffer& buf, const void* data, std::size_t bytes)
-{
-#if defined(_WIN32)
-    __try {
-        buf.setData(Containers::ArrayView<const void>{data, bytes});
-        return 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return GetExceptionCode();
-    }
-#else
-    buf.setData(Containers::ArrayView<const void>{data, bytes});
-    return 0;
-#endif
 }
 
 } // namespace

@@ -125,10 +125,14 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
 
     m_filesystem.Init();
 
-    m_ui.Init();
-
+    // Game before UI: the HUD document (ui/hud.rml) references the minimap's
+    // live texture, which must be registered before RmlUi first resolves it.
     m_game = std::make_unique<CGame>(m_filesystem);
     m_game->Start();
+
+    m_ui.RegisterLiveTexture("minimap", m_game->GetMinimapRenderer().TextureId(),
+                             MinimapRenderer::TextureSize().x(), MinimapRenderer::TextureSize().y());
+    m_ui.Init();
 
     m_glow = std::make_unique<GlowPostProcess>(m_filesystem);
 
@@ -279,6 +283,13 @@ void GravitarisApplication::drawEvent()
     m_ui.SetDensityIndependentPixelRatio(PixelScale().x());
 
     PerfMonitor& perf = m_game->GetPerfMonitor();
+
+    // Minimap first: it renders to its own offscreen texture (sampled later
+    // by the RmlUi pass), and must not disturb the glow scene target below.
+    {
+        ScopedPerfTimer timer(perf, "Minimap");
+        m_game->RenderMinimap();
+    }
 
     // Game renders into the glow pass's offscreen target, not the screen,
     // so it can be blurred/composited.

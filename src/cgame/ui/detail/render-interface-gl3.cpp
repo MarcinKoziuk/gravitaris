@@ -545,8 +545,33 @@ struct TGAHeader {
 // Restore packing
 #pragma pack()
 
+void RenderInterfaceGL3::RegisterLiveTexture(const Rml::String& name, unsigned glTextureId, Rml::Vector2i dimensions)
+{
+    m_liveTextures[name] = LiveTexture{glTextureId, dimensions};
+}
+
 Rml::TextureHandle RenderInterfaceGL3::LoadTexture(Rml::Vector2i& texture_dimensions, const Rml::String& source)
 {
+    // Live-texture bridge: "live://name" resolves to a registered engine-owned
+    // GL texture instead of a file. Searched as a substring, not a prefix,
+    // because RmlUi path-joins texture sources with the referencing document's
+    // directory ("ui/live://minimap" by the time it gets here).
+    constexpr const char livePrefix[] = "live://";
+    if (const size_t pos = source.find(livePrefix); pos != Rml::String::npos)
+    {
+        const Rml::String name = source.substr(pos + sizeof(livePrefix) - 1);
+        const auto it = m_liveTextures.find(name);
+        if (it == m_liveTextures.end())
+        {
+            Rml::Log::Message(Rml::Log::LT_ERROR, "No live texture registered as '%s'.", name.c_str());
+            return 0;
+        }
+        texture_dimensions = it->second.dimensions;
+        const auto handle = (Rml::TextureHandle)it->second.glTextureId;
+        m_liveHandles.insert(handle);
+        return handle;
+    }
+
     Rml::FileInterface* file_interface = Rml::GetFileInterface();
     Rml::FileHandle file_handle = file_interface->Open(source);
     if (!file_handle)
@@ -665,6 +690,9 @@ Rml::TextureHandle RenderInterfaceGL3::GenerateTexture(Rml::Span<const Rml::byte
 
 void RenderInterfaceGL3::ReleaseTexture(Rml::TextureHandle texture_handle)
 {
+    // Engine-owned live textures aren't ours to delete (see RegisterLiveTexture).
+    if (m_liveHandles.count(texture_handle)) return;
+
     glDeleteTextures(1, (GLuint*)&texture_handle);
 }
 
