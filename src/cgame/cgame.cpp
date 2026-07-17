@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
 #include <iterator>
 #include <optional>
 
@@ -14,6 +13,7 @@
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/planet.hpp>
+#include <gravitaris/game/util/splitmix.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 
 #include <gravitaris/cgame/spawner/centity-spawner.hpp>
@@ -424,7 +424,8 @@ void CGame::SpawnRandomAIShip()
         pos = transform->pos + Vector2d{250.0, 150.0};
     }
 
-    const AIPersonalityPreset preset = PRESETS[std::rand() % std::size(PRESETS)];
+    std::uint64_t rng = SplitMix64Seed(GetStep(), m_randomAIShipSpawnCount++);
+    const AIPersonalityPreset preset = PRESETS[SplitMix64Next(rng) % std::size(PRESETS)];
     GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, pos, preset);
 }
 

@@ -159,10 +159,31 @@ void GravitarisApplication::tickEvent()
 
     m_frameTimeAccumulator += frameTime;
 
-    if (m_frameTimeAccumulator >= Game::PHYSICS_DELTA) {
+    // Fixed-step catch-up: a slow frame runs multiple sim steps so the sim
+    // keeps real time instead of slowing down with the frame rate (a server
+    // must hold its tick rate regardless of render load -- see
+    // docs/networking-plan.md Phase 0). FeedInput runs once per step, since
+    // each tick needs its own command. Capped so a debugger pause or huge
+    // stall doesn't spiral; past the cap the leftover accumulated time is
+    // dropped (a one-time hitch, not a permanent slowdown).
+    static constexpr int MAX_STEPS_PER_FRAME = 5;
+    int steps = 0;
+    while (m_frameTimeAccumulator >= Game::PHYSICS_DELTA) {
+        if (steps >= MAX_STEPS_PER_FRAME) {
+            m_frameTimeAccumulator = 0.0;
+            static bool warnedStepCap = false;
+            if (!warnedStepCap) {
+                warnedStepCap = true;
+                LOG(warning) << "sim step cap (" << MAX_STEPS_PER_FRAME
+                             << "/frame) hit; dropping accumulated time (frame rate below "
+                             << (1.0 / (MAX_STEPS_PER_FRAME * Game::PHYSICS_DELTA)) << " fps)";
+            }
+            break;
+        }
         FeedInput();
         m_game->Update();
         m_frameTimeAccumulator -= Game::PHYSICS_DELTA;
+        ++steps;
     }
 
     redraw();

@@ -96,6 +96,17 @@ public:
     EntitySpawner& GetEntitySpawner()
     { return *m_entitySpawner; }
 
+    // FNV-1a over every NetId-bearing entity's (NetId, quantized pos/rot/vel),
+    // sorted by NetId first (flecs iteration order is not guaranteed stable
+    // across worlds, so hashing in table-encounter order would make two
+    // otherwise-identical states hash differently). Quantized rather than
+    // hashing raw doubles: same-process reruns would match on raw bits too,
+    // but this checksum is meant to keep working once state is compared
+    // across peers (ADR 0001 already flags floats as non-cross-platform
+    // -deterministic; quantizing narrows how much that can bite). Used by
+    // the headless sim-test target to catch nondeterminism regressions.
+    [[nodiscard]] std::uint64_t ComputeStateChecksum();
+
     static constexpr double PHYSICS_DELTA = 1. / 60.;
 };
 

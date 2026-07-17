@@ -12,6 +12,7 @@
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
 #include <gravitaris/game/gnc/guidance/behaviors.hpp>
 #include <gravitaris/game/gnc/control/flight-controller.hpp>
+#include <gravitaris/game/util/splitmix.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 #include <gravitaris/game/game.hpp>
@@ -28,18 +29,6 @@ static constexpr double BULLET_SPEED = 300.0; // matches ship-controls-system's 
 static double WrapToPi(double angle);
 static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Vector2d& relVel,
                                                 double projectileSpeed);
-
-// SplitMix64 -> a double in [0, 1). Deterministic per (tick, entity) seed, no
-// global RNG state, so replays stay bit-identical (same pattern as
-// death-system.cpp's frag scatter).
-static double NextUnit(std::uint64_t& state)
-{
-    std::uint64_t z = (state += 0x9E3779B97F4A7C15ull);
-    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-    z = z ^ (z >> 31);
-    return (z >> 11) * (1.0 / 9007199254740992.0); // 53-bit mantissa
-}
 
 AIPilotSystem::AIPilotSystem(flecs::world& registry, PhysicsSystem& physicsSystem,
                              TrajectoryPredictor& predictor)
@@ -69,7 +58,7 @@ void AIPilotSystem::Update(std::uint64_t step, std::optional<flecs::entity> play
 
         // Deterministic per-(tick, entity) seed for this pilot's jitter/
         // danger-ignore rolls below -- same value every replay of this tick.
-        std::uint64_t rng = step * 0x9E3779B97F4A7C15ull ^ (ent.id() + 0x632BE59Bull);
+        std::uint64_t rng = SplitMix64Seed(step, ent.id());
 
         const Source* well = nullptr;
         for (const Source& src : sources) {
@@ -90,7 +79,7 @@ void AIPilotSystem::Update(std::uint64_t step, std::optional<flecs::entity> play
         }
         else {
             if (personality.reactionJitter > 0.0) {
-                const double jitter = (NextUnit(rng) - 0.5) * 2.0
+                const double jitter = (SplitMix64NextUnit(rng) - 0.5) * 2.0
                         * personality.reactionJitter * personality.decisionInterval;
                 pilot.decisionCooldown = static_cast<std::uint32_t>(
                         std::max(1.0, static_cast<double>(personality.decisionInterval) + jitter));
@@ -146,7 +135,7 @@ void AIPilotSystem::Update(std::uint64_t step, std::optional<flecs::entity> play
         // risky path rather than re-rolling itself into evading a tick later.
         if (predictedDanger && !pilot.wasInDanger) {
             pilot.dangerSuppressed = personality.dangerIgnoreChance > 0.0
-                    && NextUnit(rng) < personality.dangerIgnoreChance;
+                    && SplitMix64NextUnit(rng) < personality.dangerIgnoreChance;
         }
         if (!predictedDanger) {
             pilot.dangerSuppressed = false;
@@ -214,7 +203,7 @@ void AIPilotSystem::Update(std::uint64_t step, std::optional<flecs::entity> play
                     // than the fire threshold flickering randomly tick to
                     // tick (which would look like the gun spraying).
                     if (personality.aimJitter > 0.0 && !pilot.aimBiasRolled) {
-                        pilot.aimBias = (NextUnit(rng) - 0.5) * 2.0 * personality.aimJitter;
+                        pilot.aimBias = (SplitMix64NextUnit(rng) - 0.5) * 2.0 * personality.aimJitter;
                         pilot.aimBiasRolled = true;
                     }
                     const double tolerance = personality.fireTolerance

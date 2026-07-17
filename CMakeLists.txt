@@ -342,6 +342,8 @@ add_executable(GravitarisNG
     include/gravitaris/game/component/bullet.hpp
     include/gravitaris/game/component/damageable.hpp
     include/gravitaris/game/component/planet.hpp
+    include/gravitaris/game/component/net-id.hpp
+    include/gravitaris/game/util/splitmix.hpp
     include/gravitaris/game/input/input-command.hpp
     include/gravitaris/game/input/input-log.hpp
     src/game/input/input-log.cpp
@@ -535,4 +537,71 @@ if(APPLE)
     set_target_properties(GravitarisNG PROPERTIES
         BUILD_RPATH "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}"
     )
+endif()
+
+# ---------------------------------------------------------------------------
+# gravitaris-sim-test — headless determinism harness (docs/networking-plan.md
+# Phase 0.4 / ADR 0001's "cheap test"). Same game/ sources as the main
+# target's sim side, deliberately NONE of cgame/, Magnum::GL, Sdl2Application,
+# Audio, RmlUi or ImGui: if this stops linking, something pulled a rendering/
+# window/audio dependency into the sim.
+# ---------------------------------------------------------------------------
+add_executable(gravitaris-sim-test
+    tools/sim-test/main.cpp
+    src/game/resource/body.cpp
+    extlibs/nanosvg/nanosvg.c
+    extlibs/clipper/clipper.cpp
+    extlibs/physfs/physfs.cpp
+    src/game/fs/filesystem-phys-fs.cpp
+    src/game/id.cpp
+    src/game/logging.cpp
+    src/game/perf-monitor.cpp
+    src/game/resource/detail/shape-common.cpp
+    src/game/resource/detail/casteljau.cpp
+    src/game/input/input-log.cpp
+    src/game/system/input-system.cpp
+    src/game/system/ai-pilot-system.cpp
+    src/game/system/ship-controls-system.cpp
+    src/game/system/bullet-lifetime-system.cpp
+    src/game/system/damage-system.cpp
+    src/game/system/death-system.cpp
+    src/game/system/physics-system.cpp
+    src/game/gnc/nav/trajectory-predictor.cpp
+    src/game/gnc/control/flight-controller.cpp
+    src/game/gnc/guidance/behaviors.cpp
+    src/game/gnc/ai-personality-presets.cpp
+    src/game/spawner/entity-spawner.cpp
+    src/game/game.cpp
+)
+
+target_include_directories(gravitaris-sim-test PRIVATE
+    src/
+    include/
+    extlibs/
+)
+
+target_include_directories(gravitaris-sim-test PRIVATE
+    ${chipmunk2d_SOURCE_DIR}/include
+)
+
+target_compile_definitions(gravitaris-sim-test PRIVATE
+    GRAVITARIS_COMPILETIME_SOURCE_PATH="${CMAKE_SOURCE_DIR}"
+)
+
+target_compile_features(gravitaris-sim-test PRIVATE cxx_std_20)
+
+target_link_libraries(gravitaris-sim-test PRIVATE
+    flecs::flecs_static
+    chipmunk_static
+    yaml-cpp::yaml-cpp
+    Magnum::Magnum
+    "${CMAKE_DL_LIBS}"
+)
+
+if(TARGET PhysFS::PhysFS)
+    target_link_libraries(gravitaris-sim-test PRIVATE PhysFS::PhysFS)
+elseif(TARGET physfs-static)
+    target_link_libraries(gravitaris-sim-test PRIVATE physfs-static)
+elseif(TARGET physfs)
+    target_link_libraries(gravitaris-sim-test PRIVATE physfs)
 endif()

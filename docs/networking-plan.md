@@ -74,38 +74,58 @@ without changing emitters.
 
 ---
 
-## Phase 0 — Sim hygiene (no networking code yet)
+## Phase 0 — Sim hygiene (no networking code yet) — DONE (2026-07-17)
 
 Goal: make the sim loop and its inputs server-grade. Everything here pays off
 even if netplay never ships.
 
-- [ ] **0.1 Fix the tick loop.** In `GravitarisApplication::tickEvent`, step
-  the sim in a `while (m_frameTimeAccumulator >= PHYSICS_DELTA)` loop, with a
-  cap (e.g. 5 steps/frame; drop the remainder beyond that and log once) so a
-  debugger pause doesn't spiral. `FeedInput()` must run once per *step*, not
-  once per frame (each sim tick needs its command — this is also why the
-  input seam is tick-stamped).
-- [ ] **0.2 `NetId`.** New replicated component
-  `include/gravitaris/game/component/net-id.hpp`:
-  `struct NetId { std::uint32_t value = 0; };` (0 = invalid). EntitySpawner
-  assigns monotonically from a member counter on every spawn (player, AI,
-  planet, bullet). Add a `NetIdRegistry` (game-side singleton or member of
-  Game): `unordered_map<u32, flecs::entity>` maintained by spawner +
-  an OnRemove observer. No consumer changes yet — this is plumbing.
-- [ ] **0.3 Kill `std::rand`.** `SpawnRandomAIShip` picks its preset via
-  SplitMix64 seeded from `(GetStep(), spawn counter)` — same pattern as
-  DeathSystem's frag scatter.
-- [ ] **0.4 State checksum + headless harness.** Add
-  `Game::ComputeStateChecksum()` — FNV-1a over each entity's (NetId, quantized
-  pos/rot/vel) in NetId order (ordering matters: flecs iteration order is not
-  stable across worlds). New CMake target `gravitaris-sim-test`: links game/
-  only (NOT cgame — this is ADR 0001's "cheap test"; if it won't link
-  headless, a constraint got violated), spawns 2 AI ships + planet, steps
-  1800 ticks, prints the checksum. Run twice, assert identical.
+- [x] **0.1 Fix the tick loop.** `GravitarisApplication::tickEvent` now steps
+  the sim in a `while (m_frameTimeAccumulator >= PHYSICS_DELTA)` loop, capped
+  at 5 steps/frame (drops the remainder past the cap and logs once) so a
+  debugger pause doesn't spiral. `FeedInput()` runs once per *step* inside the
+  loop, not once per frame.
+- [x] **0.2 `NetId`.** `include/gravitaris/game/component/net-id.hpp` as
+  specified. `EntitySpawner` owns the counter + `unordered_dense::map<u32,
+  flecs::entity>` (matching the project's existing hash-map choice, see
+  `ankerl` in CLAUDE.md) and an OnRemove observer, assigned on every spawn
+  (player, AI, planet, bullet). **Deviation from the sketch**: the observer
+  registration couldn't live in the constructor as planned — `EntitySpawner`
+  is built via `CreateEntitySpawner()`, called as an *argument* to `Game`'s
+  own (delegating/base-class) constructor, which runs *before* `Game::
+  m_registry` is constructed; calling `m_registry.observer<NetId>()` at that
+  point is UB (segfaulted the moment something in Init actually touched it
+  substantively). Fixed with `EntitySpawner::Init()`, called from `Game`'s
+  constructor *body* (after every member, including `m_registry`, is fully
+  built) — this was a **latent bug in the pre-existing `Game`/`CGame`
+  constructor pattern**, not something specific to NetId; anything future that
+  needs a live `m_registry` at spawner-construction time must go through
+  `Init()`, not the constructor.
+- [x] **0.3 Kill `std::rand`.** `SpawnRandomAIShip` seeds via
+  `SplitMix64Seed(GetStep(), spawnCounter++)` — same pattern as DeathSystem's
+  frag scatter. The two pre-existing inline SplitMix64 copies (DeathSystem,
+  AIPilotSystem) were consolidated into `game/util/splitmix.hpp` while at it
+  (byte-identical algorithm, so replays are unaffected).
+- [x] **0.4 State checksum + headless harness.** `Game::ComputeStateChecksum()`
+  — FNV-1a over each NetId-bearing entity's (NetId, quantized pos/rot/vel),
+  sorted by NetId first. New CMake target `gravitaris-sim-test`
+  (`tools/sim-test/main.cpp`): links only the `game/` sources the main target
+  itself lists (no `cgame/`, `Magnum::GL`, `Sdl2Application`, `Audio`, `RmlUi`,
+  `ImGui`) — confirms ADR 0001 constraint 1 by construction: it either links
+  clean or something pulled in a rendering/window/audio dependency. Spawns 2
+  AI ships + `Game::Start()`'s planet, steps 1800 ticks (30s), runs twice from
+  a fresh `Game`, asserts identical checksums. **This harness is what caught
+  0.2's constructor-ordering bug** — first real payoff of building it.
 
 **Done when:** sim catches up after a stall (drop a breakpoint, resume, game
 fast-forwards); `gravitaris-sim-test` builds without cgame and prints a stable
 checksum; replays still work.
+
+**Verification status**: build clean, app launches/exits without error,
+`gravitaris-sim-test` passes (two full runs, identical checksum) — done from
+an unattended session, no interactive display available. **Not yet manually
+verified**: the tick-loop catch-up under an actual debugger-pause stall, and
+F5/F6/F7 record/replay still producing matching input. Do an interactive pass
+on these before starting Phase 1 if they haven't been checked by hand yet.
 
 ## Phase 1 — Centralized event queue (the quake3 part)
 

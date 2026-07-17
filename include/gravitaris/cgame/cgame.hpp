@@ -169,6 +169,12 @@ protected:
     // pixel width, 1 = constant world-space width (scales linearly with zoom).
     float m_zoomWidthFactor = Defaults::zoomWidthFactor;
 
+    // Deterministic per-(tick, spawn) seed for SpawnRandomAIShip's preset pick
+    // (ADR 0001: no std::rand -- it mutates sim state, so it must be
+    // reproducible under replay). Incremented per call so repeated presses
+    // within one tick still diverge.
+    std::uint32_t m_randomAIShipSpawnCount = 0;
+
     AutopilotMode m_autopilotMode = AutopilotMode::Off;
     Magnum::Math::Vector2<double> m_autopilotAnchor;
     FlightControllerParams m_flightParams;

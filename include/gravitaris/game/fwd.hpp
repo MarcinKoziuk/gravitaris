@@ -26,6 +26,7 @@ struct AIPilot;
 struct Team;
 struct Bullet;
 struct Damageable;
+struct NetId;
 
 // input
 class InputLog;
