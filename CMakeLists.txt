@@ -60,35 +60,59 @@ list(APPEND CMAKE_MODULE_PATH "${corrade_SOURCE_DIR}/modules")
 # these to decide which context objects to build (e.g. MagnumWglContextObjects
 # that provides flextGLInit on Windows). Set them explicitly here so Magnum
 # inherits the correct values when it is added as a subdirectory.
-if(WIN32)
+#
+# EMSCRIPTEN must be checked first and be mutually exclusive with the rest:
+# Emscripten's own CMake toolchain sets CMake's built-in UNIX to 1 (for POSIX-
+# API-compatibility purposes), so an elseif(UNIX) reached after it would also
+# set CORRADE_TARGET_UNIX — a combination Magnum's own CMake doesn't expect
+# (CORRADE_TARGET_UNIX normally means a real desktop Unix like Linux). With
+# both set, its GL-context-selection cascade wrongly builds a GLX (X11) context
+# alongside the correct Emscripten one, and GLX fails to compile under emcc
+# (no real X11 headers) — this bit us during the initial wasm-port bring-up.
+if(EMSCRIPTEN)
+    set(CORRADE_TARGET_EMSCRIPTEN TRUE)
+elseif(WIN32)
     set(CORRADE_TARGET_WINDOWS TRUE)
 elseif(APPLE)
     set(CORRADE_TARGET_APPLE TRUE)
 elseif(UNIX)
     set(CORRADE_TARGET_UNIX TRUE)
 endif()
-if(EMSCRIPTEN)
-    set(CORRADE_TARGET_EMSCRIPTEN TRUE)
-endif()
 
 # ---------------------------------------------------------------------------
 # SDL2 — fetched before Magnum; OVERRIDE_FIND_PACKAGE so Magnum's
 # find_package(SDL2) resolves to the fetched copy.
+#
+# Emscripten is the one exception: real SDL2 upstream isn't meant to be built
+# from source against it (there's no Emscripten backend in the SDL2 source
+# tree itself) — the browser-native implementation instead comes from
+# Emscripten's own "port", activated purely via the `-sUSE_SDL=2` compiler/
+# linker flag, no library to link. Magnum's own bundled FindSDL2.cmake already
+# has a dedicated branch for exactly this (CORRADE_TARGET_EMSCRIPTEN: skip
+# finding a library, look up SDL_scancode.h under an "SDL" path suffix, and add
+# `-sUSE_SDL=2` itself) — do NOT pre-create an SDL2::SDL2 target here as we do
+# for the native case below; that module only takes its Emscripten branch when
+# no such target exists yet, and a hand-rolled one lacks the
+# INTERFACE_INCLUDE_DIRECTORIES that branch's own target ends up with, which
+# fails find_package_handle_standard_args. Simplest correct thing: just don't
+# fetch real SDL2 and let Magnum's module do its own thing, untouched.
 # ---------------------------------------------------------------------------
-FetchContent_Declare(SDL2
-    GIT_REPOSITORY  https://github.com/libsdl-org/SDL.git
-    GIT_TAG         ${GT_SDL2_TAG}
-    GIT_SHALLOW     TRUE
-    OVERRIDE_FIND_PACKAGE
-)
-# Avoid an "uninstall" custom target name clash with PhysFS, which also
-# defines one when fetched as a sibling subdirectory.
-set(SDL2_DISABLE_UNINSTALL ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(SDL2)
+if(NOT EMSCRIPTEN)
+    FetchContent_Declare(SDL2
+        GIT_REPOSITORY  https://github.com/libsdl-org/SDL.git
+        GIT_TAG         ${GT_SDL2_TAG}
+        GIT_SHALLOW     TRUE
+        OVERRIDE_FIND_PACKAGE
+    )
+    # Avoid an "uninstall" custom target name clash with PhysFS, which also
+    # defines one when fetched as a sibling subdirectory.
+    set(SDL2_DISABLE_UNINSTALL ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(SDL2)
 
-# Same OVERRIDE_FIND_PACKAGE no-op issue as Freetype: Magnum's internal
-# find_package(SDL2) won't set SDL2_FOUND, so Sdl2Application gets skipped.
-set(SDL2_FOUND TRUE)
+    # Same OVERRIDE_FIND_PACKAGE no-op issue as Freetype: Magnum's internal
+    # find_package(SDL2) won't set SDL2_FOUND, so Sdl2Application gets skipped.
+    set(SDL2_FOUND TRUE)
+endif()
 
 # ---------------------------------------------------------------------------
 # Freetype — fetched before RmlUi; OVERRIDE_FIND_PACKAGE so RmlUi's
@@ -122,6 +146,14 @@ set(WITH_GL                     ON  CACHE BOOL "" FORCE)
 set(MAGNUM_WITH_GL              ON  CACHE BOOL "" FORCE)
 set(WITH_SHADERS                ON  CACHE BOOL "" FORCE)
 set(MAGNUM_WITH_SHADERS         ON  CACHE BOOL "" FORCE)
+# Magnum defaults an Emscripten build to GLES2/WebGL1 (widest device reach).
+# Our shaders request GLES300 explicitly (see line2-shader.cpp and friends)
+# and the code uses GLES3/WebGL2-only GL features (RGBA8 texture format,
+# Framebuffer::clearColor/blit, core (non-OES) VAOs) — force GLES3/WebGL2.
+if(EMSCRIPTEN)
+    set(TARGET_GLES2         OFF CACHE BOOL "" FORCE)
+    set(MAGNUM_TARGET_GLES2  OFF CACHE BOOL "" FORCE)
+endif()
 # Disable unused modules to keep configure/build time reasonable
 set(WITH_DEBUGTOOLS       OFF CACHE BOOL "" FORCE)
 set(MAGNUM_WITH_DEBUGTOOLS OFF CACHE BOOL "" FORCE)
@@ -181,6 +213,18 @@ FetchContent_Declare(Chipmunk2D
 )
 FetchContent_MakeAvailable(Chipmunk2D)
 
+# cpHastySpace.c (the optional threaded solver -- we don't use it, nothing in
+# this codebase touches Chipmunk's threading API) assumes any non-Windows
+# platform has <sys/sysctl.h>, true on macOS/BSD but not on Emscripten (or
+# Linux). Chipmunk2D's own CMakeLists globs every src/*.c file unconditionally
+# with no option to exclude it, so strip it from the already-created target
+# instead of patching the fetched source.
+if(EMSCRIPTEN)
+    get_target_property(_chipmunk_sources chipmunk_static SOURCES)
+    list(FILTER _chipmunk_sources EXCLUDE REGEX "cpHastySpace\\.c$")
+    set_target_properties(chipmunk_static PROPERTIES SOURCES "${_chipmunk_sources}")
+endif()
+
 # ---------------------------------------------------------------------------
 # PhysFS
 # ---------------------------------------------------------------------------
@@ -239,6 +283,15 @@ set(RMLUI_BACKEND   "native"    CACHE STRING  "" FORCE)
 set(RMLUI_SAMPLES   OFF         CACHE BOOL    "" FORCE)
 set(RMLUI_TESTS     OFF         CACHE BOOL    "" FORCE)
 set(RMLUI_LUA_BINDINGS OFF      CACHE BOOL    "" FORCE)
+
+# RmlUi's own BUILD_SHARED_LIBS option defaults ON, and poly2tri's untyped
+# add_library() (below) inherits the same ambient cache variable -- fine
+# natively (plain .dylib/.so + an RPATH fixup), but Emscripten's "shared
+# library" is a side module requiring -fPIC/-sMAIN_MODULE, which is more
+# complexity than a single statically-linked wasm binary needs.
+if(EMSCRIPTEN)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+endif()
 
 FetchContent_Declare(RmlUi
     GIT_REPOSITORY  https://github.com/mikke89/RmlUi.git
@@ -536,6 +589,21 @@ elseif(TARGET physfs-static)
     target_link_libraries(GravitarisNG PRIVATE physfs-static)
 elseif(TARGET physfs)
     target_link_libraries(GravitarisNG PRIVATE physfs)
+endif()
+
+# WebGL2/GLES3: -sFULL_ES3 is needed at COMPILE time too (it's what gates
+# GLES3 declarations like glGenVertexArrays/GL_RGBA8 being visible at all in
+# Emscripten's GL headers, independent of the MAGNUM_TARGET_GLES2 OFF setting
+# above, which only affects Magnum's own C++ API surface). MIN/MAX_WEBGL_VERSION
+# pins the actual browser context Sdl2Application requests to WebGL2 --
+# without it Emscripten still defaults to negotiating WebGL1.
+if(EMSCRIPTEN)
+    target_compile_options(GravitarisNG PRIVATE "-sFULL_ES3=1")
+    target_link_options(GravitarisNG PRIVATE
+        "-sFULL_ES3=1"
+        "-sMIN_WEBGL_VERSION=2"
+        "-sMAX_WEBGL_VERSION=2"
+    )
 endif()
 
 # On macOS the fetched shared libs (Magnum, Corrade, etc.) carry no install

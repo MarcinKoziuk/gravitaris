@@ -86,27 +86,86 @@ Prep that also unblocks web audio. Desktop stays on miniaudio (already default).
 - **Done when**: native build is green and audio still plays (miniaudio), with
   no OpenAL references left (`grep -ri openal src include CMakeLists.txt` clean).
 
-### Phase 1 — Emscripten toolchain + configure
+### Phase 1 — Emscripten toolchain + configure — done (2026-07-18)
 
-Get `emcmake cmake` to configure the project for wasm (no full link yet).
+Original gate was "configures without CMake errors"; ended up reaching a full
+clean link (`GravitarisNG.js` + `.wasm`) by iterating on real `emcmake`/`em++`
+output rather than guessing, so this phase absorbed some of what was expected
+to land in Phase 2. Actual work, in the order hit:
 
-- Prereq: developer installs emsdk (`git clone emscripten-core/emsdk`,
-  `./emsdk install/activate latest`, `source emsdk_env.sh`). Not vendored.
-- Add `if(EMSCRIPTEN)` gating so configuration succeeds: skip the SDL2
-  FetchContent (use `-sUSE_SDL=2`), skip freetype FetchContent (use the port),
-  set Magnum's WebGL/GLES target options.
-- Add a `tools/wasm/build.sh` wrapper (runs `emcmake cmake` + `cmake --build`)
-  and an `index.html` shell.
-- **Done when**: `tools/wasm/build.sh` configures without CMake errors.
+- Prereq: emsdk installed at `~/Projects/emsdk` (`git clone emscripten-core/
+  emsdk`, `./emsdk install/activate latest`). Fish-shell users: skip
+  `source emsdk_env.sh` (bash-only) — `tools/wasm/build.sh` (below) finds and
+  `PATH`-exports `emcc`/`emcmake` itself, no shell activation needed.
+- **SDL2**: skip the FetchContent entirely under `EMSCRIPTEN` (real SDL2
+  upstream has no Emscripten backend to build from source against). Magnum's
+  own bundled `FindSDL2.cmake` already has a dedicated Emscripten branch (skips
+  linking a library, finds `SDL_scancode.h` under an `SDL` path suffix, adds
+  `-sUSE_SDL=2` itself) — the only requirement is to NOT pre-create an
+  `SDL2::SDL2` target ourselves, which would make that module take its
+  "already have a target" branch instead and fail on a missing
+  `INTERFACE_INCLUDE_DIRECTORIES` it never expects us to set.
+- **Freetype**: needed no special-casing at all — it's portable C and just
+  cross-compiles via `em++` like it does natively. (Original plan assumed the
+  Emscripten port would be needed; wrong guess, corrected once tested.)
+- **`CORRADE_TARGET_UNIX` vs `CORRADE_TARGET_EMSCRIPTEN` bug**: the existing
+  `if(WIN32)...elseif(APPLE)...elseif(UNIX)` chain set `CORRADE_TARGET_UNIX`
+  even when cross-compiling to Emscripten, because Emscripten's own CMake
+  toolchain sets CMake's built-in `UNIX` to `1` (POSIX-emulation, unrelated to
+  Corrade's meaning of "real desktop Unix"). With both `CORRADE_TARGET_UNIX`
+  and `CORRADE_TARGET_EMSCRIPTEN` true, Magnum's GL-context-selection cascade
+  built an erroneous GLX (X11) context alongside the correct Emscripten one,
+  and GLX doesn't compile under `em++` (no real X11 headers) — `#error
+  unsupported platform`. Fixed by checking `EMSCRIPTEN` first in that chain,
+  mutually exclusive with the rest.
+- **Chipmunk2D's `cpHastySpace.c`** (the optional threaded solver — unused;
+  nothing in this codebase touches Chipmunk's threading API) unconditionally
+  `#include <sys/sysctl.h>` on any non-Windows platform, true on macOS/BSD but
+  not Linux or Emscripten, and Chipmunk's own CMakeLists globs `src/*.c` with
+  no option to exclude it. Fixed by stripping that one file from the
+  already-created `chipmunk_static` target's `SOURCES` under `EMSCRIPTEN`.
+- **RmlUi/poly2tri shared-library default**: RmlUi's `BUILD_SHARED_LIBS` option
+  defaults `ON`, and poly2tri's untyped `add_library()` inherits the same
+  ambient variable — harmless natively (plain `.dylib`/`.so` + the existing
+  `BUILD_RPATH` fixup), but Emscripten's "shared library" is a side module
+  requiring `-fPIC`/`-sMAIN_MODULE`, and linking failed with `relocation ...
+  cannot be used against symbol ...; recompile with -fPIC`. Fixed by forcing
+  `BUILD_SHARED_LIBS OFF` under `EMSCRIPTEN` before the RmlUi fetch.
+- **GLES2 vs GLES3/WebGL2**: Magnum defaults an Emscripten build to
+  `MAGNUM_TARGET_GLES2 ON` (widest device reach), but our shaders explicitly
+  request `GLES300` and the code uses GLES3/WebGL2-only GL features
+  (`TextureFormat::RGBA8`, `Framebuffer::clearColor`/`AbstractFramebuffer::
+  blit`, core (non-OES) VAOs) — all missing/uncompilable under GLES2. Fixed by
+  forcing `MAGNUM_TARGET_GLES2`/`TARGET_GLES2 OFF` under `EMSCRIPTEN`, **plus**
+  passing `-sFULL_ES3=1` at COMPILE time too (separate from Magnum's own C++
+  option — it's what gates GLES3 declarations like `glGenVertexArrays`/
+  `GL_RGBA8` being visible in Emscripten's GL headers at all), and
+  `-sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2` at link time (pins the actual
+  browser context `Sdl2Application` requests — without it Emscripten still
+  negotiates WebGL1 by default even once the code compiles against ES3 headers).
+- Added `tools/wasm/build.sh` (locates emsdk, `emcmake cmake` + `cmake --build`,
+  works from any shell) and `.gitignore`d `out-wasm/`.
+- **NOT done yet** (deliberately left for Phase 2, since none of it was needed
+  to reach a link): `--preload-file`/physfs `/data` mount, canvas sizing,
+  `index.html` shell, and — critically — **never actually run in a browser**.
+  A clean link only proves the code compiles and the linker's happy; it says
+  nothing about whether the game boots, finds its data, or renders anything.
+- **Done when** (met): `tools/wasm/build.sh` builds `GravitarisNG.js`/`.wasm`
+  with no CMake or compiler/linker errors.
 
-### Phase 2 — Link + boot
+### Phase 2 — Data + boot
 
-- Executable link flags: `-sMAX_WEBGL_VERSION=2 -sMIN_WEBGL_VERSION=2`,
-  `-sFULL_ES3=1`, `-sALLOW_MEMORY_GROWTH=1`, `--preload-file data@/data`,
-  miniaudio's web audio.
+GL version/context flags already landed in Phase 1 (see above) — this phase is
+now just data delivery and getting an actual browser tab to show something.
+
+- Executable link flags still needed: `-sALLOW_MEMORY_GROWTH=1`,
+  `--preload-file data@/data`.
 - Runtime: add the `/data` physfs mount (`filesystem-phys-fs.cpp`); size the
   view to the HTML canvas instead of the hardcoded `1920x1080`
   (`gravitaris.cpp` `CreateConfiguration`).
+- Write `index.html` (canvas + script tag for `GravitarisNG.js`).
+- Actually load the page in a browser and see what happens — first real
+  browser-runtime signal of this whole effort.
 - **Done when**: the page loads to the first rendered frame of the game.
 
 ### Phase 3 — Polish
