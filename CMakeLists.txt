@@ -343,6 +343,7 @@ add_executable(GravitarisNG
     include/gravitaris/game/component/damageable.hpp
     include/gravitaris/game/component/planet.hpp
     include/gravitaris/game/component/net-id.hpp
+    include/gravitaris/game/event/game-event.hpp
     include/gravitaris/game/util/splitmix.hpp
     include/gravitaris/game/input/input-command.hpp
     include/gravitaris/game/input/input-log.hpp
@@ -390,6 +391,7 @@ add_executable(GravitarisNG
     src/cgame/resource/model.cpp
     include/gravitaris/cgame/renderer/simple-model-renderer.hpp
     include/gravitaris/cgame/component/renderable.hpp
+    include/gravitaris/cgame/component/hit-flash.hpp
     src/cgame/renderer/simple-model-renderer.cpp
     include/gravitaris/game/resource/common/detail/resource-wrapper.hpp
     include/gravitaris/game/system/ship-controls-system.hpp

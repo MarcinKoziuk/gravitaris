@@ -17,6 +17,7 @@
 #include <gravitaris/game/system/ship-controls-system.hpp>
 
 #include <gravitaris/cgame/spawner/centity-spawner.hpp>
+#include <gravitaris/cgame/component/hit-flash.hpp>
 #include <gravitaris/cgame/team-color.hpp>
 #include <gravitaris/cgame/cgame.hpp>
 
@@ -36,7 +37,7 @@ CGame::CGame(IFilesystem &filesystem)
     , m_modelRenderer2(m_registry, filesystem, m_resourceLoader)
     , m_starfieldRenderer(filesystem)
     , m_minimapRenderer(m_registry, m_physicsSystem, filesystem)
-    , m_audioSystem(m_registry, m_resourceLoader)
+    , m_audioSystem(m_registry, m_resourceLoader, m_eventQueue)
 {
     m_camera.SetZoom(Defaults::cameraZoom);
     m_modelRenderer2.SetReferenceZoom(Defaults::cameraZoom);
@@ -351,6 +352,28 @@ void CGame::RenderMinimap()
     m_minimapRenderer.Render(playerPos, m_camera.GetPosition(), viewHalfExtent);
 }
 
+void CGame::UpdateHitFlashes(float dtSeconds)
+{
+    // The flash previously decayed 1/8 per 60Hz tick inside DamageSystem;
+    // 7.5/s is that same rate, now applied client-side with frame dt.
+    constexpr float FLASH_DECAY_PER_SECOND = 7.5f;
+
+    m_flashEventCursor = m_eventQueue.ConsumeSince(m_flashEventCursor, [&](const GameEvent& event) {
+        if (event.type != GameEventType::Impact && event.type != GameEventType::LandingCrash) return;
+        const flecs::entity entity = m_entitySpawner->EntityForNetId(event.sourceNetId);
+        if (!entity.is_alive()) return; // e.g. the hit killed it this tick
+        if (HitFlash* flash = entity.try_get_mut<HitFlash>()) {
+            flash->amount = 1.f;
+        }
+    });
+
+    m_registry.each([&](HitFlash& flash) {
+        if (flash.amount > 0.f) {
+            flash.amount = std::max(0.f, flash.amount - FLASH_DECAY_PER_SECOND * dtSeconds);
+        }
+    });
+}
+
 void CGame::Render(double delta)
 {
     // Real wall-clock dt for the camera director (Render's `delta` is a fixed-
@@ -366,6 +389,7 @@ void CGame::Render(double delta)
     m_cameraTimeValid = true;
 
     UpdateCamera(dtSeconds);
+    UpdateHitFlashes(dtSeconds);
 
     // Debug/tuning only: reapplies every frame (cheap, one cpBodySetMass
     // call) so it stays in effect across a respawn's fresh body without

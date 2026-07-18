@@ -16,10 +16,10 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_entitySpawner(std::move(entitySpawner))
         , m_physicsSystem(m_registry)
         , m_inputSystem(m_registry)
-        , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem)
+        , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue)
         , m_bulletLifetimeSystem(m_registry)
-        , m_damageSystem(m_registry, m_physicsSystem)
-        , m_deathSystem(m_registry, *m_entitySpawner)
+        , m_damageSystem(m_registry, m_physicsSystem, m_eventQueue)
+        , m_deathSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_trajectoryPredictor(m_registry, m_physicsSystem)
         , m_aiPilotSystem(m_registry, m_physicsSystem, m_trajectoryPredictor)
         , m_step(0L)
@@ -47,6 +47,10 @@ Game::Game(IFilesystem& filesystem)
 
 void Game::Update()
 {
+    // Emitters read the current tick off the queue rather than threading the
+    // step through every EmitEvent call.
+    m_eventQueue.SetCurrentTick(m_step);
+
     {
         ScopedPerfTimer timer(m_perfMonitor, "Physics");
         m_physicsSystem.Simulate(Game::PHYSICS_DELTA);

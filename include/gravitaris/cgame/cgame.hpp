@@ -175,6 +175,11 @@ protected:
     // within one tick still diverge.
     std::uint32_t m_randomAIShipSpawnCount = 0;
 
+    // Event cursor for the hit-flash consumer (see UpdateHitFlashes); audio
+    // keeps its own inside AudioSystem -- each GameEventQueue consumer tracks
+    // its own position independently.
+    std::uint32_t m_flashEventCursor = 0;
+
     // Debug/tuning only (temporary, for calibrating gameplay feel -- see the
     // Physics debug tab). 1 = unmodified in both cases.
     // Gravity is a PhysicsSystem-wide setting, applied every ApplyGravity
@@ -217,6 +222,11 @@ protected:
     // ring around screen center, pointing at the target. Call after UpdateCamera
     // (needs the final camera pos/zoom) and before the renderer draws.
     void UpdateIndicators();
+
+    // Client-side hit-flash: sets HitFlash.amount = 1 on entities named by
+    // Impact/LandingCrash events (resolved via the NetId registry), then
+    // decays every entity's flash with the rendered frame's dt.
+    void UpdateHitFlashes(float dtSeconds);
 
     std::unique_ptr<EntitySpawner> CreateEntitySpawner() override;
 public:

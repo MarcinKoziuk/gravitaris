@@ -28,6 +28,10 @@ struct Bullet;
 struct Damageable;
 struct NetId;
 
+// event
+struct GameEvent;
+class GameEventQueue;
+
 // input
 class InputLog;
 

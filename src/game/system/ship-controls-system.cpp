@@ -9,6 +9,7 @@
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
@@ -23,10 +24,11 @@ static constexpr double BULLET_MUZZLE_SPEED = 300.0; // matches ai-pilot-system'
 static constexpr float BOX_HP = 30.f; // a couple of primary hits or one ram
 
 ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner,
-                                       PhysicsSystem& physicsSystem)
+                                       PhysicsSystem& physicsSystem, GameEventQueue& eventQueue)
         : m_registry(registry)
         , m_entitySpawner(entitySpawner)
         , m_physicsSystem(physicsSystem)
+        , m_eventQueue(eventQueue)
 {}
 
 static inline void
@@ -101,12 +103,20 @@ void ShipControlsSystem::Update(std::uint64_t step)
             bulletEntity.emplace<Bullet>(BULLET_LIFETIME_SECONDS,
                                          shooterTeam ? shooterTeam->id : TeamId::Blue,
                                          BULLET_DAMAGE);
+
+            m_eventQueue.Emit(GameEventType::BulletFired, entity,
+                              Magnum::Vector2{static_cast<float>(ret.first.x()),
+                                              static_cast<float>(ret.first.y())});
         }
         if (scontrols.actionFlags.fireSecondary) {
             scontrols.actionFlags.fireSecondary = false;
             std::pair<Vector2d, Vector2d> ret = GetBulletSpawnPosAndVel(transf, phys);
             flecs::entity box = m_entitySpawner.SpawnBullet("models/doodads/box"_id, ret.first, transf.vel);
             box.emplace<Damageable>(Damageable{BOX_HP, BOX_HP});
+
+            m_eventQueue.Emit(GameEventType::BulletFired, entity,
+                              Magnum::Vector2{static_cast<float>(ret.first.x()),
+                                              static_cast<float>(ret.first.y())});
         }
     });
 }

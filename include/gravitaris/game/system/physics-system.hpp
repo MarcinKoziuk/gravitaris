@@ -44,6 +44,7 @@ struct ImpactEvent {
     flecs::entity_t entity;
     double deltaV;
     bool upright;
+    Magnum::Vector2d contact; // world-space contact point (for the LandingCrash event)
 };
 
 class PhysicsSystem {

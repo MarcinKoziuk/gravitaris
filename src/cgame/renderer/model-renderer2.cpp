@@ -17,9 +17,9 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/team.hpp>
-#include <gravitaris/game/component/damageable.hpp>
 
 #include <gravitaris/cgame/component/renderable.hpp>
+#include <gravitaris/cgame/component/hit-flash.hpp>
 #include <gravitaris/cgame/team-color.hpp>
 #include <gravitaris/cgame/renderer/gl-safe-upload.hpp>
 #include <gravitaris/cgame/renderer/model-renderer2.hpp>
@@ -320,8 +320,8 @@ void ModelRenderer2::RenderTag(id_t tag, const std::function<bool(flecs::entity)
         const Team* team = entity.try_get<Team>();
         const Vector3 teamColor = team ? Vector3{TeamColor(team->id)} : Vector3{1.f, 1.f, 1.f};
 
-        const Damageable* dmg = entity.try_get<Damageable>();
-        const float flash = dmg ? dmg->flashAmount : 0.f;
+        const HitFlash* hitFlash = entity.try_get<HitFlash>();
+        const float flash = hitFlash ? hitFlash->amount : 0.f;
 
         m_instanceScratch[modelId].push_back(InstanceData{transform, teamColor, flash});
     });

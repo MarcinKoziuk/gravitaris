@@ -9,6 +9,7 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/util/splitmix.hpp>
+#include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/death-system.hpp>
 
@@ -25,9 +26,10 @@ static constexpr double FRAG_LIFETIME_SECONDS = 0.8;
 static constexpr float FRAG_DAMAGE = 8.f;
 static constexpr double FRAG_SPAWN_OFFSET = 6.0; // start just off-centre so frags don't share one point
 
-DeathSystem::DeathSystem(flecs::world& registry, EntitySpawner& entitySpawner)
+DeathSystem::DeathSystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue)
         : m_registry(registry)
         , m_entitySpawner(entitySpawner)
+        , m_eventQueue(eventQueue)
 {}
 
 void DeathSystem::Update(std::uint64_t step)
@@ -49,6 +51,12 @@ void DeathSystem::Explode(flecs::entity ship, std::uint64_t step)
 {
     const Transform* transf = ship.try_get<Transform>();
     if (!transf) return;
+
+    // Emitted before the frag loop (and before the caller destructs the ship)
+    // so the event still resolves the ship's NetId.
+    m_eventQueue.Emit(GameEventType::Explosion, ship,
+                      Magnum::Vector2{static_cast<float>(transf->pos.x()),
+                                      static_cast<float>(transf->pos.y())});
 
     // Deterministic per-(tick, entity) seed so record/replay stays identical.
     std::uint64_t rng = SplitMix64Seed(step, ship.id());

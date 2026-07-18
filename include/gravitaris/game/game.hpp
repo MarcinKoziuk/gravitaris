@@ -10,6 +10,7 @@
 
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/perf-monitor.hpp>
+#include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/input-system.hpp>
@@ -32,6 +33,10 @@ protected:
     flecs::world m_registry;
 
     std::unique_ptr<EntitySpawner> m_entitySpawner;
+
+    // Declared before the systems below: several take a reference to it in
+    // their constructors (member init order).
+    GameEventQueue m_eventQueue;
 
     PhysicsSystem m_physicsSystem;
 
@@ -95,6 +100,10 @@ public:
 
     EntitySpawner& GetEntitySpawner()
     { return *m_entitySpawner; }
+
+    // The sim's one-shot event stream (docs/networking-plan.md Phase 1).
+    // Consumers keep their own cursor and read via ConsumeSince.
+    [[nodiscard]] const GameEventQueue& GetEventQueue() const { return m_eventQueue; }
 
     // FNV-1a over every NetId-bearing entity's (NetId, quantized pos/rot/vel),
     // sorted by NetId first (flecs iteration order is not guaranteed stable

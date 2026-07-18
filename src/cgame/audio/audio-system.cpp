@@ -2,9 +2,7 @@
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/controls.hpp>
-#include <gravitaris/game/component/team.hpp>
-#include <gravitaris/game/component/bullet.hpp>
-#include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/event/game-event.hpp>
 
 #include <gravitaris/cgame/resource/audio-clip.hpp>
 #include <gravitaris/cgame/audio/audio-system.hpp>
@@ -34,9 +32,11 @@ constexpr float THRUST_GAIN = 0.55f;
 
 } // namespace
 
-AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader)
+AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
+                         const GameEventQueue& eventQueue)
         : m_registry(registry)
         , m_resourceLoader(resourceLoader)
+        , m_eventQueue(eventQueue)
 {
     m_resourceLoader.OnCreate<AudioClip>().connect(&AudioSystem::HandleClipAdded, this);
     m_resourceLoader.OnDestroy<AudioClip>().connect(&AudioSystem::HandleClipRemoved, this);
@@ -70,26 +70,12 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader)
     HandleClipAdded(*m_hitClip, m_hitClip.Id());
 
     AcquireVoicePool();
-
-    m_bulletObserver = m_registry.observer<Bullet>()
-            .event(flecs::OnSet)
-            .each([this](flecs::entity ent, Bullet& bullet) {
-                if (bullet.team == TeamId::None) return; // shrapnel, not a gunshot
-                const Transform* transf = ent.try_get<Transform>();
-                if (!transf) return;
-                m_pendingShots.push_back(Vector2{static_cast<float>(transf->pos.x()),
-                                                 static_cast<float>(transf->pos.y())});
-            });
 }
 
 AudioSystem::~AudioSystem()
 {
     m_resourceLoader.OnCreate<AudioClip>().disconnect(&AudioSystem::HandleClipAdded, this);
     m_resourceLoader.OnDestroy<AudioClip>().disconnect(&AudioSystem::HandleClipRemoved, this);
-
-    // Same teardown reasoning as PhysicsSystem: the observer closes over
-    // `this` and must not outlive it.
-    if (m_bulletObserver) m_bulletObserver.destruct();
 
     // m_backend's own destructor tears down every voice/buffer it still owns.
 }
@@ -171,24 +157,22 @@ void AudioSystem::Update(const Vector2& cameraPos)
 
     m_backend->SetListenerPosition(cameraPos, LISTENER_HEIGHT);
 
-    for (const Vector2& pos : m_pendingShots) {
-        PlayOneShotById(m_laserClip.Id(), pos, LASER_GAIN);
-    }
-    m_pendingShots.clear();
-
-    // Hit sounds on the rising edge of the damage flash (DamageSystem sets it
-    // to exactly 1 on every hit and decays it the following ticks).
-    m_lastFlashScratch.clear();
-    m_registry.each([&](flecs::entity ent, const Transform& transf, const Damageable& dmg) {
-        const auto it = m_lastFlash.find(ent.id());
-        const float previous = it != m_lastFlash.end() ? it->second : 0.f;
-        if (dmg.flashAmount >= 1.f && previous < 1.f) {
-            PlayOneShotById(m_hitClip.Id(), Vector2{static_cast<float>(transf.pos.x()),
-                                                    static_cast<float>(transf.pos.y())}, HIT_GAIN);
+    // One-shots straight off the sim's event stream. Frag shrapnel is
+    // naturally silent -- DeathSystem spawns it without a BulletFired event.
+    // Explosion/LandingCrash borrow the hit sound until they get their own
+    // clips (docs/networking-plan.md 1.4).
+    m_eventCursor = m_eventQueue.ConsumeSince(m_eventCursor, [&](const GameEvent& event) {
+        switch (event.type) {
+            case GameEventType::BulletFired:
+                PlayOneShotById(m_laserClip.Id(), event.pos, LASER_GAIN);
+                break;
+            case GameEventType::Impact:
+            case GameEventType::LandingCrash:
+            case GameEventType::Explosion:
+                PlayOneShotById(m_hitClip.Id(), event.pos, HIT_GAIN);
+                break;
         }
-        m_lastFlashScratch.emplace(ent.id(), dmg.flashAmount);
     });
-    std::swap(m_lastFlash, m_lastFlashScratch);
 
     // Thruster loops: one looping voice per entity holding thrust.
     for (auto& [id, loop] : m_thrusters) loop.seen = false;

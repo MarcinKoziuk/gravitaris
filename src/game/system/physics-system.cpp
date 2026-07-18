@@ -107,7 +107,8 @@ void PhysicsSystem::RecordImpact(cpShape* shape, cpBody* body, cpFloat impulse, 
     const bool upright = cpvdot(legs, toContact) > UPRIGHT_DOT_THRESHOLD;
 
     const auto raw = reinterpret_cast<std::uintptr_t>(cpShapeGetUserData(shape));
-    m_impacts.push_back(ImpactEvent{static_cast<flecs::entity_t>(raw), impulse / mass, upright});
+    m_impacts.push_back(ImpactEvent{static_cast<flecs::entity_t>(raw), impulse / mass, upright,
+                                    Magnum::Vector2d{contact.x, contact.y}});
 }
 
 std::vector<ImpactEvent> PhysicsSystem::DrainImpacts()

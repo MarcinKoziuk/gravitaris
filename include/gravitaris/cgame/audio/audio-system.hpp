@@ -27,11 +27,15 @@ using Magnum::Vector2;
 // panning and distance attenuation fall out of the plane geometry. Sound
 // assets are AudioClip resources, loaded reactively through ResourceLoader
 // (mirrors ModelRenderer2's OnCreate<Model>/OnDestroy<Model> pattern) rather
-// than read/parsed ad hoc. Event sources:
-//  - gunshots: flecs observer on Bullet creation (frag shrapnel, TeamId::None,
-//    is skipped -- it's debris, not a gun),
-//  - hits: rising edge of Damageable::flashAmount (set to 1 on every hit),
-//  - thrust: looping per-entity voice while Controls::thrustForward is held.
+// than read/parsed ad hoc.
+//
+// One-shots (gunshots, hits, explosions) come from the sim's GameEventQueue
+// via this system's own cursor -- the same stream a network client will
+// receive, so audio needs no knowledge of how the sim produced them (it
+// previously inferred shots from a Bullet-creation observer and hits from a
+// flashAmount edge, both of which break under replication). Thrust stays
+// state-driven: a looping per-entity voice while Controls::thrustForward is
+// held -- continuous state, not an event.
 class AudioSystem {
 private:
     struct ThrusterLoop {
@@ -49,6 +53,8 @@ private:
 
     flecs::world& m_registry;
     ResourceLoader& m_resourceLoader;
+    const GameEventQueue& m_eventQueue;
+    std::uint32_t m_eventCursor = 0;
 
     std::unique_ptr<IAudioBackend> m_backend;
     AudioBackendPreference m_backendPreference = AudioBackendPreference::Auto;
@@ -74,14 +80,6 @@ private:
     std::unordered_map<flecs::entity_t, ThrusterLoop> m_thrusters;
     std::vector<FadingVoice> m_fadingVoices;
 
-    // Rising-edge tracking for Damageable::flashAmount; double-buffered so
-    // entries for dead entities don't accumulate.
-    std::unordered_map<flecs::entity_t, float> m_lastFlash;
-    std::unordered_map<flecs::entity_t, float> m_lastFlashScratch;
-
-    flecs::observer m_bulletObserver;
-    std::vector<Vector2> m_pendingShots;
-
     void HandleClipAdded(const AudioClip& clip, id_t id);
     void HandleClipRemoved(const AudioClip& clip, id_t id);
 
@@ -90,7 +88,8 @@ private:
     void AcquireVoicePool();
 
 public:
-    AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader);
+    AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
+                const GameEventQueue& eventQueue);
 
     ~AudioSystem();
 

@@ -14,9 +14,10 @@ class DamageSystem {
 private:
     flecs::world& m_registry;
     PhysicsSystem& m_physicsSystem;
+    GameEventQueue& m_eventQueue;
 
 public:
-    DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem);
+    DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue);
 
     void Update();
 };

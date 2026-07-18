@@ -15,11 +15,12 @@ class DeathSystem {
 private:
     flecs::world& m_registry;
     EntitySpawner& m_entitySpawner;
+    GameEventQueue& m_eventQueue;
 
     void Explode(flecs::entity ship, std::uint64_t step);
 
 public:
-    DeathSystem(flecs::world& registry, EntitySpawner& entitySpawner);
+    DeathSystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue);
 
     void Update(std::uint64_t step);
 };

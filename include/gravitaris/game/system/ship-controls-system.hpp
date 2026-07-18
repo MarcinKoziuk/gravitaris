@@ -25,9 +25,11 @@ private:
 
     PhysicsSystem& m_physicsSystem;
 
+    GameEventQueue& m_eventQueue;
+
 public:
     explicit ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner,
-                                PhysicsSystem& physicsSystem);
+                                PhysicsSystem& physicsSystem, GameEventQueue& eventQueue);
 
     ~ShipControlsSystem() = default;
 

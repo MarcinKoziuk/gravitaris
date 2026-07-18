@@ -8,6 +8,7 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/damage-system.hpp>
 
@@ -16,9 +17,6 @@ namespace Gravitaris {
 // Forgiveness radius around the swept segment, so a fast bullet's exact
 // centerline doesn't have to intersect the target polygon precisely.
 static constexpr double BULLET_QUERY_RADIUS = 2.0;
-
-// Ticks the hit-flash takes to decay back to 0 (~0.13 s at 60 Hz).
-static constexpr float FLASH_DECAY_PER_TICK = 1.f / 8.f;
 
 // Landing/ram damage tuning. deltaV (impact speed) below the threshold does
 // no damage; above it, damage scales linearly. Uprightness matters far more
@@ -30,19 +28,14 @@ static constexpr double TIPPED_SAFE_DELTAV = 12.0;
 static constexpr double DAMAGE_PER_DELTAV = 0.6;
 static constexpr float TIPPED_DAMAGE_MULTIPLIER = 3.0f;
 
-DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem)
+DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue)
         : m_registry(registry)
         , m_physicsSystem(physicsSystem)
+        , m_eventQueue(eventQueue)
 {}
 
 void DamageSystem::Update()
 {
-    m_registry.each([](Damageable& dmg) {
-        if (dmg.flashAmount > 0.f) {
-            dmg.flashAmount = std::max(0.f, dmg.flashAmount - FLASH_DECAY_PER_TICK);
-        }
-    });
-
     // Landing / ram damage from this step's hard contacts.
     for (const ImpactEvent& ev : m_physicsSystem.DrainImpacts()) {
         flecs::entity hitEntity(m_registry, ev.entity);
@@ -59,7 +52,11 @@ void DamageSystem::Update()
         if (!ev.upright) damage *= TIPPED_DAMAGE_MULTIPLIER;
 
         dmg->hp -= damage;
-        dmg->flashAmount = 1.f;
+
+        m_eventQueue.Emit(GameEventType::LandingCrash, hitEntity,
+                          Magnum::Vector2{static_cast<float>(ev.contact.x()),
+                                          static_cast<float>(ev.contact.y())},
+                          static_cast<std::uint32_t>(damage * 10.f));
     }
 
     // Bullets that scored a hit this tick; destroyed after the query loop so
@@ -90,7 +87,11 @@ void DamageSystem::Update()
         if (!dmg) return;
 
         dmg->hp -= bullet.damage;
-        dmg->flashAmount = 1.f;
+
+        m_eventQueue.Emit(GameEventType::Impact, hitEntity,
+                          Magnum::Vector2{static_cast<float>(info.point.x),
+                                          static_cast<float>(info.point.y)},
+                          static_cast<std::uint32_t>(bullet.damage * 10.f));
 
         spent.push_back(bulletEnt);
     });

@@ -133,7 +133,7 @@ Goal: every gameplay one-shot flows through one serializable stream. This is
 the "network boundary seam" — and it immediately fixes the audio observer
 hacks, so it's valuable stand-alone.
 
-- [ ] **1.1 The event types.** `include/gravitaris/game/event/game-event.hpp`:
+- [x] **1.1 The event types.** `include/gravitaris/game/event/game-event.hpp`:
 
   ```cpp
   enum class GameEventType : std::uint8_t {
@@ -155,33 +155,46 @@ hacks, so it's valuable stand-alone.
 
   Continuous states (thruster on, flash decay) are NOT events — they stay
   replicated component state. Events are strictly things that *happen*.
-- [ ] **1.2 The queue.** Game owns a fixed ring (`std::array<GameEvent, 256>`
+- [x] **1.2 The queue.** Game owns a fixed ring (`std::array<GameEvent, 256>`
   + head/count, like InputQueue) plus the seq counter. `Game::EmitEvent(type,
   sourceEntity, pos, param)` resolves the entity's NetId and stamps seq/tick.
   Consumers read via `Game::EventsSince(u32 seq)` (returns a span/pair of
   ranges) — multiple independent consumers, each tracking its own cursor,
   exactly how a per-client "events since last ack" will work in Phase 3.
-- [ ] **1.3 Emit.** ShipControlsSystem → BulletFired (both weapons);
+- [x] **1.3 Emit.** ShipControlsSystem → BulletFired (both weapons);
   DamageSystem → Impact (bullet hits) and LandingCrash (impact events over
   the damage threshold); DeathSystem → Explosion. All emitted server-side,
   same tick the thing happened.
-- [ ] **1.4 Consume — AudioSystem.** Delete the Bullet OnSet observer and the
+- [x] **1.4 Consume — AudioSystem.** Delete the Bullet OnSet observer and the
   `m_lastFlash` edge-detection maps; AudioSystem keeps an event cursor and
   plays laser/hit sounds from BulletFired/Impact. Thruster loops stay
   state-driven (correct — continuous). LandingCrash/Explosion get sounds when
   assets exist; wire them to the hit sound for now.
-- [ ] **1.5 Move the hit flash client-side.** Remove `flashAmount` from
+- [x] **1.5 Move the hit flash client-side.** Remove `flashAmount` from
   `Damageable`; new cgame-side flash state (map NetId → amount inside
   ModelRenderer2's instance-color path, or a small `CGame` map consumed by
   it) set to 1 on Impact/LandingCrash events, decayed client-side. This fixes
   the replication-class violation and the missed-edge fragility in one move.
-- [ ] **1.6 Replay check.** A recorded replay must produce the identical
+- [x] **1.6 Replay check.** A recorded replay must produce the identical
   event stream (compare final seq + a checksum over (seq,type,tick) in the
   sim-test harness).
 
 **Done when:** audio behaves identically by ear; AudioSystem contains no flecs
 observers and no flash-edge maps; `Damageable` has no presentation fields;
 replaying a recording yields the same event-stream checksum.
+
+**Verification status**: build clean for both `GravitarisNG` and
+`gravitaris-sim-test`; `gravitaris-sim-test` passes (two full runs, identical
+state checksum *and* identical event-stream checksum — 21 events emitted both
+times over 1800 ticks); `GravitarisNG.exe` launches, loads all resources
+(fonts, audio backend, RmlUi), and runs several seconds with no errors or
+warnings beyond the expected sim-step-cap message from running headless.
+Done from an unattended session, no interactive display available. **Not yet
+manually verified**: audio "sounds right" by ear, hit-flash visuals render
+correctly on-screen, and a real F5/F6/F7 replay reproduces the same
+event-stream checksum interactively (only the scripted two-run sim-test
+comparison was exercised). Do an interactive play-test pass on these before
+starting Phase 2 if they haven't been checked by hand yet.
 
 ## Phase 2 — Snapshot serialization (still zero sockets)
 

@@ -31,7 +31,13 @@ namespace {
 
 constexpr int TICKS = 1800; // 30s at the fixed 60Hz tick
 
-std::uint64_t RunSimulation()
+struct RunResult {
+    std::uint64_t stateChecksum;
+    std::uint64_t eventChecksum; // FNV over the full GameEvent stream
+    std::uint32_t eventCount;
+};
+
+RunResult RunSimulation()
 {
     FilesystemPhysFS fs;
     if (!fs.Init()) {
@@ -45,13 +51,33 @@ std::uint64_t RunSimulation()
     game.GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, Magnum::Vector2d{200.0, -150.0});
     game.GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, Magnum::Vector2d{-200.0, 150.0});
 
+    // Consume the event stream every tick (before the 256-entry ring can
+    // wrap) and fold it into a running FNV-1a: two identical runs must
+    // produce the identical stream (docs/networking-plan.md 1.6).
+    std::uint64_t eventHash = 1469598103934665603ull;
+    constexpr std::uint64_t FNV_PRIME = 1099511628211ull;
+    const auto mix = [&](std::uint64_t v) {
+        for (int b = 0; b < 8; ++b) {
+            eventHash ^= (v >> (b * 8)) & 0xFFull;
+            eventHash *= FNV_PRIME;
+        }
+    };
+    std::uint32_t eventCursor = 0;
+
     for (int i = 0; i < TICKS; ++i) {
         game.Update();
+        eventCursor = game.GetEventQueue().ConsumeSince(eventCursor, [&](const GameEvent& event) {
+            mix(event.seq);
+            mix(event.tick);
+            mix(static_cast<std::uint64_t>(event.type));
+            mix(event.sourceNetId);
+            mix(event.param);
+        });
     }
 
-    const std::uint64_t checksum = game.ComputeStateChecksum();
+    const RunResult result{game.ComputeStateChecksum(), eventHash, game.GetEventQueue().LatestSeq()};
     fs.Shutdown();
-    return checksum;
+    return result;
 }
 
 } // namespace
@@ -60,16 +86,26 @@ int main()
 {
     HasEnteredMain = true;
 
-    const std::uint64_t a = RunSimulation();
-    const std::uint64_t b = RunSimulation();
+    const RunResult a = RunSimulation();
+    const RunResult b = RunSimulation();
 
-    std::printf("sim-test: run 1 checksum = 0x%016llx\n", static_cast<unsigned long long>(a));
-    std::printf("sim-test: run 2 checksum = 0x%016llx\n", static_cast<unsigned long long>(b));
+    std::printf("sim-test: run 1 state = 0x%016llx  events = 0x%016llx (%u emitted)\n",
+                static_cast<unsigned long long>(a.stateChecksum),
+                static_cast<unsigned long long>(a.eventChecksum), a.eventCount);
+    std::printf("sim-test: run 2 state = 0x%016llx  events = 0x%016llx (%u emitted)\n",
+                static_cast<unsigned long long>(b.stateChecksum),
+                static_cast<unsigned long long>(b.eventChecksum), b.eventCount);
 
-    if (a != b) {
-        std::fprintf(stderr, "sim-test: MISMATCH -- sim is not deterministic across runs\n");
-        return 1;
+    bool ok = true;
+    if (a.stateChecksum != b.stateChecksum) {
+        std::fprintf(stderr, "sim-test: STATE MISMATCH -- sim is not deterministic across runs\n");
+        ok = false;
     }
+    if (a.eventChecksum != b.eventChecksum || a.eventCount != b.eventCount) {
+        std::fprintf(stderr, "sim-test: EVENT-STREAM MISMATCH -- emitted events differ across runs\n");
+        ok = false;
+    }
+    if (!ok) return 1;
 
     std::printf("sim-test: OK, deterministic across %d ticks\n", TICKS);
     return 0;
