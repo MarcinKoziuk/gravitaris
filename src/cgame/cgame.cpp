@@ -5,6 +5,7 @@
 
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/component/transform.hpp>
+#include <gravitaris/game/net/snapshot.hpp>
 
 #include <gravitaris/cgame/spawner/centity-spawner.hpp>
 #include <gravitaris/cgame/cgame.hpp>
@@ -15,6 +16,8 @@ CGame::CGame(IFilesystem &filesystem)
     : Game(filesystem, CreateEntitySpawner())
     , m_simpleModelRenderer(m_registry, filesystem, m_resourceLoader)
     , m_modelRenderer2(m_registry, filesystem, m_resourceLoader)
+    , m_mirrorRenderer2(m_mirrorWorld, filesystem, m_resourceLoader)
+    , m_snapshotApplier(m_mirrorWorld, m_resourceLoader)
     , m_starfieldRenderer(filesystem)
     , m_minimapRenderer(m_registry, m_physicsSystem, filesystem)
     , m_audioSystem(m_registry, m_resourceLoader, m_eventQueue)
@@ -24,6 +27,7 @@ CGame::CGame(IFilesystem &filesystem)
     , m_autopilot(m_registry, m_physicsSystem)
 {
     m_modelRenderer2.SetReferenceZoom(Defaults::cameraZoom);
+    m_mirrorRenderer2.SetReferenceZoom(Defaults::cameraZoom);
 
     // This game's tuned default (Game's own default is 1 = unmodified): a
     // lighter ship reads better against the solar system's gravity wells.
@@ -76,9 +80,12 @@ void CGame::Render(double delta)
     m_starfieldRenderer.SetZoom(camera.GetZoom());
     m_starfieldRenderer.SetCameraPosition(camera.GetPosition());
 
-    // Overlays ride the model renderer's instanced draw, so they must be
-    // submitted before it runs (and after the camera director settles the view).
-    m_indicatorRenderer.Update(GetPlayer(), camera.GetPosition(), camera.GetZoom(), m_viewportSize, m_pixelScale);
+    // Overlays ride m_modelRenderer2's instanced draw (which clears them at
+    // the end of its Render), so only submit them when that renderer actually
+    // runs this frame -- otherwise the overlay scratch grows unboundedly.
+    if (m_activeRenderer == RendererKind::Baked) {
+        m_indicatorRenderer.Update(GetPlayer(), camera.GetPosition(), camera.GetZoom(), m_viewportSize, m_pixelScale);
+    }
 
     {
         ScopedPerfTimer timer(m_perfMonitor, "Starfield");
@@ -95,6 +102,31 @@ void CGame::Render(double delta)
             case RendererKind::Baked:
                 m_modelRenderer2.Render(delta);
                 break;
+            case RendererKind::Mirror: {
+                // Round-trip the live sim through the full snapshot path
+                // (world -> bytes -> parse -> apply), then draw the mirror
+                // world instead of the real one (networking-plan 2.5).
+                {
+                    ScopedPerfTimer mirrorTimer(m_perfMonitor, "Snapshot Mirror");
+                    m_snapshotScratch.Clear();
+                    WriteSnapshot(m_registry, m_eventQueue, GetStep(), m_mirrorEventCursor,
+                                  m_snapshotScratch);
+                    ByteReader reader(m_snapshotScratch.Data(), m_snapshotScratch.Size());
+                    SnapshotData snapshot;
+                    if (ReadSnapshot(reader, snapshot)) {
+                        m_snapshotApplier.Apply(snapshot);
+                        if (!snapshot.events.empty()) {
+                            m_mirrorEventCursor = snapshot.events.back().seq;
+                        }
+                    }
+                }
+                m_mirrorRenderer2.SetZoom(camera.GetZoom());
+                m_mirrorRenderer2.SetCameraPosition(camera.GetPosition());
+                m_mirrorRenderer2.SetLineWidth(m_lineWidthPixels);
+                m_mirrorRenderer2.SetZoomWidthFactor(m_zoomWidthFactor);
+                m_mirrorRenderer2.Render(delta);
+                break;
+            }
         }
     }
 

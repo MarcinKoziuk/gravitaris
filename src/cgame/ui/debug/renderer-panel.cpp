@@ -11,14 +11,21 @@ void DrawRendererPanel(CGame& game)
     ImGui::SeparatorText("Active line renderer");
 
     const RendererKind current = game.GetActiveRenderer();
-    int choice = (current == RendererKind::Simple) ? 0 : 1;
+    int choice = (current == RendererKind::Simple) ? 0 : (current == RendererKind::Baked) ? 1 : 2;
 
     ImGui::RadioButton("SimpleModelRenderer (GL LineStrip)", &choice, 0);
     ImGui::SetItemTooltip("Fixed 1px GL lines, no thickness control.");
     ImGui::RadioButton("ModelRenderer2 (baked/instanced, px width)", &choice, 1);
     ImGui::SetItemTooltip("Pixel-space width; thickness vs. zoom is tunable below.");
+    ImGui::RadioButton("Snapshot mirror (net debug)", &choice, 2);
+    ImGui::SetItemTooltip("Draws a second world fed only by serialize->apply of the live sim every "
+                          "frame (networking-plan 2.5). Should look identical to ModelRenderer2; "
+                          "cost shows as 'Snapshot Mirror' in the perf panel. HUD arrows are hidden "
+                          "in this mode.");
 
-    const RendererKind picked = (choice == 0) ? RendererKind::Simple : RendererKind::Baked;
+    const RendererKind picked = (choice == 0) ? RendererKind::Simple
+                              : (choice == 1) ? RendererKind::Baked
+                                              : RendererKind::Mirror;
     if (picked != current) {
         game.SetActiveRenderer(picked);
     }

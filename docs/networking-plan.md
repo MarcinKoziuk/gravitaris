@@ -201,47 +201,76 @@ starting Phase 2 if they haven't been checked by hand yet.
 Goal: world → bytes → world, proven inside one process. This is the highest
 -value/lowest-risk replication step and needs no networking knowledge.
 
-- [ ] **2.1 Byte IO.** `include/gravitaris/game/net/byte-stream.hpp`:
+- [x] **2.1 Byte IO.** `include/gravitaris/game/net/byte-stream.hpp`:
   `ByteWriter`/`ByteReader` (little-endian u8/u16/u32/u64/float, plus
-  `WriteQuantizedFloat(v, min, max, bits)`). Unit-test roundtrips in the sim
-  -test target.
-- [ ] **2.2 EntityState.** What replicates per entity (keep it brutal-simple
-  for v1): `netId, entityType (u8: Ship/Bullet/Planet), modelId (u32 hash —
-  already stable, it's the asset-path FNV), teamId (u8), pos (2×f32),
-  rot (f32), vel (2×f32), angVel (f32), controlsFlags (u8 pack — drives
-  remote thruster visuals/sound), hp (f32)`. Planets replicate once
-  (they're static); fine to include them in full snapshots v1.
-- [ ] **2.3 SnapshotWriter (game/).** `WriteSnapshot(ByteWriter&)`: tick,
-  entity count, EntityStates in NetId order, then all events since a given
-  seq. Server-side, reads only replicated components.
-- [ ] **2.4 SnapshotApplier (cgame/).** Applies a snapshot into a *client*
-  world: creates missing entities by NetId (new spawn path in CEntitySpawner
-  that attaches Transform/Team/Renderable but **no RigidBodyDesc — remote
-  entities have no client physics**; ADR constraint 6 keeps prediction
-  minimal), updates existing ones, destroys absent ones. Client-side Game
-  systems (physics, AI, damage...) must not run on these — the client world
-  in remote mode runs only presentation.
-- [ ] **2.5 The mirror test.** Debug-only mode (F1 toggle or CLI flag):
-  every tick, serialize the live Game and apply into a second flecs world
-  rendered by the same renderers (swap via the existing renderer toggle
-  pattern). The mirror must be visually indistinguishable except bullets/
-  ships snapping at 60Hz (no interpolation yet). This proves the whole
-  replication path with zero transport.
+  `WriteQuantizedFloat(v, min, max, bits)`), explicit byte-by-byte so the
+  layout is host-endianness/padding-independent (native and wasm must
+  interoperate). Roundtrip + overrun-latch tests run in the sim-test target.
+- [x] **2.2 EntityState.** As specced, plus one deviation: **`scale (2×f32)`
+  added** — bullets spawn with Transform scale {3,3}, so a remote client
+  rendering them without it would draw them 3x too small. Quantized floats
+  exist in ByteWriter but v1 uses plain f32 everywhere, per the sketch.
+- [x] **2.3 SnapshotWriter (game/).** Split into `GatherSnapshot` (world ->
+  `SnapshotData`) + `SerializeSnapshot` (`SnapshotData` -> bytes), with
+  `WriteSnapshot` as the combined convenience — the split is what lets the
+  sim-test prove gather -> serialize -> parse -> re-serialize is
+  **byte-identical** without linking cgame. Version byte + count sanity caps
+  on read. Entities NetId-ascending (canonical order, delta-able later).
+- [x] **2.4 SnapshotApplier (cgame/net/).** As specced: creates by NetId with
+  Transform/Team/Renderable/HitFlash and **no RigidBodyDesc**, updates,
+  destroys absent. Deviations: it owns its own NetId->entity map (no
+  CEntitySpawner involvement — server NetIds are applied as-is, and
+  EntitySpawner's job is *assigning* ids, which the client must never do);
+  `Controls` is also emplaced on Ship-type entities (unpacked from
+  controlsFlags) because ModelRenderer2 gates the `_thrust` tag group on
+  `Controls::actionFlags.thrustForward` — exactly the "drives remote thruster
+  visuals" the field was specced for. hp is parsed but not applied (nothing
+  renders health), events are parsed but left to the caller.
+- [x] **2.5 The mirror test.** Implemented as a third entry in the existing
+  renderer toggle (`RendererKind::Mirror`, Renderer debug tab): while active,
+  every rendered frame serializes the live Game, parses it back, applies into
+  `CGame::m_mirrorWorld`, and draws that world via a second ModelRenderer2
+  instance (constructed before any model loads so ResourceLoader's
+  OnCreate<Model> bakes into both; debug-only duplicate GL memory).
+  Serialize+apply cost shows as "Snapshot Mirror" in the perf panel. Known
+  mirror-mode limits: HUD arrows hidden (overlays ride the real renderer's
+  draw), hit-flash doesn't flash in the mirror (flash events apply to the
+  real world's entities), audio still plays from the real sim's queue.
 
 **Done when:** the mirror view plays identically; serialize+apply cost shows
 up acceptable in the perf panel (< 0.5ms for a typical scene).
+
+**Verification status**: both targets build clean; `gravitaris-sim-test`
+passes with the new gates — byte-stream roundtrips (including quantized-float
+step tolerance and overrun latching), snapshot gather -> serialize -> parse ->
+re-serialize byte-identical, entities strictly NetId-ascending — and the
+determinism checksums are **unchanged from pre-Phase-2** (state
+0x1a3096e5f4b36217, events 0x2e16d87965684ca9), proving GatherSnapshot reads
+without perturbing the sim. Done from an unattended session. **Not yet
+manually verified**: the mirror renderer toggle itself (visual identity, the
+< 0.5ms perf-panel gate) — needs an interactive pass: F1 -> Renderer tab ->
+"Snapshot mirror (net debug)", fly/fight, compare against ModelRenderer2 and
+check the "Snapshot Mirror" perf section.
 
 ## Phase 3 — Transport & protocol (first real netplay)
 
 Goal: two processes on localhost, second player visible and flying.
 
-- [ ] **3.1 Transport choice: ENet** (zlib license, tiny, reliable+unreliable
-  channels, sequencing, fragmentation — solves exactly the parts worth not
-  hand-rolling; FetchContent like every other dep). Wrap it behind
-  `INetTransport` (game/net/): `Send(peer, channel, bytes, reliable)`,
-  `Poll() -> {Connected, Disconnected, Packet}` events. Also implement
-  `LoopbackTransport` (in-process pair) so protocol tests run in the sim-test
-  target without sockets.
+- [ ] **3.1 Transport choice — constrained by the wasm port (2026-07-19).**
+  The browser build is a supported target, and browsers cannot open raw UDP
+  sockets: ENet only works native. So `INetTransport` (game/net/) is the
+  load-bearing decision, not ENet: `Send(peer, channel, bytes, reliable)`,
+  `Poll() -> {Connected, Disconnected, Packet}` events, implementations
+  per platform. Plan: `LoopbackTransport` first (in-process pair, protocol
+  tests in sim-test without sockets), then **WebSockets as the first real
+  transport** — Emscripten maps POSIX TCP sockets to WebSockets out of the
+  box, a native server can terminate them with a small library, and one
+  transport that works for BOTH native and browser beats maintaining two
+  from day one. TCP head-of-line blocking is acceptable at this stage (the
+  protocol's unreliable-by-redundancy design still applies; it just rides a
+  reliable pipe). ENet (or WebRTC datachannels for true unreliable-to-
+  browser) becomes a second `INetTransport` impl later **only if** HOL
+  blocking measurably hurts.
 - [ ] **3.2 Protocol v1** (all little-endian, first byte = packet type):
   - `ClientHello {protocolVersion, name}` (reliable)
   - `ServerWelcome {clientId, yourShipNetId, tickRate}` (reliable)

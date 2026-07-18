@@ -34,6 +34,12 @@ struct Orbit;
 struct GameEvent;
 class GameEventQueue;
 
+// net
+class ByteWriter;
+class ByteReader;
+struct EntityState;
+struct SnapshotData;
+
 // input
 class InputLog;
 

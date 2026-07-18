@@ -8,8 +8,10 @@
 
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/component/team.hpp>
+#include <gravitaris/game/net/byte-stream.hpp>
 
 #include <gravitaris/cgame/camera.hpp>
+#include <gravitaris/cgame/net/snapshot-applier.hpp>
 #include <gravitaris/cgame/camera-director.hpp>
 #include <gravitaris/cgame/autopilot.hpp>
 #include <gravitaris/cgame/renderer/simple-model-renderer.hpp>
@@ -27,12 +29,27 @@ namespace Gravitaris {
 enum class RendererKind {
     Simple, // SimpleModelRenderer  — GL LineStrip, no thickness control
     Baked,  // ModelRenderer2       — baked/instanced, pixel-space width
+    Mirror, // Baked, but drawing the snapshot-mirror world (net debug, see below)
 };
 
 class CGame : public Game {
 protected:
     SimpleModelRenderer m_simpleModelRenderer;
     ModelRenderer2 m_modelRenderer2;
+
+    // Snapshot mirror (docs/networking-plan.md 2.5): a second, presentation
+    // -only flecs world fed exclusively by serialize -> parse -> apply of the
+    // live sim each rendered frame while RendererKind::Mirror is active,
+    // drawn by its own ModelRenderer2 -- proves the whole replication path
+    // with zero transport. Declared right after m_modelRenderer2 so the
+    // mirror renderer's OnCreate<Model> subscription exists before any model
+    // loads (models bake into both renderers; debug-only duplicate GL cost).
+    flecs::world m_mirrorWorld;
+    ModelRenderer2 m_mirrorRenderer2;
+    SnapshotApplier m_snapshotApplier;
+    ByteWriter m_snapshotScratch;
+    std::uint32_t m_mirrorEventCursor = 0;
+
     StarfieldRenderer m_starfieldRenderer;
     MinimapRenderer m_minimapRenderer;
     AudioSystem m_audioSystem;
@@ -87,6 +104,7 @@ public:
         m_viewportSize = size;
         m_simpleModelRenderer.SetViewportSize(size);
         m_modelRenderer2.SetViewportSize(size);
+        m_mirrorRenderer2.SetViewportSize(size);
         m_starfieldRenderer.SetViewportSize(size);
     }
 
@@ -96,6 +114,7 @@ public:
     {
         m_pixelScale = scale;
         m_modelRenderer2.SetPixelScale(scale);
+        m_mirrorRenderer2.SetPixelScale(scale);
         m_starfieldRenderer.SetPixelScale(scale);
     }
 

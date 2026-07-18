@@ -155,6 +155,14 @@ if(EMSCRIPTEN)
     set(MAGNUM_TARGET_GLES2  OFF CACHE BOOL "" FORCE)
 endif()
 # Disable unused modules to keep configure/build time reasonable
+# AUDIO explicitly OFF (not just omitted): miniaudio is our sole backend now
+# (see ADR 0003), so Magnum::Audio/OpenAL is unused -- but a build directory
+# configured before that change has MAGNUM_WITH_AUDIO=ON baked into its
+# CMakeCache.txt, and removing a set(...FORCE) line doesn't clear an
+# already-cached value. Force it OFF here so a stale cache can't resurrect
+# Magnum's own find_package(OpenAL) and fail configure.
+set(WITH_AUDIO            OFF CACHE BOOL "" FORCE)
+set(MAGNUM_WITH_AUDIO     OFF CACHE BOOL "" FORCE)
 set(WITH_DEBUGTOOLS       OFF CACHE BOOL "" FORCE)
 set(MAGNUM_WITH_DEBUGTOOLS OFF CACHE BOOL "" FORCE)
 set(WITH_MESHTOOLS        OFF CACHE BOOL "" FORCE)
@@ -394,6 +402,11 @@ add_executable(GravitarisNG
     include/gravitaris/game/component/orbit.hpp
     include/gravitaris/game/component/net-id.hpp
     include/gravitaris/game/event/game-event.hpp
+    include/gravitaris/game/net/byte-stream.hpp
+    include/gravitaris/game/net/snapshot.hpp
+    src/game/net/snapshot.cpp
+    include/gravitaris/cgame/net/snapshot-applier.hpp
+    src/cgame/net/snapshot-applier.cpp
     include/gravitaris/game/util/splitmix.hpp
     include/gravitaris/game/input/input-command.hpp
     include/gravitaris/game/input/input-log.hpp
@@ -661,6 +674,7 @@ add_executable(gravitaris-sim-test
     src/game/gnc/ai-personality-presets.cpp
     src/game/spawner/entity-spawner.cpp
     src/game/scenario/classic-scenario.cpp
+    src/game/net/snapshot.cpp
     src/game/game.cpp
 )
 

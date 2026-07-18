@@ -16,4 +16,7 @@ struct Renderable;
 // renderer
 class ModelRenderer2;
 
+// net
+class SnapshotApplier;
+
 } // namespace Gravitaris
