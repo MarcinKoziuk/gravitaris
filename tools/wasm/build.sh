@@ -54,13 +54,28 @@ RECONFIGURE=0
 BUILD_TYPE="Debug"
 for arg in "$@"; do
     case "$arg" in
-        --reconfigure) RECONFIGURE=1 ;;
-        --release) BUILD_TYPE="Release" ;;
+        --reconfigure)     RECONFIGURE=1 ;;
+        --release)         BUILD_TYPE="Release" ;;
+        # -O2 + NDEBUG but no -flto -- used to bisect Release-only bugs (is it
+        # the optimization level, or LTO?).
+        --relwithdebinfo)  BUILD_TYPE="RelWithDebInfo" ;;
         *) echo "unknown argument: $arg" >&2; exit 1 ;;
     esac
 done
 
-if [[ "$RECONFIGURE" == "1" || ! -f "$BUILD_DIR/build.ninja" ]]; then
+# out-wasm is a single-config (Ninja) build tree, so CMAKE_BUILD_TYPE is baked
+# at configure time. Switching Debug<->Release therefore REQUIRES a reconfigure
+# -- otherwise `cmake --build` happily rebuilds the previously-configured type
+# and the artifacts land under a different <Config>/bin than this run expects
+# (which previously made the index.html copy below fail with a confusing "No
+# such file or directory"). Detect the cached type and reconfigure on a
+# mismatch.
+CACHED_TYPE=""
+if [[ -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+    CACHED_TYPE="$(grep -E '^CMAKE_BUILD_TYPE:' "$BUILD_DIR/CMakeCache.txt" | cut -d= -f2)"
+fi
+
+if [[ "$RECONFIGURE" == "1" || ! -f "$BUILD_DIR/build.ninja" || "$CACHED_TYPE" != "$BUILD_TYPE" ]]; then
     emcmake cmake -S "$REPO_ROOT" -B "$BUILD_DIR" -G Ninja \
         -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
 fi
@@ -71,5 +86,6 @@ OUT_DIR="$BUILD_DIR/$BUILD_TYPE/bin"
 cp "$SCRIPT_DIR/index.html" "$OUT_DIR/index.html"
 
 echo
+echo "Build type:   $BUILD_TYPE"
 echo "Build output: $OUT_DIR/ (GravitarisNG.js/.wasm/.data, index.html)"
 echo "Serve it with, e.g.: (cd $OUT_DIR && python3 -m http.server 8080)"

@@ -43,6 +43,27 @@
             printErr: function (text) {
                 console.error(text);
             },
+            onRuntimeInitialized: function () {
+                // Magnum's Sdl2Application only re-syncs its internal
+                // viewport/framebuffer size in response to an actual size
+                // change -- a synthetic `dispatchEvent(new Event('resize'))`
+                // with no real dimension change is a no-op (confirmed: it does
+                // not fix the bug below), which is presumably why the app
+                // looks wrong at the wrong aspect ratio/pixel density on the
+                // very first frame but self-corrects the instant the user
+                // actually resizes the window. Force a genuine (1px, cosmetically
+                // invisible) canvas box change instead: shrink it a frame, then
+                // restore, so Magnum's resize handling sees two real deltas
+                // and settles on the correct final size on its own.
+                const canvas = document.getElementById('canvas');
+                requestAnimationFrame(function () {
+                    const restoreWidth = canvas.style.width;
+                    canvas.style.width = (canvas.clientWidth - 1) + 'px';
+                    requestAnimationFrame(function () {
+                        canvas.style.width = restoreWidth;
+                    });
+                });
+            },
         };
         Module.setStatus('Downloading…');
     </script>
