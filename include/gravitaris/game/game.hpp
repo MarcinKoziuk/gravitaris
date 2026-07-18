@@ -71,6 +71,20 @@ protected:
     int m_playerRespawnTimer = -1;
     static constexpr int RESPAWN_DELAY_TICKS = 90; // 1.5 s at the fixed tick
 
+    // Deterministic per-(tick, spawn) seed for SpawnRandomAIShip's preset pick
+    // (ADR 0001: no std::rand -- it mutates sim state, so it must be
+    // reproducible under replay). Incremented per call so repeated presses
+    // within one tick still diverge.
+    std::uint32_t m_randomAIShipSpawnCount = 0;
+
+    // Debug/tuning knob (see the Physics debug tab): scales the player's live
+    // Chipmunk mass off its resource-authored base every tick
+    // (PhysicsSystem::SetMassMultiplier), so a respawn's fresh body picks it
+    // up too without extra bookkeeping. 1 = unmodified -- the sim-test and
+    // any other headless Game never touch the setter, so this is a no-op
+    // there; CGame sets its own tuned default at startup.
+    float m_shipWeightMultiplier = 1.f;
+
     void HandlePlayerRespawn();
 
     virtual std::unique_ptr<EntitySpawner> CreateEntitySpawner();
@@ -107,6 +121,15 @@ public:
     // The sim's one-shot event stream (docs/networking-plan.md Phase 1).
     // Consumers keep their own cursor and read via ConsumeSince.
     [[nodiscard]] const GameEventQueue& GetEventQueue() const { return m_eventQueue; }
+
+    [[nodiscard]] float GetShipWeightMultiplier() const { return m_shipWeightMultiplier; }
+    void SetShipWeightMultiplier(float multiplier) { m_shipWeightMultiplier = multiplier; }
+
+    // Spawns an AI fighter near the player with a random personality preset;
+    // shared by the Spawn debug tab's button and the J shortcut. A sim
+    // mutation (like any Spawn*), so it lives here rather than in cgame --
+    // under netcode this becomes a server command handler.
+    void SpawnRandomAIShip();
 
     // FNV-1a over every NetId-bearing entity's (NetId, quantized pos/rot/vel),
     // sorted by NetId first (flecs iteration order is not guaranteed stable

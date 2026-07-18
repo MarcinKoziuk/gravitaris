@@ -4,8 +4,11 @@
 #include <vector>
 
 #include <gravitaris/game/component/transform.hpp>
+#include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
+#include <gravitaris/game/gnc/ai-personality-presets.hpp>
+#include <gravitaris/game/util/splitmix.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/game.hpp>
 
@@ -83,6 +86,16 @@ void Game::Update()
         // Place orbiting bodies on their rails before the step reads positions
         // for gravity and resolves collisions against them.
         m_orbitSystem.Update();
+
+        // Debug/tuning only: reapplies every tick (cheap, one cpBodySetMass
+        // call) so it stays in effect across a respawn's fresh body without
+        // extra bookkeeping -- see m_shipWeightMultiplier's field comment.
+        if (m_player) {
+            if (const PhysicsRef* ref = m_player->try_get<PhysicsRef>()) {
+                m_physicsSystem.SetMassMultiplier(*ref, m_shipWeightMultiplier);
+            }
+        }
+
         m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
         m_physicsSystem.Update();
     }
@@ -114,6 +127,24 @@ void Game::HandlePlayerRespawn()
     if (m_playerRespawnTimer > 0 && --m_playerRespawnTimer == 0) {
         m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, m_playerSpawnPos);
     }
+}
+
+void Game::SpawnRandomAIShip()
+{
+    static constexpr AIPersonalityPreset PRESETS[] = {
+            AIPersonalityPreset::Balanced, AIPersonalityPreset::Aggressive, AIPersonalityPreset::Cautious,
+            AIPersonalityPreset::Sniper, AIPersonalityPreset::Reckless,
+    };
+
+    Vector2d pos{300.0, 200.0};
+    const Transform* transform = m_player ? m_player->try_get<Transform>() : nullptr;
+    if (transform) {
+        pos = transform->pos + Vector2d{250.0, 150.0};
+    }
+
+    std::uint64_t rng = SplitMix64Seed(m_step, m_randomAIShipSpawnCount++);
+    const AIPersonalityPreset preset = PRESETS[SplitMix64Next(rng) % std::size(PRESETS)];
+    m_entitySpawner->SpawnAIShip("models/ships/fighter-1"_id, pos, preset);
 }
 
 std::unique_ptr<EntitySpawner> Game::CreateEntitySpawner()

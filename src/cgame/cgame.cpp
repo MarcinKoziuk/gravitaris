@@ -15,7 +15,6 @@
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/planet.hpp>
-#include <gravitaris/game/util/splitmix.hpp>
 #include <gravitaris/game/resource/body.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
@@ -67,6 +66,12 @@ CGame::CGame(IFilesystem &filesystem)
     // Loading it is what bakes it into m_modelRenderer2 (via OnCreate<Model>);
     // the ResourcePtr member then keeps it baked -- see m_arrowModel.
     m_arrowModel = m_resourceLoader.Load<Model>("models/ui/arrow-1"_id);
+
+    // This game's tuned default (Game's own default is 1 = unmodified): a
+    // lighter ship reads better against the solar system's gravity wells.
+    // Headless Games (sim-test) never call this, so their determinism is
+    // unaffected by this specific value.
+    SetShipWeightMultiplier(0.667f);
 }
 
 void CGame::NudgeManualZoom(float notches)
@@ -441,15 +446,6 @@ void CGame::Render(double delta)
     UpdateCamera(dtSeconds);
     m_hitFlashSystem.Update(dtSeconds);
 
-    // Debug/tuning only: reapplies every frame (cheap, one cpBodySetMass
-    // call) so it stays in effect across a respawn's fresh body without
-    // extra bookkeeping -- see m_shipWeightMultiplier's field comment.
-    if (const std::optional<flecs::entity> player = GetPlayer()) {
-        if (const PhysicsRef* ref = player->try_get<PhysicsRef>()) {
-            m_physicsSystem.SetMassMultiplier(*ref, m_shipWeightMultiplier);
-        }
-    }
-
     m_simpleModelRenderer.SetZoom(m_camera.GetZoom());
     m_simpleModelRenderer.SetCameraPosition(m_camera.GetPosition());
     m_modelRenderer2.SetZoom(m_camera.GetZoom());
@@ -491,25 +487,6 @@ void CGame::Render(double delta)
 std::unique_ptr<EntitySpawner> CGame::CreateEntitySpawner()
 {
     return std::make_unique<CEntitySpawner>(m_registry, m_resourceLoader);
-}
-
-void CGame::SpawnRandomAIShip()
-{
-    static constexpr AIPersonalityPreset PRESETS[] = {
-            AIPersonalityPreset::Balanced, AIPersonalityPreset::Aggressive, AIPersonalityPreset::Cautious,
-            AIPersonalityPreset::Sniper, AIPersonalityPreset::Reckless,
-    };
-
-    Vector2d pos{300.0, 200.0};
-    const std::optional<flecs::entity> player = GetPlayer();
-    const Transform* transform = player ? player->try_get<Transform>() : nullptr;
-    if (transform) {
-        pos = transform->pos + Vector2d{250.0, 150.0};
-    }
-
-    std::uint64_t rng = SplitMix64Seed(GetStep(), m_randomAIShipSpawnCount++);
-    const AIPersonalityPreset preset = PRESETS[SplitMix64Next(rng) % std::size(PRESETS)];
-    GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, pos, preset);
 }
 
 std::optional<CGame::GravitySource> CGame::FindHeaviestGravitySource()

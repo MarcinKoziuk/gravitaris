@@ -21,7 +21,7 @@ constexpr AIPersonalityPreset PRESETS[] = {
 };
 
 // Only for the dropdown-selected preset; the random button uses
-// CGame::SpawnRandomAIShip() directly, shared with the J shortcut.
+// Game::SpawnRandomAIShip() directly, shared with the J shortcut.
 void SpawnAINearPlayer(CGame& game, AIPersonalityPreset preset)
 {
     Vector2d pos{300.0, 200.0};

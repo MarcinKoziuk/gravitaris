@@ -197,23 +197,6 @@ protected:
     // pixel width, 1 = constant world-space width (scales linearly with zoom).
     float m_zoomWidthFactor = Defaults::zoomWidthFactor;
 
-    // Deterministic per-(tick, spawn) seed for SpawnRandomAIShip's preset pick
-    // (ADR 0001: no std::rand -- it mutates sim state, so it must be
-    // reproducible under replay). Incremented per call so repeated presses
-    // within one tick still diverge.
-    std::uint32_t m_randomAIShipSpawnCount = 0;
-
-    // Debug/tuning only (temporary, for calibrating gameplay feel -- see the
-    // Physics debug tab). 1 = unmodified in both cases; 0.667 is this game's
-    // tuned default (a lighter ship reads better against the solar system's
-    // gravity wells).
-    // Gravity is a PhysicsSystem-wide setting, applied every ApplyGravity
-    // call; ship weight scales the player's live Chipmunk mass off its
-    // resource-authored base (PhysicsSystem::SetMassMultiplier), reapplied
-    // every Render() call so it survives a respawn's fresh body without
-    // extra bookkeeping.
-    float m_shipWeightMultiplier = 0.667f;
-
     AutopilotMode m_autopilotMode = AutopilotMode::Off;
     Magnum::Math::Vector2<double> m_autopilotAnchor;
     FlightControllerParams m_flightParams;
@@ -328,13 +311,11 @@ public:
 
     void AddLineWidth(float deltaPixels) { SetLineWidth(m_lineWidthPixels + deltaPixels); }
 
-    // --- Debug/tuning: gravity + ship weight multipliers (see field comments) ---
+    // --- Debug/tuning: gravity multiplier (see field comment); ship weight
+    //     multiplier lives on Game itself now (see its field comment) ---
 
     [[nodiscard]] float GetGravityMultiplier() const { return m_physicsSystem.GetGravityMultiplier(); }
     void SetGravityMultiplier(float multiplier) { m_physicsSystem.SetGravityMultiplier(multiplier); }
-
-    [[nodiscard]] float GetShipWeightMultiplier() const { return m_shipWeightMultiplier; }
-    void SetShipWeightMultiplier(float multiplier) { m_shipWeightMultiplier = multiplier; }
 
     [[nodiscard]] float GetZoomWidthFactor() const { return m_zoomWidthFactor; }
 
@@ -347,10 +328,6 @@ public:
     {
         m_modelRenderer2.SetDebugForceFacetedCircles(!m_modelRenderer2.GetDebugForceFacetedCircles());
     }
-
-    // Spawns an AI fighter near the player with a random personality preset;
-    // shared by the Spawn debug tab's button and the J shortcut.
-    void SpawnRandomAIShip();
 
     [[nodiscard]] AutopilotMode GetAutopilotMode() const { return m_autopilotMode; }
 
