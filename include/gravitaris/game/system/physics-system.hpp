@@ -76,7 +76,7 @@ private:
     flecs::observer m_bodyAddedObserver;
     flecs::observer m_bodyRemovedObserver;
 
-    float m_gravityMultiplier = 1.f;
+    float m_gravityMultiplier = 1.667f; // this game's tuned default; 1 = GRAVITY_CONSTANT unmodified
 
     void InitSpace(id_t spaceId);
 

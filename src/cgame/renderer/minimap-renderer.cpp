@@ -143,7 +143,8 @@ MinimapRenderer::MinimapRenderer(flecs::world& registry, PhysicsSystem& physicsS
           .setInstanceCount(1);
 }
 
-void MinimapRenderer::Render(const Vector2& center, const Vector2& viewCenter, const Vector2& viewHalfExtent)
+void MinimapRenderer::Render(const Vector2& mapCenter, const Vector2& playerPos,
+                             const Vector2& viewCenter, const Vector2& viewHalfExtent)
 {
     m_framebuffer.setViewport({{}, TextureSize()})
                  .clearColor(0, BACKGROUND)
@@ -172,7 +173,7 @@ void MinimapRenderer::Render(const Vector2& center, const Vector2& viewCenter, c
                                               * static_cast<float>(t.scale.x()));
         }
 
-        if ((pos - center).length() - radius > worldRadius) return;
+        if ((pos - mapCenter).length() - radius > worldRadius) return;
         EmitBillboard(vertices, pos, radius, isStar ? SUN_COLOR : PLANET_COLOR, PRIM_RING);
     });
 
@@ -181,13 +182,13 @@ void MinimapRenderer::Render(const Vector2& center, const Vector2& viewCenter, c
     m_registry.each([&](flecs::entity, const Transform& t, const Team& team, const Damageable&) {
         if (team.id == TeamId::None) return;
         const Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
-        if ((pos - center).length() > worldRadius) return;
+        if ((pos - mapCenter).length() > worldRadius) return;
         EmitBillboard(vertices, pos, m_params.shipDotPx / ppu, Vector3{TeamColor(team.id)}, PRIM_DISC);
     });
 
     // Player marker: brighter, ringed, drawn on top of the team dots.
-    EmitBillboard(vertices, center, m_params.playerDotPx / ppu, PLAYER_COLOR, PRIM_DISC);
-    EmitBillboard(vertices, center, (m_params.playerDotPx + 3.f) / ppu, PLAYER_COLOR, PRIM_RING);
+    EmitBillboard(vertices, playerPos, m_params.playerDotPx / ppu, PLAYER_COLOR, PRIM_DISC);
+    EmitBillboard(vertices, playerPos, (m_params.playerDotPx + 3.f) / ppu, PLAYER_COLOR, PRIM_RING);
 
     if (m_params.showViewRect) {
         EmitRect(vertices, viewCenter, viewHalfExtent, VIEW_RECT_COLOR);
@@ -210,7 +211,7 @@ void MinimapRenderer::Render(const Vector2& center, const Vector2& viewCenter, c
     // orientation match the main view's.
     const Matrix3 viewProjection =
             Matrix3::projection({2.f * worldRadius, -2.f * worldRadius})
-            * Matrix3::translation(-center);
+            * Matrix3::translation(-mapCenter);
 
     m_shader.setViewportSize(Vector2{TextureSize()})
             .setViewProjection(viewProjection)

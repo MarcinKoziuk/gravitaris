@@ -59,13 +59,13 @@ void Game::Start()
     };
 
     const double sunAMass = effectiveMass(m_entitySpawner->SpawnStar(sun, sunA));
-    m_entitySpawner->SpawnOrbitingPlanet(planet, sunA, sunAMass, 1440., 1.0, 0.0);
-    m_entitySpawner->SpawnOrbitingPlanet(planet, sunA, sunAMass, 2400., -1.0, 2.1);
-    m_entitySpawner->SpawnOrbitingPlanet(planet, sunA, sunAMass, 3400., 1.0, 4.0);
+    m_entitySpawner->SpawnOrbitingPlanet(planet, sunA, sunAMass, 2000., 1.0, 0.0);
+    m_entitySpawner->SpawnOrbitingPlanet(planet, sunA, sunAMass, 3400., -1.0, 2.1);
+    m_entitySpawner->SpawnOrbitingPlanet(planet, sunA, sunAMass, 4800., 1.0, 4.0);
 
     const double sunBMass = effectiveMass(m_entitySpawner->SpawnStar(sun, sunB));
-    m_entitySpawner->SpawnOrbitingPlanet(planet, sunB, sunBMass, 1600., -1.0, 1.0);
-    m_entitySpawner->SpawnOrbitingPlanet(planet, sunB, sunBMass, 2800., 1.0, 3.5);
+    m_entitySpawner->SpawnOrbitingPlanet(planet, sunB, sunBMass, 2200., -1.0, 1.0);
+    m_entitySpawner->SpawnOrbitingPlanet(planet, sunB, sunBMass, 4000., 1.0, 3.5);
 }
 
 Game::Game(IFilesystem& filesystem)

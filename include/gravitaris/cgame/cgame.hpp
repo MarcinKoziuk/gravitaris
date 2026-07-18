@@ -183,13 +183,15 @@ protected:
     std::uint32_t m_flashEventCursor = 0;
 
     // Debug/tuning only (temporary, for calibrating gameplay feel -- see the
-    // Physics debug tab). 1 = unmodified in both cases.
+    // Physics debug tab). 1 = unmodified in both cases; 0.667 is this game's
+    // tuned default (a lighter ship reads better against the solar system's
+    // gravity wells).
     // Gravity is a PhysicsSystem-wide setting, applied every ApplyGravity
     // call; ship weight scales the player's live Chipmunk mass off its
     // resource-authored base (PhysicsSystem::SetMassMultiplier), reapplied
     // every Render() call so it survives a respawn's fresh body without
     // extra bookkeeping.
-    float m_shipWeightMultiplier = 1.f;
+    float m_shipWeightMultiplier = 0.667f;
 
     AutopilotMode m_autopilotMode = AutopilotMode::Off;
     Magnum::Math::Vector2<double> m_autopilotAnchor;

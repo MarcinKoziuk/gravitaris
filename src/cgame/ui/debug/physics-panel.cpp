@@ -16,9 +16,9 @@ void DrawPhysicsPanel(CGame& game)
     if (ImGui::SliderFloat("Gravity multiplier", &gravity, 0.f, 4.f, "%.2f")) {
         game.SetGravityMultiplier(gravity);
     }
-    ImGui::SetItemTooltip("Scales every planet's pull on every body. Applied live, every tick.");
+    ImGui::SetItemTooltip("Scales every planet's pull on every body. Applied live, every tick. Default 1.667.");
     if (ImGui::Button("Reset##gravity")) {
-        game.SetGravityMultiplier(1.f);
+        game.SetGravityMultiplier(1.667f);
     }
 
     ImGui::SeparatorText("Ship weight");
@@ -30,9 +30,9 @@ void DrawPhysicsPanel(CGame& game)
     ImGui::SetItemTooltip("Scales the player ship's mass off its resource-authored base. Heavier "
                           "= more sluggish under thrust and less speed change per impact; gravity's "
                           "own pull on the ship is unaffected (real physics: falling doesn't care "
-                          "about your own mass).");
+                          "about your own mass). Default 0.667.");
     if (ImGui::Button("Reset##weight")) {
-        game.SetShipWeightMultiplier(1.f);
+        game.SetShipWeightMultiplier(0.667f);
     }
 }
 

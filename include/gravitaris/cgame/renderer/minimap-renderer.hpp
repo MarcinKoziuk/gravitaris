@@ -37,11 +37,11 @@ public:
 
     struct Params {
         bool enabled = true;
-        float worldRadius = 10000.f; // world units from the player to the map edge
+        float worldRadius = 12000.f; // world units from the map center to the map edge
         float shipDotPx = 3.f;      // ship dot radius, minimap texture px
         float playerDotPx = 1.5f;   // player marker dot radius, minimap texture px
-        float planetMinPx = 4.f;    // floor for a planet ring that'd map below this
-        float starMinPx = 7.f;      // floor for a sun ring that'd map below this (bigger than a planet)
+        float planetMinPx = 2.f;    // floor for a planet ring that'd map below this
+        float starMinPx = 3.5f;     // floor for a sun ring that'd map below this (bigger than a planet)
         bool showViewRect = false;  // outline the main camera's visible extent
     };
 
@@ -68,12 +68,15 @@ public:
     [[nodiscard]] unsigned TextureId() { return m_texture.id(); }
     [[nodiscard]] static Vector2i TextureSize() { return {TEXTURE_SIZE, TEXTURE_SIZE}; }
 
-    // Renders the map centered on `center` (the player). viewCenter/
-    // viewHalfExtent describe the main camera's world-space extent for the
-    // view rectangle. Binds its own framebuffer; the caller is expected to
-    // bind whatever it renders to next itself (the app runs this before the
-    // glow pass claims the scene target).
-    void Render(const Vector2& center, const Vector2& viewCenter, const Vector2& viewHalfExtent);
+    // Renders the map: static, centered on `mapCenter` (not the player) so
+    // panning the ship doesn't scroll the map. `playerPos` places the player
+    // marker within that static view. viewCenter/viewHalfExtent describe the
+    // main camera's world-space extent for the (optional) view rectangle.
+    // Binds its own framebuffer; the caller is expected to bind whatever it
+    // renders to next itself (the app runs this before the glow pass claims
+    // the scene target).
+    void Render(const Vector2& mapCenter, const Vector2& playerPos,
+               const Vector2& viewCenter, const Vector2& viewHalfExtent);
 };
 
 } // namespace Gravitaris

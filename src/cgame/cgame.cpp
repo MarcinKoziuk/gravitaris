@@ -336,7 +336,9 @@ void CGame::RenderMinimap()
                                     static_cast<float>(transform->pos.y())};
     const Magnum::Vector2 viewHalfExtent = m_viewportSize / (2.f * std::max(m_cameraZoom, 1e-3f));
 
-    m_minimapRenderer.Render(playerPos, m_camera.GetPosition(), viewHalfExtent);
+    // Static, not player-centered: the solar system is laid out symmetrically
+    // around the origin (see Game::Start), so that's the whole map's center.
+    m_minimapRenderer.Render(Magnum::Vector2{0.f, 0.f}, playerPos, m_camera.GetPosition(), viewHalfExtent);
 }
 
 void CGame::UpdateHitFlashes(float dtSeconds)

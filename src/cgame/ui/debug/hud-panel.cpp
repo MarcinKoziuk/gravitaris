@@ -63,7 +63,7 @@ void DrawHudPanel(CGame& game)
     ImGui::BeginDisabled(!minimap.enabled);
     ImGui::SetNextItemWidth(220.f);
     ImGui::DragFloat("World radius", &minimap.worldRadius, 25.f, 500.f, 30000.f, "%.0f");
-    ImGui::SetItemTooltip("World units from the player to the map edge. Default 10000.");
+    ImGui::SetItemTooltip("World units from the map center to the map edge. Default 12000.");
     ImGui::SetNextItemWidth(220.f);
     ImGui::DragFloat("Ship dot (px)", &minimap.shipDotPx, 0.1f, 1.f, 12.f, "%.1f");
     ImGui::SetItemTooltip("Ship dot radius in minimap texture pixels. Default 3.");
