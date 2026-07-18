@@ -153,7 +153,7 @@ to land in Phase 2. Actual work, in the order hit:
 - **Done when** (met): `tools/wasm/build.sh` builds `GravitarisNG.js`/`.wasm`
   with no CMake or compiler/linker errors.
 
-### Phase 2 — Data + boot — in progress (2026-07-18)
+### Phase 2 — Data + boot — done (2026-07-18)
 
 GL version/context flags already landed in Phase 1. This phase is data
 delivery + actually loading the page in a browser, which is where the real
@@ -205,27 +205,34 @@ signal is — a clean link (Phase 1) only proves the compiler/linker are happy.
   running (a "sim step cap hit" warning proves ticks are executing, just
   slow — expected for an unoptimized `Debug` wasm build).
 
-**Not done / next**:
-- RmlUi's own GL3 render backend (`render-interface-gl3.cpp`) hits
-  `GL_INVALID_OPERATION` in both `CompileGeometry` and `RenderGeometry`. Not
-  yet root-caused: `shaders` isn't null (so its own embedded shader compile
-  apparently succeeded — it already has a `#version 300 es` + precision
-  header, likely written with Emscripten in mind already), so the error isn't
-  the same missing-precision class as the game shaders above. Next step:
-  bracket individual GL calls inside `CompileGeometry` with `Gfx::
-  CheckGLError` (currently only called once at the end of each function) to
-  find the exact offending call — WebGL2 validates buffer/VAO/attribute state
-  more strictly than desktop GL, so a call that's silently tolerated natively
-  is the likely shape of the bug.
-- Whether the *game's own* scene (starfield/ships, not just RmlUi's UI layer)
-  is rendering anything is still unconfirmed — the canvas was black
-  throughout, but that's consistent with either "nothing drew yet" or "RmlUi's
-  GL error corrupted state before the game's own draw calls ran"; can't tell
-  which until the above is fixed.
-- `--release` build (current testing was `Debug`; `.wasm` was 67MB
+**The `GL_INVALID_OPERATION` root cause (found, not RmlUi's fault):**
+`GlowPostProcess::EndSceneAndComposite` blits its single-sampled composited
+result into the default framebuffer every frame
+(`AbstractFramebuffer::blit`). `CreateGLConfiguration` requested 4x MSAA on
+that same default framebuffer (`conf.setSampleCount(4)`). GLES3/WebGL2
+forbids blitting into a multisampled destination outright — desktop GL
+drivers are just more lenient about the identical spec violation, which is
+why this never surfaced natively. The browser's own console eventually gave
+the real error verbatim once the user tested it independently:
+`glBlitFramebuffer: Invalid operation on multisampled framebuffer` — RmlUi's
+`CompileGeometry`/`RenderGeometry` `GL_INVALID_OPERATION` reports upstream
+were a symptom (the corrupted/errored GL state from the earlier failed blit
+each frame), not their own bug. Fixed: skip `setSampleCount(4)` under
+`CORRADE_TARGET_EMSCRIPTEN` (lines already get analytic edge AA from their
+own shader, so the visual cost is minimal). Native keeps 4x MSAA, unaffected.
+
+**Confirmed live in a browser: the game fully renders** — starfield, player
+ship, RmlUi HUD panel with a "LAUNCH" button, minimap with planets. First
+successful end-to-end render of this port.
+
+**Not done / next** (Phase 3 territory):
+- `--release` build (testing so far was `Debug`; `.wasm` was 67MB
   unoptimized — expect a large drop with `-O2`/`-O3` + closure).
-- Canvas/window resize handling, `-DNDEBUG` for release.
-- **Done when**: the page loads to the first rendered frame of the game.
+- Canvas/window resize handling (the canvas backing size was observed growing
+  across repeated resizes — not yet investigated).
+- Verify audio actually plays, keyboard/mouse/scroll input works, and the sim
+  runs at a reasonable framerate in `--release`.
+- **Done when** (met): the page loads to the first rendered frame of the game.
 
 ### Phase 3 — Polish
 
