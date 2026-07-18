@@ -8,17 +8,17 @@
 
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/component/team.hpp>
-#include <gravitaris/game/gnc/control/flight-controller.hpp>
-#include <gravitaris/game/gnc/guidance/behaviors.hpp>
 
 #include <gravitaris/cgame/camera.hpp>
 #include <gravitaris/cgame/camera-director.hpp>
+#include <gravitaris/cgame/autopilot.hpp>
 #include <gravitaris/cgame/renderer/simple-model-renderer.hpp>
 #include <gravitaris/cgame/renderer/model-renderer2.hpp>
 #include <gravitaris/cgame/renderer/starfield-renderer.hpp>
 #include <gravitaris/cgame/renderer/minimap-renderer.hpp>
 #include <gravitaris/cgame/audio/audio-system.hpp>
 #include <gravitaris/cgame/fx/hit-flash-system.hpp>
+#include <gravitaris/cgame/hud/indicator-renderer.hpp>
 
 namespace Gravitaris {
 
@@ -27,16 +27,6 @@ namespace Gravitaris {
 enum class RendererKind {
     Simple, // SimpleModelRenderer  — GL LineStrip, no thickness control
     Baked,  // ModelRenderer2       — baked/instanced, pixel-space width
-};
-
-// Player pilot assist; produces commands like a human would, the sim only
-// sees the InputQueue.
-enum class AutopilotMode {
-    Off,
-    KillVelocity, // retro-burn toward zero velocity
-    HoldPosition, // hover at the position where engaged
-    GotoPoint,    // fly to the goto target and stop
-    Orbit,        // circle the heaviest gravity source at the engage radius
 };
 
 class CGame : public Game {
@@ -48,6 +38,7 @@ protected:
     AudioSystem m_audioSystem;
     HitFlashSystem m_hitFlashSystem;
     CameraDirector m_cameraDirector;
+    IndicatorRenderer m_indicatorRenderer;
 
     RendererKind m_activeRenderer = RendererKind::Baked;
 
@@ -59,38 +50,7 @@ protected:
     std::chrono::steady_clock::time_point m_lastCameraTime{};
     bool m_cameraTimeValid = false;
 
-public:
-    // Tunables for the off-screen target arrows (exposed in the HUD debug tab).
-    // Distances are world units; sizes are logical pixels (scaled by the HiDPI
-    // pixel scale like line width is).
-    struct IndicatorParams {
-        bool enabled = true;
-        float ringRadiusPx = 120.f;  // arrow ring radius around screen center
-        float arrowSizePx = 13.f;    // arrow width, and height at long range (see maxHeightFactor)
-        float enemyRange = 2500.f;   // show enemies within this
-        float edgeMarginPx = 24.f;   // treat as off-screen this far inside the view edge
-        float fadeBandPx = 90.f;     // px past the edge over which an arrow fades fully in
-        float minStrength = 0.35f;   // brightness floor at max range (never fully invisible while in range)
-        // Height-only stretch at point-blank range (width never changes with
-        // distance, only with the edge-appear fade) -- 1 = no stretch, taller
-        // as the target closes in. Intentionally allowed to look "squished".
-        float maxHeightFactor = 2.5f;
-        // Multiplies the proximity fed into the height stretch, so it reaches
-        // maxHeightFactor within a 1/heightRampFactor fraction of the range --
-        // arrows stay flat over most of the range and only stretch tall right
-        // at the end, instead of ramping linearly across the whole range.
-        float heightRampFactor = 4.f;
-        int maxEnemies = 8;
-    };
-
 protected:
-    IndicatorParams m_indicatorParams;
-
-    // Kept alive so the arrow glyph stays baked in ModelRenderer2 (loading a
-    // Model is what fires the renderer's OnCreate<Model>); overlays aren't
-    // entities, so nothing else holds a reference to it.
-    ResourcePtr<const Model> m_arrowModel;
-
     // framebuffer-pixels per logical-pixel; needed here (not just forwarded to
     // the renderers) to size the HiDPI-independent indicator ring/arrows.
     float m_pixelScale = 1.f;
@@ -103,28 +63,7 @@ protected:
     // pixel width, 1 = constant world-space width (scales linearly with zoom).
     float m_zoomWidthFactor = Defaults::zoomWidthFactor;
 
-    AutopilotMode m_autopilotMode = AutopilotMode::Off;
-    Magnum::Math::Vector2<double> m_autopilotAnchor;
-    FlightControllerParams m_flightParams;
-
-    GuidanceParams m_guidanceParams;
-    Magnum::Math::Vector2<double> m_gotoTarget;
-    Magnum::Math::Vector2<double> m_orbitCenter;
-    double m_orbitMass = 0.0;
-    double m_orbitRadius = 0.0;
-    double m_orbitDirection = 1.0;
-
-    struct GravitySource {
-        Magnum::Math::Vector2<double> pos;
-        double mass;
-    };
-    std::optional<GravitySource> FindHeaviestGravitySource();
-
-    // Submits an arrow overlay per nearby-but-off-screen enemy/planet, on a
-    // ring around screen center, pointing at the target. Call after the
-    // camera director's Update (needs the final camera pos/zoom) and before
-    // the renderer draws.
-    void UpdateIndicators();
+    Autopilot m_autopilot;
 
     std::unique_ptr<EntitySpawner> CreateEntitySpawner() override;
 public:
@@ -177,7 +116,8 @@ public:
     [[nodiscard]] float GetCameraZoom() const { return m_cameraDirector.GetCameraZoom(); }
     [[nodiscard]] bool IsManualZoomActive() const { return m_cameraDirector.IsManualZoomActive(); }
 
-    IndicatorParams& GetIndicatorParams() { return m_indicatorParams; }
+    IndicatorRenderer& GetIndicatorRenderer() { return m_indicatorRenderer; }
+    IndicatorRenderer::Params& GetIndicatorParams() { return m_indicatorRenderer.GetParams(); }
 
     // Mouse-wheel zoom: multiplicatively nudges a manual zoom target that
     // overrides the dynamic zoom until the player next thrusts/rotates (after
@@ -228,33 +168,34 @@ public:
         m_modelRenderer2.SetDebugForceFacetedCircles(!m_modelRenderer2.GetDebugForceFacetedCircles());
     }
 
-    [[nodiscard]] AutopilotMode GetAutopilotMode() const { return m_autopilotMode; }
+    // The autopilot is a client-side command producer (same seam as
+    // keyboard input); these forward to it so external callers don't need
+    // to know it's a separate object.
+    Autopilot& GetAutopilot() { return m_autopilot; }
+    [[nodiscard]] AutopilotMode GetAutopilotMode() const { return m_autopilot.GetMode(); }
 
     // Engaging HoldPosition captures the player's current position as anchor.
-    void SetAutopilotMode(AutopilotMode mode);
+    void SetAutopilotMode(AutopilotMode mode) { m_autopilot.SetMode(mode, GetPlayer()); }
 
-    void ToggleAutopilotMode(AutopilotMode mode)
-    {
-        SetAutopilotMode(m_autopilotMode == mode ? AutopilotMode::Off : mode);
-    }
+    void ToggleAutopilotMode(AutopilotMode mode) { m_autopilot.ToggleMode(mode, GetPlayer()); }
 
-    [[nodiscard]] const Magnum::Math::Vector2<double>& GetAutopilotAnchor() const { return m_autopilotAnchor; }
+    [[nodiscard]] const Magnum::Math::Vector2<double>& GetAutopilotAnchor() const { return m_autopilot.GetAnchor(); }
 
-    FlightControllerParams& GetFlightParams() { return m_flightParams; }
+    FlightControllerParams& GetFlightParams() { return m_autopilot.GetFlightParams(); }
 
-    GuidanceParams& GetGuidanceParams() { return m_guidanceParams; }
+    GuidanceParams& GetGuidanceParams() { return m_autopilot.GetGuidanceParams(); }
 
-    [[nodiscard]] const Magnum::Math::Vector2<double>& GetGotoTarget() const { return m_gotoTarget; }
+    [[nodiscard]] const Magnum::Math::Vector2<double>& GetGotoTarget() const { return m_autopilot.GetGotoTarget(); }
 
-    void SetGotoTarget(const Magnum::Math::Vector2<double>& target) { m_gotoTarget = target; }
+    void SetGotoTarget(const Magnum::Math::Vector2<double>& target) { m_autopilot.SetGotoTarget(target); }
 
-    [[nodiscard]] const Magnum::Math::Vector2<double>& GetOrbitCenter() const { return m_orbitCenter; }
+    [[nodiscard]] const Magnum::Math::Vector2<double>& GetOrbitCenter() const { return m_autopilot.GetOrbitCenter(); }
 
-    [[nodiscard]] double GetOrbitRadius() const { return m_orbitRadius; }
+    [[nodiscard]] double GetOrbitRadius() const { return m_autopilot.GetOrbitRadius(); }
 
     // This tick's autopilot command, or nullopt when off / no player. Fire
     // bits are false; the caller merges keyboard fire.
-    std::optional<ControlFlags> ComputeAutopilotControls();
+    std::optional<ControlFlags> ComputeAutopilotControls() { return m_autopilot.ComputeControls(GetPlayer()); }
 
     void Render(double delta);
 };

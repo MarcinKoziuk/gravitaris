@@ -13,4 +13,7 @@ class AudioClip;
 // component
 struct Renderable;
 
+// renderer
+class ModelRenderer2;
+
 } // namespace Gravitaris

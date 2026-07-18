@@ -8,7 +8,7 @@ namespace Gravitaris {
 
 void DrawHudPanel(CGame& game)
 {
-    CGame::IndicatorParams& params = game.GetIndicatorParams();
+    IndicatorRenderer::Params& params = game.GetIndicatorParams();
 
     ImGui::SeparatorText("Off-screen target arrows");
     ImGui::Checkbox("Enabled", &params.enabled);
