@@ -559,7 +559,17 @@ static Application::Configuration CreateConfiguration(const Application::Argumen
 static Application::GLConfiguration CreateGLConfiguration(const Application::Arguments&)
 {
     Application::GLConfiguration conf;
+#ifndef CORRADE_TARGET_EMSCRIPTEN
+    // GlowPostProcess composites its single-sampled result into the default
+    // framebuffer via AbstractFramebuffer::blit() every frame (see
+    // EndSceneAndComposite). Under GLES3/WebGL2 that's an INVALID_OPERATION
+    // if the *destination* is multisampled -- unlike some desktop GL drivers,
+    // WebGL2 actually enforces the spec's "blit cannot target a multisampled
+    // framebuffer" rule strictly. Lines already get analytic edge AA in their
+    // own shader (see line2.f.glsl), so skipping window MSAA here costs very
+    // little.
     conf.setSampleCount(4);
+#endif
     return conf;
 }
 
