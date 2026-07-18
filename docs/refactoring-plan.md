@@ -43,12 +43,12 @@ From CLAUDE.md / ADR 0001, restated as the invariants each item below serves:
 
 ## Phase R0 — Bug fix + warning silencing (do first, it's small)
 
-- [ ] **R0.1 Fix FindHeaviestGravitySource.** Query `GravitySource`
+- [x] **R0.1 Fix FindHeaviestGravitySource.** Query `GravitySource`
   (mass × multiplier) like AIPilotSystem does, instead of `cpBodyGetMass`.
   Kills the NaN risk in autopilot Orbit and removes cgame's last direct
   Chipmunk-mass read for celestials. Manual check: engage Orbit autopilot
   near a sun; ship should circle, not vanish.
-- [ ] **R0.2 Silence Magnum C4910.** The warnings come from Magnum's own
+- [x] **R0.2 Silence Magnum C4910.** The warnings come from Magnum's own
   `Math/ConfigurationValue.h` (`extern template` + `__declspec(dllexport)`
   explicit instantiations — a known, benign Magnum-on-MSVC-shared artifact;
   our code doesn't trigger it). Preferred: after
@@ -62,14 +62,14 @@ From CLAUDE.md / ADR 0001, restated as the invariants each item below serves:
 
 ## Phase R1 — HitFlashSystem (the UpdateHitFlashes extraction)
 
-- [ ] **R1.1** New `include/gravitaris/cgame/fx/hit-flash-system.hpp` +
+- [x] **R1.1** New `include/gravitaris/cgame/fx/hit-flash-system.hpp` +
   `src/cgame/fx/hit-flash-system.cpp`: class `HitFlashSystem` holding the
   event cursor, constructed with `(flecs::world&, const GameEventQueue&,
   EntitySpawner&)` (spawner only for `EntityForNetId`). One method
   `Update(float dtSeconds)` containing exactly today's
   `CGame::UpdateHitFlashes` body. Mirrors AudioSystem's shape: a cgame
   consumer of the event stream with its own cursor (rule 3).
-- [ ] **R1.2** CGame: drop `UpdateHitFlashes`/`m_flashEventCursor`, add a
+- [x] **R1.2** CGame: drop `UpdateHitFlashes`/`m_flashEventCursor`, add a
   `HitFlashSystem m_hitFlashSystem;` member (constructed after
   m_entitySpawner exists — constructor body or careful init order, same
   concern as the EntitySpawner::Init() precedent), call
@@ -77,14 +77,14 @@ From CLAUDE.md / ADR 0001, restated as the invariants each item below serves:
 
 ## Phase R2 — Sim mutations out of the render/client path
 
-- [ ] **R2.1 Ship-weight multiplier into Game.** Move
+- [x] **R2.1 Ship-weight multiplier into Game.** Move
   `m_shipWeightMultiplier` + its application into `Game`: a
   `m_shipWeightMultiplier` field applied at the top of `Game::Update()` on
   the player's PhysicsRef (same reapply-every-tick logic, now on the tick
   path instead of the render path — rule 2). CGame keeps only the
   getter/setter forwarding for the debug panel. Note in the field comment
   that it is a debug knob, replicated nowhere.
-- [ ] **R2.2 SpawnRandomAIShip into Game.** Move the method +
+- [x] **R2.2 SpawnRandomAIShip into Game.** Move the method +
   `m_randomAIShipSpawnCount` to `Game` unchanged (it already seeds from
   `GetStep()`). Debug UI/keybind call it via the Game reference they already
   have. Under future netcode this becomes a server command handler; having
@@ -95,60 +95,59 @@ From CLAUDE.md / ADR 0001, restated as the invariants each item below serves:
 The biggest extraction: all camera state and logic into
 `include/gravitaris/cgame/camera-director.hpp` + `src/cgame/camera-director.cpp`.
 
-- [ ] **R3.1** Class `CameraDirector` owning: `Camera`, `CameraParams` (moves
-  out of CGame wholesale), zoom state (`m_cameraZoom`, manual-zoom trio),
-  framing state (`m_framingAmount`, `m_framedEnemy`, `m_framedEnemyOffset`,
-  `m_framedReach`, planet/close amounts), the dead-zone constants,
-  `SelectFramedEnemy`, `PlanetFramingGoal`, and `UpdateCamera` renamed to
-  `Update(const CameraFrame&)` — where `CameraFrame` is a small input struct
-  `{playerPos, playerVel, playerTeam, viewportSize, pixelScale, dtSeconds}`
-  plus the registry/physics refs it queries. `NudgeManualZoom`, the
-  follow-toggle, and the getters move with it.
-- [ ] **R3.2** CGame shrinks to: `CameraDirector m_cameraDirector;`,
-  `GetCameraDirector()` for the debug panel + app, and `Render()` calls
-  `m_cameraDirector.Update(frame)` then reads pos/zoom off it for the
-  renderers. `camera-panel.cpp` takes `CameraDirector&` instead of poking
-  CGame accessors.
-- [ ] **R3.3** The wall-clock dt bookkeeping (`m_lastCameraTime`,
-  `m_cameraTimeValid`) moves into CameraDirector too (it exists only to feed
-  camera smoothing; HitFlashSystem gets dt passed in from the same place it
-  does today).
+- [x] **R3.1** Class `CameraDirector` owning: `Camera`, `CameraParams` (moved
+  out of CGame wholesale), zoom state, framing state, the dead-zone
+  constants, `SelectFramedEnemy`, `PlanetFramingGoal`, and `UpdateCamera`
+  renamed to `Update(player, viewportSize, dtSeconds)` — plain parameters
+  instead of a `CameraFrame` wrapper struct (3 params didn't warrant one).
+  `NudgeManualZoom`, the follow-toggle, and the getters moved with it.
+- [x] **R3.2** CGame shrinks to a `CameraDirector m_cameraDirector;` member,
+  `GetCameraDirector()`, and thin forwarding wrappers (`GetCamera`,
+  `GetCameraParams`, `NudgeManualZoom`, etc.) so external callers (app,
+  WorldToUi, debug panels) needed no changes except `camera-panel.cpp`'s one
+  now-relocated type name. `Render()` calls `m_cameraDirector.Update(...)`
+  then reads pos/zoom off it for the renderers.
+- [x] **R3.3 — deviated from the plan.** Kept `m_lastCameraTime`/
+  `m_cameraTimeValid` in `CGame::Render()` rather than moving into
+  CameraDirector: the same dt also feeds `HitFlashSystem::Update`, so
+  computing it once in the caller and passing it to both consumers is
+  simpler than duplicating the wall-clock bookkeeping.
 
 ## Phase R4 — IndicatorRenderer & Autopilot
 
-- [ ] **R4.1 IndicatorRenderer.** `UpdateIndicators` + `IndicatorParams` +
+- [x] **R4.1 IndicatorRenderer.** `UpdateIndicators` + `IndicatorParams` +
   `m_arrowModel` → `include/gravitaris/cgame/hud/indicator-renderer.hpp` +
   `src/cgame/hud/indicator-renderer.cpp`. Constructed with
   `(flecs::world&, ResourceLoader&, ModelRenderer2&)` (loads/holds the arrow
-  model itself); `Update(playerPos, playerTeam, cameraPos, zoom,
-  viewportSize, pixelScale)` submits the overlays. hud-panel takes it by
-  reference.
-- [ ] **R4.2 Autopilot.** `AutopilotMode`, `SetAutopilotMode`,
-  `ComputeAutopilotControls`, `FindHeaviestGravitySource` (post-R0.1),
-  anchor/goto/orbit state, `m_flightParams`, `m_guidanceParams` →
+  model itself); `Update(player, cameraPos, zoom, viewportSize, pixelScale)`
+  submits the overlays, doing its own Transform/Team try_get like
+  CameraDirector does.
+- [x] **R4.2 Autopilot.** `AutopilotMode` (now a free enum again, not nested
+  in CGame — every `AutopilotMode::X` call site stayed unchanged),
+  `SetAutopilotMode`/`ComputeAutopilotControls`/`FindHeaviestGravitySource`,
+  anchor/goto/orbit state, `FlightControllerParams`/`GuidanceParams` →
   `include/gravitaris/cgame/autopilot.hpp` + `src/cgame/autopilot.cpp`,
-  class `Autopilot`. It is a client-side *command producer* (same seam as
-  the keyboard — its output goes into FeedInput's InputCommand), so cgame is
-  the right module; it just shouldn't be CGame itself. CGame keeps a member
-  + accessor; the app's FeedInput and the autopilot debug panel go through
-  it.
+  class `Autopilot`. CGame keeps `GetAutopilot()` + thin forwarders for
+  every existing accessor, so the app's FeedInput and flight-panel.cpp
+  needed no call-site changes.
 
 ## Phase R5 — game/ and client/ cleanups
 
-- [ ] **R5.1 Scenario builder.** Extract the hardcoded solar system from
+- [x] **R5.1 Scenario builder.** Extracted the hardcoded solar system from
   `Game::Start()` into `src/game/scenario/classic-scenario.cpp` with
-  `void BuildClassicScenario(EntitySpawner&)` (+ tiny header). `Start()`
-  becomes: spawn player, `BuildClassicScenario(*m_entitySpawner)`. Prepares
-  for data-driven maps without inventing a format now.
-- [ ] **R5.2 ReplayController.** Move record/replay state + logic
-  (`m_recordLog`, `m_replayLog`, cursors, `ToggleRecording`, `StartReplay`,
-  `StopReplay`, the replay branch of `FeedInput`) from
-  `GravitarisApplication` into `src/client/replay-controller.hpp/.cpp`
-  (client-local, not `include/` — nothing else needs it). The app keeps the
-  keybinds and calls `m_replay.NextCommand(...)` / `m_replay.Record(...)`.
-- [ ] **R5.3 SpawnStar/SpawnPlanet dedupe.** Both just call SpawnCelestial;
-  either delete them in favor of public `SpawnCelestial` or keep as inline
-  semantic aliases in the header. Cosmetic; do last.
+  `void BuildClassicScenario(EntitySpawner&)`. `Start()` is now just: spawn
+  player, `BuildClassicScenario(*m_entitySpawner)`. Spawn order (and NetId
+  assignment order) unchanged, so the sim-test checksum matched exactly.
+- [x] **R5.2 ReplayController.** Moved record/replay state + logic into
+  `src/client/replay-controller.hpp/.cpp` (client-local, not `include/`).
+  `GravitarisApplication` kept identical method names
+  (`ToggleRecording`/`StartReplay`/`StopReplay`) as thin wrappers, so the
+  F5/F6/F7 key handlers needed no changes.
+- [x] **R5.3 SpawnStar/SpawnPlanet dedupe.** `SpawnPlanet` turned out to be
+  entirely unused (every planet spawn goes through `SpawnOrbitingPlanet`
+  now) — deleted outright. `SpawnStar` stays as a semantic alias over
+  `SpawnCelestial` since it's still the one call site classic-scenario.cpp
+  uses.
 
 ## Phase R6 — Deferred / needs a decision
 
@@ -178,3 +177,14 @@ The biggest extraction: all camera state and logic into
 - Everything else is mechanical relocation; determinism checksums must not
   change in R1, R3, R4, R5.2, R5.3. R5.1 must not change spawn order (NetId
   assignment order is part of the checksum).
+
+**Verification status**: R0-R5 done. After every phase: both `GravitarisNG`
+and `gravitaris-sim-test` built clean, `gravitaris-sim-test` matched the
+pre-refactor checksum exactly (`0x1a3096e5f4b36217` state,
+`0x2e16d87965684ca9` events, unchanged across all six phases as expected —
+none of them touch sim behavior), and `GravitarisNG.exe` launched and ran a
+few seconds with no errors/asserts beyond the expected headless-environment
+sim-step-cap warning. Done from an unattended/autonomous session — **not yet
+manually play-tested interactively** (camera framing/zoom feel, autopilot
+modes, F5/F6/F7 record-replay, minimap, HUD arrows). Worth a hands-on pass
+before considering R6.
