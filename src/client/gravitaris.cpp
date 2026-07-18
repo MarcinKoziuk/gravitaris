@@ -23,7 +23,6 @@
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/input/input-command.hpp>
-#include <gravitaris/game/input/input-log.hpp>
 
 #include <gravitaris/cgame/cgame.hpp>
 #include <gravitaris/cgame/renderer/glow-post-process.hpp>
@@ -31,6 +30,8 @@
 #include <gravitaris/ui/ui.hpp>
 
 #include <cgame/ui/debug/debug-ui.hpp>
+
+#include "replay-controller.hpp"
 
 namespace Gravitaris {
 
@@ -67,15 +68,7 @@ private:
     ControlFlags m_currentInput{};
 
     // Record/replay: F5 toggles recording to disk, F6 replays it back, F7 stops.
-    InputLog     m_recordLog;
-    bool         m_recording = false;
-    std::uint64_t m_recordStartTick = 0;
-
-    InputLog     m_replayLog;
-    bool         m_replaying = false;
-    std::size_t  m_replayCursor = 0;
-
-    static constexpr const char* REPLAY_PATH = "input-replay.grinput";
+    ReplayController m_replay;
 
     void FeedInput();
     void ToggleRecording();
@@ -207,15 +200,8 @@ void GravitarisApplication::FeedInput()
     InputCommand cmd;
     cmd.tick = tick;
 
-    if (m_replaying) {
-        if (m_replayCursor >= m_replayLog.Size()) {
-            StopReplay();
-            cmd.flags = ControlFlags{};
-        }
-        else {
-            cmd.flags = m_replayLog.Commands()[m_replayCursor].flags;
-            ++m_replayCursor;
-        }
+    if (m_replay.IsReplaying()) {
+        cmd.flags = m_replay.NextReplayCommand();
     }
     else {
         cmd.flags = m_currentInput;
@@ -229,12 +215,7 @@ void GravitarisApplication::FeedInput()
 
     maybePlayer->get_mut<InputQueue>().Push(cmd);
 
-    if (m_recording) {
-        // Store tick-relative so the log can replay from any starting tick.
-        InputCommand rec = cmd;
-        rec.tick = tick - m_recordStartTick;
-        m_recordLog.Append(rec);
-    }
+    m_replay.RecordIfActive(cmd, tick);
 
     // One-shot actions apply only for the tick they were pressed on.
     // (firePrimary is held; released on key-up.)
@@ -243,44 +224,19 @@ void GravitarisApplication::FeedInput()
 
 void GravitarisApplication::ToggleRecording()
 {
-    if (m_recording) {
-        m_recording = false;
-        if (m_recordLog.Save(REPLAY_PATH)) {
-            LOG(info) << "Saved input replay '" << REPLAY_PATH << "' ("
-                      << m_recordLog.Size() << " commands)";
-        } else {
-            LOG(warning) << "Failed to save input replay '" << REPLAY_PATH << "'";
-        }
-    } else {
-        StopReplay();
-        m_recordLog.Clear();
-        m_recordStartTick = m_game->GetStep();
-        m_recording = true;
-        LOG(info) << "Recording input at tick " << m_recordStartTick;
-    }
+    m_replay.ToggleRecording(m_game->GetStep());
 }
 
 void GravitarisApplication::StartReplay()
 {
-    if (m_recording) ToggleRecording(); // stop & flush recording first
-
-    if (!m_replayLog.Load(REPLAY_PATH)) {
-        LOG(warning) << "No input replay to load at '" << REPLAY_PATH << "'";
-        return;
+    if (m_replay.StartReplay(m_game->GetStep())) {
+        m_currentInput = ControlFlags{}; // drop any held keys
     }
-
-    m_replaying = true;
-    m_replayCursor = 0;
-    m_currentInput = ControlFlags{};     // drop any held keys
-    LOG(info) << "Replaying input '" << REPLAY_PATH << "' ("
-              << m_replayLog.Size() << " commands)";
 }
 
 void GravitarisApplication::StopReplay()
 {
-    if (!m_replaying) return;
-    m_replaying = false;
-    LOG(info) << "Replay stopped";
+    m_replay.StopReplay();
 }
 
 void GravitarisApplication::RenderUi()
@@ -443,7 +399,7 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
 
     // While replaying, the recorded command stream drives the ship; ignore
     // live gameplay keys (debug keys above still work).
-    if (m_replaying) return;
+    if (m_replay.IsReplaying()) return;
 
     switch (event.key()) {
         // Manual movement input disengages the autopilot.
@@ -477,7 +433,7 @@ void GravitarisApplication::keyReleaseEvent(Magnum::Platform::Sdl2Application::K
         return;
     }
 
-    if (m_replaying) return;
+    if (m_replay.IsReplaying()) return;
 
     switch (event.key()) {
         case KeyEvent::Key::Up:

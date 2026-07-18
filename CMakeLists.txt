@@ -326,6 +326,8 @@ FetchContent_MakeAvailable(MagnumIntegration)
 # ---------------------------------------------------------------------------
 add_executable(GravitarisNG
     src/client/gravitaris.cpp
+    src/client/replay-controller.hpp
+    src/client/replay-controller.cpp
     src/game/resource/body.cpp
     extlibs/nanosvg/nanosvg.c
     include/gravitaris/game/resource/common/iresource.hpp
