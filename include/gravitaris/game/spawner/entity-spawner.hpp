@@ -66,8 +66,6 @@ public:
 
     flecs::entity SpawnStar(id_t modelId, Vector2d position);
 
-    flecs::entity SpawnPlanet(id_t modelId, Vector2d position);
-
     // A planet on a circular orbit around `center`, whose angular speed
     // OrbitSystem derives each tick from `centerMass` and the live gravity
     // settings (matching the speed a freely falling ship would need at this

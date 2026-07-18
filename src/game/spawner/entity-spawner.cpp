@@ -121,11 +121,6 @@ flecs::entity EntitySpawner::SpawnStar(id_t modelId, Vector2d position)
     return SpawnCelestial(modelId, position);
 }
 
-flecs::entity EntitySpawner::SpawnPlanet(id_t modelId, Vector2d position)
-{
-    return SpawnCelestial(modelId, position);
-}
-
 flecs::entity EntitySpawner::SpawnOrbitingPlanet(id_t modelId, Vector2d center, double centerMass,
                                                  double radius, double direction, double phase)
 {
