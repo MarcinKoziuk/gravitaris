@@ -1,3 +1,8 @@
+// GLSL ES (WebGL) requires an explicit default float precision in fragment
+// shaders -- desktop GLSL has no such requirement and silently accepts this
+// as a no-op, so it is unconditional rather than platform-guarded.
+precision highp float;
+
 // Bright-pass extraction: subtracts `threshold` from each color channel
 // before the scene is downsampled+blurred for bloom. Without this, blurring
 // a large flat-filled area (e.g. a UI dialog's background) returns that same

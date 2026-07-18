@@ -603,6 +603,18 @@ if(EMSCRIPTEN)
         "-sFULL_ES3=1"
         "-sMIN_WEBGL_VERSION=2"
         "-sMAX_WEBGL_VERSION=2"
+        # Total memory isn't known upfront (flecs/RmlUi/asset resources all
+        # grow dynamically) -- without this, allocation past the default
+        # initial heap just aborts instead of growing it.
+        "-sALLOW_MEMORY_GROWTH=1"
+        # Emscripten's 64KB default stack is too small for this codebase
+        # (flecs queries, RmlUi layout, deep template call chains) and
+        # overflowed silently at boot; 1MB matches what desktop OSes give a
+        # thread's stack by default.
+        "-sSTACK_SIZE=1048576"
+        # Embeds data/ into MEMFS at /data, populated before main() runs; see
+        # the matching PHYSFS_mount("/data", ...) in filesystem-phys-fs.cpp.
+        "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/data@/data"
     )
 endif()
 

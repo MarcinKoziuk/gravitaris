@@ -1,3 +1,8 @@
+// GLSL ES (WebGL) requires an explicit default float precision in fragment
+// shaders -- desktop GLSL has no such requirement and silently accepts this
+// as a no-op, so it is unconditional rather than platform-guarded.
+precision highp float;
+
 // Simple CRT line effect: horizontal scanlines + a gentle brightness lift so
 // the darkening doesn't crush the image. Runs as the final present pass over
 // the (already composited) scene.

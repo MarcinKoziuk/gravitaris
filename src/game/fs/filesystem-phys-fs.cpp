@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <cassert>
 #include <limits>
+#include <sys/stat.h>
 
 #include <physfs.h>
 #include <memory>
@@ -40,9 +41,33 @@ FilesystemPhysFS& FilesystemPhysFS::instance()
 
 bool FilesystemPhysFS::Init()
 {
-    int result = PHYSFS_init(GRAVITARIS_NAME);
+#if defined(__EMSCRIPTEN__)
+    // PHYSFS_init()'s user-dir lookup calls getenv("HOME") first, which
+    // Emscripten leaves unset; its fallback (a UID/passwd lookup) also fails
+    // under Emscripten's fake user database. "/" always exists in Emscripten's
+    // MEMFS, so pointing HOME there satisfies the stat()-is-a-directory check.
+    setenv("HOME", "/", 1);
+#endif
+
+#if defined(__EMSCRIPTEN__)
+    // PHYSFS_init()'s base-dir lookup tries (in order) a /proc/self/exe
+    // symlink, then an argv0 search through $PATH -- neither exists under
+    // Emscripten, so with a bare program name like GRAVITARIS_NAME it fails
+    // outright (confirmed by temporarily instrumenting PhysFS's own source:
+    // it's calculateBaseDir(), not the user-dir lookup above, despite the
+    // resulting error text reading as empty/"no error" -- a separate quirk in
+    // PhysFS's per-thread error-state lookup under Emscripten's non-pthread
+    // build, not the actual failure). Passing an argv0 that already contains
+    // a '/' sidesteps both lookups entirely: PhysFS's own documented fallback
+    // just chops it at the last separator, which trivially succeeds for "/".
+    const char* argv0 = "/" GRAVITARIS_NAME;
+#else
+    const char* argv0 = GRAVITARIS_NAME;
+#endif
+    int result = PHYSFS_init(argv0);
     if (!result) {
-        LOG(error) << "PhysFS initialization failed";
+        LOG(error) << "PhysFS initialization failed: "
+                   << PHYSFS_getErrorByCode(PHYSFS_getLastErrorCode());
         return false;
     }
 
@@ -52,6 +77,11 @@ bool FilesystemPhysFS::Init()
     mounts += (PHYSFS_mount("/mnt/host/GravitarisNG/data", "/", true) != 0);
     mounts += (PHYSFS_mount(R"(C:\Users\marcin\Projects\GravitarisNG\data)", "/", true) != 0);
     mounts += (PHYSFS_mount("/Users/marcin/projects/gravitaris/data", "/", true) != 0);
+    // Emscripten: --preload-file data@/data (see CMakeLists.txt) populates
+    // MEMFS at /data before main() runs; PhysFS's POSIX platform driver reads
+    // through libc, so this is an ordinary mount as far as PhysFS is
+    // concerned. Harmless everywhere else -- the path just doesn't exist.
+    mounts += (PHYSFS_mount("/data", "/", true) != 0);
 
     if (!mounts) {
         LOG(error) << "Mounting of data directory failed";

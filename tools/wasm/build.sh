@@ -56,6 +56,9 @@ fi
 
 cmake --build "$BUILD_DIR" --target GravitarisNG -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
 
+OUT_DIR="$BUILD_DIR/$BUILD_TYPE/bin"
+cp "$SCRIPT_DIR/index.html" "$OUT_DIR/index.html"
+
 echo
-echo "Build output: $BUILD_DIR/$BUILD_TYPE/bin/GravitarisNG.js (+ .wasm, .data once data is preloaded)"
-echo "Serve it with, e.g.: (cd $BUILD_DIR/$BUILD_TYPE/bin && python3 -m http.server 8080)"
+echo "Build output: $OUT_DIR/ (GravitarisNG.js/.wasm/.data, index.html)"
+echo "Serve it with, e.g.: (cd $OUT_DIR && python3 -m http.server 8080)"

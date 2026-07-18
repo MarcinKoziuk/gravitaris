@@ -1,3 +1,8 @@
+// GLSL ES (WebGL) requires an explicit default float precision in fragment
+// shaders -- desktop GLSL has no such requirement and silently accepts this
+// as a no-op, so it is unconditional rather than platform-guarded.
+precision highp float;
+
 // Analytic edge AA for the baked line renderer, using screen-space partial
 // derivatives (fwidth) rather than a fixed 1px falloff — the standard
 // technique for SDF/distance-based antialiasing (see Chris Green's "Improved

@@ -1,3 +1,8 @@
+// GLSL ES (WebGL) requires an explicit default float precision in fragment
+// shaders -- desktop GLSL has no such requirement and silently accepts this
+// as a no-op, so it is unconditional rather than platform-guarded.
+precision highp float;
+
 // One pass of a separable 9-tap Gaussian blur. Called twice (horizontal then
 // vertical) by GlowPostProcess to approximate a 2D blur cheaply. Sampling a
 // full-res `image` into a lower-res destination (see GlowPostProcess) also

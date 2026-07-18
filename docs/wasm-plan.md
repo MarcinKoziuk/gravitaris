@@ -153,19 +153,78 @@ to land in Phase 2. Actual work, in the order hit:
 - **Done when** (met): `tools/wasm/build.sh` builds `GravitarisNG.js`/`.wasm`
   with no CMake or compiler/linker errors.
 
-### Phase 2 — Data + boot
+### Phase 2 — Data + boot — in progress (2026-07-18)
 
-GL version/context flags already landed in Phase 1 (see above) — this phase is
-now just data delivery and getting an actual browser tab to show something.
+GL version/context flags already landed in Phase 1. This phase is data
+delivery + actually loading the page in a browser, which is where the real
+signal is — a clean link (Phase 1) only proves the compiler/linker are happy.
 
-- Executable link flags still needed: `-sALLOW_MEMORY_GROWTH=1`,
-  `--preload-file data@/data`.
-- Runtime: add the `/data` physfs mount (`filesystem-phys-fs.cpp`); size the
-  view to the HTML canvas instead of the hardcoded `1920x1080`
-  (`gravitaris.cpp` `CreateConfiguration`).
-- Write `index.html` (canvas + script tag for `GravitarisNG.js`).
-- Actually load the page in a browser and see what happens — first real
-  browser-runtime signal of this whole effort.
+**Done:**
+- Link flags: `-sALLOW_MEMORY_GROWTH=1`, `-sSTACK_SIZE=1048576` (Emscripten's
+  64KB default stack overflowed silently — flecs/RmlUi/template call chains
+  need more), `--preload-file=<repo>/data@/data`.
+- `filesystem-phys-fs.cpp`: added a `PHYSFS_mount("/data", ...)` candidate (the
+  preload path above populates Emscripten's MEMFS there before `main()` runs;
+  PhysFS's POSIX driver reads through libc, so this is an ordinary mount as far
+  as PhysFS is concerned).
+- **Two real `PHYSFS_init()` bugs found by instrumenting PhysFS's own source
+  directly** (temporarily, in the gitignored `out-wasm/_deps` checkout — not a
+  guess-and-check loop):
+  1. Its user-dir lookup (`getenv("HOME")`, falling back to a passwd/UID
+     lookup) — Emscripten leaves `HOME` unset and has no real passwd database,
+     so both fail. Fixed: `setenv("HOME", "/", 1)` before `PHYSFS_init()`
+     under `__EMSCRIPTEN__` (`/` always exists in MEMFS).
+  2. Its *base*-dir lookup (`/proc/self/exe` symlink, then an argv0 search
+     through `$PATH`) — neither exists under Emscripten, so with a bare
+     program-name argv0 (`GRAVITARIS_NAME`, no `/` in it) it fails outright.
+     The failure surfaced as `PHYSFS_getLastErrorCode()` reporting "no error"
+     — a separate PhysFS quirk (its error state is a `pthread_self()`-keyed
+     per-thread lookup, which doesn't roundtrip correctly in a non-`-pthread`
+     Emscripten build) that made the *real* failure look like the user-dir one
+     above at first; only confirmed by temporarily adding `fprintf(stderr, ...)`
+     at each of `PHYSFS_init`'s internal `goto initFailed` sites. Fixed:
+     passing `"/" GRAVITARIS_NAME` as argv0 under `__EMSCRIPTEN__` instead —
+     PhysFS's own documented fallback (chop at the last `/`) then trivially
+     succeeds. **Both fixes are `#if defined(__EMSCRIPTEN__)`, native
+     unaffected** (reconfirmed: native rebuild + smoke run green).
+- **GLSL ES requires an explicit default float precision in fragment shaders**
+  (`precision highp float;`) — desktop GLSL has no such requirement. All 7
+  actively-loaded fragment shaders were missing it (`line2.f.glsl`,
+  `starfield.f.glsl`, `postprocess/{crt,glow-blur,glow-composite,
+  glow-threshold}.f.glsl`, `simple/lines.f.glsl`); the directive is a no-op on
+  desktop GLSL, so added unconditionally rather than platform-guarded.
+- `tools/wasm/index.html`: canvas with the hardcoded `id="canvas"` Magnum's
+  Sdl2Application requires on Emscripten (`emscripten_get_element_css_size`
+  keys off it); CSS size doubles as the initial canvas size query, so no
+  separate C++-side "size to canvas" change was needed. `build.sh` copies it
+  next to the built artifacts.
+- **Verified live in a browser** (this machine's Chromium-based preview,
+  WebGL2 confirmed: `OpenGL ES 3.0 (WebGL 2.0 (OpenGL ES 3.0 Chromium))`):
+  boot reaches PhysFS mount (90 files enumerated) → miniaudio backend →
+  Chipmunk physics space → RmlUi font loading → the sim loop actually
+  running (a "sim step cap hit" warning proves ticks are executing, just
+  slow — expected for an unoptimized `Debug` wasm build).
+
+**Not done / next**:
+- RmlUi's own GL3 render backend (`render-interface-gl3.cpp`) hits
+  `GL_INVALID_OPERATION` in both `CompileGeometry` and `RenderGeometry`. Not
+  yet root-caused: `shaders` isn't null (so its own embedded shader compile
+  apparently succeeded — it already has a `#version 300 es` + precision
+  header, likely written with Emscripten in mind already), so the error isn't
+  the same missing-precision class as the game shaders above. Next step:
+  bracket individual GL calls inside `CompileGeometry` with `Gfx::
+  CheckGLError` (currently only called once at the end of each function) to
+  find the exact offending call — WebGL2 validates buffer/VAO/attribute state
+  more strictly than desktop GL, so a call that's silently tolerated natively
+  is the likely shape of the bug.
+- Whether the *game's own* scene (starfield/ships, not just RmlUi's UI layer)
+  is rendering anything is still unconfirmed — the canvas was black
+  throughout, but that's consistent with either "nothing drew yet" or "RmlUi's
+  GL error corrupted state before the game's own draw calls ran"; can't tell
+  which until the above is fixed.
+- `--release` build (current testing was `Debug`; `.wasm` was 67MB
+  unoptimized — expect a large drop with `-O2`/`-O3` + closure).
+- Canvas/window resize handling, `-DNDEBUG` for release.
 - **Done when**: the page loads to the first rendered frame of the game.
 
 ### Phase 3 — Polish
