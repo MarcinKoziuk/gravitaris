@@ -443,6 +443,8 @@ add_executable(GravitarisNG
     include/gravitaris/cgame/renderer/minimap-renderer.hpp
     src/cgame/renderer/minimap-renderer.cpp
     include/gravitaris/cgame/camera.hpp
+    include/gravitaris/cgame/camera-director.hpp
+    src/cgame/camera-director.cpp
     include/gravitaris/cgame/renderer/shader/glow-threshold-shader.hpp
     src/cgame/renderer/shader/glow-threshold-shader.cpp
     include/gravitaris/cgame/renderer/shader/glow-blur-shader.hpp

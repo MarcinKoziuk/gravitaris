@@ -12,6 +12,7 @@
 #include <gravitaris/game/gnc/guidance/behaviors.hpp>
 
 #include <gravitaris/cgame/camera.hpp>
+#include <gravitaris/cgame/camera-director.hpp>
 #include <gravitaris/cgame/renderer/simple-model-renderer.hpp>
 #include <gravitaris/cgame/renderer/model-renderer2.hpp>
 #include <gravitaris/cgame/renderer/starfield-renderer.hpp>
@@ -46,113 +47,19 @@ protected:
     MinimapRenderer m_minimapRenderer;
     AudioSystem m_audioSystem;
     HitFlashSystem m_hitFlashSystem;
+    CameraDirector m_cameraDirector;
 
     RendererKind m_activeRenderer = RendererKind::Baked;
 
-    Camera m_camera;
     Magnum::Vector2 m_viewportSize{1280.f, 720.f};
 
-    bool m_cameraFollow = true;
-    // Dead-zone half-size as a fraction of the visible half-extent: the ship
-    // roams the central (2*fraction) of the view before the camera follows.
-    // Shrinks toward FRAMING while an enemy is being framed so the view tracks
-    // the pair instead of letting it drift in the dead zone.
-    static constexpr float DEAD_ZONE_FRACTION = 0.35f;
-    static constexpr float DEAD_ZONE_FRACTION_FRAMING = 0.08f;
-
-    // Camera director state (see UpdateCamera). m_cameraZoom is the smoothed
-    // zoom actually applied to the camera each frame. The wheel writes
-    // m_manualZoom and sets m_manualZoomActive, which locks the zoom there
-    // regardless of speed/framing. It stays locked until the player actively
-    // controls the ship (thrust/rotate) -- m_manualZoomGraceRemaining is a
-    // grace period (CameraParams::manualHold) after a wheel nudge during
-    // which control input doesn't cancel it, so scrolling while already
-    // moving doesn't instantly undo the pick. Once cancelled, m_cameraZoom
-    // eases back to the dynamic target via the usual tau-smoothing below.
-    float m_cameraZoom = Defaults::cameraZoom;
-    float m_manualZoom = Defaults::cameraZoom;
-    bool m_manualZoomActive = false;
-    float m_manualZoomGraceRemaining = 0.f;
+    // Wall-clock dt for the camera director and hit-flash decay -- both are
+    // presentation-only and driven by real time, not the fixed sim tick (see
+    // Render()). Clamped there so a stall doesn't snap the camera.
     std::chrono::steady_clock::time_point m_lastCameraTime{};
     bool m_cameraTimeValid = false;
 
-    // Eased 0..1: how "framed" the view currently is. FollowWithDeadZone moves
-    // the camera instantly to keep its target inside the dead zone, so feeding
-    // it a target/dead-zone-size that itself jumps (enemy appears/leaves
-    // radius) would snap the camera in one frame. Easing this amount in/out
-    // instead means both the framing bias and the dead-zone shrink ramp in
-    // smoothly, and FollowWithDeadZone's per-frame correction stays small.
-    float m_framingAmount = 0.f;
-    // Which enemy the camera is framing. Sticky: with several enemies in
-    // range the raw "nearest" flips identity constantly as ships orbit, so
-    // the framed target only switches when a rival is decisively closer
-    // (FRAMING_SWITCH_FACTOR) -- pure nearest-wins would snap the pan target
-    // between ships every few frames.
-    flecs::entity m_framedEnemy{};
-    // Eased enemy-relative offset (world units) used for the pan bias.
-    // Smoothed toward the framed enemy's true offset so a target switch that
-    // does happen glides instead of stepping; kept after the enemy leaves
-    // range so the bias fades back out along the direction it faded in from.
-    Magnum::Vector2 m_framedEnemyOffset{0.f, 0.f};
-    // Eased distance (world units) from the player to the farthest in-range
-    // enemy, driving the zoom-fit so *all* nearby enemies fit in view (not
-    // just the framed one). Separate from the offset: pan follows one sticky
-    // target, zoom must contain the whole group. Smoothed so a far enemy
-    // entering/leaving range doesn't snap the zoom.
-    float m_framedReach = 0.f;
-
-    // Eased 0..1 engage amounts for the planet-fit zoom-out and the
-    // close-combat zoom-in (see UpdateCamera and CameraParams). Smoothed the
-    // same way m_framingAmount is, so both blend in/out without snapping.
-    float m_planetFramingAmount = 0.f;
-    float m_closeZoomAmount = 0.f;
-
-    // A rival enemy must be closer than (this * current target's distance)
-    // to steal the framing. Exit hysteresis: the current target is kept
-    // until it exceeds enemyRadius by 15%, so a ship hovering right at the
-    // radius doesn't strobe the framing on/off.
-    static constexpr float FRAMING_SWITCH_FACTOR = 0.7f;
-    static constexpr float FRAMING_EXIT_RADIUS_FACTOR = 1.15f;
-
 public:
-    // Tunables for the camera director (exposed in the Camera debug tab).
-    struct CameraParams {
-        bool dynamicZoom = true;
-        float minZoom = 0.5f;       // most zoomed-out (fast / framing) end
-        float maxZoom = 5.f;        // most zoomed-in (at rest) end
-        float speedFalloff = 220.f; // world units/sec at which zoom noticeably backs off
-        float zoomTau = 2.f;        // zoom smoothing time constant (s), for the dynamic (speed/framing) target
-        float manualZoomTau = 0.25f;// zoom smoothing time constant (s), for a wheel-driven target -- snappier
-                                    // than zoomTau so a manual scroll reads immediately, without touching
-                                    // the dynamic-zoom feel (enemy framing, speed falloff).
-        float manualHold = 5.f;     // grace period (s) after a wheel nudge before ship control can cancel it
-        float scrollSensitivity = 1.08f; // zoom multiplier per wheel notch (was 1.15 -- felt oversensitive)
-
-        bool enemyFraming = true;
-        float enemyRadius = 1100.f; // consider enemies within this for framing
-        float framingBias = 0.35f;  // 0 = stay on player, 1 = midpoint between player and enemy
-        float framingMargin = 220.f;// extra world units kept around the framed pair
-        float framingTau = 1.2f;    // time constant for easing framing in/out as an enemy appears/leaves
-
-        // Celestial (planet/sun) framing: as the player nears a body, zoom out
-        // to fit it so it's actually visible instead of filling the screen at
-        // the speed-driven zoom-in; then release near the surface so the final
-        // approach zooms back in (nice for a slow landing). Engaged only in a
-        // band of surface distances (planetReleaseDist..planetFramingRange), so
-        // it does nothing far out and hands back control right at the surface.
-        bool planetFraming = true;
-        float planetFramingRange = 2000.f; // surface distance at which framing starts fading in
-        float planetReleaseDist = 90.f;    // surface distance below which framing releases (zoom in to land)
-        float planetFramingMargin = 350.f; // extra world units kept around the fitted body
-
-        // Close-combat zoom-in: when the framed enemy gets near (almost
-        // colliding), pull the zoom back in toward closeZoomFraction of maxZoom
-        // -- readable clash without going fully zoomed in. Overrides the
-        // speed/framing zoom-out only at point-blank range.
-        float closeZoomRange = 320.f;    // enemy distance under which the zoom-in ramps
-        float closeZoomFraction = 0.7f;  // fraction of maxZoom reached at contact (not 1 = "not fully")
-    };
-
     // Tunables for the off-screen target arrows (exposed in the HUD debug tab).
     // Distances are world units; sizes are logical pixels (scaled by the HiDPI
     // pixel scale like line width is).
@@ -177,7 +84,6 @@ public:
     };
 
 protected:
-    CameraParams m_cameraParams;
     IndicatorParams m_indicatorParams;
 
     // Kept alive so the arrow glyph stays baked in ModelRenderer2 (loading a
@@ -214,21 +120,10 @@ protected:
     };
     std::optional<GravitySource> FindHeaviestGravitySource();
 
-    // Updates m_framedEnemy (sticky nearest hostile, see field comment) and
-    // returns the framed enemy's current position, or nullopt when nothing is
-    // in range. `outCoverDist` receives the distance to the farthest in-range
-    // enemy (0 if none), for the group zoom-fit. Will also feed the planned
-    // enemy/planet arrow indicators.
-    std::optional<Magnum::Vector2> SelectFramedEnemy(const Magnum::Vector2& from, TeamId playerTeam,
-                                                     float& outCoverDist);
-
-    // Per-frame camera director: eases position (with enemy framing) and zoom
-    // (speed-driven, enemy-fit, or manual override) toward their targets.
-    void UpdateCamera(float dtSeconds);
-
     // Submits an arrow overlay per nearby-but-off-screen enemy/planet, on a
-    // ring around screen center, pointing at the target. Call after UpdateCamera
-    // (needs the final camera pos/zoom) and before the renderer draws.
+    // ring around screen center, pointing at the target. Call after the
+    // camera director's Update (needs the final camera pos/zoom) and before
+    // the renderer draws.
     void UpdateIndicators();
 
     std::unique_ptr<EntitySpawner> CreateEntitySpawner() override;
@@ -273,24 +168,28 @@ public:
     // scene target (not from within Render()).
     void RenderMinimap();
 
-    Camera& GetCamera() { return m_camera; }
+    // The camera director owns all zoom/framing state and logic; these
+    // forward to it so external callers (the client app, debug panels,
+    // WorldToUi) don't need to know it exists as a separate object.
+    CameraDirector& GetCameraDirector() { return m_cameraDirector; }
+    Camera& GetCamera() { return m_cameraDirector.GetCamera(); }
+    CameraDirector::CameraParams& GetCameraParams() { return m_cameraDirector.GetCameraParams(); }
+    [[nodiscard]] float GetCameraZoom() const { return m_cameraDirector.GetCameraZoom(); }
+    [[nodiscard]] bool IsManualZoomActive() const { return m_cameraDirector.IsManualZoomActive(); }
 
-    CameraParams& GetCameraParams() { return m_cameraParams; }
     IndicatorParams& GetIndicatorParams() { return m_indicatorParams; }
-    [[nodiscard]] float GetCameraZoom() const { return m_cameraZoom; }
-    [[nodiscard]] bool IsManualZoomActive() const { return m_manualZoomActive; }
 
     // Mouse-wheel zoom: multiplicatively nudges a manual zoom target that
     // overrides the dynamic zoom until the player next thrusts/rotates (after
     // an initial CameraParams::manualHold grace period), then eases back.
     // `notches` is the scroll delta (positive = zoom in).
-    void NudgeManualZoom(float notches);
+    void NudgeManualZoom(float notches) { m_cameraDirector.NudgeManualZoom(notches); }
 
     // Framebuffer pixels; world->screen mapping is ppu = zoom (renderers use
     // 1 px/unit at zoom 1), camera-centered.
     [[nodiscard]] const Magnum::Vector2& GetViewportSize() const { return m_viewportSize; }
 
-    void ToggleCameraFollow() { m_cameraFollow = !m_cameraFollow; }
+    void ToggleCameraFollow() { m_cameraDirector.ToggleCameraFollow(); }
 
     void SetActiveRenderer(RendererKind kind) { m_activeRenderer = kind; }
     [[nodiscard]] RendererKind GetActiveRenderer() const { return m_activeRenderer; }

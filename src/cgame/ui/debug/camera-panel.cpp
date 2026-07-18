@@ -8,7 +8,7 @@ namespace Gravitaris {
 
 void DrawCameraPanel(CGame& game)
 {
-    CGame::CameraParams& params = game.GetCameraParams();
+    CameraDirector::CameraParams& params = game.GetCameraParams();
 
     ImGui::Text("Current zoom: %.2f", game.GetCameraZoom());
     ImGui::SameLine();
