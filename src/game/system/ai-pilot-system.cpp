@@ -25,7 +25,7 @@ using Magnum::Vector2d;
 
 static constexpr double PI = 3.14159265358979323846;
 
-static constexpr double BULLET_SPEED = 300.0; // matches ship-controls-system's BULLET_MUZZLE_SPEED
+static constexpr double BULLET_SPEED = 200.0; // matches ship-controls-system's BULLET_MUZZLE_SPEED
 
 static double WrapToPi(double angle);
 static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Vector2d& relVel,
@@ -210,8 +210,20 @@ void AIPilotSystem::Update(std::uint64_t step, std::optional<flecs::entity> play
 
                     if (std::abs(WrapToPi(aimHeading - heading)) < tolerance) {
                         flags.firePrimary = true;
-                        pilot.fireCooldown = personality.fireInterval;
                         pilot.aimBiasRolled = false; // roll fresh for the next shot
+
+                        if (personality.burstCount > 1) {
+                            if (pilot.burstShotsRemaining == 0) {
+                                pilot.burstShotsRemaining = personality.burstCount;
+                            }
+                            --pilot.burstShotsRemaining;
+                            pilot.fireCooldown = pilot.burstShotsRemaining > 0
+                                    ? personality.burstShotInterval
+                                    : personality.fireInterval;
+                        }
+                        else {
+                            pilot.fireCooldown = personality.fireInterval;
+                        }
                     }
                 }
             }

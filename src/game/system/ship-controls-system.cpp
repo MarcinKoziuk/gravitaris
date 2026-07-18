@@ -20,7 +20,7 @@ using Magnum::Vector2d;
 
 static constexpr double BULLET_LIFETIME_SECONDS = 3.0;
 static constexpr float BULLET_DAMAGE = 10.f;
-static constexpr double BULLET_MUZZLE_SPEED = 300.0; // matches ai-pilot-system's BULLET_SPEED
+static constexpr double BULLET_MUZZLE_SPEED = 200.0; // matches ai-pilot-system's BULLET_SPEED; 33% slower than the original 300
 static constexpr float BOX_HP = 30.f; // a couple of primary hits or one ram
 
 ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner,
