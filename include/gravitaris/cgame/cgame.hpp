@@ -99,6 +99,12 @@ protected:
     // entering/leaving range doesn't snap the zoom.
     float m_framedReach = 0.f;
 
+    // Eased 0..1 engage amounts for the planet-fit zoom-out and the
+    // close-combat zoom-in (see UpdateCamera and CameraParams). Smoothed the
+    // same way m_framingAmount is, so both blend in/out without snapping.
+    float m_planetFramingAmount = 0.f;
+    float m_closeZoomAmount = 0.f;
+
     // A rival enemy must be closer than (this * current target's distance)
     // to steal the framing. Exit hysteresis: the current target is kept
     // until it exceeds enemyRadius by 15%, so a ship hovering right at the
@@ -125,6 +131,24 @@ public:
         float framingBias = 0.35f;  // 0 = stay on player, 1 = midpoint between player and enemy
         float framingMargin = 220.f;// extra world units kept around the framed pair
         float framingTau = 1.2f;    // time constant for easing framing in/out as an enemy appears/leaves
+
+        // Celestial (planet/sun) framing: as the player nears a body, zoom out
+        // to fit it so it's actually visible instead of filling the screen at
+        // the speed-driven zoom-in; then release near the surface so the final
+        // approach zooms back in (nice for a slow landing). Engaged only in a
+        // band of surface distances (planetReleaseDist..planetFramingRange), so
+        // it does nothing far out and hands back control right at the surface.
+        bool planetFraming = true;
+        float planetFramingRange = 2000.f; // surface distance at which framing starts fading in
+        float planetReleaseDist = 90.f;    // surface distance below which framing releases (zoom in to land)
+        float planetFramingMargin = 350.f; // extra world units kept around the fitted body
+
+        // Close-combat zoom-in: when the framed enemy gets near (almost
+        // colliding), pull the zoom back in toward closeZoomFraction of maxZoom
+        // -- readable clash without going fully zoomed in. Overrides the
+        // speed/framing zoom-out only at point-blank range.
+        float closeZoomRange = 320.f;    // enemy distance under which the zoom-in ramps
+        float closeZoomFraction = 0.7f;  // fraction of maxZoom reached at contact (not 1 = "not fully")
     };
 
     // Tunables for the off-screen target arrows (exposed in the HUD debug tab).

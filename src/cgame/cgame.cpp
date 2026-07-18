@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <optional>
 
 #include <gravitaris/game/logging.hpp>
@@ -12,7 +13,10 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/util/splitmix.hpp>
+#include <gravitaris/game/resource/body.hpp>
+#include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 
 #include <gravitaris/cgame/spawner/centity-spawner.hpp>
@@ -23,6 +27,28 @@
 namespace Gravitaris {
 
 namespace {
+
+// 0..1 envelope for the planet zoom-out: fades in as the surface distance
+// drops from framingRange to a plateau, holds through the plateau, then fades
+// back out approaching releaseDist so the final approach hands back to the
+// speed-driven zoom-in (a slow landing then reads as "zooming in", not stuck
+// zoomed out).
+float PlanetFramingGoal(float surfaceDist, float releaseDist, float framingRange)
+{
+    if (surfaceDist <= 0.f || surfaceDist >= framingRange) return 0.f;
+
+    const float plateauInner = releaseDist * 2.5f;
+    const float plateauOuter = framingRange * 0.5f;
+
+    if (surfaceDist >= plateauOuter) {
+        return 1.f - (surfaceDist - plateauOuter) / std::max(framingRange - plateauOuter, 1.f);
+    }
+    if (surfaceDist >= plateauInner) return 1.f;
+    if (surfaceDist >= releaseDist) {
+        return (surfaceDist - releaseDist) / std::max(plateauInner - releaseDist, 1.f);
+    }
+    return 0.f;
+}
 
 } // namespace
 
@@ -144,6 +170,30 @@ void CGame::UpdateCamera(float dtSeconds)
     float coverDist = 0.f;
     const std::optional<Magnum::Vector2> enemy =
             m_cameraParams.enemyFraming ? SelectFramedEnemy(playerPos, playerTeam, coverDist) : std::nullopt;
+    const float framedDist = enemy ? (*enemy - playerPos).length() : 0.f;
+
+    // Nearest planet/sun surface distance, for the zoom-out-to-see-it band
+    // below. True world radius (not a minimap floor): a sun should need more
+    // clearance than a small planet.
+    float nearestSurfaceDist = std::numeric_limits<float>::max();
+    float nearestPlanetRadius = 0.f;
+    if (m_cameraParams.planetFraming) {
+        m_registry.each([&](flecs::entity entity, const Transform& t, const PhysicsRef& ref) {
+            if (!entity.has<Planet>()) return;
+            float radius = 0.f;
+            const PhysicsBody& body = m_physicsSystem.GetBody(ref);
+            if (body.body && !body.body->GetCircleShapes().empty()) {
+                radius = static_cast<float>(body.body->GetCircleShapes().front().radius)
+                        * static_cast<float>(t.scale.x());
+            }
+            const Magnum::Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
+            const float surfaceDist = (pos - playerPos).length() - radius;
+            if (surfaceDist < nearestSurfaceDist) {
+                nearestSurfaceDist = surfaceDist;
+                nearestPlanetRadius = radius;
+            }
+        });
+    }
 
     // Cancel a manual zoom override once the player actively flies the ship
     // (thrust/rotate), past the post-nudge grace period -- see field comment.
@@ -164,6 +214,18 @@ void CGame::UpdateCamera(float dtSeconds)
     const float framingAlpha = 1.f - std::exp(-dtSeconds / std::max(m_cameraParams.framingTau, 1e-3f));
     const float framingGoal = enemy ? 1.f : 0.f;
     m_framingAmount += (framingGoal - m_framingAmount) * framingAlpha;
+
+    // Same easing for the planet zoom-out band and the close-combat zoom-in,
+    // so both blend in/out as smoothly as enemy framing does.
+    const float planetFramingGoal = m_cameraParams.planetFraming
+            ? PlanetFramingGoal(nearestSurfaceDist, m_cameraParams.planetReleaseDist, m_cameraParams.planetFramingRange)
+            : 0.f;
+    m_planetFramingAmount += (planetFramingGoal - m_planetFramingAmount) * framingAlpha;
+
+    const float closeZoomGoal = enemy
+            ? std::clamp(1.f - framedDist / std::max(m_cameraParams.closeZoomRange, 1.f), 0.f, 1.f)
+            : 0.f;
+    m_closeZoomAmount += (closeZoomGoal - m_closeZoomAmount) * framingAlpha;
 
     // Ease the offset vector too: a framed-target switch (or the enemy's own
     // motion) then glides rather than stepping. While framing is still nearly
@@ -208,6 +270,26 @@ void CGame::UpdateCamera(float dtSeconds)
             const float fitZoom = std::min(m_viewportSize.x(), m_viewportSize.y()) / std::max(span, 1.f);
             zoomTarget += (std::min(zoomTarget, fitZoom) - zoomTarget) * m_framingAmount;
         }
+
+        // Zoom out further to fit a nearby planet/sun while approaching it
+        // (see m_planetFramingAmount/PlanetFramingGoal) -- only ever pulls the
+        // target wider, same min() pattern as the enemy fit above.
+        if (m_planetFramingAmount > 0.f) {
+            const float span = 2.f * nearestPlanetRadius + 2.f * m_cameraParams.planetFramingMargin;
+            const float fitZoom = std::min(m_viewportSize.x(), m_viewportSize.y()) / std::max(span, 1.f);
+            zoomTarget += (std::min(zoomTarget, fitZoom) - zoomTarget) * m_planetFramingAmount;
+        }
+
+        // Close-combat zoom-in: pulls toward closeZoomFraction of maxZoom as
+        // the framed enemy nears point-blank range -- readable clash, not a
+        // full snap-in (closeZoomFraction < 1). Only ever tightens (max()),
+        // so it can't undo the planet/enemy zoom-out above unless it's
+        // actually closer-in than what they already want.
+        if (m_closeZoomAmount > 0.f) {
+            const float closeZoomTarget = m_cameraParams.maxZoom * m_cameraParams.closeZoomFraction;
+            zoomTarget += (std::max(zoomTarget, closeZoomTarget) - zoomTarget) * m_closeZoomAmount;
+        }
+
         zoomTarget = std::clamp(zoomTarget, m_cameraParams.minZoom, m_cameraParams.maxZoom);
     } else {
         zoomTarget = m_cameraParams.maxZoom;

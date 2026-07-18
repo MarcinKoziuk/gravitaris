@@ -61,6 +61,32 @@ void DrawCameraPanel(CGame& game)
     ImGui::SliderFloat("Framing smoothing (s)", &params.framingTau, 0.05f, 2.4f, "%.2f");
     ImGui::SetItemTooltip("Time constant for easing the pan/zoom-fit in and out as an enemy enters/leaves range.");
     ImGui::EndDisabled();
+
+    ImGui::SeparatorText("Planet framing");
+    ImGui::Checkbox("Zoom out for nearby planets", &params.planetFraming);
+    ImGui::SetItemTooltip("Zoom out to fit a planet/sun while approaching it, then release near the surface "
+                          "so the final approach zooms back in.");
+    ImGui::BeginDisabled(!params.planetFraming);
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Framing range", &params.planetFramingRange, 20.f, 100.f, 8000.f, "%.0f");
+    ImGui::SetItemTooltip("Surface distance at which the zoom-out starts fading in. Default 2000.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Release distance", &params.planetReleaseDist, 5.f, 20.f, 1500.f, "%.0f");
+    ImGui::SetItemTooltip("Surface distance below which framing releases, handing back to the normal "
+                          "speed-driven zoom-in for landing. Default 90.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Fit margin##planet", &params.planetFramingMargin, 5.f, 0.f, 3000.f, "%.0f");
+    ImGui::SetItemTooltip("Extra world units kept around the fitted body. Default 350.");
+    ImGui::EndDisabled();
+
+    ImGui::SeparatorText("Close-combat zoom");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Close range", &params.closeZoomRange, 5.f, 20.f, 2000.f, "%.0f");
+    ImGui::SetItemTooltip("Enemy distance under which the zoom-in ramps toward Close fraction. Default 320.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Close fraction", &params.closeZoomFraction, 0.1f, 1.f, "%.2f");
+    ImGui::SetItemTooltip("Fraction of max zoom reached at point-blank range -- 1 would be a full snap-in. "
+                          "Default 0.7.");
 }
 
 } // namespace Gravitaris
