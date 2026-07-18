@@ -20,7 +20,7 @@ void ApplyAIPersonalityPreset(AIPilot& pilot, AIPersonalityPreset preset)
             break;
 
         case AIPersonalityPreset::Aggressive:
-            p.engageRange = 650.0;
+            p.engageRange = 8000.0;
             p.standoffDistance = 35.0;
             p.fireRange = 400.0;
             p.fireTolerance = 0.16;
@@ -42,7 +42,7 @@ void ApplyAIPersonalityPreset(AIPilot& pilot, AIPersonalityPreset preset)
             break;
 
         case AIPersonalityPreset::Cautious:
-            p.engageRange = 350.0;
+            p.engageRange = 4500.0;
             p.standoffDistance = 70.0;
             p.fireRange = 300.0;
             p.fireTolerance = 0.10;
@@ -64,7 +64,7 @@ void ApplyAIPersonalityPreset(AIPilot& pilot, AIPersonalityPreset preset)
             break;
 
         case AIPersonalityPreset::Sniper:
-            p.engageRange = 550.0;
+            p.engageRange = 6000.0;
             p.standoffDistance = 180.0;
             p.fireRange = 450.0;
             p.fireTolerance = 0.05;
@@ -79,7 +79,7 @@ void ApplyAIPersonalityPreset(AIPilot& pilot, AIPersonalityPreset preset)
             break;
 
         case AIPersonalityPreset::Reckless:
-            p.engageRange = 600.0;
+            p.engageRange = 7000.0;
             p.standoffDistance = 30.0;
             p.fireRange = 380.0;
             p.fireTolerance = 0.18;

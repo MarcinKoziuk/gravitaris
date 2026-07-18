@@ -22,7 +22,9 @@ static constexpr double PI = 3.14159265358979323846;
 static constexpr int FRAG_COUNT = 12;
 static constexpr double FRAG_SPEED_MIN = 120.0;
 static constexpr double FRAG_SPEED_MAX = 240.0;
-static constexpr double FRAG_LIFETIME_SECONDS = 0.8;
+// Matches ShipControlsSystem::BULLET_LIFETIME_SECONDS -- frags should linger
+// exactly as long as a fired bullet, not vanish early.
+static constexpr double FRAG_LIFETIME_SECONDS = 3.0;
 static constexpr float FRAG_DAMAGE = 8.f;
 static constexpr double FRAG_SPAWN_OFFSET = 6.0; // start just off-centre so frags don't share one point
 

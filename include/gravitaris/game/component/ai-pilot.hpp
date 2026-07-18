@@ -21,7 +21,7 @@ enum class AIBehavior {
 // GuidanceParams/FlightControllerParams (also stored per-pilot on AIPilot)
 // cover flight-dynamics tuning; this covers the decision layer above them.
 struct AIPersonality {
-    double engageRange = 500.0;      // pursue the target inside this
+    double engageRange = 6000.0;     // pursue the target inside this
     double standoffDistance = 50.0;  // desired range to hold during Intercept
     double fireRange = 350.0;        // opens fire this far out (was 250)
     double fireTolerance = 0.12;     // rad off the lead solution, still fires
