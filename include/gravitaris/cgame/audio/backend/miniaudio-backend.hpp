@@ -38,10 +38,9 @@ private:
     // ma_audio_buffer_ref that plays this clip -- see class comment. Not
     // mutated/reallocated once uploaded except via UploadBuffer/ReleaseBuffer
     // on this exact slot, which by construction only happens with no voice
-    // still reading it (see PlayOneShot/PlayLooping's re-init-per-play and
-    // AudioSystem::SetBackendPreference's release-voices-before-buffers
-    // order); reusing a slot for a *different* clip while an old voice is
-    // still mid-playback from it is a known, currently-unhandled edge case.
+    // still reading it (see PlayOneShot/PlayLooping's re-init-per-play);
+    // reusing a slot for a *different* clip while an old voice is still
+    // mid-playback from it is a known, currently-unhandled edge case.
     struct BufferSlot {
         std::vector<std::int16_t> samples;
         std::uint32_t sampleRate = 0;

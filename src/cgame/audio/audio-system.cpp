@@ -5,6 +5,7 @@
 #include <gravitaris/game/event/game-event.hpp>
 
 #include <gravitaris/cgame/resource/audio-clip.hpp>
+#include <gravitaris/cgame/audio/backend/miniaudio-backend.hpp>
 #include <gravitaris/cgame/audio/audio-system.hpp>
 
 namespace Gravitaris {
@@ -43,10 +44,9 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
 
     // Loaded unconditionally, before any backend exists: Update()/
     // PlayOneShotById dereference these clips' Id() every frame with no null
-    // check, and SetBackendPreference() can enable audio later even if this
-    // constructor's own backend attempt below fails -- both need these to
-    // always be valid ResourcePtrs (real or Placeholder), never the
-    // default-constructed empty state. A failed load silently substitutes
+    // check, so they need to be valid ResourcePtrs (real or Placeholder),
+    // never the default-constructed empty state, even if the backend attempt
+    // below fails and audio stays disabled. A failed load silently substitutes
     // AudioClip::Placeholder() (an empty clip) -- same graceful-degrade
     // convention as Model/Body; that one clip just plays silence.
     //
@@ -57,11 +57,14 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
     m_thrustClip = m_resourceLoader.Load<AudioClip>("sounds/thrust-1.wav"_id);
     m_hitClip    = m_resourceLoader.Load<AudioClip>("sounds/hit-1.wav"_id);
 
-    m_backendPreference = ResolveAudioBackendPreference(m_backendPreference);
-    m_backend = CreateAudioBackend(m_backendPreference);
+    auto miniaudio = std::make_unique<MiniaudioBackend>();
+    if (miniaudio->Init()) {
+        LOG(info) << "[audio] using backend: " << miniaudio->Name();
+        m_backend = std::move(miniaudio);
+    }
     m_enabled = bool(m_backend);
     if (!m_enabled) {
-        LOG(warning) << "[audio] no usable backend; audio disabled";
+        LOG(warning) << "[audio] miniaudio backend failed to initialize; audio disabled";
         return;
     }
 
@@ -101,34 +104,6 @@ void AudioSystem::AcquireVoicePool()
     for (std::size_t i = 0; i < ONE_SHOT_POOL_SIZE; ++i) {
         m_oneShotPool.push_back(m_backend->AcquireVoice());
     }
-}
-
-void AudioSystem::SetBackendPreference(AudioBackendPreference preference)
-{
-    if (m_backend) {
-        for (const VoiceHandle& voice : m_oneShotPool) m_backend->ReleaseVoice(voice);
-        for (auto& [id, loop] : m_thrusters) m_backend->ReleaseVoice(loop.voice);
-        for (const FadingVoice& fading : m_fadingVoices) m_backend->ReleaseVoice(fading.voice);
-        for (auto& [id, handle] : m_buffers) m_backend->ReleaseBuffer(handle);
-    }
-    m_oneShotPool.clear();
-    m_thrusters.clear(); // still-thrusting entities re-acquire a fresh voice next Update()
-    m_fadingVoices.clear();
-    m_buffers.clear();
-
-    m_backendPreference = ResolveAudioBackendPreference(preference);
-    m_backend = CreateAudioBackend(m_backendPreference);
-    m_enabled = bool(m_backend);
-    if (!m_enabled) {
-        LOG(warning) << "[audio] backend switch failed; audio disabled";
-        return;
-    }
-
-    if (m_laserClip)  HandleClipAdded(*m_laserClip, m_laserClip.Id());
-    if (m_thrustClip) HandleClipAdded(*m_thrustClip, m_thrustClip.Id());
-    if (m_hitClip)    HandleClipAdded(*m_hitClip, m_hitClip.Id());
-
-    AcquireVoicePool();
 }
 
 void AudioSystem::PlayOneShotById(id_t clipId, const Vector2& pos, float gain)

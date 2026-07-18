@@ -1,6 +1,9 @@
 # ADR 0003: IAudioBackend abstraction over OpenAL and miniaudio
 
-Status: accepted, deliberately transitional (see "When to remove this" below)
+Status: superseded (2026-07-18) — the OpenAL backend and the whole
+two-backend scaffolding were removed; miniaudio is now the sole backend.
+See "When to remove this" (below) and "Resolution" (at the end). Kept for
+the diagnosis history, which is still useful if audio is revisited.
 
 ## Decision
 
@@ -174,3 +177,15 @@ backend -- see "Why miniaudio as the macOS default"), delete
 `MagnumOpenALBackend`, `AudioBackendPreference`, `CreateAudioBackend`, and the
 debug UI's backend picker; `AudioSystem` keeps just `IAudioBackend` and
 whichever single implementation remains.
+
+## Resolution (2026-07-18)
+
+Done, exactly as above. OpenAL had ongoing issues (the high-pitched pops
+noted under "Why"), was only ever the non-default A/B option, and doesn't
+build for the WebAssembly target (see `docs/wasm-plan.md` Phase 0), so it was
+removed on all platforms: `MagnumOpenALBackend`, `AudioBackendPreference`, the
+`CreateAudioBackend`/`ResolveAudioBackendPreference` factory, the runtime
+`AudioSystem::SetBackendPreference` switch, the Audio-tab backend picker, and
+the OpenAL-soft / `Magnum::Audio` build dependencies all deleted. `AudioSystem`
+now constructs `MiniaudioBackend` directly through the retained `IAudioBackend`
+interface.

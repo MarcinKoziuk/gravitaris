@@ -36,7 +36,6 @@ set(GT_RMLUI_TAG      "6.0")
 set(GT_POLY2TRI_TAG   "master")
 set(GT_IMGUI_TAG      "v1.91.5")
 set(GT_MAGNUMINT_TAG  "master")
-set(GT_OPENALSOFT_TAG "1.23.1")
 
 # ---------------------------------------------------------------------------
 # Corrade — must be fetched before Magnum; OVERRIDE_FIND_PACKAGE so that
@@ -114,31 +113,6 @@ endif()
 set(FREETYPE_FOUND TRUE)
 
 # ---------------------------------------------------------------------------
-# OpenAL Soft — fetched before Magnum; Magnum's FindOpenAL detects the
-# subproject `OpenAL` target directly. Bundled (rather than Apple's system
-# OpenAL.framework) so EFX effects behave identically on every platform.
-# STATIC is load-bearing on Windows: a shared build produces OpenAL32.dll,
-# whose name collides with the legacy Creative router many machines have in
-# System32 — whichever the loader picks wins, and the router crashes against
-# a modern context. Static linking removes the name from the equation.
-# ---------------------------------------------------------------------------
-set(LIBTYPE STATIC)
-# Magnum's internal MagnumAudioObjects object-library pulls only OpenAL's
-# include dirs (not its INTERFACE_COMPILE_DEFINITIONS), so the static-linkage
-# define has to be applied globally or its objects keep dllimport AL symbols.
-add_compile_definitions(AL_LIBTYPE_STATIC)
-set(ALSOFT_UTILS    OFF CACHE BOOL "" FORCE)
-set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(ALSOFT_INSTALL  OFF CACHE BOOL "" FORCE)
-
-FetchContent_Declare(OpenALSoft
-    GIT_REPOSITORY  https://github.com/kcat/openal-soft.git
-    GIT_TAG         ${GT_OPENALSOFT_TAG}
-    GIT_SHALLOW     TRUE
-)
-FetchContent_MakeAvailable(OpenALSoft)
-
-# ---------------------------------------------------------------------------
 # Magnum — requires Corrade and SDL2 to already be available
 # ---------------------------------------------------------------------------
 # v2020.06 used WITH_*, master uses MAGNUM_WITH_* — set both for safety
@@ -148,8 +122,6 @@ set(WITH_GL                     ON  CACHE BOOL "" FORCE)
 set(MAGNUM_WITH_GL              ON  CACHE BOOL "" FORCE)
 set(WITH_SHADERS                ON  CACHE BOOL "" FORCE)
 set(MAGNUM_WITH_SHADERS         ON  CACHE BOOL "" FORCE)
-set(WITH_AUDIO                  ON  CACHE BOOL "" FORCE)
-set(MAGNUM_WITH_AUDIO           ON  CACHE BOOL "" FORCE)
 # Disable unused modules to keep configure/build time reasonable
 set(WITH_DEBUGTOOLS       OFF CACHE BOOL "" FORCE)
 set(MAGNUM_WITH_DEBUGTOOLS OFF CACHE BOOL "" FORCE)
@@ -188,7 +160,6 @@ if(MSVC)
             MagnumMathObjects
             MagnumGL MagnumGLObjects
             MagnumShaders MagnumShadersObjects
-            MagnumAudio MagnumAudioObjects
             MagnumSdl2Application)
         if(TARGET ${_magnumTarget})
             target_compile_options(${_magnumTarget} PRIVATE /wd4910)
@@ -406,10 +377,6 @@ add_executable(GravitarisNG
     include/gravitaris/cgame/audio/audio-system.hpp
     src/cgame/audio/audio-system.cpp
     include/gravitaris/cgame/audio/audio-backend.hpp
-    include/gravitaris/cgame/audio/audio-backend-factory.hpp
-    src/cgame/audio/audio-backend-factory.cpp
-    include/gravitaris/cgame/audio/backend/magnum-openal-backend.hpp
-    src/cgame/audio/backend/magnum-openal-backend.cpp
     include/gravitaris/cgame/audio/backend/miniaudio-backend.hpp
     src/cgame/audio/backend/miniaudio-backend.cpp
     extlibs/miniaudio/miniaudio_impl.c
@@ -549,7 +516,6 @@ target_link_libraries(GravitarisNG PRIVATE
     Magnum::GL
     Magnum::Shaders
     Magnum::Sdl2Application
-    Magnum::Audio
 
     MagnumIntegration::ImGui
 

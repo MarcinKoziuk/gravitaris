@@ -15,7 +15,6 @@
 
 #include <gravitaris/cgame/fwd.hpp>
 #include <gravitaris/cgame/audio/audio-backend.hpp>
-#include <gravitaris/cgame/audio/audio-backend-factory.hpp>
 
 namespace Gravitaris {
 
@@ -57,7 +56,6 @@ private:
     std::uint32_t m_eventCursor = 0;
 
     std::unique_ptr<IAudioBackend> m_backend;
-    AudioBackendPreference m_backendPreference = AudioBackendPreference::Auto;
     bool m_enabled = false;
 
     // Reactive cache: AudioClip resource id -> uploaded buffer handle in the
@@ -93,11 +91,6 @@ public:
 
     ~AudioSystem();
 
-    // Tears down the current backend (releasing its voices/buffers) and
-    // creates a new one per `preference`, re-uploading every still-live clip
-    // into it. Safe to call at runtime (the debug UI's backend dropdown does).
-    void SetBackendPreference(AudioBackendPreference preference);
-    [[nodiscard]] AudioBackendPreference GetBackendPreference() const { return m_backendPreference; }
     [[nodiscard]] const char* GetBackendName() const { return m_backend ? m_backend->Name() : "none"; }
     [[nodiscard]] bool IsEnabled() const { return m_enabled; }
 

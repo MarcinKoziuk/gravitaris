@@ -134,10 +134,6 @@ public:
     void SetActiveRenderer(RendererKind kind) { m_activeRenderer = kind; }
     [[nodiscard]] RendererKind GetActiveRenderer() const { return m_activeRenderer; }
 
-    void SetAudioBackendPreference(AudioBackendPreference preference)
-    { m_audioSystem.SetBackendPreference(preference); }
-    [[nodiscard]] AudioBackendPreference GetAudioBackendPreference() const
-    { return m_audioSystem.GetBackendPreference(); }
     [[nodiscard]] const char* GetAudioBackendName() const { return m_audioSystem.GetBackendName(); }
     [[nodiscard]] bool IsAudioEnabled() const { return m_audioSystem.IsEnabled(); }
 
