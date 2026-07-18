@@ -425,6 +425,8 @@ add_executable(GravitarisNG
     include/gravitaris/game/system/ship-controls-system.hpp
     include/gravitaris/game/spawner/entity-spawner.hpp
     src/game/spawner/entity-spawner.cpp
+    include/gravitaris/game/scenario/classic-scenario.hpp
+    src/game/scenario/classic-scenario.cpp
     include/gravitaris/cgame/spawner/centity-spawner.hpp
     src/cgame/spawner/centity-spawner.cpp
     include/gravitaris/cgame/fwd.hpp
@@ -610,6 +612,7 @@ add_executable(gravitaris-sim-test
     src/game/gnc/guidance/behaviors.cpp
     src/game/gnc/ai-personality-presets.cpp
     src/game/spawner/entity-spawner.cpp
+    src/game/scenario/classic-scenario.cpp
     src/game/game.cpp
 )
 

@@ -6,10 +6,10 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/net-id.hpp>
-#include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/gnc/ai-personality-presets.hpp>
 #include <gravitaris/game/util/splitmix.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
+#include <gravitaris/game/scenario/classic-scenario.hpp>
 #include <gravitaris/game/game.hpp>
 
 namespace Gravitaris {
@@ -43,32 +43,7 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
 void Game::Start()
 {
     m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, m_playerSpawnPos);
-
-    // Hardcoded "classic mode" solar system: two still suns, each with a few
-    // green planets on pre-calculated circular orbits. The suns are the
-    // dominant gravity wells; the orbiting planets attract too, far less.
-    const id_t sun = "models/stars/sun"_id;
-    const id_t planet = "models/planets/simple"_id;
-
-    const Vector2d sunA{-5600., 0.};
-    const Vector2d sunB{5600., 0.};
-
-    // Orbit angular speed is derived from centerMass at the actual gravity
-    // settings (see OrbitSystem), so this is the star's effective attracting
-    // mass -- mass * its own gravity multiplier, matching what ApplyGravity
-    // computes for it as a source.
-    const auto effectiveMass = [](flecs::entity star) {
-        return star.get<GravitySource>().mass * star.get<GravitySource>().multiplier;
-    };
-
-    const double sunAMass = effectiveMass(m_entitySpawner->SpawnStar(sun, sunA));
-    m_entitySpawner->SpawnOrbitingPlanet(planet, sunA, sunAMass, 2000., 1.0, 0.0);
-    m_entitySpawner->SpawnOrbitingPlanet(planet, sunA, sunAMass, 3400., -1.0, 2.1);
-    m_entitySpawner->SpawnOrbitingPlanet(planet, sunA, sunAMass, 4800., 1.0, 4.0);
-
-    const double sunBMass = effectiveMass(m_entitySpawner->SpawnStar(sun, sunB));
-    m_entitySpawner->SpawnOrbitingPlanet(planet, sunB, sunBMass, 2200., -1.0, 1.0);
-    m_entitySpawner->SpawnOrbitingPlanet(planet, sunB, sunBMass, 4000., 1.0, 3.5);
+    BuildClassicScenario(*m_entitySpawner);
 }
 
 Game::Game(IFilesystem& filesystem)
