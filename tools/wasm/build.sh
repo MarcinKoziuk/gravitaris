@@ -34,8 +34,19 @@ if [[ -z "$EMSDK_FOUND" ]]; then
     echo "  EMSDK_DIR=~/Projects/emsdk tools/wasm/build.sh" >&2
     exit 1
 fi
+# emcc's own shell wrapper execs $EMSDK_PYTHON if set, else falls back to
+# whatever `python3` is on PATH. emscripten requires 3.10+; macOS ships an
+# ancient CommandLineTools python3 (3.9.x) that plenty of machines resolve by
+# default, which fails with an assertion deep inside emcc.py that looks
+# unrelated to PATH at a glance. Point it at emsdk's own vendored interpreter
+# explicitly so this can't happen regardless of the calling shell's default.
+EMSDK_PYTHON="$(ls -d "$EMSDK_FOUND"/python/*/bin/python3 2>/dev/null | head -1)"
+if [[ -n "$EMSDK_PYTHON" ]]; then
+    export EMSDK_PYTHON
+fi
 export PATH="$EMSDK_FOUND/upstream/emscripten:$EMSDK_FOUND:$PATH"
 echo "Using emsdk at: $EMSDK_FOUND"
+echo "Using python: ${EMSDK_PYTHON:-$(command -v python3)} ($("${EMSDK_PYTHON:-python3}" --version))"
 emcc --version | head -1
 
 # --- Args --------------------------------------------------------------------
