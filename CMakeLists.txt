@@ -174,6 +174,28 @@ FetchContent_Declare(Magnum
 )
 FetchContent_MakeAvailable(Magnum)
 
+# C4910 ('__declspec(dllexport)' and 'extern' are incompatible on an explicit
+# instantiation) fires from Corrade/Magnum's own Math/ConfigurationValue.h
+# building as a shared MSVC lib -- benign, not triggered by our code. Silenced
+# per-target (real add_library names, not the Corrade::/Magnum:: ALIASes --
+# target_compile_options needs the actual target) rather than globally so it
+# doesn't mask a real C4910 in our own sources.
+if(MSVC)
+    foreach(_magnumTarget
+            CorradeUtility CorradeUtilityObjects
+            CorradePluginManager CorradePluginManagerObjects
+            Magnum MagnumObjects
+            MagnumMathObjects
+            MagnumGL MagnumGLObjects
+            MagnumShaders MagnumShadersObjects
+            MagnumAudio MagnumAudioObjects
+            MagnumSdl2Application)
+        if(TARGET ${_magnumTarget})
+            target_compile_options(${_magnumTarget} PRIVATE /wd4910)
+        endif()
+    endforeach()
+endif()
+
 # ---------------------------------------------------------------------------
 # Chipmunk2D
 # ---------------------------------------------------------------------------

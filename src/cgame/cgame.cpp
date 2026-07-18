@@ -10,6 +10,7 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/bullet.hpp>
+#include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/controls.hpp>
@@ -535,12 +536,12 @@ void CGame::SpawnRandomAIShip()
 
 std::optional<CGame::GravitySource> CGame::FindHeaviestGravitySource()
 {
-    const std::optional<flecs::entity> player = GetPlayer();
-
+    // GravitySource.mass, not cpBodyGetMass: celestials are kinematic bodies
+    // (infinite Chipmunk mass), so their gravitational mass lives in the
+    // component instead (see include/gravitaris/game/component/gravity-source.hpp).
     std::optional<GravitySource> best;
-    m_registry.each([&](flecs::entity ent, Transform& transf, PhysicsRef& ref) {
-        if ((player && ent == *player) || ent.has<Bullet>()) return;
-        const double mass = cpBodyGetMass(m_physicsSystem.GetBody(ref).cp.body.get());
+    m_registry.each([&](flecs::entity, const Transform& transf, const Gravitaris::GravitySource& gs) {
+        const double mass = gs.mass * gs.multiplier;
         if (!best || mass > best->mass) {
             best = GravitySource{transf.pos, mass};
         }
