@@ -17,6 +17,7 @@
 #include <gravitaris/cgame/renderer/starfield-renderer.hpp>
 #include <gravitaris/cgame/renderer/minimap-renderer.hpp>
 #include <gravitaris/cgame/audio/audio-system.hpp>
+#include <gravitaris/cgame/fx/hit-flash-system.hpp>
 
 namespace Gravitaris {
 
@@ -44,6 +45,7 @@ protected:
     StarfieldRenderer m_starfieldRenderer;
     MinimapRenderer m_minimapRenderer;
     AudioSystem m_audioSystem;
+    HitFlashSystem m_hitFlashSystem;
 
     RendererKind m_activeRenderer = RendererKind::Baked;
 
@@ -201,11 +203,6 @@ protected:
     // within one tick still diverge.
     std::uint32_t m_randomAIShipSpawnCount = 0;
 
-    // Event cursor for the hit-flash consumer (see UpdateHitFlashes); audio
-    // keeps its own inside AudioSystem -- each GameEventQueue consumer tracks
-    // its own position independently.
-    std::uint32_t m_flashEventCursor = 0;
-
     // Debug/tuning only (temporary, for calibrating gameplay feel -- see the
     // Physics debug tab). 1 = unmodified in both cases; 0.667 is this game's
     // tuned default (a lighter ship reads better against the solar system's
@@ -250,11 +247,6 @@ protected:
     // ring around screen center, pointing at the target. Call after UpdateCamera
     // (needs the final camera pos/zoom) and before the renderer draws.
     void UpdateIndicators();
-
-    // Client-side hit-flash: sets HitFlash.amount = 1 on entities named by
-    // Impact/LandingCrash events (resolved via the NetId registry), then
-    // decays every entity's flash with the rendered frame's dt.
-    void UpdateHitFlashes(float dtSeconds);
 
     std::unique_ptr<EntitySpawner> CreateEntitySpawner() override;
 public:

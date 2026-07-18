@@ -411,6 +411,8 @@ add_executable(GravitarisNG
     include/gravitaris/cgame/audio/backend/miniaudio-backend.hpp
     src/cgame/audio/backend/miniaudio-backend.cpp
     extlibs/miniaudio/miniaudio_impl.c
+    include/gravitaris/cgame/fx/hit-flash-system.hpp
+    src/cgame/fx/hit-flash-system.cpp
     include/gravitaris/cgame/resource/audio-clip.hpp
     src/cgame/resource/audio-clip.cpp
     include/gravitaris/cgame/resource/model.hpp
