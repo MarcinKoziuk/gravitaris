@@ -33,7 +33,14 @@ void DrawCameraPanel(CGame& game)
 
     ImGui::SetNextItemWidth(220.f);
     ImGui::SliderFloat("Zoom smoothing (s)", &params.zoomTau, 0.1f, 3.9f, "%.2f");
-    ImGui::SetItemTooltip("Time constant for easing toward the target zoom. Default 2.");
+    ImGui::SetItemTooltip("Time constant for easing toward the dynamic (speed/framing) zoom target. Default 2.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Wheel zoom smoothing (s)", &params.manualZoomTau, 0.02f, 2.f, "%.2f");
+    ImGui::SetItemTooltip("Time constant for easing toward a wheel-driven zoom target. Lower = scroll reads "
+                          "more immediately. Default 0.25.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Wheel sensitivity", &params.scrollSensitivity, 1.01f, 1.3f, "%.3f");
+    ImGui::SetItemTooltip("Zoom multiplier per wheel notch. Default 1.08.");
     ImGui::SetNextItemWidth(220.f);
     ImGui::SliderFloat("Wheel hold (s)", &params.manualHold, 0.f, 10.f, "%.1f");
     ImGui::SetItemTooltip("Grace period after a wheel nudge before flying the ship cancels the manual zoom. Default 5.");

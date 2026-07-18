@@ -33,6 +33,11 @@ protected:
     // every Spawn* method before the entity is returned.
     void AssignNetId(flecs::entity entity);
 
+    // Shared setup for stars and planets: a kinematic body (per the Body's
+    // physics.kinematic) tagged Planet, with a GravitySource attached when the
+    // Body declares one.
+    flecs::entity SpawnCelestial(id_t modelId, Vector2d position);
+
 private:
     std::uint32_t m_nextNetId = 1; // 0 stays reserved as "invalid" (see NetId)
     ankerl::unordered_dense::map<std::uint32_t, flecs::entity> m_netIdToEntity;
@@ -59,7 +64,17 @@ public:
     flecs::entity SpawnAIShip(id_t modelId, Vector2d position,
                               AIPersonalityPreset preset = AIPersonalityPreset::Balanced);
 
+    flecs::entity SpawnStar(id_t modelId, Vector2d position);
+
     flecs::entity SpawnPlanet(id_t modelId, Vector2d position);
+
+    // A planet on a circular orbit around `center`, whose angular speed
+    // OrbitSystem derives each tick from `centerMass` and the live gravity
+    // settings (matching the speed a freely falling ship would need at this
+    // radius). Its initial transform is placed at the tick-0 orbit position.
+    // `direction` is sign-only: positive/negative picks the orbit direction.
+    flecs::entity SpawnOrbitingPlanet(id_t modelId, Vector2d center, double centerMass,
+                                      double radius, double direction, double phase);
 
     // sensor: true for bullets whose hits are resolved by DamageSystem's
     // segment query rather than Chipmunk collision response (see RigidBodyDesc).

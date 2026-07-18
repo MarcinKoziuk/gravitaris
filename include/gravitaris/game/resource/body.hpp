@@ -52,6 +52,9 @@ public:
 private:
     cpFloat m_mass;
     cpFloat m_friction;
+    bool m_kinematic = false;
+    bool m_gravitySource = false;
+    double m_gravityMultiplier = 1.0;
     std::vector<CircleShape> m_circleShapes;
     std::vector<std::vector<TVector2<cpFloat>>> m_polygonShapes;
     std::vector<Hardpoint> m_hardpoints;
@@ -76,6 +79,19 @@ public:
 
     [[nodiscard]] cpFloat GetFriction() const
     { return m_friction; }
+
+    // Kinematic: an immovable body whose motion is driven externally (e.g. by
+    // OrbitSystem), unaffected by collisions, forces or gravity.
+    [[nodiscard]] bool IsKinematic() const
+    { return m_kinematic; }
+
+    // Whether this body attracts others (a star/planet). Its gravitational
+    // mass is GetMass(); the physical Chipmunk mass may be infinite (kinematic).
+    [[nodiscard]] bool IsGravitySource() const
+    { return m_gravitySource; }
+
+    [[nodiscard]] double GetGravityMultiplier() const
+    { return m_gravityMultiplier; }
 
     [[nodiscard]] const std::vector<CircleShape>& GetCircleShapes() const
     { return m_circleShapes; }

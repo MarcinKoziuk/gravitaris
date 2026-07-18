@@ -1,8 +1,7 @@
 #include <cmath>
 
 #include <gravitaris/game/component/transform.hpp>
-#include <gravitaris/game/component/physics.hpp>
-#include <gravitaris/game/component/bullet.hpp>
+#include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
 
@@ -26,10 +25,8 @@ std::vector<Vector2d> TrajectoryPredictor::Predict(flecs::entity ship, int steps
     };
     std::vector<Source> sources;
 
-    m_registry.each([&](flecs::entity ent, Transform& transf, PhysicsRef& ref) {
-        if (ent == ship || ent.has<Bullet>()) return;
-        PhysicsBody& slot = m_physicsSystem.GetBody(ref);
-        sources.push_back({transf.pos, cpBodyGetMass(slot.cp.body.get())});
+    m_registry.each([&](flecs::entity, const Transform& transf, const GravitySource& gs) {
+        sources.push_back({transf.pos, gs.mass * gs.multiplier});
     });
 
     Vector2d pos = shipTransf->pos;

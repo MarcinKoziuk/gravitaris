@@ -5,6 +5,7 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/bullet.hpp>
+#include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 
 namespace Gravitaris {
@@ -125,19 +126,30 @@ void PhysicsSystem::SetMassMultiplier(const PhysicsRef& ref, float multiplier)
     cpBodySetMass(slot.cp.body.get(), slot.baseMass * multiplier);
 }
 
+void PhysicsSystem::SetKinematicMotion(const PhysicsRef& ref, Magnum::Vector2d pos, Magnum::Vector2d vel)
+{
+    cpBody* body = GetBody(ref).cp.body.get();
+    cpBodySetPosition(body, cpv(pos.x(), pos.y()));
+    cpBodySetVelocity(body, cpv(vel.x(), vel.y()));
+}
+
 void PhysicsSystem::InitBody(PhysicsBody& slot, const Transform& transf)
 {
     const Body& bodyResource = *slot.body;
     cpSpace* space = m_spaces.at(slot.spaceId).get();
 
-    slot.cp.body.reset(cpBodyNew(1.0, 1.0));
+    const bool kinematic = bodyResource.IsKinematic();
+    slot.cp.body.reset(kinematic ? cpBodyNewKinematic() : cpBodyNew(1.0, 1.0));
     slot.cp.space = m_spaces.at(slot.spaceId);
 
     cpBody* body = slot.cp.body.get();
 
     cpFloat moment = 0.0;
     cpFloat mass = bodyResource.GetMass();
-    slot.baseMass = mass;
+    // A kinematic body has no meaningful physical mass; leave baseMass 0 so
+    // SetMassMultiplier no-ops on it. Its gravitational pull comes from a
+    // GravitySource component instead.
+    slot.baseMass = kinematic ? 0.0 : mass;
     for (const auto& poly : bodyResource.GetPolygonShapes()) {
         moment += cpMomentForPoly(
                 mass,
@@ -167,8 +179,10 @@ void PhysicsSystem::InitBody(PhysicsBody& slot, const Transform& transf)
         slot.cp.shapes.emplace_back(cpShapeUniquePtr(shape));
     }
 
-    if (moment != 0.) cpBodySetMoment(body, moment);
-    if (mass != 0.) cpBodySetMass(body, mass);
+    if (!kinematic) {
+        if (moment != 0.) cpBodySetMoment(body, moment);
+        if (mass != 0.) cpBodySetMass(body, mass);
+    }
 
     cpSpaceAddBody(space, body);
     for (auto& it : slot.cp.shapes) {
@@ -276,38 +290,44 @@ void PhysicsSystem::UnloadSpace(id_t spaceId)
 
 void PhysicsSystem::ApplyGravity(id_t spaceId)
 {
-    const static cpFloat gravityConstant = GRAVITY_CONSTANT;
-
-    // Gather the space's gravity-participating bodies in a single ECS pass,
-    // then do the O(n^2) pairwise attraction over the plain vector.
-    struct GravBody {
-        cpBody* body;
-        cpFloat mass;
+    // Gravity is sources -> targets, not all-pairs: only GravitySource bodies
+    // (stars/planets) attract, and only dynamic bodies (ships/debris) are
+    // pulled. Kinematic sources report infinite Chipmunk mass, so their
+    // gravitational mass comes from the component, not cpBodyGetMass.
+    struct Source {
         cpVect pos;
-        cpVect center;
+        cpFloat mass;
     };
-    std::vector<GravBody> bodies;
+    std::vector<Source> sources;
 
-    m_registry.each<PhysicsRef>([&](flecs::entity ent, PhysicsRef& ref) {
+    m_registry.each([&](flecs::entity, const GravitySource& gs, PhysicsRef& ref) {
+        PhysicsBody& slot = GetBody(ref);
+        if (slot.spaceId != spaceId) return;
+        sources.push_back({cpBodyGetPosition(slot.cp.body.get()),
+                           gs.mass * static_cast<cpFloat>(gs.multiplier)});
+    });
+
+    if (sources.empty()) return;
+
+    m_registry.each([&](flecs::entity ent, PhysicsRef& ref) {
         PhysicsBody& slot = GetBody(ref);
         if (slot.spaceId != spaceId || ent.has<Bullet>()) return;
         cpBody* body = slot.cp.body.get();
-        bodies.push_back({body, cpBodyGetMass(body), cpBodyGetPosition(body),
-                          cpBodyGetCenterOfGravity(body)});
-    });
+        if (cpBodyGetType(body) != CP_BODY_TYPE_DYNAMIC) return;
 
-    for (const GravBody& tgt : bodies) {
-        for (const GravBody& src : bodies) {
-            if (src.body == tgt.body) continue;
-
-            const cpFloat dist = cpvdist(src.pos, tgt.pos);
-            cpFloat vel = gravityConstant * m_gravityMultiplier * ((tgt.mass * src.mass) / std::pow(dist, 2));
-            cpFloat dir = std::atan2(src.pos.y - tgt.pos.y, src.pos.x - tgt.pos.x);
-            cpVect force = cpv(std::cos(dir) * vel, std::sin(dir) * vel);
-
-            cpBodyApplyForceAtWorldPoint(tgt.body, force, cpvadd(tgt.pos, tgt.center));
+        const cpVect tpos = cpBodyGetPosition(body);
+        const cpFloat tmass = cpBodyGetMass(body);
+        cpVect total = cpvzero;
+        for (const Source& src : sources) {
+            const cpVect d = cpvsub(src.pos, tpos);
+            const cpFloat dist2 = cpvlengthsq(d);
+            if (dist2 < 1e-6) continue;
+            const cpFloat f = GRAVITY_CONSTANT * m_gravityMultiplier * (tmass * src.mass) / dist2;
+            total = cpvadd(total, cpvmult(d, f / std::sqrt(dist2)));
         }
-    }
+
+        cpBodyApplyForceAtWorldPoint(body, total, cpvadd(tpos, cpBodyGetCenterOfGravity(body)));
+    });
 }
 
 void PhysicsSystem::Simulate(double dt)

@@ -1,6 +1,6 @@
-scale: 0.2
+scale: 0.5
 physics:
-    mass: 25000
+    mass: 120000
     kinematic: true
     density: 10
     restitution: 0.5
@@ -8,4 +8,4 @@ physics:
 gravity:
     is_source: true
     is_target: false
-    multiplier: 0.4
+    multiplier: 1

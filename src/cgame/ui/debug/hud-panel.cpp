@@ -12,7 +12,7 @@ void DrawHudPanel(CGame& game)
 
     ImGui::SeparatorText("Off-screen target arrows");
     ImGui::Checkbox("Enabled", &params.enabled);
-    ImGui::SetItemTooltip("Arrows around the screen center pointing at nearby enemies/planets that are off-screen.");
+    ImGui::SetItemTooltip("Arrows around the screen center pointing at nearby enemies that are off-screen.");
 
     ImGui::BeginDisabled(!params.enabled);
 
@@ -34,16 +34,10 @@ void DrawHudPanel(CGame& game)
     ImGui::SetNextItemWidth(220.f);
     ImGui::DragFloat("Enemy range", &params.enemyRange, 10.f, 100.f, 20000.f, "%.0f");
     ImGui::SetItemTooltip("World units: show enemies within this. Default 2500.");
-    ImGui::SetNextItemWidth(220.f);
-    ImGui::DragFloat("Planet range", &params.planetRange, 10.f, 100.f, 40000.f, "%.0f");
-    ImGui::SetItemTooltip("World units: show planets within this. Default 6000.");
 
     ImGui::SetNextItemWidth(220.f);
     ImGui::DragInt("Max enemies", &params.maxEnemies, 0.1f, 0, 32);
     ImGui::SetItemTooltip("Cap on enemy arrows; the nearest win. Default 8.");
-    ImGui::SetNextItemWidth(220.f);
-    ImGui::DragInt("Max planets", &params.maxPlanets, 0.1f, 0, 32);
-    ImGui::SetItemTooltip("Cap on planet arrows; the nearest win. Default 4.");
 
     ImGui::SeparatorText("Fade");
     ImGui::SetNextItemWidth(220.f);
@@ -69,14 +63,21 @@ void DrawHudPanel(CGame& game)
     ImGui::BeginDisabled(!minimap.enabled);
     ImGui::SetNextItemWidth(220.f);
     ImGui::DragFloat("World radius", &minimap.worldRadius, 25.f, 500.f, 30000.f, "%.0f");
-    ImGui::SetItemTooltip("World units from the player to the map edge. Default 3000.");
+    ImGui::SetItemTooltip("World units from the player to the map edge. Default 10000.");
     ImGui::SetNextItemWidth(220.f);
     ImGui::DragFloat("Ship dot (px)", &minimap.shipDotPx, 0.1f, 1.f, 12.f, "%.1f");
     ImGui::SetItemTooltip("Ship dot radius in minimap texture pixels. Default 3.");
     ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Player dot (px)", &minimap.playerDotPx, 0.1f, 0.5f, 12.f, "%.1f");
+    ImGui::SetItemTooltip("Player marker dot radius in minimap texture pixels. Default 1.5.");
+    ImGui::SetNextItemWidth(220.f);
     ImGui::DragFloat("Planet min (px)", &minimap.planetMinPx, 0.1f, 1.f, 24.f, "%.1f");
     ImGui::SetItemTooltip("Smallest ring a planet can shrink to; real world radius is used when it maps "
                           "bigger than this. Default 4.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Sun min (px)", &minimap.starMinPx, 0.1f, 1.f, 32.f, "%.1f");
+    ImGui::SetItemTooltip("Smallest ring a sun can shrink to; real world radius is used when it maps "
+                          "bigger than this. Default 7.");
     ImGui::Checkbox("Show view rectangle", &minimap.showViewRect);
     ImGui::SetItemTooltip("Outline the main camera's visible extent on the map.");
     ImGui::EndDisabled();

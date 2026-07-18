@@ -37,10 +37,12 @@ public:
 
     struct Params {
         bool enabled = true;
-        float worldRadius = 3000.f; // world units from the player to the map edge
+        float worldRadius = 10000.f; // world units from the player to the map edge
         float shipDotPx = 3.f;      // ship dot radius, minimap texture px
+        float playerDotPx = 1.5f;   // player marker dot radius, minimap texture px
         float planetMinPx = 4.f;    // floor for a planet ring that'd map below this
-        bool showViewRect = true;   // outline the main camera's visible extent
+        float starMinPx = 7.f;      // floor for a sun ring that'd map below this (bigger than a planet)
+        bool showViewRect = false;  // outline the main camera's visible extent
     };
 
 private:

@@ -113,8 +113,12 @@ public:
         float minZoom = 0.5f;       // most zoomed-out (fast / framing) end
         float maxZoom = 5.f;        // most zoomed-in (at rest) end
         float speedFalloff = 220.f; // world units/sec at which zoom noticeably backs off
-        float zoomTau = 2.f;        // zoom smoothing time constant (s)
+        float zoomTau = 2.f;        // zoom smoothing time constant (s), for the dynamic (speed/framing) target
+        float manualZoomTau = 0.25f;// zoom smoothing time constant (s), for a wheel-driven target -- snappier
+                                    // than zoomTau so a manual scroll reads immediately, without touching
+                                    // the dynamic-zoom feel (enemy framing, speed falloff).
         float manualHold = 5.f;     // grace period (s) after a wheel nudge before ship control can cancel it
+        float scrollSensitivity = 1.08f; // zoom multiplier per wheel notch (was 1.15 -- felt oversensitive)
 
         bool enemyFraming = true;
         float enemyRadius = 1100.f; // consider enemies within this for framing
@@ -131,7 +135,6 @@ public:
         float ringRadiusPx = 120.f;  // arrow ring radius around screen center
         float arrowSizePx = 13.f;    // arrow width, and height at long range (see maxHeightFactor)
         float enemyRange = 2500.f;   // show enemies within this
-        float planetRange = 6000.f;  // show planets within this (they're big, matter farther out)
         float edgeMarginPx = 24.f;   // treat as off-screen this far inside the view edge
         float fadeBandPx = 90.f;     // px past the edge over which an arrow fades fully in
         float minStrength = 0.35f;   // brightness floor at max range (never fully invisible while in range)
@@ -145,7 +148,6 @@ public:
         // at the end, instead of ramping linearly across the whole range.
         float heightRampFactor = 4.f;
         int maxEnemies = 8;
-        int maxPlanets = 4;
     };
 
 protected:

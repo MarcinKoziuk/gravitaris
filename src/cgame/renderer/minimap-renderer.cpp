@@ -12,6 +12,7 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/planet.hpp>
+#include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/resource/body.hpp>
@@ -36,7 +37,10 @@ constexpr float MAP_LINE_WIDTH = 1.5f;
 // pass can't tint the panel.
 constexpr Color4 BACKGROUND{0.004f, 0.078f, 0.102f, 1.f};
 
-const Vector3 PLANET_COLOR{0.55f, 0.75f, 0.9f};
+// Match the world assets: yellow suns (data/models/stars/sun), green planets
+// (data/models/planets/simple).
+const Vector3 SUN_COLOR{1.f, 0.87f, 0.13f};
+const Vector3 PLANET_COLOR{0.2f, 1.f, 0.2f};
 const Vector3 VIEW_RECT_COLOR{0.12f, 0.42f, 0.48f};
 const Vector3 PLAYER_COLOR{1.f, 1.f, 1.f};
 
@@ -153,12 +157,15 @@ void MinimapRenderer::Render(const Vector2& center, const Vector2& viewCenter, c
 
     std::vector<LineVertex> vertices;
 
-    // Planets: rings at their true world radius (with a visibility floor).
+    // Planets/suns: rings at their true world radius (with a visibility
+    // floor). A sun has no Orbit (it sits still); an orbiting planet does --
+    // that also picks the floor and color to match the world assets.
     m_registry.each([&](flecs::entity entity, const Transform& t, const PhysicsRef& ref) {
         if (!entity.has<Planet>()) return;
+        const bool isStar = !entity.has<Orbit>();
         const Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
 
-        float radius = m_params.planetMinPx / ppu;
+        float radius = (isStar ? m_params.starMinPx : m_params.planetMinPx) / ppu;
         const PhysicsBody& body = m_physicsSystem.GetBody(ref);
         if (body.body && !body.body->GetCircleShapes().empty()) {
             radius = std::max(radius, static_cast<float>(body.body->GetCircleShapes().front().radius)
@@ -166,7 +173,7 @@ void MinimapRenderer::Render(const Vector2& center, const Vector2& viewCenter, c
         }
 
         if ((pos - center).length() - radius > worldRadius) return;
-        EmitBillboard(vertices, pos, radius, PLANET_COLOR, PRIM_RING);
+        EmitBillboard(vertices, pos, radius, isStar ? SUN_COLOR : PLANET_COLOR, PRIM_RING);
     });
 
     // Ships: team-colored dots (same "enemy/ship" notion as the HUD arrows:
@@ -179,8 +186,8 @@ void MinimapRenderer::Render(const Vector2& center, const Vector2& viewCenter, c
     });
 
     // Player marker: brighter, ringed, drawn on top of the team dots.
-    EmitBillboard(vertices, center, m_params.shipDotPx / ppu, PLAYER_COLOR, PRIM_DISC);
-    EmitBillboard(vertices, center, (m_params.shipDotPx + 3.f) / ppu, PLAYER_COLOR, PRIM_RING);
+    EmitBillboard(vertices, center, m_params.playerDotPx / ppu, PLAYER_COLOR, PRIM_DISC);
+    EmitBillboard(vertices, center, (m_params.playerDotPx + 3.f) / ppu, PLAYER_COLOR, PRIM_RING);
 
     if (m_params.showViewRect) {
         EmitRect(vertices, viewCenter, viewHalfExtent, VIEW_RECT_COLOR);

@@ -49,8 +49,9 @@ struct ImpactEvent {
 
 class PhysicsSystem {
 public:
-    // Newtonian F = G*m1*m2/d^2, applied pairwise in ApplyGravity. Public so
-    // TrajectoryPredictor integrates against the exact same field.
+    // Newtonian F = G*m1*m2/d^2. ApplyGravity attracts every dynamic body
+    // toward each GravitySource. Public so TrajectoryPredictor integrates
+    // against the exact same field.
     static constexpr double GRAVITY_CONSTANT = 20.0;
 
     // Shared filter group for bullet (sensor) shapes so a bullet's swept
@@ -112,6 +113,11 @@ public:
     // the deleters do (pointless when the whole space dies). Stale
     // PhysicsRefs on still-live entities become no-ops via the generation.
     void UnloadSpace(id_t spaceId);
+
+    // Drives a kinematic body directly (position + velocity), for externally
+    // scripted motion like OrbitSystem's pre-calculated orbits. No effect on
+    // dynamic bodies' integration -- meant for CP_BODY_TYPE_KINEMATIC only.
+    void SetKinematicMotion(const PhysicsRef& ref, Magnum::Vector2d pos, Magnum::Vector2d vel);
 
     void Simulate(double dt);
 

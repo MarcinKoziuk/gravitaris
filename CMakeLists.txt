@@ -342,6 +342,8 @@ add_executable(GravitarisNG
     include/gravitaris/game/component/bullet.hpp
     include/gravitaris/game/component/damageable.hpp
     include/gravitaris/game/component/planet.hpp
+    include/gravitaris/game/component/gravity-source.hpp
+    include/gravitaris/game/component/orbit.hpp
     include/gravitaris/game/component/net-id.hpp
     include/gravitaris/game/event/game-event.hpp
     include/gravitaris/game/util/splitmix.hpp
@@ -369,6 +371,8 @@ add_executable(GravitarisNG
     src/game/system/death-system.cpp
     include/gravitaris/game/system/physics-system.hpp
     src/game/system/physics-system.cpp
+    include/gravitaris/game/system/orbit-system.hpp
+    src/game/system/orbit-system.cpp
     include/gravitaris/game/perf-monitor.hpp
     src/game/perf-monitor.cpp
     src/game/game.cpp
@@ -570,6 +574,7 @@ add_executable(gravitaris-sim-test
     src/game/system/damage-system.cpp
     src/game/system/death-system.cpp
     src/game/system/physics-system.cpp
+    src/game/system/orbit-system.cpp
     src/game/gnc/nav/trajectory-predictor.cpp
     src/game/gnc/control/flight-controller.cpp
     src/game/gnc/guidance/behaviors.cpp

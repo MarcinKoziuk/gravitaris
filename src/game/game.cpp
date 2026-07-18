@@ -5,6 +5,7 @@
 
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/net-id.hpp>
+#include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/game.hpp>
 
@@ -15,6 +16,7 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_resourceLoader(filesystem)
         , m_entitySpawner(std::move(entitySpawner))
         , m_physicsSystem(m_registry)
+        , m_orbitSystem(m_registry, m_physicsSystem)
         , m_inputSystem(m_registry)
         , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue)
         , m_bulletLifetimeSystem(m_registry)
@@ -38,7 +40,32 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
 void Game::Start()
 {
     m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, m_playerSpawnPos);
-    m_entitySpawner->SpawnPlanet("models/planets/simple"_id, { -100, -100 });
+
+    // Hardcoded "classic mode" solar system: two still suns, each with a few
+    // green planets on pre-calculated circular orbits. The suns are the
+    // dominant gravity wells; the orbiting planets attract too, far less.
+    const id_t sun = "models/stars/sun"_id;
+    const id_t planet = "models/planets/simple"_id;
+
+    const Vector2d sunA{-5600., 0.};
+    const Vector2d sunB{5600., 0.};
+
+    // Orbit angular speed is derived from centerMass at the actual gravity
+    // settings (see OrbitSystem), so this is the star's effective attracting
+    // mass -- mass * its own gravity multiplier, matching what ApplyGravity
+    // computes for it as a source.
+    const auto effectiveMass = [](flecs::entity star) {
+        return star.get<GravitySource>().mass * star.get<GravitySource>().multiplier;
+    };
+
+    const double sunAMass = effectiveMass(m_entitySpawner->SpawnStar(sun, sunA));
+    m_entitySpawner->SpawnOrbitingPlanet(planet, sunA, sunAMass, 1440., 1.0, 0.0);
+    m_entitySpawner->SpawnOrbitingPlanet(planet, sunA, sunAMass, 2400., -1.0, 2.1);
+    m_entitySpawner->SpawnOrbitingPlanet(planet, sunA, sunAMass, 3400., 1.0, 4.0);
+
+    const double sunBMass = effectiveMass(m_entitySpawner->SpawnStar(sun, sunB));
+    m_entitySpawner->SpawnOrbitingPlanet(planet, sunB, sunBMass, 1600., -1.0, 1.0);
+    m_entitySpawner->SpawnOrbitingPlanet(planet, sunB, sunBMass, 2800., 1.0, 3.5);
 }
 
 Game::Game(IFilesystem& filesystem)
@@ -53,6 +80,9 @@ void Game::Update()
 
     {
         ScopedPerfTimer timer(m_perfMonitor, "Physics");
+        // Place orbiting bodies on their rails before the step reads positions
+        // for gravity and resolves collisions against them.
+        m_orbitSystem.Update();
         m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
         m_physicsSystem.Update();
     }

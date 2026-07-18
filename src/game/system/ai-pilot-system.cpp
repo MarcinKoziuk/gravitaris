@@ -6,6 +6,7 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/bullet.hpp>
+#include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/component/ai-pilot.hpp>
@@ -39,17 +40,15 @@ AIPilotSystem::AIPilotSystem(flecs::world& registry, PhysicsSystem& physicsSyste
 
 void AIPilotSystem::Update(std::uint64_t step, std::optional<flecs::entity> player)
 {
-    // Non-bullet bodies, for picking each pilot's dominant gravity source.
+    // Celestial attractors, for picking each pilot's dominant gravity source.
     struct Source {
         flecs::entity entity;
         Vector2d pos;
         double mass;
     };
     std::vector<Source> sources;
-    m_registry.each([&](flecs::entity ent, Transform& transf, PhysicsRef& ref) {
-        if (ent.has<Bullet>()) return;
-        const double mass = cpBodyGetMass(m_physicsSystem.GetBody(ref).cp.body.get());
-        sources.push_back({ent, transf.pos, mass});
+    m_registry.each([&](flecs::entity ent, const Transform& transf, const GravitySource& gs) {
+        sources.push_back({ent, transf.pos, gs.mass * gs.multiplier});
     });
 
     m_registry.each([&](flecs::entity ent, Transform& transf, PhysicsRef& ref,

@@ -61,6 +61,20 @@ ResourcePtr<const Body> Body::Create(id_t id, LoadingContext& context)
         if (physicsCfg["friction"]) {
             body->m_friction = physicsCfg["friction"].as<float>();
         }
+        if (physicsCfg["kinematic"]) {
+            body->m_kinematic = physicsCfg["kinematic"].as<bool>();
+        }
+    }
+
+    if (cfg["gravity"]) {
+        const YAML::Node& gravityCfg = cfg["gravity"];
+
+        if (gravityCfg["is_source"]) {
+            body->m_gravitySource = gravityCfg["is_source"].as<bool>();
+        }
+        if (gravityCfg["multiplier"]) {
+            body->m_gravityMultiplier = gravityCfg["multiplier"].as<double>();
+        }
     }
 
     NSVGimage& svg = *shapeFiles->svg;

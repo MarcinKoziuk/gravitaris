@@ -1,3 +1,5 @@
+#include <cmath>
+
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/resource/body.hpp>
 #include <gravitaris/game/component/transform.hpp>
@@ -8,6 +10,8 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/planet.hpp>
+#include <gravitaris/game/component/gravity-source.hpp>
+#include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
@@ -94,7 +98,7 @@ flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, AIPers
     return entity;
 }
 
-flecs::entity EntitySpawner::SpawnPlanet(id_t modelId, Vector2d position)
+flecs::entity EntitySpawner::SpawnCelestial(id_t modelId, Vector2d position)
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
 
@@ -102,8 +106,33 @@ flecs::entity EntitySpawner::SpawnPlanet(id_t modelId, Vector2d position)
     entity.emplace<Transform>(position);
     entity.emplace<RigidBodyDesc>("main"_id, body);
     entity.add<Planet>();
+    if (body->IsGravitySource()) {
+        entity.emplace<GravitySource>(
+                GravitySource{body->GetMass(), static_cast<float>(body->GetGravityMultiplier())});
+    }
     AssignNetId(entity);
     AddRenderable(entity, modelId);
+
+    return entity;
+}
+
+flecs::entity EntitySpawner::SpawnStar(id_t modelId, Vector2d position)
+{
+    return SpawnCelestial(modelId, position);
+}
+
+flecs::entity EntitySpawner::SpawnPlanet(id_t modelId, Vector2d position)
+{
+    return SpawnCelestial(modelId, position);
+}
+
+flecs::entity EntitySpawner::SpawnOrbitingPlanet(id_t modelId, Vector2d center, double centerMass,
+                                                 double radius, double direction, double phase)
+{
+    const Vector2d initialPos = center + Vector2d{std::cos(phase), std::sin(phase)} * radius;
+
+    flecs::entity entity = SpawnCelestial(modelId, initialPos);
+    entity.emplace<Orbit>(Orbit{center, centerMass, radius, phase, std::copysign(1.0, direction)});
 
     return entity;
 }

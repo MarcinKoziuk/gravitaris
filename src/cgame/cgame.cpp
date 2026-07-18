@@ -12,7 +12,6 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/controls.hpp>
-#include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/util/splitmix.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 
@@ -24,10 +23,6 @@
 namespace Gravitaris {
 
 namespace {
-
-// Planets have no team; their arrows get a fixed neutral tint that reads as
-// "terrain", distinct from any team color.
-const Magnum::Vector3 PLANET_INDICATOR_COLOR{0.55f, 0.75f, 0.9f};
 
 } // namespace
 
@@ -54,7 +49,7 @@ void CGame::NudgeManualZoom(float notches)
     if (!m_manualZoomActive) {
         m_manualZoom = m_cameraZoom;
     }
-    m_manualZoom = std::clamp(m_manualZoom * std::pow(1.15f, notches),
+    m_manualZoom = std::clamp(m_manualZoom * std::pow(m_cameraParams.scrollSensitivity, notches),
                               Camera::MIN_ZOOM, Camera::MAX_ZOOM);
     m_manualZoomActive = true;
     m_manualZoomGraceRemaining = m_cameraParams.manualHold;
@@ -219,8 +214,12 @@ void CGame::UpdateCamera(float dtSeconds)
     }
 
     // Exponential smoothing toward the target: frame-rate independent, and it
-    // gives the free "interpolate back" when the manual override expires.
-    const float alpha = 1.f - std::exp(-dtSeconds / std::max(m_cameraParams.zoomTau, 1e-3f));
+    // gives the free "interpolate back" when the manual override expires. A
+    // wheel-driven target uses its own (snappier) tau so scrolling reads
+    // immediately without changing how smooth the dynamic zoom (speed/enemy
+    // framing) feels.
+    const float tau = m_manualZoomActive ? m_cameraParams.manualZoomTau : m_cameraParams.zoomTau;
+    const float alpha = 1.f - std::exp(-dtSeconds / std::max(tau, 1e-3f));
     m_cameraZoom += (zoomTarget - m_cameraZoom) * alpha;
     m_camera.SetZoom(m_cameraZoom);
 }
@@ -256,7 +255,6 @@ void CGame::UpdateIndicators()
         float distance;
     };
     std::vector<Candidate> enemies;
-    std::vector<Candidate> planets;
 
     // Enemy = damageable ship on a real opposing team -- same notion
     // SelectFramedEnemy uses for the camera.
@@ -268,21 +266,11 @@ void CGame::UpdateIndicators()
         enemies.push_back({pos, Magnum::Vector3{TeamColor(team.id)}, dist});
     });
 
-    m_registry.each([&](flecs::entity entity, const Transform& t) {
-        if (!entity.has<Planet>()) return;
-        const Magnum::Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
-        const float dist = (pos - playerPos).length();
-        if (dist > m_indicatorParams.planetRange) return;
-        planets.push_back({pos, PLANET_INDICATOR_COLOR, dist});
-    });
-
     // Nearest-first, then cap: with a crowded field the closest threats are the
     // ones worth the screen space.
     const auto byDistance = [](const Candidate& a, const Candidate& b) { return a.distance < b.distance; };
     std::sort(enemies.begin(), enemies.end(), byDistance);
-    std::sort(planets.begin(), planets.end(), byDistance);
     enemies.resize(std::min<std::size_t>(enemies.size(), m_indicatorParams.maxEnemies));
-    planets.resize(std::min<std::size_t>(planets.size(), m_indicatorParams.maxPlanets));
 
     const auto submit = [&](const Candidate& c, float range) {
         const Magnum::Vector2 fromCamera = c.pos - cameraPos;
@@ -335,7 +323,6 @@ void CGame::UpdateIndicators()
         m_modelRenderer2.SubmitOverlay(m_arrowModel.Id(), transform, c.color * strength);
     };
 
-    for (const Candidate& c : planets) submit(c, m_indicatorParams.planetRange);
     for (const Candidate& c : enemies) submit(c, m_indicatorParams.enemyRange);
 }
 

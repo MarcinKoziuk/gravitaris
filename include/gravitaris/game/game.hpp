@@ -13,6 +13,7 @@
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
+#include <gravitaris/game/system/orbit-system.hpp>
 #include <gravitaris/game/system/input-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 #include <gravitaris/game/system/bullet-lifetime-system.hpp>
@@ -39,6 +40,8 @@ protected:
     GameEventQueue m_eventQueue;
 
     PhysicsSystem m_physicsSystem;
+
+    OrbitSystem m_orbitSystem;
 
     InputSystem m_inputSystem;
 

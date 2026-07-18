@@ -27,6 +27,8 @@ struct Team;
 struct Bullet;
 struct Damageable;
 struct NetId;
+struct GravitySource;
+struct Orbit;
 
 // event
 struct GameEvent;
@@ -46,6 +48,7 @@ struct GuidanceParams;
 
 // system
 class PhysicsSystem;
+class OrbitSystem;
 class InputSystem;
 class ShipControlsSystem;
 class AIPilotSystem;

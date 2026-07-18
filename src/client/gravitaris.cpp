@@ -1,6 +1,7 @@
 ﻿// Gravitaris.cpp : Defines the entry point for the application.
 //
 
+#include <algorithm>
 #include <memory>
 #include <chrono>
 #include <cmath>
@@ -510,7 +511,13 @@ void GravitarisApplication::scrollEvent(ScrollEvent& event)
         return;
     }
 
-    m_game->NudgeManualZoom(event.offset().y());
+    // Clamp a single event's magnitude: NudgeManualZoom scales zoom
+    // multiplicatively (1.15^notches), and inertial/momentum scroll (trackpad
+    // flings, some wheel drivers) can report one outsized offset -- unclamped,
+    // that compounds into a jump straight to min/max zoom that reads as
+    // "runaway" scrolling. Purely client-side; unrelated to the sim tick loop.
+    const float notches = std::clamp(event.offset().y(), -3.f, 3.f);
+    m_game->NudgeManualZoom(notches);
     event.setAccepted();
 }
 
