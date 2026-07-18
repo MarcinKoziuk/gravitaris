@@ -225,14 +225,56 @@ own shader, so the visual cost is minimal). Native keeps 4x MSAA, unaffected.
 ship, RmlUi HUD panel with a "LAUNCH" button, minimap with planets. First
 successful end-to-end render of this port.
 
+**`--release`/`--relwithdebinfo` builds now work** (`tools/wasm/build.sh
+--release` / `--relwithdebinfo`) — needed one real, general fix:
+`include/gravitaris/game/id.hpp` used `std::size_t` without including
+`<cstddef>`; it happened to compile under Debug only because `<string>` (guarded
+by `#ifndef NDEBUG`, pulled in for the debug ID-collision checker) transitively
+supplied it. Under any `NDEBUG` build (Release, RelWithDebInfo — native *or*
+wasm) that include disappears and the missing direct one is exposed. This was
+a latent bug independent of the wasm port; fixed by including `<cstddef>`
+unconditionally.
+
+**Open, unresolved bug (2026-07-19): the game renders black (UI still shows)
+specifically in Chrome, both `--release` and `--relwithdebinfo`, even from a
+fully clean rebuild** — confirmed by the user on their machine. Notably:
+- **Safari renders correctly** with the same build.
+- **Native `RelWithDebInfo` (no sanitizers) renders correctly.**
+- Native `RelWithDebInfo` + UBSan (`-fsanitize=undefined`) ran clean for 6s at
+  startup — no sanitizer reports, so if this is C++ UB, it's not a class UBSan
+  catches, or it only triggers in wasm codegen specifically.
+- On the assistant's own machine, a clean `--relwithdebinfo` wasm build
+  rendered fine in the (Chromium-based) preview browser, but a clean
+  `--release` (`-O3 -flto`) build reproduced the same black-scene symptom —
+  suggesting `-O3`/LTO specifically, *and/or* something Chrome/ANGLE-specific
+  (Chrome's GL calls go through ANGLE's translation-to-Metal layer on macOS;
+  Safari's WebKit WebGL implementation is native, no ANGLE) given the earlier
+  MSAA/blit bug was exactly this shape: a spec violation only some
+  implementations enforce strictly. Both explanations are plausible and not
+  mutually exclusive; **not disambiguated yet**.
+- Next step whoever picks this up: test `--relwithdebinfo` (not `--release`)
+  specifically in Chrome on the user's machine to separate the `-O3`/LTO axis
+  from the Chrome/ANGLE axis (native RelWithDebInfo+Safari/Chrome-in-wasm
+  hasn't been cross-tested either). If `--relwithdebinfo` also reproduces in
+  Chrome, it's not LTO-specific and the Chrome/ANGLE angle is the one to chase
+  — likely another stricter-spec-validation case like the MSAA blit fix above;
+  bracket the game's own render calls (`CGame::Render`,
+  `GlowPostProcess`, `StarfieldRenderer`, `ModelRenderer2`) with `glGetError()`
+  checks the way `RenderInterfaceGL3::CheckGLError` already does for RmlUi.
+
 **Not done / next** (Phase 3 territory):
-- `--release` build (testing so far was `Debug`; `.wasm` was 67MB
-  unoptimized — expect a large drop with `-O2`/`-O3` + closure).
+- Resolve the Chrome-black-scene bug above.
 - Canvas/window resize handling (the canvas backing size was observed growing
-  across repeated resizes — not yet investigated).
+  across repeated resizes — not yet investigated). A JS-side workaround
+  (forcing a genuine 1px canvas resize right after boot, since Magnum only
+  recomputes canvas size/DPI on an actual resize event) is in `index.html`
+  but is unverified against the *original* aspect-ratio complaint, since it's
+  since been superseded by the Chrome black-scene issue in every test.
 - Verify audio actually plays, keyboard/mouse/scroll input works, and the sim
-  runs at a reasonable framerate in `--release`.
+  runs at a reasonable framerate in `--release` (blocked on the above).
 - **Done when** (met): the page loads to the first rendered frame of the game.
+  (Only reached so far in a Debug build and in Safari for Release-class
+  builds — Chrome + Release/RelWithDebInfo is the open gap.)
 
 ### Phase 3 — Polish
 

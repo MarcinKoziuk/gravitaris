@@ -3,6 +3,7 @@
 // Extracted and adapted from Turbo Badger's TBID
 // (C) 2011-2014, Emil Segerås
 
+#include <cstddef>
 #include <cstdint>
 
 #ifndef NDEBUG
