@@ -85,9 +85,25 @@ public:
     // instead would desync the two). INPUT_LEAD_TICKS is slack for one-way
     // trip + jitter on top of the estimate: queued commands with a future
     // tick just wait in InputQueue until due, so leading further than
-    // strictly needed costs nothing. No-ops before the handshake completes
-    // (there's no ship to control yet).
-    static constexpr std::uint64_t INPUT_LEAD_TICKS = 2;
+    // strictly needed costs nothing but a slightly longer own-ship
+    // prediction/replay window and a marginally later apparent reaction
+    // time for *other* clients watching this one's ship via snapshots (the
+    // owning client itself is unaffected -- it always applies its own input
+    // immediately via ClientPrediction, regardless of this stamped tick).
+    // No-ops before the handshake completes (there's no ship to control
+    // yet).
+    //
+    // 2 (33ms) was confirmed too tight from a real two-peer LAN session's
+    // server logs (2026-07-19): "input arrived N ticks late" fired
+    // recurringly, every few seconds, with N in [1,3] -- not occasional
+    // large drift, just ordinary jitter routinely exceeding a 2-tick lead.
+    // Each occurrence is one stale-dropped command -> InputSystem repeats
+    // the last-consumed flags for that tick -> the server's real path
+    // diverges from what ClientPrediction predicted -> a reconciliation
+    // snap next snapshot. That recurring-every-few-seconds cadence matches
+    // "still jitters often" exactly. Raised past the observed max with
+    // headroom for jitter this short a sample didn't happen to catch.
+    static constexpr std::uint64_t INPUT_LEAD_TICKS = 8;
     void SendInput(std::uint64_t tick, const ControlFlags& flags);
 
     [[nodiscard]] bool IsWelcomed() const { return m_welcomed; }

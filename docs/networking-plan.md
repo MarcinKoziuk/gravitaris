@@ -1382,6 +1382,46 @@ and to check whether the `INPUT_LEAD_TICKS`-lateness logging above shows
 anything now that the dominant *visible* symptom should be gone regardless
 of its outcome.
 
+**Hypothesis confirmed, root cause fixed (2026-07-19, same day): a real
+two-peer LAN session's server log settled it.** The ship-render smoothing
+fix above wasn't enough on its own — "still jitters often, doesn't look
+smooth at all," even on the same local network with no real internet
+latency. The `NetServer::HandlePacket` stale-input logging added earlier
+this session caught it directly: `"input for tick N arrived M ticks late"`
+fired recurringly, every few real seconds, with M consistently in `[1,3]`
+— not one rare large-drift event, ordinary jitter routinely exceeding the
+2-tick (33ms) lead. Each occurrence is one command silently dropped by
+`InputSystem` (tick already passed, zero tolerance) → repeat-last-command
+holds the previous flags for that tick → the server's real simulated path
+diverges from what `ClientPrediction` predicted with the *new* flags → the
+next snapshot reveals the gap → a reconciliation correction. Recurring
+every few seconds matches "jitters often" exactly, and explains why it
+persisted after the render-smoothing fix: that fix hides how a correction
+*looks*, it does nothing about how *often* one happens, and one was
+happening this frequently.
+
+Fix: `NetClient::INPUT_LEAD_TICKS` raised from 2 to 8 (33ms → 133ms) —
+past the observed max (3 ticks) with headroom for jitter a two-minute
+sample didn't happen to catch. Costs: the own-ship prediction/replay
+window grows slightly (negligible), and *other* clients see this ship
+react to input marginally later via snapshots (the owning client itself is
+unaffected either way — it always applies its own input immediately
+through `ClientPrediction`, regardless of what tick gets stamped on the
+wire). `sim-test`'s determinism suite still passes (run1 == run2
+unchanged, its actual pass criterion) — the absolute checksum value
+shifted from the previous session's, expected and harmless: earlier
+network-path tests now exchange commands on slightly different tick
+numbers with the new constant, which shifts NetId allocation before
+`RunSimulation()`'s own fresh `Game` starts, not a determinism regression.
+
+**Verification status**: all four targets build clean, full sim-test suite
+passes. **Not yet manually verified**: needs a real multiplayer session —
+this should substantially reduce correction *frequency* (not just hide
+individual corrections visually); if jitter is still noticeable at 8, the
+stale-input log is still there to show whether lateness now clusters
+higher (raise further) or has gone quiet (the remaining jitter is a
+different cause and needs fresh log evidence, not a bigger constant).
+
 ## Phase 8 — Deferred (needs its own design pass when reached)
 
 - Delta-compressed snapshots (per-entity change masks vs last acked).
