@@ -24,6 +24,8 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue)
         , m_bulletLifetimeSystem(m_registry)
         , m_damageSystem(m_registry, m_physicsSystem, m_eventQueue)
+        , m_landingStateSystem(m_registry, m_physicsSystem)
+        , m_conquestSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_deathSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_trajectoryPredictor(m_registry, m_physicsSystem)
         , m_aiPilotSystem(m_registry, m_physicsSystem, m_trajectoryPredictor)
@@ -94,6 +96,8 @@ void Game::Update()
         // DamageSystem applies this step's bullet hits and landing impacts, so
         // DeathSystem (next) sees final hp and can explode ships the same tick.
         m_damageSystem.Update();
+        m_landingStateSystem.Update();
+        m_conquestSystem.Update();
         m_deathSystem.Update(m_step);
         // Detect a player death from DeathSystem before any system reads m_player.
         HandlePlayerRespawn();

@@ -2,9 +2,12 @@
 
 #include <Magnum/Math/Angle.h>
 
+#include <gravitaris/game/component/landing-state.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/gnc/control/flight-controller.hpp>
 #include <gravitaris/game/gnc/guidance/behaviors.hpp>
+#include <gravitaris/game/system/landing-state-system.hpp>
+#include <gravitaris/game/system/conquest-system.hpp>
 
 #include <gravitaris/cgame/cgame.hpp>
 
@@ -94,6 +97,22 @@ void DrawFlightPanel(CGame& game)
     }
 
     ImGui::Text("Speed: %.2f  AngVel: %.2f rad/s", transform->vel.length(), transform->angVel);
+
+    if (const LandingState* landing = player->try_get<LandingState>()) {
+        const bool safeSpeed = transform->vel.length() < LandingStateSystem::SAFE_LANDING_SPEED;
+        ImGui::Text("Landing: %s | speed %s (< %.0f)",
+                    landing->landed ? "LANDED" : "in flight",
+                    safeSpeed ? "safe" : "too fast",
+                    LandingStateSystem::SAFE_LANDING_SPEED);
+        if (landing->landed) {
+            ImGui::Text("  on planet NetId %u, %u/%u ticks to claim",
+                        landing->landedOnNetId,
+                        landing->landedTicks > ConquestSystem::CLAIM_TICKS
+                                ? ConquestSystem::CLAIM_TICKS : landing->landedTicks,
+                        ConquestSystem::CLAIM_TICKS);
+        }
+    }
+
     switch (current) {
         case AutopilotMode::HoldPosition:
             ImGui::Text("Distance to anchor: %.2f",

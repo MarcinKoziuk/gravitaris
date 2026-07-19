@@ -119,6 +119,32 @@ std::vector<ImpactEvent> PhysicsSystem::DrainImpacts()
     return out;
 }
 
+void PhysicsSystem::ForEachTouching(const PhysicsRef& ref, void (*fn)(flecs::entity, void*), void* ctx)
+{
+    struct Iter {
+        PhysicsSystem* self;
+        cpBody* body;
+        void (*fn)(flecs::entity, void*);
+        void* ctx;
+    };
+
+    PhysicsBody& slot = GetBody(ref);
+    if (!slot.IsAlive()) return;
+
+    Iter iter{this, slot.cp.body.get(), fn, ctx};
+    cpBodyEachArbiter(iter.body, [](cpBody*, cpArbiter* arb, void* data) {
+        // A cached-but-separated arbiter has no contact points.
+        if (cpArbiterGetCount(arb) == 0) return;
+
+        auto* it = static_cast<Iter*>(data);
+        cpShape *shapeA, *shapeB;
+        cpArbiterGetShapes(arb, &shapeA, &shapeB);
+        // cpBodyEachArbiter presents the arbiter with the iterated body as A.
+        flecs::entity touched = it->self->GetEntityForShape(shapeB);
+        if (touched.is_alive()) it->fn(touched, it->ctx);
+    }, &iter);
+}
+
 void PhysicsSystem::SetMassMultiplier(const PhysicsRef& ref, float multiplier)
 {
     PhysicsBody& slot = GetBody(ref);

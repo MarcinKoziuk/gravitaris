@@ -17,9 +17,17 @@
 #include <cstring>
 #include <thread>
 
+#include <chipmunk/chipmunk.h>
+
 #include <gravitaris/game/fs/filesystem-physfs.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/landing-state.hpp>
+#include <gravitaris/game/component/net-id.hpp>
+#include <gravitaris/game/component/physics.hpp>
+#include <gravitaris/game/component/planet.hpp>
+#include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/id.hpp>
@@ -405,6 +413,82 @@ void TestClientPrediction()
     fs.Shutdown();
 }
 
+// docs/gravity-well-mode-plan.md Phase 1: safe-landing detection + claiming.
+// A ship settling gently, upright, on a planet becomes landed and claims it
+// after ConquestSystem::CLAIM_TICKS; a fast crash damages and does NOT claim.
+void TestLandingAndClaiming()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs); // no Start() -- hand-built minimal scene
+
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    // Near-zero center mass: the Orbit component marks the planet claimable
+    // (suns have none) while its derived orbital speed stays ~0, so the
+    // "surface" barely moves under the ship.
+    flecs::entity planet = spawner.SpawnOrbitingPlanet("models/planets/simple"_id,
+                                                       Vector2d{0., 0.}, 1e-9, 800., 1.0, 0.0);
+    const float planetRadius = planet.get<Planet>().radius
+            * static_cast<float>(planet.get<Transform>().scale.x());
+    Require(planetRadius > 0.f, "landing: planet body has a radius");
+    Require(planet.get<Team>().id == TeamId::None, "landing: planet starts unowned");
+
+    // Clear of the surface on the planet's +Y side (a tight spawn overlaps
+    // the fighter's own shape into the planet -- Chipmunk resolves that as a
+    // huge impulse that kills the ship instantly), rotated so the legs
+    // (local +Y) point down at the center (rot = pi), descending well below
+    // the safe-landing speed.
+    flecs::entity ship = spawner.SpawnPlayer("models/ships/fighter-1"_id,
+                                             Vector2d{800., planetRadius + 40.});
+    cpBody* shipBody = game.GetPhysicsSystem().GetBody(ship.get<PhysicsRef>()).cp.body.get();
+    cpBodySetAngle(shipBody, CP_PI);
+    cpBodySetVelocity(shipBody, cpv(0., -8.));
+
+    bool sawLanded = false;
+    for (int tick = 0; tick < 900 && ship.is_alive(); ++tick) {
+        game.Update();
+        if (ship.get<LandingState>().landed) sawLanded = true;
+        if (planet.get<Team>().id != TeamId::None) break;
+    }
+    Require(ship.is_alive(), "landing: the descending ship survives touchdown");
+    Require(sawLanded, "landing: gentle upright contact registers as landed");
+    Require(planet.get<Team>().id == TeamId::Blue, "landing: staying landed claims the planet");
+    Require(ship.get<LandingState>().lastFriendlySiteNetId == planet.get<NetId>().value,
+            "landing: the claimed planet becomes the ship's friendly respawn site");
+
+    bool claimedEventSeen = false;
+    game.GetEventQueue().ConsumeSince(0, [&](const GameEvent& event) {
+        if (event.type == GameEventType::PlanetClaimed) claimedEventSeen = true;
+    });
+    Require(claimedEventSeen, "landing: PlanetClaimed event was emitted");
+
+    // Crash case: a second planet and a ship slamming into it upright but
+    // far above the safe speed -- damage, no claim at the moment of impact.
+    flecs::entity planet2 = spawner.SpawnOrbitingPlanet("models/planets/simple"_id,
+                                                        Vector2d{0., -20000.}, 1e-9, 800., 1.0, 0.0);
+    flecs::entity crasher = spawner.SpawnPlayer("models/ships/fighter-1"_id,
+                                                Vector2d{800., -20000. + planetRadius + 120.});
+    cpBody* crasherBody = game.GetPhysicsSystem().GetBody(crasher.get<PhysicsRef>()).cp.body.get();
+    cpBodySetAngle(crasherBody, CP_PI);
+    cpBodySetVelocity(crasherBody, cpv(0., -150.));
+
+    const float hpBefore = crasher.get<Damageable>().hp;
+    bool damaged = false;
+    for (int tick = 0; tick < 120 && !damaged && crasher.is_alive(); ++tick) {
+        game.Update();
+        damaged = crasher.is_alive() ? crasher.get<Damageable>().hp < hpBefore
+                                     : true; // died outright: definitely damaged
+    }
+    Require(damaged, "landing: crashing into a planet at speed damages the ship");
+    Require(planet2.get<Team>().id == TeamId::None, "landing: a crash does not claim the planet");
+
+    fs.Shutdown();
+}
+
 // docs/networking-plan.md 2.3: gather -> serialize -> parse -> re-serialize
 // must be byte-identical (proves the reader reconstructs exactly what the
 // writer meant, field for field, with no drift or truncation).
@@ -706,6 +790,7 @@ int main()
     TestByteStream();
     TestSnapshotInterpolation();
     TestClientPrediction();
+    TestLandingAndClaiming();
     TestWebRtcRoundtrip();
     TestWebRtcSignalingRoundtrip();
 

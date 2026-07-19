@@ -127,6 +127,13 @@ public:
     // damage from them. Leaves the buffer empty for the next step.
     [[nodiscard]] std::vector<ImpactEvent> DrainImpacts();
 
+    // Calls `fn` for each entity whose shape is currently touching `ref`'s
+    // body (live contact arbiters only -- Chipmunk keeps separated arbiters
+    // cached a few steps, those are skipped). For sustained-contact checks
+    // like landed-state detection, as opposed to DrainImpacts' one-shot
+    // first-contact events.
+    void ForEachTouching(const PhysicsRef& ref, void (*fn)(flecs::entity touched, void* ctx), void* ctx);
+
     // --- Debug/tuning knobs (temporary, for calibrating gameplay feel) ---
 
     // Scales the force ApplyGravity computes for every source/target pair.

@@ -7,6 +7,7 @@
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/component/ai-pilot.hpp>
+#include <gravitaris/game/component/landing-state.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/planet.hpp>
@@ -73,6 +74,7 @@ flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position)
     entity.emplace<InputQueue>();
     entity.emplace<Team>(TeamId::Blue);
     entity.emplace<Damageable>();
+    entity.emplace<LandingState>();
     AssignNetId(entity);
     AddRenderable(entity, modelId);
 
@@ -91,6 +93,7 @@ flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, AIPers
     entity.emplace<AIPilot>();
     entity.emplace<Team>(TeamId::Red);
     entity.emplace<Damageable>();
+    entity.emplace<LandingState>();
     ApplyAIPersonalityPreset(entity.get_mut<AIPilot>(), preset);
     AssignNetId(entity);
     AddRenderable(entity, modelId);
@@ -112,6 +115,10 @@ flecs::entity EntitySpawner::SpawnCelestial(id_t modelId, Vector2d position)
     entity.emplace<Transform>(position);
     entity.emplace<RigidBodyDesc>("main"_id, body);
     entity.emplace<Planet>(radius);
+    // Present from birth (TeamId::None = unowned) rather than emplaced on
+    // first claim, so ownership flips are plain field writes and the
+    // existing per-entity teamId replication picks planets up unchanged.
+    entity.emplace<Team>(TeamId::None);
     if (body->IsGravitySource()) {
         entity.emplace<GravitySource>(
                 GravitySource{body->GetMass(), static_cast<float>(body->GetGravityMultiplier())});

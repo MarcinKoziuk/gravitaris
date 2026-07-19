@@ -18,6 +18,8 @@
 #include <gravitaris/game/system/ship-controls-system.hpp>
 #include <gravitaris/game/system/bullet-lifetime-system.hpp>
 #include <gravitaris/game/system/damage-system.hpp>
+#include <gravitaris/game/system/landing-state-system.hpp>
+#include <gravitaris/game/system/conquest-system.hpp>
 #include <gravitaris/game/system/death-system.hpp>
 #include <gravitaris/game/system/ai-pilot-system.hpp>
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
@@ -50,6 +52,10 @@ protected:
     BulletLifetimeSystem m_bulletLifetimeSystem;
 
     DamageSystem m_damageSystem;
+
+    LandingStateSystem m_landingStateSystem;
+
+    ConquestSystem m_conquestSystem;
 
     DeathSystem m_deathSystem;
 

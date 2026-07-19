@@ -105,6 +105,11 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot)
         if (Controls* controls = entity.try_get_mut<Controls>()) {
             controls->actionFlags = UnpackControlFlags(state.controlsFlags);
         }
+        // Ownership changes mid-round (planet claims); creation-time Team
+        // alone would leave the mirror stale.
+        if (state.teamId != TeamId::None) {
+            entity.set<Team>(Team{state.teamId});
+        }
         if (Damageable* damageable = entity.try_get_mut<Damageable>()) {
             damageable->hp = state.hp;
         }

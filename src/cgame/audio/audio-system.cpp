@@ -146,6 +146,8 @@ void AudioSystem::Update(const Vector2& cameraPos)
             case GameEventType::Explosion:
                 PlayOneShotById(m_hitClip.Id(), event.pos, HIT_GAIN);
                 break;
+            default:
+                break; // no sound assigned (PlanetClaimed etc.)
         }
     });
 

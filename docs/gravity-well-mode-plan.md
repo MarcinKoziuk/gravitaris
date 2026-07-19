@@ -16,11 +16,18 @@ netcode constraints that are easy to violate otherwise. Update the status
 checkboxes and add a short "Verification status" note per phase as you go
 (same convention as `networking-plan.md`).
 
-## Scope decisions (settled with Marcin 2026-07-19 — don't relitigate)
+## Scope decisions (settled with Marcin 2026-07-19/20 — don't relitigate)
 
-- **Single-player first** vs AI opponents. Multiplayer conquest is out of
-  scope, but every rule below runs in `game/` (headless,
-  server-authoritative later) so it composes with the netcode for free.
+- **Multiplayer is a first-class goal, not a later port** (clarified
+  2026-07-20): an early version must support playing against other players,
+  against AI, or any mix. A faction/team is not one pilot — **a team can
+  field multiple fighters** (human co-op, or humans + AI leaders sharing a
+  team). Concretely this means: never key a rule off "the player" — key it
+  off `Team` (claiming, friendly sites, defeat) or off the individual ship
+  (respawn site, landing state), whichever the rule is actually about. All
+  sim code below runs in `game/` (headless, server-authoritative), so the
+  existing netcode carries the mode; the multiplayer-specific wiring gap is
+  small and tracked in its own phase below.
 - **Full freighter logistics IS in scope** — the materials economy runs on
   real freighters doing real trips, like the original: colonies produce raw
   materials, freighters haul them, bases/high ports convert raw → finished,
@@ -41,9 +48,13 @@ checkboxes and add a short "Verification status" note per phase as you go
 - **Rockets/missiles, tech upgrades, shields: deferred.** The HUD reserves
   space for them but nothing implements them in this slice. Ships have
   `Damageable` hull only.
-- **Win/lose**: win when every planet is claimed by you (destroying enemy
-  complexes as needed); the original's defeat rule applies to factions (all
-  colonies + freighters destroyed = can no longer expand = defeated).
+- **Win/lose is per-faction (team), not per-pilot**: a team wins when every
+  planet is claimed by it; a faction is defeated when all its colonies AND
+  freighters are destroyed (can no longer expand, the original's rule). An
+  individual pilot dying just respawns (see above) as long as their faction
+  still has a facility to rebuild at; a faction whose facilities are all
+  gone is out — for a team of human players, that's the whole team's game
+  over together.
 - **Round-based**: when it's over it's over, nothing persists.
 
 ## Invariants (apply to every phase — same list as networking-plan.md)
@@ -83,31 +94,48 @@ Goal: "safely landed" is a detectable sim state; landing on an unowned,
 undeveloped planet claims it for your team. Arena: the existing classic
 scenario, unchanged.
 
-- [ ] Safe-landing detection in `game/`: a ship is *landed* on a planet when
-  in contact with it, relative speed below a threshold, and surviving (the
-  hard-contact damage path already exists — `LandingCrash` in
-  `src/game/system/damage-system.cpp`; read it first, the new logic should
-  live near/with the same contact processing rather than duplicating it).
-  Track it as a field (e.g. on `Controls` or a new small component on
-  ships), not an add/remove tag.
-- [ ] Track per-ship "last friendly landing site" (NetId field, same
-  component) — Phase 4's respawn rule reads it.
-- [ ] Claiming: new system (e.g. `src/game/system/conquest-system.cpp`) —
-  when a ship with a `Team` is landed on a planet whose `Team` is absent or
-  different AND the planet has no living enemy structures, set the planet's
-  `Team` to the lander's. Emit a new `GameEventType::PlanetClaimed`
-  (param = team id) so UI/audio can react.
-- [ ] `Team` on planets must replicate: extend `EntityState` +
-  `GatherSnapshot`/`SerializeSnapshot`/`ReadSnapshot`
-  (`src/game/net/snapshot.cpp`) with the owner team (bump
-  `SNAPSHOT_VERSION`; follow the GravitySource-replication commit pattern,
-  `git log --grep=GravitySource`).
-- [ ] Landing aid: surface "slow enough to land" to the player — UI phase U2
-  does it properly; until then a debug-panel readout is fine for verifying
-  this phase.
-- Sim-test: place a ship at rest on a planet (or script a descent) and
-  assert landed=true, claim happens, event emitted; assert a fast contact
-  still damages and does NOT claim.
+- [x] Safe-landing detection in `game/`: `LandingState` component
+  (`include/gravitaris/game/component/landing-state.hpp`, server-only,
+  emplaced by `SpawnPlayer`/`SpawnAIShip`) + `LandingStateSystem`
+  (`src/game/system/landing-state-system.cpp`): landed = live contact with
+  a Planet entity (new `PhysicsSystem::ForEachTouching`, which iterates
+  Chipmunk's current arbiters rather than duplicating contact math) +
+  relative speed under `SAFE_LANDING_SPEED` (20, comfortably below
+  DamageSystem's damage thresholds) + upright (same legs-toward-surface
+  cosine test the impact path uses).
+- [x] "Last friendly landing site" tracked in the same component
+  (`lastFriendlySiteNetId`), updated on landing at a friendly planet and on
+  a successful claim.
+- [x] Claiming: `ConquestSystem` (`src/game/system/conquest-system.cpp`) —
+  fires once when `landedTicks == CLAIM_TICKS` (60, so a graze never
+  claims); planet must have an `Orbit` (suns are not claimable) and a
+  different/absent owner. Emits `GameEventType::PlanetClaimed` (param = new
+  team id). Enemy-structure check is a marked TODO for Phase 2 (structures
+  don't exist yet).
+- [x] Replication came almost free: `EntityState.teamId` already travels
+  for every entity, so planets just needed a `Team` component —
+  `SpawnCelestial` now emplaces `Team{TeamId::None}` (= unowned) from
+  birth. No `SNAPSHOT_VERSION` bump. One real client-side fix:
+  `SnapshotApplier` only set `Team` at entity creation, never on update, so
+  a mid-round claim would never reach the mirror world — the update path
+  now `set<Team>`s too.
+- [x] Debug readout in the Flight panel (landed / speed-vs-safe-threshold /
+  claim-progress ticks); the real HUD aid is UI phase U2.
+- [x] Sim-test `TestLandingAndClaiming`: scripted gentle descent ⇒ landed,
+  claimed, `PlanetClaimed` emitted, friendly-site recorded; fast crash ⇒
+  damage, no claim. Caught a real test-authoring gotcha: spawning a ship
+  with < ~40 units of surface clearance overlaps its shape into the planet,
+  and Chipmunk's overlap resolution kills it instantly (flecs then
+  fatal-asserts on `.get()` of the dead entity — which on Windows shows as
+  a silent hang, since MSVC's abort dialog has no console).
+
+**Verification status** (2026-07-20): native `GravitarisNG`,
+`gravitaris-sim-test`, `gravitaris-server` build clean; sim-test passes
+with the new proof and the two-run determinism checksum stable. Not yet
+done: wasm build verification, and the "claim a planet in a real
+playthrough" half of the gate — needs a hand-flown landing on a planet in
+the classic scenario (watch the Flight debug panel for the landed/claim
+readout; there is no visual ownership feedback until UI phase U1).
 
 Done when: you can claim a planet in a real playthrough and the sim-test
 proof passes.
@@ -244,6 +272,26 @@ architecture table first; tactics/guidance/control already exist.
   AI load).
 
 Done when: a solitaire round against AI leaders is genuinely contested.
+
+## Multiplayer wiring (parallel track — required before the first vs-humans round)
+
+The sim side needs nothing special: every rule above is headless `game/`
+code the server already runs, conquest state replicates via the existing
+per-entity `teamId`, and one-shots ride the `GameEvent` stream. The real
+gaps are the known netcode ones plus team assignment:
+
+- [ ] Per-peer team assignment: `NetServer` currently spawns every peer via
+  `SpawnPlayer` (hardcoded `TeamId::Blue`). The welcome/setup flow needs to
+  assign a team per peer — same team = co-op (multiple fighters per team is
+  by design), different teams = versus, and AI leaders can share or oppose
+  any of them.
+- [ ] Client consumes replicated `SnapshotData::events` (net task #34) —
+  without it, remote players never see/hear claims, explosions, or hits.
+- [ ] Peer respawn loop (net task #33) — becomes "respawn at the ship's
+  last friendly landing site" once Phase 4 lands, replacing the current
+  nothing.
+- [ ] Round setup over the network (which team each peer joins; AI fill) —
+  UI side lives in U4's setup screen.
 
 ## Phase 6 — Sector generation (deliberately late)
 
