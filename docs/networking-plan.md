@@ -1244,8 +1244,58 @@ would).
 
 **Verification status**: all four targets build clean; full sim-test suite
 (including the new planet-interpolation proof) passes, determinism
-checksum unchanged. **Not yet manually verified**: whether this actually
-reads as "no sinking" and "no zoom pulse" in a real multiplayer session.
+checksum unchanged. **Manually verified (2026-07-19)**: planets look right
+now — no visible sinking, and the per-snapshot step called out in the
+accepted trade-off above wasn't noticeable in practice. The uncapped
+-extrapolation follow-up stays a documented option, not something currently
+needed.
+
+## Follow-up (2026-07-19, same day): local-ship reconciliation was jittering camera *framing*, not zoom
+
+After the planet fix above, zoom pulsing near planets was confirmed gone,
+but camera *position* framing (the dead-zone rectangle) was still jittering
+during ordinary movement — a fast, smooth-but-quick oscillation, distinct
+from the zoom issue and *not* explained by lag in synced enemy/planet data
+(which is fine, per the phases above — genuinely just delayed, not jittery).
+Correctly suspected as a separate architectural issue rather than "more of
+the same," and it was: purely local, nothing to do with how remote entities
+are synced.
+
+Root cause, in `CGame::RenderNetClient`: `ReconcileOwnShipIfNeeded()` can
+hard-snap the real predicted ship's Transform (`ClientPrediction::Reconcile`
+calls `cpBodySetPosition`/`cpBodySetVelocity` directly) whenever prediction
+and the authoritative snapshot diverge past epsilon — this is necessary and
+correct, replay must continue from the corrected state. The very next call,
+`CameraDirector::Update(GetPlayer(), ...)`, read that (possibly
+just-snapped) Transform straight from the ECS as its "where is the player"
+input — feeding the raw, discontinuous jump directly into dead-zone follow,
+enemy-framing distance, and planet-framing distance, all *before* any
+smoothing. The existing `m_visualCorrectionOffset` mechanism (Phase 5) was
+built to hide exactly this kind of snap, but it was applied *afterward*, by
+nudging the camera's already-computed output position — by which point
+dead-zone follow had already reacted to the raw jump if it exceeded the
+dead zone's slack. Two uncoordinated mechanisms fighting the same
+correction, on top of an input that was discontinuous in the first place:
+architecturally wrong ordering, not a data/lag problem.
+
+Fix: `CameraDirector::Update` gains an optional `positionOverride`
+parameter, used instead of reading `Transform::pos` when set (single-player
+never sets it — unchanged behavior there). `RenderNetClient` now decays
+`m_visualCorrectionOffset` *before* calling `Update`, adds it to the real
+position to produce an already-smoothed position, and passes *that* in —
+so dead-zone follow, enemy framing, and planet framing all see a
+continuous, eased signal from the start instead of reacting to a snap and
+then getting corrected after the fact. The old post-hoc
+`camera.SetPosition(camera.GetPosition() - offset)` step is gone entirely;
+smoothing now happens once, at the source, for everything that consumes
+"where is the player" — not as a bolt-on to just the camera's final
+position.
+
+**Verification status**: all four targets build clean; full sim-test suite
+passes unchanged (this path isn't exercised by sim-test — no headless
+CameraDirector — so no new proof here; it's cgame-only, GL-dependent
+code). **Not yet manually verified**: needs a real multiplayer session to
+confirm the rectangle-framing jitter is actually gone.
 
 ## Phase 8 — Deferred (needs its own design pass when reached)
 

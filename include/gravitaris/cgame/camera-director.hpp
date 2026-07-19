@@ -174,8 +174,22 @@ public:
     // framing -- multiplayer's mirror world, so a remote ship/planet the
     // player never locally simulates can still be framed exactly like
     // single-player frames a local one.
+    //
+    // `positionOverride`, when set, replaces `player`'s own Transform::pos as
+    // the position fed into dead-zone follow, enemy-framing distance, and
+    // planet-surface distance -- everything downstream of "where is the
+    // player" in this function. Single-player never sets it (nullopt: reads
+    // the real Transform, as before). Multiplayer's own predicted ship needs
+    // it: Phase 5 reconciliation can hard-snap that Transform mid-frame
+    // (ClientPrediction::Reconcile), and feeding the *raw* post-snap position
+    // straight into dead-zone follow/framing here -- before any smoothing --
+    // is what caused a fast, repeating position jitter distinct from (and
+    // easily mistaken for) network lag in synced enemy/planet data. The
+    // caller is expected to pass an already-smoothed position instead (see
+    // CGame::m_visualCorrectionOffset).
     void Update(std::optional<flecs::entity> player, const Magnum::Vector2& viewportSize, float dtSeconds,
-               flecs::world* remoteWorld = nullptr);
+               flecs::world* remoteWorld = nullptr,
+               std::optional<Magnum::Vector2> positionOverride = std::nullopt);
 };
 
 } // namespace Gravitaris

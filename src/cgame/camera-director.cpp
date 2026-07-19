@@ -143,7 +143,8 @@ std::optional<Magnum::Vector2> CameraDirector::SelectFramedEnemy(const Magnum::V
 }
 
 void CameraDirector::Update(std::optional<flecs::entity> player, const Magnum::Vector2& viewportSize,
-                            float dtSeconds, flecs::world* remoteWorld)
+                            float dtSeconds, flecs::world* remoteWorld,
+                            std::optional<Magnum::Vector2> positionOverride)
 {
     if (!m_cameraFollow) return;
     if (!player) return;
@@ -155,8 +156,11 @@ void CameraDirector::Update(std::optional<flecs::entity> player, const Magnum::V
     const Transform* transform = player->try_get<Transform>();
     if (!transform) return;
 
-    const Magnum::Vector2 playerPos{static_cast<float>(transform->pos.x()),
-                                    static_cast<float>(transform->pos.y())};
+    // See positionOverride's own doc comment: multiplayer substitutes an
+    // already-smoothed position here instead of the real (possibly just
+    // reconciliation-snapped) Transform.
+    const Magnum::Vector2 playerPos = positionOverride.value_or(Magnum::Vector2{
+            static_cast<float>(transform->pos.x()), static_cast<float>(transform->pos.y())});
     const Magnum::Vector2 playerVel{static_cast<float>(transform->vel.x()),
                                     static_cast<float>(transform->vel.y())};
     const float speed = playerVel.length();

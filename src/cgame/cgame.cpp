@@ -169,19 +169,34 @@ void CGame::RenderNetClient(float dtSeconds)
         m_snapshotApplier.Apply(*interpolated);
     }
 
+    // Blend out any reconciliation snap over ~100ms by decaying the offset
+    // *before* camera framing runs, then feeding it in as an already
+    // -smoothed position override -- not by nudging the camera's own output
+    // position afterward (the previous approach). That ordering mattered:
+    // dead-zone follow/enemy-framing/planet-framing all read "where is the
+    // player" once, at the top of CameraDirector::Update, so a correction
+    // applied only after the fact left every one of them reacting to the
+    // raw, still-discontinuous snap this frame -- a fast, repeating jitter
+    // in position framing that had nothing to do with network lag in synced
+    // enemy/planet data (that's smooth by design; see SnapshotInterpolator).
+    // The real simulated Transform itself is never touched here -- it must
+    // stay exactly correct for the next predicted tick to build on.
+    static constexpr float CORRECTION_SMOOTH_SECONDS = 0.1f;
+    m_visualCorrectionOffset *= std::exp(-dtSeconds / CORRECTION_SMOOTH_SECONDS);
+
+    Magnum::Vector2 smoothedPlayerPos;
+    if (const std::optional<flecs::entity> player = GetPlayer()) {
+        const Transform& t = player->get<Transform>();
+        smoothedPlayerPos = Magnum::Vector2{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())}
+                + m_visualCorrectionOffset;
+    }
+
     // Real single-player camera logic against m_registry -- works for the
     // own ship (dead-zone follow, dynamic zoom); m_mirrorWorld is swept
     // alongside it for enemy/planet framing, since every entity but the own
     // ship lives there in this mode (see m_netClient's field comment).
-    m_cameraDirector.Update(GetPlayer(), m_viewportSize, dtSeconds, &m_mirrorWorld);
+    m_cameraDirector.Update(GetPlayer(), m_viewportSize, dtSeconds, &m_mirrorWorld, smoothedPlayerPos);
     Camera& camera = m_cameraDirector.GetCamera();
-
-    // Blend out any reconciliation snap over ~100ms by nudging the camera,
-    // never the real simulated Transform (which must stay exactly correct
-    // for the next predicted tick to build on).
-    static constexpr float CORRECTION_SMOOTH_SECONDS = 0.1f;
-    m_visualCorrectionOffset *= std::exp(-dtSeconds / CORRECTION_SMOOTH_SECONDS);
-    camera.SetPosition(camera.GetPosition() - m_visualCorrectionOffset);
 
     // Own-ship one-shots (BulletLifetimeSystem-tracked cosmetic bullets emit
     // BulletFired via m_clientPrediction) and thruster loop, via the same
