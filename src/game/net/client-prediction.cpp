@@ -5,11 +5,14 @@
 
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/game.hpp>
+#include <gravitaris/game/resource/body.hpp>
+#include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
@@ -18,11 +21,13 @@
 namespace Gravitaris {
 
 ClientPrediction::ClientPrediction(flecs::world& registry, PhysicsSystem& physicsSystem,
-                                   EntitySpawner& entitySpawner, GameEventQueue& eventQueue)
+                                   EntitySpawner& entitySpawner, GameEventQueue& eventQueue,
+                                   ResourceLoader& resourceLoader)
         : m_registry(registry)
         , m_physicsSystem(physicsSystem)
         , m_entitySpawner(entitySpawner)
         , m_eventQueue(eventQueue)
+        , m_resourceLoader(resourceLoader)
 {}
 
 bool ClientPrediction::HasOwnShip() const
@@ -36,26 +41,50 @@ void ClientPrediction::SpawnOwnShip(id_t modelId, Magnum::Vector2d initialPos)
     m_ownShip = m_entitySpawner.SpawnPlayer(modelId, initialPos);
 }
 
-void ClientPrediction::ApplyGravity(cpBody* body, const std::vector<EntityState>& planets)
+void ClientPrediction::SyncPlanetProxies(const std::vector<EntityState>& planets)
 {
-    const cpVect shipPos = cpBodyGetPosition(body);
-    const cpFloat shipMass = cpBodyGetMass(body);
-    const cpFloat multiplier = static_cast<cpFloat>(m_physicsSystem.GetGravityMultiplier());
+    for (const EntityState& state : planets) {
+        if (state.type != NetEntityType::Planet) continue;
 
-    cpVect total = cpvzero;
-    for (const EntityState& planet : planets) {
-        if (planet.type != NetEntityType::Planet || planet.gravityMass <= 0.f) continue;
+        const auto it = m_planetProxies.find(state.netId);
+        flecs::entity proxy = (it != m_planetProxies.end()) ? it->second : flecs::entity{};
 
-        const cpVect srcPos = cpv(planet.pos.x(), planet.pos.y());
-        const cpVect d = cpvsub(srcPos, shipPos);
-        const cpFloat dist2 = cpvlengthsq(d);
-        if (dist2 < 1e-6) continue;
+        if (!proxy.is_alive()) {
+            // Same Body resource the real sim loads for this planet (by the
+            // already-replicated modelId) -- its kinematic-ness and collision
+            // shape come along for free, no separate wire field needed.
+            const ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(state.modelId);
+            proxy = m_registry.entity();
+            proxy.emplace<Transform>(Magnum::Vector2d{state.pos});
+            proxy.emplace<RigidBodyDesc>("main"_id, body);
+            m_planetProxies[state.netId] = proxy;
+        }
 
-        const cpFloat f = PhysicsSystem::GRAVITY_CONSTANT * multiplier * planet.gravityMultiplier
-                * (shipMass * static_cast<cpFloat>(planet.gravityMass)) / dist2;
-        total = cpvadd(total, cpvmult(d, f / std::sqrt(dist2)));
+        // (Re)apply GravitySource every sync, not just at creation: harmless
+        // if unchanged, but keeps this correct if a planet's replicated
+        // mass/multiplier ever changes (e.g. a future gravity-multiplier
+        // debug tab affecting the server) without needing extra bookkeeping.
+        if (state.gravityMass > 0.f) {
+            proxy.set<GravitySource>(GravitySource{state.gravityMass, state.gravityMultiplier});
+        }
+
+        m_physicsSystem.SetKinematicMotion(proxy.get<PhysicsRef>(), Magnum::Vector2d{state.pos},
+                                           Magnum::Vector2d{state.vel});
     }
-    cpBodyApplyForceAtWorldPoint(body, total, shipPos);
+
+    // Prune proxies for planets no longer present. Doesn't normally happen
+    // (planets don't despawn), but keeps this correct if it ever does.
+    for (auto it = m_planetProxies.begin(); it != m_planetProxies.end();) {
+        const bool stillPresent = std::any_of(planets.begin(), planets.end(), [&](const EntityState& s) {
+            return s.type == NetEntityType::Planet && s.netId == it->first;
+        });
+        if (stillPresent) {
+            ++it;
+        } else {
+            if (it->second.is_alive()) it->second.destruct();
+            it = m_planetProxies.erase(it);
+        }
+    }
 }
 
 ClientPrediction::PredictedTick ClientPrediction::CaptureTick(std::uint64_t tick, const ControlFlags& flags)
@@ -73,9 +102,15 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags, const
     // tag group in ModelRenderer2, notably) ever reflects live input.
     m_ownShip.get_mut<Controls>().actionFlags = flags;
 
+    // Position/velocity the planet collision proxies (Phase 7) before this
+    // tick's step, so PhysicsSystem::Simulate's own per-space gravity pass
+    // and Chipmunk's contact resolution both see them where they actually
+    // are this tick -- gravity is no longer a manual force here at all, it
+    // falls out of that existing machinery once these proxies exist.
+    SyncPlanetProxies(planets);
+
     cpBody* body = m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()).cp.body.get();
     ShipControlsSystem::ApplyMovement(body, flags);
-    ApplyGravity(body, planets);
 
     m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
     m_physicsSystem.Update();
@@ -117,6 +152,12 @@ std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t author
         return std::nullopt;
     }
 
+    // Same current-snapshot planet positions for every replayed tick below,
+    // not each one's own historical position -- an accepted approximation
+    // (see the class doc comment), same as the gravity-from-current-snapshot
+    // one this replaces.
+    SyncPlanetProxies(planets);
+
     cpBody* body = m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()).cp.body.get();
     cpBodySetPosition(body, cpv(authoritativePos.x(), authoritativePos.y()));
     cpBodySetAngle(body, static_cast<cpFloat>(authoritative.rot));
@@ -129,7 +170,6 @@ std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t author
     for (const PredictedTick& pending : toReplay) {
         m_ownShip.get_mut<Controls>().actionFlags = pending.flags;
         ShipControlsSystem::ApplyMovement(body, pending.flags);
-        ApplyGravity(body, planets);
         m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
         m_physicsSystem.Update();
         m_history.push_back(CaptureTick(pending.tick, pending.flags));

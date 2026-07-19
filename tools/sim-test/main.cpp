@@ -209,7 +209,8 @@ void TestClientPrediction()
     Game game(fs);
     GameEventQueue eventQueue;
 
-    ClientPrediction prediction(game.GetRegistry(), game.GetPhysicsSystem(), game.GetEntitySpawner(), eventQueue);
+    ClientPrediction prediction(game.GetRegistry(), game.GetPhysicsSystem(), game.GetEntitySpawner(), eventQueue,
+                                game.GetResourceLoader());
     prediction.SpawnOwnShip("models/ships/fighter-1"_id, Vector2d{0., 0.});
     Require(prediction.HasOwnShip(), "prediction: own ship spawns");
 
@@ -287,6 +288,28 @@ void TestClientPrediction()
 
     prediction.Step(10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS, firing, planets);
     Require(countBullets() == 2, "prediction: cooldown expiring lets the next held shot fire");
+
+    // Phase 7: planet collision proxies have real collision geometry, not
+    // just gravitational pull -- place a real planet body (not the earlier
+    // placeholder-modelId one, which has no shape) exactly at the ship's own
+    // current position, with zero gravitational mass to isolate the effect,
+    // so any resulting displacement can only be Chipmunk's own contact
+    // resolution against the proxy's shape pushing the ship back out.
+    const Magnum::Vector2d beforeCollision = prediction.GetOwnShip().get<Transform>().pos;
+    EntityState collidingPlanet{};
+    collidingPlanet.netId = 100;
+    collidingPlanet.type = NetEntityType::Planet;
+    collidingPlanet.modelId = "models/planets/simple"_id;
+    collidingPlanet.pos = Magnum::Vector2{static_cast<float>(beforeCollision.x()),
+                                         static_cast<float>(beforeCollision.y())};
+    collidingPlanet.gravityMass = 0.f;
+    const std::vector<EntityState> collidingPlanets{collidingPlanet};
+
+    const std::uint64_t collideTick = 10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS + 1;
+    prediction.Step(collideTick, ControlFlags{}, collidingPlanets);
+    const Magnum::Vector2d afterCollision = prediction.GetOwnShip().get<Transform>().pos;
+    Require((afterCollision - beforeCollision).length() > 0.1,
+            "prediction: planet collision proxy has real shape, pushes the ship out of a deep overlap");
 
     fs.Shutdown();
 }

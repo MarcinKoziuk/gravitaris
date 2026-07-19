@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 #include <flecs.h>
@@ -15,8 +16,6 @@
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 
-struct cpBody;
-
 namespace Gravitaris {
 
 // Client-side prediction + reconciliation for the local player's own ship
@@ -24,30 +23,34 @@ namespace Gravitaris {
 // 4's interpolation path via SnapshotInterpolator/SnapshotApplier). Owns a
 // single locally-simulated entity, spawned via the same EntitySpawner::
 // SpawnPlayer real single-player uses -- real Chipmunk body, real
-// RigidBodyDesc("main"_id, ...). Since nothing else is ever spawned into
-// this registry, that body is alone in its own Chipmunk space: there is
-// nothing else to collide with, satisfying ADR 0001 constraint 6's "no
-// ship-ship contacts during replay" by construction rather than by
+// RigidBodyDesc("main"_id, ...). Nothing but this ship and the planet
+// -collision proxies below (Phase 7) is ever spawned into this registry, so
+// there is no *other ship* to collide with, satisfying ADR 0001 constraint
+// 6's "no ship-ship contacts during replay" by construction rather than by
 // filtering.
 //
-// Gravity is computed manually from the Planet-typed EntityStates in the
-// latest snapshot (their replicated position + GravitySource fields) rather
-// than by running a second, independently-seeded OrbitSystem simulation
-// locally: two orbit simulations starting from different wall-clock moments
-// (server boot vs. this client's join time) would need their phase
-// synchronized somehow, and simply reading the already-correct, already
-// -interpolated replicated position sidesteps that entirely. Trade-off:
-// this predicted ship never collides with a planet during prediction/replay
-// (no local planet shape exists to hit) -- an accepted approximation beyond
-// the ADR's own "no ship-ship contacts" one; any discrepancy is corrected
-// on the next reconciliation once the server's real collision response
-// arrives in a snapshot.
+// Planets are real kinematic collision proxies now (Phase 7,
+// SyncPlanetProxies), positioned each tick from the replicated Planet
+// -typed EntityStates in the latest snapshot rather than by running a
+// second, independently-seeded OrbitSystem simulation locally: two orbit
+// simulations starting from different wall-clock moments (server boot vs.
+// this client's join time) would need their phase synchronized somehow, and
+// simply reading the already-correct, already-interpolated replicated
+// position sidesteps that entirely. Gravity is no longer a manual force
+// hack either -- PhysicsSystem::Simulate's own per-space ApplyGravity finds
+// these proxies' GravitySource components and just works, same as
+// single-player. Landing on a planet during prediction now behaves
+// correctly (real contact response against the moving kinematic surface);
+// ship-ship contact is still not predicted (see the proxies' own doc
+// comment on why that one stays out of scope) -- any discrepancy there is
+// corrected on the next reconciliation once the server's real collision
+// response arrives in a snapshot.
 //
 // Headless (game/-level, ADR constraint 1): built entirely from
-// PhysicsSystem/EntitySpawner (which a real Game already owns) plus plain
-// EntityState/ControlFlags data, so it's testable in gravitaris-sim-test
-// with no cgame/GL dependency -- CGame only wires input sampling and
-// rendering around it.
+// PhysicsSystem/EntitySpawner/ResourceLoader (which a real Game already
+// owns) plus plain EntityState/ControlFlags data, so it's testable in
+// gravitaris-sim-test with no cgame/GL dependency -- CGame only wires input
+// sampling and rendering around it.
 class ClientPrediction {
 public:
     struct PredictedTick {
@@ -85,7 +88,7 @@ public:
     static constexpr std::size_t MAX_HISTORY = 180;
 
     ClientPrediction(flecs::world& registry, PhysicsSystem& physicsSystem, EntitySpawner& entitySpawner,
-                     GameEventQueue& eventQueue);
+                     GameEventQueue& eventQueue, ResourceLoader& resourceLoader);
 
     // Idempotent: only the first call actually spawns anything.
     void SpawnOwnShip(id_t modelId, Magnum::Vector2d initialPos);
@@ -121,17 +124,28 @@ public:
                                               const std::vector<EntityState>& planets);
 
 private:
-    void ApplyGravity(cpBody* body, const std::vector<EntityState>& planets);
     PredictedTick CaptureTick(std::uint64_t tick, const ControlFlags& flags);
+
+    // Creates/updates/prunes the client-only kinematic collision proxies
+    // (Phase 7) for every Planet-typed EntityState in `planets`, keyed by
+    // NetId. Idempotent -- safe to call every Step()/Reconcile(). See the
+    // class doc comment for why these exist and what they deliberately
+    // don't do (no Renderable, no Planet component, no remote-ship
+    // equivalent).
+    void SyncPlanetProxies(const std::vector<EntityState>& planets);
 
     flecs::world& m_registry;
     PhysicsSystem& m_physicsSystem;
     EntitySpawner& m_entitySpawner;
     GameEventQueue& m_eventQueue;
+    ResourceLoader& m_resourceLoader;
 
     flecs::entity m_ownShip;
     std::deque<PredictedTick> m_history;
     std::uint32_t m_fireCooldown = 0;
+
+    // Planet NetId -> this client's local collision-proxy entity.
+    std::unordered_map<std::uint32_t, flecs::entity> m_planetProxies;
 };
 
 } // namespace Gravitaris

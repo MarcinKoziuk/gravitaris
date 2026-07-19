@@ -1120,7 +1120,87 @@ unaffected. **Not yet manually verified**: whether the laser sound and
 cosmetic tracer actually read as "immediate" over real network latency in an
 actual multiplayer session — by-feel judgment, not something sim-test proves.
 
-## Phase 7 — Deferred (needs its own design pass when reached)
+## Phase 7 — Client-side collision geometry for prediction
+
+Found from playtesting (2026-07-19): two symptoms traced to the same root
+cause. (1) Two Blue (friendly) ships bumping into each other makes the camera
+shake. (2) Landing on an orbiting planet and standing still instead shows a
+stairstep jitter synced to the planet's motion.
+
+Root cause: `ClientPrediction::Step`'s Chipmunk space contains *only* the
+locally-predicted own ship. Gravity was applied as a manual force computed
+from replicated planet positions (`ClientPrediction::ApplyGravity`) — there
+was no planet *shape* to rest on, and no other ship's hull to bounce off, in
+that space at all. So whenever the server resolves a contact the client
+can't see (bouncing off a planet or another ship), prediction diverges hard
+every tick and `Reconcile` snaps + replays every single snapshot during the
+whole contact episode — each snap dumps into the visual-correction offset
+faster than its ~100ms decay bleeds off. This is exactly the approximation
+`ClientPrediction`'s own header comment and ADR constraint 6 already flag
+("no shape to collide with at all during prediction/replay, not even a
+planet" / "no ship-ship contacts during replay").
+
+- [x] **Planet collision proxies** (`ClientPrediction::SyncPlanetProxies`):
+  for each Planet-typed `EntityState` in the current snapshot, lazily spawn
+  a minimal client-only entity in the *same* Chipmunk space as the own ship
+  (`Transform` + `RigidBodyDesc("main"_id, body)`, `body` loaded by the
+  already-replicated `modelId` — the same `Body` resource the real sim uses,
+  so the kinematic-ness and collision shape come along for free) plus
+  `GravitySource` when the planet has one (mass/multiplier already on the
+  wire since Phase 5). Every call drives it with
+  `PhysicsSystem::SetKinematicMotion(ref, pos, vel)` from the snapshot's
+  replicated position/velocity, same mechanism `OrbitSystem` uses for the
+  real sim's orbiting planets — just sourced from replicated data instead of
+  recomputed orbit math. No `Renderable` (the mirror world already draws the
+  visual planet — this is collision geometry only, and would double-render
+  otherwise) and deliberately no `Planet` component either (camera/minimap
+  already see the real one via `m_mirrorWorld`; adding it here would make
+  both sweeps count the same planet twice).
+- [x] **`ClientPrediction::ApplyGravity`'s manual force hack deleted.**
+  `PhysicsSystem::Simulate` already runs its own per-space `ApplyGravity`
+  every tick, querying `m_registry` for `(GravitySource, PhysicsRef)` sources
+  and pulling every dynamic body in that space — once the proxies above
+  register as real `GravitySource`-bearing bodies in the ship's own space,
+  that existing machinery just works, with zero special-casing. This also
+  means gravity and collision are now resolved by the exact same code path
+  single-player uses, not a parallel hand-rolled one.
+- [x] Proxies are synced (created/updated/pruned) once per `Step` and once
+  per `Reconcile` call (a `Reconcile` can run from a differently-timed point
+  in the frame than the `Step` that preceded it, against a possibly-newer
+  snapshot's planet list) — idempotent, keyed by the planet's `NetId`.
+
+**Ship-ship contact is *not* fixed by this** (deliberately out of scope,
+matches the ADR's own call): predicting a bounce off another player would
+need a kinematic proxy for that ship too, positioned from its own
+interpolated (i.e., ~100ms-in-the-past) remote state — the contact timing
+would never quite match the server's, and it's the exact case ADR 0001
+constraint 6 already says to approximate rather than chase. Two friendly
+ships colliding still produces a reconciliation-thrash camera shake; a
+future pass could either build the same kinematic-proxy machinery for
+remote ships (more correct, more complexity/edge cases) or just detect a
+sustained-correction episode and clamp/ease the visual-correction offset
+harder so the camera glides instead of shaking (cheaper, doesn't pretend to
+predict the bounce).
+
+**Done when:** landing on an orbiting planet and standing still actually
+looks still (no stairstep jitter) at a simulated 20Hz snapshot rate.
+
+**Verification status**: all four targets (native `GravitarisNG`, Emscripten
+`GravitarisNG`, `gravitaris-sim-test`, `gravitaris-server`) build clean.
+`TestClientPrediction` extended with a dedicated collision proof: a real
+planet body (`models/planets/simple`) placed exactly at the predicted
+ship's own current position with zero gravitational mass (isolating the
+effect from gravity) measurably pushes the ship away next tick — proof the
+proxy has real collision shape, not just gravitational pull. The existing
+gravity/reconciliation/bullet assertions in the same test still pass
+unchanged (now routed through `PhysicsSystem::Simulate`'s own per-space
+gravity instead of the deleted manual force, same underlying formula). Full
+two-run determinism suite unchanged (identical checksum to the previous
+session). **Not yet manually verified**: the actual "does landing feel
+still" and "does bumping a friendly ship still shake the camera as
+expected (unfixed)" by-feel gates — needs a real multiplayer session.
+
+## Phase 8 — Deferred (needs its own design pass when reached)
 
 - Delta-compressed snapshots (per-entity change masks vs last acked).
 - Relevance/interest management (distance culling per client).
@@ -1129,6 +1209,9 @@ actual multiplayer session — by-feel judgment, not something sim-test proves.
   a future targeted/homing weapon; today's ballistic bullets don't need this
   (see Phase 6's scope note).
 - Clock sync polish, connection quality HUD, host migration, encryption/auth.
+- Ship-ship contact prediction (kinematic proxies for remote ships), or the
+  cheaper camera-shake mitigation, for the reconciliation-thrash case Phase 7
+  explicitly left unfixed.
 
 ---
 

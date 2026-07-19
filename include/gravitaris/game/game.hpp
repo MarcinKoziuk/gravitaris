@@ -104,6 +104,9 @@ public:
     PhysicsSystem& GetPhysicsSystem()
     { return m_physicsSystem; }
 
+    ResourceLoader& GetResourceLoader()
+    { return m_resourceLoader; }
+
     std::optional<flecs::entity> GetPlayer()
     { return m_player; }
 

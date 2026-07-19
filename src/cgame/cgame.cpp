@@ -26,7 +26,7 @@ CGame::CGame(IFilesystem &filesystem)
     , m_hitFlashSystem(m_registry, m_eventQueue, *m_entitySpawner)
     , m_cameraDirector(m_registry, Defaults::cameraZoom)
     , m_indicatorRenderer(m_registry, m_resourceLoader, m_modelRenderer2)
-    , m_clientPrediction(m_registry, m_physicsSystem, *m_entitySpawner, m_eventQueue)
+    , m_clientPrediction(m_registry, m_physicsSystem, *m_entitySpawner, m_eventQueue, m_resourceLoader)
     , m_autopilot(m_registry, m_physicsSystem)
 {
     m_modelRenderer2.SetReferenceZoom(Defaults::cameraZoom);
