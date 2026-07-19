@@ -153,6 +153,19 @@ public:
     // toward their targets. `player` may be a dead/invalid entity (between
     // death and respawn) -- the update is then a no-op.
     void Update(std::optional<flecs::entity> player, const Magnum::Vector2& viewportSize, float dtSeconds);
+
+    // Simplified per-frame update for a multiplayer client rendering a
+    // server-authoritative remote ship (CGame::RenderNetClient): the tracked
+    // ship lives in the client's own presentation-only mirror world, not
+    // m_registry, so there's no enemy/planet framing here (both need registry
+    // queries). Position hard-follows shipPos every frame -- it's already
+    // server-authoritative, so smoothing it would only add latency, not
+    // reduce jitter. Zoom still gets the same manual-override machinery as
+    // Update() (wheel nudge + smoothing), decaying to baseZoom once the grace
+    // period elapses; unlike Update(), there's no Controls/thrust signal
+    // available here to cancel the override early, so it always runs the
+    // full grace period.
+    void UpdateNetClient(const Magnum::Vector2& shipPos, float baseZoom, float dtSeconds);
 };
 
 } // namespace Gravitaris

@@ -60,21 +60,25 @@ void CGame::ConnectToServer(const std::string& wsUrl)
     m_netTransport->ConnectSignaling(wsUrl);
 }
 
-void CGame::RenderNetClient()
+void CGame::RenderNetClient(float dtSeconds)
 {
     m_netClient->Update();
     if (const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot()) {
         m_snapshotApplier.Apply(*snapshot);
     }
 
-    Camera& camera = m_cameraDirector.GetCamera();
     const flecs::entity ship = m_snapshotApplier.EntityForNetId(m_netClient->GetYourShipNetId());
+    // Zoom is a pure client preference here (never replicated -- see
+    // CameraDirector::UpdateNetClient's doc), so it still runs even between
+    // death/respawn when there's no ship to follow yet.
+    Magnum::Vector2 shipPos = m_cameraDirector.GetCamera().GetPosition();
     if (ship.is_alive()) {
         const Transform& t = ship.get<Transform>();
-        camera.SetPosition(Magnum::Vector2{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())});
+        shipPos = Magnum::Vector2{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
     }
-    camera.SetZoom(Defaults::cameraZoom);
+    m_cameraDirector.UpdateNetClient(shipPos, Defaults::cameraZoom, dtSeconds);
 
+    const Camera& camera = m_cameraDirector.GetCamera();
     m_starfieldRenderer.SetZoom(camera.GetZoom());
     m_starfieldRenderer.SetCameraPosition(camera.GetPosition());
     m_starfieldRenderer.Render();
@@ -88,14 +92,10 @@ void CGame::RenderNetClient()
 
 void CGame::Render(double delta)
 {
-    if (m_netClient) {
-        RenderNetClient();
-        return;
-    }
-
     // Real wall-clock dt for the camera director (Render's `delta` is a fixed-
     // step interpolation fraction, not seconds). Clamped so a stall doesn't
-    // snap the camera.
+    // snap the camera. Computed up front (not just in the local-sim path
+    // below) since the net-client path needs it too, for its own zoom easing.
     const auto now = std::chrono::steady_clock::now();
     float dtSeconds = 1.f / 60.f;
     if (m_cameraTimeValid) {
@@ -104,6 +104,11 @@ void CGame::Render(double delta)
     }
     m_lastCameraTime = now;
     m_cameraTimeValid = true;
+
+    if (m_netClient) {
+        RenderNetClient(dtSeconds);
+        return;
+    }
 
     m_cameraDirector.Update(GetPlayer(), m_viewportSize, dtSeconds);
     m_hitFlashSystem.Update(dtSeconds);

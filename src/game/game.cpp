@@ -47,7 +47,21 @@ void Game::Start()
 }
 
 Game::Game(IFilesystem& filesystem)
-        : Game(filesystem, CreateEntitySpawner())
+        // Explicitly-qualified (non-virtual) call: this is a delegating
+        // constructor of Game itself, not a derived class's base-init (that
+        // case -- see CGame::CGame -- is fine; the derived class's own vptr
+        // is already set by the time it evaluates the base-class argument).
+        // Here, evaluating CreateEntitySpawner() is part of constructing
+        // Game via delegation to Game's own two-arg constructor, and at
+        // least one observed toolchain (Apple Clang 21 arm64) does not yet
+        // have Game's vptr installed at that point, so a virtual call reads
+        // a garbage vtable pointer and jumps into invalid memory (reliably
+        // reproducible SEGV -- confirmed via AddressSanitizer, and via
+        // bisection against every constructor in this class). Since a plain
+        // Game (as opposed to CGame) never has this overridden anyway, the
+        // qualified call changes nothing observable and sidesteps the whole
+        // question.
+        : Game(filesystem, Game::CreateEntitySpawner())
 {}
 
 void Game::Update()

@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <gravitaris/game/net/byte-stream.hpp>
 #include <gravitaris/game/net/protocol.hpp>
 #include <gravitaris/game/net/net-client.hpp>
@@ -43,6 +45,7 @@ void NetClient::Update()
                         SnapshotData snapshot;
                         if (!ReadSnapshot(reader, snapshot)) break;
                         m_lastAckedSnapshotTick = snapshot.tick;
+                        m_lastAckedSnapshotRecvTime = std::chrono::steady_clock::now();
                         for (const GameEvent& e : snapshot.events) {
                             if (e.seq > m_lastAckedEventSeq) m_lastAckedEventSeq = e.seq;
                         }
@@ -59,12 +62,21 @@ void NetClient::Update()
     }
 }
 
+std::uint64_t NetClient::EstimateCurrentServerTick() const
+{
+    if (!m_lastAckedSnapshotRecvTime) return m_lastAckedSnapshotTick;
+    const float elapsedSeconds =
+            std::chrono::duration<float>(std::chrono::steady_clock::now() - *m_lastAckedSnapshotRecvTime).count();
+    const auto elapsedTicks = static_cast<std::uint64_t>(std::max(elapsedSeconds, 0.f) * static_cast<float>(m_tickRate));
+    return m_lastAckedSnapshotTick + elapsedTicks;
+}
+
 void NetClient::SendInput(const ControlFlags& flags)
 {
     if (!m_welcomed) return;
 
     InputCommand cmd;
-    cmd.tick = m_lastAckedSnapshotTick + INPUT_LEAD_TICKS;
+    cmd.tick = EstimateCurrentServerTick() + INPUT_LEAD_TICKS;
     cmd.flags = flags;
     m_recentCommands.push_back(cmd);
     while (m_recentCommands.size() > CLIENT_INPUT_BACKUP) m_recentCommands.pop_front();

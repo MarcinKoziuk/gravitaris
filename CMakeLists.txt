@@ -370,6 +370,14 @@ if(NOT EMSCRIPTEN)
     set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
     set(ENABLE_TESTING  OFF CACHE BOOL "" FORCE)
     set(MBEDTLS_USER_CONFIG_FILE "${CMAKE_SOURCE_DIR}/cmake/mbedtls-user-config.h" CACHE FILEPATH "" FORCE)
+    # v3.6.2's vendored sources predate -Wunterminated-string-initialization
+    # (new in recent Clang/Apple Clang), which fires on its intentionally
+    # unterminated char[] label constants (e.g. ssl_tls13_keys.c) -- mbedtls's
+    # own CMakeLists turns warnings into errors by default, so a newer
+    # compiler than this pin was tested against fails the build outright.
+    # Not our code, nothing to fix upstream of updating the pin; just don't
+    # let mbedtls's warning policy break our build.
+    set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
 
     FetchContent_Declare(MbedTLS
         GIT_REPOSITORY  https://github.com/Mbed-TLS/mbedtls.git
@@ -831,7 +839,7 @@ endif()
 # ---------------------------------------------------------------------------
 if(NOT EMSCRIPTEN)
     add_executable(gravitaris-server
-        tools/server/main.cpp
+        src/server/main.cpp
         src/game/resource/body.cpp
         extlibs/nanosvg/nanosvg.c
         extlibs/clipper/clipper.cpp

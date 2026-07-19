@@ -34,10 +34,21 @@ class NetServer {
         // never acks correctly must not get its event stream wedged).
         std::uint32_t lastSentEventSeq = 0;
         bool welcomed = false;
+        // Highest InputCommand::tick already pushed into this peer's
+        // InputQueue. The client resends its last CLIENT_INPUT_BACKUP
+        // commands with every packet (so a dropped packet doesn't lose a
+        // command), so without this the same commands get pushed again every
+        // packet and silently evict genuinely-new ones once the 64-slot ring
+        // fills up. Commands with tick <= this are duplicates and skipped.
+        std::uint64_t lastQueuedInputTick = 0;
+        // Commands arriving with tick < the server's current tick -- already
+        // stale, InputSystem would drop them anyway (see its own comment) --
+        // counted here as a health metric, not currently surfaced anywhere.
+        std::uint64_t staleInputCount = 0;
     };
     ankerl::unordered_dense::map<PeerId, PeerState> m_peers;
 
-    void HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t size);
+    void HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t size, std::uint64_t currentTick);
     void HandleDisconnect(PeerId peer);
 
 public:

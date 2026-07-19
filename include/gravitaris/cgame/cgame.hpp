@@ -74,7 +74,7 @@ protected:
     std::unique_ptr<WebRtcTransport> m_netTransport;
     std::unique_ptr<NetClient> m_netClient;
 
-    void RenderNetClient();
+    void RenderNetClient(float dtSeconds);
 
     Magnum::Vector2 m_viewportSize{1280.f, 720.f};
 

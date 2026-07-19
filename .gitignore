@@ -1,7 +1,8 @@
 # CMake build dirs
 build/
+build-*/
 out/
-out-wasm/
+out-*/
 cmake-build-*/
 
 # CMake generated artifacts

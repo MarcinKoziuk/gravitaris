@@ -518,7 +518,7 @@ served over plain `http://` (which it is, via `python -m http.server`).
   than via `ConnectSignaling`, which is the Offerer/client path), emitting
   `Connected`/`Disconnected`/`Packet` tagged with that `PeerId`. `Send(peer,
   ...)` routes to that peer's channel. `NetServer` needed zero changes.
-- [x] `gravitaris-server` (`tools/server/main.cpp`): the sim-test pattern
+- [x] `gravitaris-server` (`src/server/main.cpp`): the sim-test pattern
   promoted to a long-running process — `FilesystemPhysFS` + `Game` (started
   via `BuildClassicScenario` directly, *not* `Game::Start()`, which would
   spawn an uncontrolled, unreplicated local player) + `NetServer` +

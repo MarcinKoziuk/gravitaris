@@ -30,14 +30,13 @@ void NetServer::IngestInput(std::uint64_t currentTick)
                 HandleDisconnect(event.peer);
                 break;
             case NetEventType::Packet:
-                HandlePacket(event.peer, event.data.data(), event.data.size());
+                HandlePacket(event.peer, event.data.data(), event.data.size(), currentTick);
                 break;
         }
     }
-    (void)currentTick; // reserved: server-side input-tick validation, not needed yet
 }
 
-void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t size)
+void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t size, std::uint64_t currentTick)
 {
     ByteReader reader(data, size);
     const auto type = static_cast<PacketType>(reader.ReadU8());
@@ -83,7 +82,12 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             if (it == m_peers.end() || !it->second.welcomed || !it->second.ship.is_alive()) return;
 
             InputQueue& queue = it->second.ship.get_mut<InputQueue>();
-            for (const InputCommand& cmd : input.commands) queue.Push(cmd);
+            for (const InputCommand& cmd : input.commands) {
+                if (cmd.tick <= it->second.lastQueuedInputTick) continue; // already queued, part of the resend window
+                if (cmd.tick < currentTick) ++it->second.staleInputCount; // queued anyway; InputSystem drops it itself
+                queue.Push(cmd);
+                it->second.lastQueuedInputTick = cmd.tick;
+            }
             break;
         }
         case PacketType::ServerWelcome:
