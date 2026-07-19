@@ -113,6 +113,25 @@ std::optional<SnapshotData> SnapshotInterpolator::Compute(const std::deque<Snaps
         out.events = newer.events;
     }
 
+    // Planets: always the newest known state, never delayed/lerped like
+    // everything else here. Two reasons. (1) They move on a perfectly
+    // smooth, deterministic orbit -- unlike input-driven ships, there's no
+    // snapshot-rate jerkiness to hide, so delaying them buys nothing. (2)
+    // Phase 7's ClientPrediction::SyncPlanetProxies collides the local ship
+    // against a planet proxy positioned from the *latest* raw snapshot
+    // (undelayed) -- rendering the visual planet ~100ms behind that made a
+    // landed ship look sunk into (or floating above) the surface by however
+    // far the planet moved in that gap, and the position discontinuity each
+    // time this function's lerp/extrapolate mode switched fed camera
+    // framing's nearestSurfaceDist, reading as a fast zoom pulse. Matching
+    // physics and visuals to the same (newest) state fixes both.
+    for (EntityState& e : out.entities) {
+        if (e.type != NetEntityType::Planet) continue;
+        if (const EntityState* latest = FindByNetId(history.back(), e.netId)) {
+            e = *latest;
+        }
+    }
+
     // Own ship: Phase 5's ClientPrediction renders it via a real, locally
     // -simulated entity instead, so it's omitted here entirely rather than
     // included at some snapshot-derived position (interpolated, latest, or

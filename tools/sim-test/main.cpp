@@ -163,6 +163,37 @@ void TestSnapshotInterpolation()
         Require(std::fabs(remoteExtrap.pos.x() - 102.5f) < 0.01f, "interp: extrapolation is capped, not unbounded");
     }
     {
+        // Planets: always the newest known state, never lerped/delayed like
+        // everything else (see Compute's own doc comment) -- render at a
+        // straddled tick between two snapshots where a planet moved, and the
+        // output position must be the *newer* snapshot's raw position
+        // (matching what ClientPrediction::SyncPlanetProxies collides
+        // against), not the halfway lerped point a Ship-typed entity would get.
+        EntityState planetOlder{};
+        planetOlder.netId = 5;
+        planetOlder.type = NetEntityType::Planet;
+        planetOlder.pos = {0.f, 0.f};
+
+        EntityState planetNewer = planetOlder;
+        planetNewer.pos = {100.f, 0.f};
+
+        SnapshotData planetA;
+        planetA.tick = 200;
+        planetA.entities = {planetOlder};
+        SnapshotData planetB;
+        planetB.tick = 210;
+        planetB.entities = {planetNewer};
+        std::deque<SnapshotData> planetHistory{planetA, planetB};
+
+        const std::optional<SnapshotData> mid = SnapshotInterpolator::Compute(
+                planetHistory, 205, /*exemptNetId*/ 0, TICK_RATE, SnapshotInterpolator::Params{});
+        Require(mid.has_value(), "interp: planet straddled render tick produces a result");
+        Require(mid->entities.size() == 1 && mid->entities[0].netId == 5,
+                "interp: planet entity present at the straddled tick");
+        Require(std::fabs(mid->entities[0].pos.x() - 100.f) < 0.01f,
+                "interp: planet uses the newest known state, not the lerped halfway point");
+    }
+    {
         // Presence follows the newer straddling snapshot: an entity
         // destroyed between two snapshots must not appear at a render tick
         // between them; one freshly spawned must appear at its exact state.

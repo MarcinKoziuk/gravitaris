@@ -1200,6 +1200,53 @@ session). **Not yet manually verified**: the actual "does landing feel
 still" and "does bumping a friendly ship still shake the camera as
 expected (unfixed)" by-feel gates — needs a real multiplayer session.
 
+**Follow-up (2026-07-19, same day): planets exempted from interpolation
+delay.** Playtesting surfaced two remaining symptoms this session's proxy
+fix didn't cover, both traced to one further cause. (1) A landed ship
+looked sunk ~10px into the surface, scaling with planet speed. (2) Camera
+zoom pulsed quickly (smoothly, but fast) specifically while approaching a
+planet, not during other motion. Root cause:
+`ClientPrediction::SyncPlanetProxies` collides the ship against a planet
+proxy positioned from the *latest raw* snapshot (undelayed), but the
+*visual* planet was drawn via `SnapshotInterpolator`, which deliberately
+renders ~100ms behind (Phase 4's smoothing delay) — for an orbiting planet
+those two positions differ by however far it moved in that gap, which is
+exactly the sinking. The same live-vs-delayed mismatch fed
+`CameraDirector`'s planet-framing `nearestSurfaceDist` calculation, and
+every mode switch between the interpolator's lerp-between-snapshots and
+extrapolate-past-newest paths as fresh snapshots arrived nudged that
+distance slightly — a fast, repeating perturbation into the zoom-fit math.
+
+Fix: `SnapshotInterpolator::Compute` now always uses the newest known raw
+state for `NetEntityType::Planet` entities specifically, the same
+"exempt from delay" treatment the local player's own ship already gets —
+never lerped, never extrapolated. Justified because planets move on a
+perfectly smooth, deterministic circular orbit; unlike input-driven ships,
+there's no snapshot-rate jerkiness to hide, so the delay was pure downside
+here. This makes physics and visuals agree (both now read the same latest
+snapshot), which removes the sinking, and removes the interpolation-mode
+-switch noise that was perturbing camera framing. Proven in sim-test
+(`TestSnapshotInterpolation`): a planet moving between two snapshots
+renders at the *newer* snapshot's exact position at a render tick straddled
+between them, not the halfway lerped point a Ship-typed entity would get.
+
+**Accepted trade-off**: since planets now update only when a new snapshot
+actually arrives (no continuous lerp/extrapolation smoothing anymore),
+their rendered motion could show a small per-snapshot step rather than
+buttery continuous motion — expected to be imperceptible given how slowly
+orbits move relative to snapshot rate, but worth eyeballing. An easy
+follow-up if it ever is noticeable: extrapolate planets forward from the
+latest snapshot using their replicated velocity, uncapped (unlike the
+existing capped extrapolation for everyone else — safe here specifically
+because orbital motion is smooth/predictable, so guessing further ahead
+doesn't accumulate visible error the way guessing a ship's next move
+would).
+
+**Verification status**: all four targets build clean; full sim-test suite
+(including the new planet-interpolation proof) passes, determinism
+checksum unchanged. **Not yet manually verified**: whether this actually
+reads as "no sinking" and "no zoom pulse" in a real multiplayer session.
+
 ## Phase 8 — Deferred (needs its own design pass when reached)
 
 - Delta-compressed snapshots (per-entity change masks vs last acked).
