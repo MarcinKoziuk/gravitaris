@@ -34,6 +34,23 @@ void NetServer::IngestInput(std::uint64_t currentTick)
                 break;
         }
     }
+
+    // Dead-man sweep (see INPUT_TIMEOUT_TICKS): a peer that stops landing
+    // fresh commands gets one synthetic idle command, so InputSystem's
+    // repeat-last-command semantics settle on "hands off the controls"
+    // instead of replaying its last held flags forever.
+    for (auto& [peer, state] : m_peers) {
+        if (!state.welcomed || !state.ship.is_alive() || state.idleInjected) continue;
+        if (currentTick <= state.lastQueuedInputTick + INPUT_TIMEOUT_TICKS) continue;
+
+        InputCommand idle;
+        idle.tick = currentTick;
+        state.ship.get_mut<InputQueue>().Push(idle);
+        state.lastQueuedInputTick = currentTick;
+        state.idleInjected = true;
+        LOG(info) << "net: peer " << peer << " input timed out (" << INPUT_TIMEOUT_TICKS
+                  << " ticks silent, " << state.staleInputCount << " stale so far), zeroing controls";
+    }
 }
 
 void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t size, std::uint64_t currentTick)
@@ -61,6 +78,7 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             const flecs::entity ship = m_entitySpawner.SpawnPlayer(playerModel, Vector2d{spawnOffset, 0.});
             it->second.ship = ship;
             it->second.welcomed = true;
+            it->second.lastQueuedInputTick = currentTick; // dead-man baseline: "joined now", not tick 0
 
             ServerWelcomePacket welcome;
             welcome.clientId = peer;
@@ -87,6 +105,7 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
                 if (cmd.tick < currentTick) ++it->second.staleInputCount; // queued anyway; InputSystem drops it itself
                 queue.Push(cmd);
                 it->second.lastQueuedInputTick = cmd.tick;
+                it->second.idleInjected = false; // fresh input: stall episode (if any) is over
             }
             break;
         }

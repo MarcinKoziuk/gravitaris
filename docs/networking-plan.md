@@ -995,6 +995,46 @@ wired into net-client mode (also would likely work now that there's a real
      `a.world().c_ptr() == b.world().c_ptr()`), used everywhere
      `m_framedEnemy` is compared.
 
+4. **Two browser tabs: one tab's ship desyncs after ~5s and spins/freezes
+   server-side forever, while that tab still feels fully controllable (no
+   errors anywhere).** Root cause: `CGame::m_nextPredictedTick` is seeded
+   once and then free-runs, +1 per *executed* tick — but the browser
+   doesn't guarantee ticks execute. rAF throttling on a backgrounded tab
+   (switching between two tabs guarantees one is always throttled), GC
+   hitches, and `tickEvent`'s net-client step cap (which *discarded* the
+   excess backlog: `m_frameTimeAccumulator = 0.0` at `MAX_STEPS_PER_FRAME`)
+   all lose wall-clock time the counter never sees — permanent backward
+   drift vs. the server's wall-clock-paced tick. Once total drift exceeds
+   `INPUT_LEAD_TICKS` (2 ticks = 33ms!), every `ClientInput` from that tab
+   is stamped in the server's past: `InputSystem` drops it as stale,
+   repeat-last-command latches the last consumed flags (mid-rotation =
+   spins forever; idle = frozen), and the affected tab never notices — its
+   own ship is locally predicted (responsive), and reconciliation quietly
+   stops matching (the snapshot tick no longer lines up with the drifted
+   prediction ring), so nothing ever corrects it. The *other* tab renders
+   the server truth: a spinning/frozen ship. Fixed two ways, same day:
+   - **Client tick resync** (`CGame::TickNetClient`): each tick, compare
+     `m_nextPredictedTick` against `EstimateCurrentServerTick() +
+     INPUT_LEAD_TICKS`; drift beyond 5 ticks (~83ms, above the estimate's
+     own jitter) re-seeds the counter (logged, with the old/new values).
+     Small drift is still left alone so consecutive predicted ticks stay
+     exactly one `PHYSICS_DELTA` apart (the property Phase 5 introduced
+     the free-running counter for).
+   - **Server dead-man switch** (`NetServer::INPUT_TIMEOUT_TICKS = 15`,
+     250ms): a welcomed peer that hasn't landed a fresh command for that
+     long gets one synthetic idle command injected into its `InputQueue`
+     (once per stall episode, `PeerState::idleInjected`), so
+     repeat-last-command settles on "hands off the controls" instead of
+     replaying held thrust/rotate forever — defense in depth for *any*
+     future input stall, not just this one. `lastQueuedInputTick` is now
+     seeded to the welcome tick so the timeout measures from "joined".
+     Proven in sim-test: `TestNetRoundtrip` now goes silent for 30 ticks
+     after sustained thrust and asserts the server zeroed
+     `Controls::actionFlags.thrustForward`.
+   (The `[si_destination_compare] send failed` lines in the server log are
+   macOS system-log noise from the ICE/mDNS stack inside libdatachannel —
+   harmless, unrelated.)
+
 **Verification status**: all four targets (native `GravitarisNG`,
 Emscripten `GravitarisNG`, `gravitaris-sim-test`, `gravitaris-server`) build
 clean. `TestClientPrediction` (sim-test) exercises `ClientPrediction`

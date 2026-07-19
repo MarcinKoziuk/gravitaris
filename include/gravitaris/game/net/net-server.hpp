@@ -40,13 +40,30 @@ class NetServer {
         // command), so without this the same commands get pushed again every
         // packet and silently evict genuinely-new ones once the 64-slot ring
         // fills up. Commands with tick <= this are duplicates and skipped.
+        // Seeded to the welcome tick, so the dead-man timeout below measures
+        // from "joined" rather than from tick 0.
         std::uint64_t lastQueuedInputTick = 0;
         // Commands arriving with tick < the server's current tick -- already
         // stale, InputSystem would drop them anyway (see its own comment) --
         // counted here as a health metric, not currently surfaced anywhere.
         std::uint64_t staleInputCount = 0;
+        // Dead-man latch: true once the input timeout has injected a
+        // synthetic idle command for the current stall episode (see
+        // IngestInput); reset by the next genuinely accepted command. One
+        // injection per episode is enough -- InputSystem's repeat-last
+        // -command then repeats *idle*, the safe steady state.
+        bool idleInjected = false;
     };
     ankerl::unordered_dense::map<PeerId, PeerState> m_peers;
+
+    // Dead-man timeout: if a welcomed peer hasn't landed a fresh command in
+    // this many ticks, inject one synthetic all-clear command so repeat-last
+    // -command can't keep a stalled client's ship thrusting/spinning forever
+    // (a throttled browser tab whose input ticks drifted stale did exactly
+    // that -- every command it sent was silently dropped while its last
+    // consumed flags kept applying). 250ms: far above real packet-loss
+    // gaps at the 60Hz send rate, far below "ship visibly flies away".
+    static constexpr std::uint64_t INPUT_TIMEOUT_TICKS = 15;
 
     void HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t size, std::uint64_t currentTick);
     void HandleDisconnect(PeerId peer);

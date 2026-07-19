@@ -13,7 +13,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BUILD_DIR="$REPO_ROOT/out-wasm"
+# BUILD_DIR is derived from BUILD_TYPE after arg parsing below -- each build
+# type gets its own tree (out/wasm-Debug, out/wasm-Release, ...) so switching
+# types doesn't clobber/reconfigure the other's artifacts.
 
 # --- Locate emsdk -----------------------------------------------------------
 CANDIDATE_DIRS=(
@@ -79,13 +81,13 @@ for arg in "$@"; do
     esac
 done
 
-# out-wasm is a single-config (Ninja) build tree, so CMAKE_BUILD_TYPE is baked
-# at configure time. Switching Debug<->Release therefore REQUIRES a reconfigure
-# -- otherwise `cmake --build` happily rebuilds the previously-configured type
-# and the artifacts land under a different <Config>/bin than this run expects
-# (which previously made the index.html copy below fail with a confusing "No
-# such file or directory"). Detect the cached type and reconfigure on a
-# mismatch.
+BUILD_DIR="$REPO_ROOT/out/wasm-$BUILD_TYPE"
+
+# Each build tree is single-config (Ninja), CMAKE_BUILD_TYPE baked at
+# configure time. The per-type BUILD_DIR above means type switches land in
+# separate trees now, but keep the cached-type check as a belt-and-suspenders
+# guard (e.g. a tree left behind by the old shared-out-wasm layout, or a
+# hand-run cmake with a different type in this dir).
 CACHED_TYPE=""
 if [[ -f "$BUILD_DIR/CMakeCache.txt" ]]; then
     CACHED_TYPE="$(grep -E '^CMAKE_BUILD_TYPE:' "$BUILD_DIR/CMakeCache.txt" | cut -d= -f2)"

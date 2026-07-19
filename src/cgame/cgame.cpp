@@ -86,6 +86,33 @@ void CGame::TickNetClient(const ControlFlags& flags)
         m_nextPredictedTick = m_netClient->EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS;
     }
 
+    // Drift guard on the free-running tick counter. It advances once per
+    // *executed* tick, but the browser doesn't guarantee ticks execute: rAF
+    // throttling on a backgrounded tab, GC hitches, and tickEvent's own
+    // step cap (which discards the excess backlog rather than replaying it)
+    // all lose wall-clock time that this counter never sees. Every lost
+    // tick is permanent backward drift vs. the server's wall-clock-paced
+    // step, and once the drift exceeds INPUT_LEAD_TICKS, every input this
+    // client sends is stamped in the server's past -- InputSystem drops it
+    // as stale, repeat-last-command latches the last consumed flags, and
+    // the ship spins/freezes server-side forever while local prediction
+    // (and silently-failing reconciliation) keep this client feeling fine.
+    // Re-seed from the wall-clock estimate when the drift grows past the
+    // estimate's own jitter; small drift is left alone so consecutive
+    // predicted ticks normally stay exactly one PHYSICS_DELTA apart (see
+    // m_nextPredictedTick's field comment for why that matters).
+    {
+        const std::uint64_t target = m_netClient->EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS;
+        static constexpr std::uint64_t RESYNC_THRESHOLD_TICKS = 5; // ~83ms; > estimate jitter, < perceptible lag
+        const std::uint64_t drift = target > m_nextPredictedTick ? target - m_nextPredictedTick
+                                                                 : m_nextPredictedTick - target;
+        if (drift > RESYNC_THRESHOLD_TICKS) {
+            LOG(info) << "net: predicted-tick drift of " << drift << " ticks (throttled tab?), resyncing "
+                      << m_nextPredictedTick << " -> " << target;
+            m_nextPredictedTick = target;
+        }
+    }
+
     const std::uint64_t tick = m_nextPredictedTick++;
     m_netClient->SendInput(tick, flags);
 

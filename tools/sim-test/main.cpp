@@ -375,6 +375,23 @@ void TestNetRoundtrip(Game& game)
     const Magnum::Vector2 serverPos{static_cast<float>(serverTransform.pos.x()),
                                     static_cast<float>(serverTransform.pos.y())};
     Require((it->pos - serverPos).length() < 0.5f, "net: replicated position matches server truth");
+
+    // Dead-man switch (NetServer::INPUT_TIMEOUT_TICKS): stop sending input
+    // entirely -- as if the client's tab got throttled and its input ticks
+    // went permanently stale -- and the server must zero the ship's controls
+    // rather than let repeat-last-command keep the last held thrust applied
+    // forever. The last real command above held thrustForward, so without
+    // the timeout Controls::actionFlags.thrustForward would stay true
+    // indefinitely.
+    for (int i = 0; i < 30; ++i) { // 30 ticks of silence > INPUT_TIMEOUT_TICKS (15)
+        server.IngestInput(game.GetStep());
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+    }
+    const Controls& controls = shipEntity.get<Controls>();
+    Require(!controls.actionFlags.thrustForward,
+            "net: input dead-man timeout zeroed a silent peer's held thrust");
 }
 
 // docs/networking-plan.md 3.1b: same NetServer/NetClient wiring as
