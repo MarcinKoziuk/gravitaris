@@ -18,6 +18,7 @@
 #include <thread>
 
 #include <gravitaris/game/fs/filesystem-physfs.hpp>
+#include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/game.hpp>
@@ -206,8 +207,9 @@ void TestClientPrediction()
     // No game.Start() -- ClientPrediction only needs PhysicsSystem/
     // EntitySpawner, not a populated scenario.
     Game game(fs);
+    GameEventQueue eventQueue;
 
-    ClientPrediction prediction(game.GetRegistry(), game.GetPhysicsSystem(), game.GetEntitySpawner());
+    ClientPrediction prediction(game.GetRegistry(), game.GetPhysicsSystem(), game.GetEntitySpawner(), eventQueue);
     prediction.SpawnOwnShip("models/ships/fighter-1"_id, Vector2d{0., 0.});
     Require(prediction.HasOwnShip(), "prediction: own ship spawns");
 
@@ -261,6 +263,30 @@ void TestClientPrediction()
     // the replay above (history now only holds ticks after it).
     const std::optional<Vector2d> stale = prediction.Reconcile(5, divergent, planets);
     Require(!stale.has_value(), "prediction: re-reconciling an already-replayed tick finds nothing");
+
+    // Phase 6: predicted-cosmetic bullet + local fire feedback (same
+    // ClientPrediction/Game, continuing from tick 10).
+    auto countBullets = [&]() {
+        std::size_t count = 0;
+        game.GetRegistry().each([&](flecs::entity, Bullet&) { ++count; });
+        return count;
+    };
+
+    ControlFlags firing{};
+    firing.firePrimary = true;
+    prediction.Step(10, firing, planets);
+    Require(countBullets() == 1, "prediction: firePrimary spawns exactly one cosmetic bullet");
+    Require(eventQueue.LatestSeq() == 1, "prediction: firing emits a local BulletFired event");
+
+    // Cooldown gates the cadence: holding the trigger for FIRE_COOLDOWN_TICKS
+    // - 1 more ticks must not spawn another bullet yet.
+    for (std::uint64_t tick = 11; tick < 10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS; ++tick) {
+        prediction.Step(tick, firing, planets);
+    }
+    Require(countBullets() == 1, "prediction: fire cooldown gates cadence, no bullet mid-cooldown");
+
+    prediction.Step(10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS, firing, planets);
+    Require(countBullets() == 2, "prediction: cooldown expiring lets the next held shot fire");
 
     fs.Shutdown();
 }

@@ -26,7 +26,7 @@ CGame::CGame(IFilesystem &filesystem)
     , m_hitFlashSystem(m_registry, m_eventQueue, *m_entitySpawner)
     , m_cameraDirector(m_registry, m_physicsSystem, Defaults::cameraZoom)
     , m_indicatorRenderer(m_registry, m_resourceLoader, m_modelRenderer2)
-    , m_clientPrediction(m_registry, m_physicsSystem, *m_entitySpawner)
+    , m_clientPrediction(m_registry, m_physicsSystem, *m_entitySpawner, m_eventQueue)
     , m_autopilot(m_registry, m_physicsSystem)
 {
     m_modelRenderer2.SetReferenceZoom(Defaults::cameraZoom);
@@ -87,6 +87,7 @@ void CGame::TickNetClient(const ControlFlags& flags)
 
     if (const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot()) {
         m_clientPrediction.Step(tick, flags, snapshot->entities);
+        m_bulletLifetimeSystem.Update(PHYSICS_DELTA);
     }
 }
 
@@ -149,6 +150,12 @@ void CGame::RenderNetClient(float dtSeconds)
     static constexpr float CORRECTION_SMOOTH_SECONDS = 0.1f;
     m_visualCorrectionOffset *= std::exp(-dtSeconds / CORRECTION_SMOOTH_SECONDS);
     camera.SetPosition(camera.GetPosition() - m_visualCorrectionOffset);
+
+    // Own-ship one-shots (BulletLifetimeSystem-tracked cosmetic bullets emit
+    // BulletFired via m_clientPrediction) and thruster loop, via the same
+    // event-driven path single-player uses -- m_registry only ever holds the
+    // own ship in this mode, so nothing else's audio can leak in.
+    m_audioSystem.Update(camera.GetPosition());
 
     m_starfieldRenderer.SetZoom(camera.GetZoom());
     m_starfieldRenderer.SetCameraPosition(camera.GetPosition());

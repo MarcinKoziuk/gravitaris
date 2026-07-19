@@ -71,6 +71,12 @@ public:
     [[nodiscard]] double GetPositionEpsilon() const { return m_positionEpsilon; }
     void SetPositionEpsilon(double epsilon) { m_positionEpsilon = std::max(epsilon, 0.0); }
 
+    // Cosmetic bullets only need to live until the server's authoritative
+    // bullet arrives and renders (~RTT/2 + input lead + interp delay), not
+    // the real BULLET_LIFETIME_SECONDS -- otherwise both streams stay
+    // visible side by side for seconds per shot.
+    static constexpr double COSMETIC_BULLET_LIFETIME_SECONDS = 0.35;
+
     // How many predicted ticks are kept -- generous headroom (3s @ 60Hz) for
     // however long a snapshot round-trip takes; older entries are dropped
     // (Reconcile() then has nothing to compare against for that tick and
@@ -78,7 +84,8 @@ public:
     // matched).
     static constexpr std::size_t MAX_HISTORY = 180;
 
-    ClientPrediction(flecs::world& registry, PhysicsSystem& physicsSystem, EntitySpawner& entitySpawner);
+    ClientPrediction(flecs::world& registry, PhysicsSystem& physicsSystem, EntitySpawner& entitySpawner,
+                     GameEventQueue& eventQueue);
 
     // Idempotent: only the first call actually spawns anything.
     void SpawnOwnShip(id_t modelId, Magnum::Vector2d initialPos);
@@ -87,13 +94,18 @@ public:
     [[nodiscard]] flecs::entity GetOwnShip() const { return m_ownShip; }
 
     // Advances the local prediction by exactly one Game::PHYSICS_DELTA tick:
-    // applies `flags` (rotation/thrust only, no weapons -- see class
-    // comment on why firing isn't predicted yet), gravity from `planets`
-    // (this snapshot's Planet-typed EntityStates), integrates, and records
-    // the result keyed by `tick`. The caller owns tick numbering (see
-    // NetClient::SendInput -- the same number must be sent on the wire for
-    // Reconcile() to later find this entry). No-op if SpawnOwnShip hasn't
-    // been called yet.
+    // applies `flags` (rotation/thrust, and now firePrimary -- Phase 6), the
+    // same weapon cooldown ShipControlsSystem uses so cadence matches, gravity
+    // from `planets` (this snapshot's Planet-typed EntityStates), integrates,
+    // and records the result keyed by `tick`. On firing, spawns a sensor
+    // bullet directly into the registry (cosmetic only -- expired by the
+    // caller's own BulletLifetimeSystem, never reconciled against the
+    // server's real bullet) and emits a local BulletFired event into
+    // `eventQueue` purely so AudioSystem's existing event-driven one-shot
+    // path plays the fire sound; this event is never serialized/sent. The
+    // caller owns tick numbering (see NetClient::SendInput -- the same
+    // number must be sent on the wire for Reconcile() to later find this
+    // entry). No-op if SpawnOwnShip hasn't been called yet.
     void Step(std::uint64_t tick, const ControlFlags& flags, const std::vector<EntityState>& planets);
 
     // Compares the authoritative state for `authoritativeTick` (from a
@@ -115,9 +127,11 @@ private:
     flecs::world& m_registry;
     PhysicsSystem& m_physicsSystem;
     EntitySpawner& m_entitySpawner;
+    GameEventQueue& m_eventQueue;
 
     flecs::entity m_ownShip;
     std::deque<PredictedTick> m_history;
+    std::uint32_t m_fireCooldown = 0;
 };
 
 } // namespace Gravitaris

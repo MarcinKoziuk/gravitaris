@@ -18,7 +18,6 @@ namespace Gravitaris {
 
 using Magnum::Vector2d;
 
-static constexpr double BULLET_LIFETIME_SECONDS = 3.0;
 static constexpr float BULLET_DAMAGE = 10.f;
 static constexpr double BULLET_MUZZLE_SPEED = 200.0; // matches ai-pilot-system's BULLET_SPEED; 33% slower than the original 300
 static constexpr float BOX_HP = 30.f; // a couple of primary hits or one ram
@@ -40,7 +39,7 @@ cpBodyApplyTorque(cpBody *body, cpFloat torque)
     cpBodyApplyImpulseAtLocalPoint(body, cpv(0.0, -torque), cpv(-1.0 + c.x, c.y));
 }
 
-static std::pair<Vector2d, Vector2d> GetBulletSpawnPosAndVel(const Transform& transf, const PhysicsBody& phys)
+std::pair<Vector2d, Vector2d> ShipControlsSystem::ComputeBulletSpawn(const Transform& transf, const PhysicsBody& phys)
 {
     if (!phys.body->GetHardpoints().empty()) {
         Body::Hardpoint hp = phys.body->GetHardpoints().front();
@@ -101,12 +100,12 @@ void ShipControlsSystem::Update(std::uint64_t step)
         // so holding the button auto-fires at a fixed cadence.
         if (scontrols.actionFlags.firePrimary && scontrols.fireCooldown == 0) {
             scontrols.fireCooldown = ShipControlsSystem::FIRE_COOLDOWN_TICKS;
-            std::pair<Vector2d, Vector2d> ret = GetBulletSpawnPosAndVel(transf, phys);
+            std::pair<Vector2d, Vector2d> ret = ShipControlsSystem::ComputeBulletSpawn(transf, phys);
 
             const Team* shooterTeam = entity.try_get<Team>();
             flecs::entity bulletEntity = m_entitySpawner.SpawnBullet(
                     "models/bullets/bullet-0"_id, ret.first, ret.second, /*sensor=*/true);
-            bulletEntity.emplace<Bullet>(BULLET_LIFETIME_SECONDS,
+            bulletEntity.emplace<Bullet>(ShipControlsSystem::BULLET_LIFETIME_SECONDS,
                                          shooterTeam ? shooterTeam->id : TeamId::Blue,
                                          BULLET_DAMAGE);
 
@@ -116,7 +115,7 @@ void ShipControlsSystem::Update(std::uint64_t step)
         }
         if (scontrols.actionFlags.fireSecondary) {
             scontrols.actionFlags.fireSecondary = false;
-            std::pair<Vector2d, Vector2d> ret = GetBulletSpawnPosAndVel(transf, phys);
+            std::pair<Vector2d, Vector2d> ret = ShipControlsSystem::ComputeBulletSpawn(transf, phys);
             flecs::entity box = m_entitySpawner.SpawnBullet("models/doodads/box"_id, ret.first, transf.vel);
             box.emplace<Damageable>(Damageable{BOX_HP, BOX_HP});
 

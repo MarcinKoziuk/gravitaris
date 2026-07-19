@@ -3,10 +3,12 @@
 
 #include <chipmunk/chipmunk.h>
 
+#include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/transform.hpp>
+#include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
@@ -16,10 +18,11 @@
 namespace Gravitaris {
 
 ClientPrediction::ClientPrediction(flecs::world& registry, PhysicsSystem& physicsSystem,
-                                   EntitySpawner& entitySpawner)
+                                   EntitySpawner& entitySpawner, GameEventQueue& eventQueue)
         : m_registry(registry)
         , m_physicsSystem(physicsSystem)
         , m_entitySpawner(entitySpawner)
+        , m_eventQueue(eventQueue)
 {}
 
 bool ClientPrediction::HasOwnShip() const
@@ -76,6 +79,20 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags, const
 
     m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
     m_physicsSystem.Update();
+
+    if (m_fireCooldown > 0) --m_fireCooldown;
+    if (flags.firePrimary && m_fireCooldown == 0) {
+        m_fireCooldown = ShipControlsSystem::FIRE_COOLDOWN_TICKS;
+
+        const auto [pos, vel] = ShipControlsSystem::ComputeBulletSpawn(
+                m_ownShip.get<Transform>(), m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()));
+        const flecs::entity bullet = m_entitySpawner.SpawnBullet(
+                "models/bullets/bullet-0"_id, pos, vel, /*sensor=*/true);
+        bullet.emplace<Bullet>(COSMETIC_BULLET_LIFETIME_SECONDS, TeamId::Blue, 0.f);
+
+        m_eventQueue.Emit(GameEventType::BulletFired, m_ownShip,
+                          Magnum::Vector2{static_cast<float>(pos.x()), static_cast<float>(pos.y())});
+    }
 
     m_history.push_back(CaptureTick(tick, flags));
     while (m_history.size() > MAX_HISTORY) m_history.pop_front();

@@ -1,5 +1,6 @@
 #include <algorithm>
 
+#include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/net-id.hpp>
@@ -114,7 +115,19 @@ void WriteSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::u
 
 bool ReadSnapshot(ByteReader& in, SnapshotData& out)
 {
-    if (in.ReadU8() != SNAPSHOT_VERSION) return false;
+    if (const std::uint8_t version = in.ReadU8(); version != SNAPSHOT_VERSION) {
+        // Symptom of a version-mismatched rejection is a client that welcomes
+        // fine but never syncs (e.g. a stale cached wasm build) -- worth one
+        // loud line instead of silence.
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            LOG(warning) << "net: rejecting snapshot version " << int(version)
+                         << " (this build expects " << int(SNAPSHOT_VERSION)
+                         << ") -- mismatched client/server builds? Stale cached wasm?";
+        }
+        return false;
+    }
     out.tick = in.ReadU64();
 
     const std::uint32_t entityCount = in.ReadU32();

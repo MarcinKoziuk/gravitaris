@@ -64,12 +64,12 @@ Known violations / gaps (fixed by Phase 0-1):
 | `svc_snapshot`               | `SnapshotPacket` (Phase 3)                     |
 | `entityState_t.event` + `eventParm` + sequence | `GameEvent` stream with `seq` (Phase 1) |
 | temp entities (EV_*)         | folded into the same `GameEvent` stream        |
-| PVS / interest management    | distance-based relevance (Phase 6, deferred)   |
+| PVS / interest management    | distance-based relevance (Phase 7, deferred)   |
 
 One deliberate difference: quake3 attaches events to entities inside
 snapshots; we use a single global, sequence-numbered event stream (simpler to
 reason about, trivially delta-able by "events since your last acked seq", and
-it works identically offline). Spatial filtering can be added at Phase 6
+it works identically offline). Spatial filtering can be added at Phase 7
 without changing emitters.
 
 ---
@@ -638,7 +638,9 @@ and the server compensates for what the client actually saw when it fired.
   ring; a fire command stamped "I acted on tick T" is resolved by rewinding
   the relevant entities to tick T, testing the hit there, applying the result
   in the present. This is the "confirm the kill the client saw" behaviour.
-  → Phase 6 ("Lag compensation for hits").
+  Turned out not to be needed for this game's non-targeted bullets — see
+  Phase 6's scope note below; kept here as Phase 7 ("Lag compensation for
+  hits") for if/when a targeted/homing weapon needs it.
 
 They are complementary: prediction alone leaves your shots resolving against a
 server world where the enemy is elsewhere; lag comp alone leaves your ship
@@ -987,12 +989,66 @@ under real (non-zero, jittery) RTT specifically — the sim-test proof drives
 `NetClient`/transport round-trip the way Phase 3's `TestWebRtcRoundtrip`
 did for the protocol layer.
 
-## Phase 6 — Deferred (needs its own design pass when reached)
+## Phase 6 — Bullets: predicted-cosmetic bullet + immediate feedback
+
+- [x] `ShipControlsSystem::ComputeBulletSpawn` extracted (was file-local
+  `GetBulletSpawnPosAndVel`), `BULLET_LIFETIME_SECONDS` made public — shared
+  by the real sim and `ClientPrediction` the same way `ApplyMovement` already
+  is, so the cosmetic bullet's muzzle math matches the server's exactly.
+- [x] `ClientPrediction::Step` mirrors `ShipControlsSystem::Update`'s own
+  fire-cooldown/cadence logic (`FIRE_COOLDOWN_TICKS`) for `firePrimary`, and
+  on firing spawns a sensor bullet directly into the registry via the same
+  `EntitySpawner::SpawnBullet` + `Bullet` component the real sim uses —
+  expired the same way, by the caller's own `BulletLifetimeSystem`.
+- [x] `ClientPrediction` gained a `GameEventQueue&` constructor param and
+  emits a local `BulletFired` event on fire, purely so `AudioSystem`'s
+  existing event-driven one-shot path plays the laser sound — no new audio
+  code. This event is never serialized; it only exists in this client's own
+  in-process queue.
+- [x] `CGame::TickNetClient` now runs `m_bulletLifetimeSystem.Update(...)`
+  each predicted tick, and `RenderNetClient` now calls `m_audioSystem.Update
+  (camera position)` each frame — a side effect of the latter: the
+  previously-silent thruster loop in net-client mode (same root cause as the
+  Phase 5 thrust-exhaust visual bug, just the audio half of it) now works too.
+
+**Scope note — no server-side spawn-moment rewind was implemented.** The
+Design Direction section above frames Phase 6 as needing lag-compensated
+spawn resolution because a targeted/homing weapon's hit relevance would
+depend on exactly where the target was when the shooter's client saw it fire.
+This game's bullets aren't targeted: `ComputeBulletSpawn` only ever reads the
+shooter's own transform, and Phase 3's tick-stamped `ClientInput`/`InputQueue`
+already guarantees the server spawns the real bullet from the shooter's
+correct position for that input tick. So for this weapon model, "lag
+compensating the spawn moment" reduces to "process input on the tick it
+claims," which was already true — there was no additional rewind logic to
+add. If a targeted/homing weapon is ever added, this note is the first thing
+to revisit.
+
+**Known gaps, explicitly out of scope this pass**: `fireSecondary` (the box
+spawn) is not predicted, only `firePrimary`; the cosmetic bullet is never
+explicitly matched against or dropped in favor of the authoritative
+replicated one that arrives later — it simply expires on its own short local
+timer, so a brief visual overlap between the two is an accepted
+simplification rather than a bug.
+
+**Verification status**: all four targets build clean.
+`TestClientPrediction` (sim-test) extended to cover firing: `firePrimary`
+spawns exactly one cosmetic bullet and emits exactly one local event, the
+cooldown gates cadence (no second bullet until `FIRE_COOLDOWN_TICKS` have
+elapsed), and holding the trigger past the cooldown fires again — the same
+7-tick cadence `ShipControlsSystem::Update` uses. Two-run determinism suite
+unaffected. **Not yet manually verified**: whether the laser sound and
+cosmetic tracer actually read as "immediate" over real network latency in an
+actual multiplayer session — by-feel judgment, not something sim-test proves.
+
+## Phase 7 — Deferred (needs its own design pass when reached)
 
 - Delta-compressed snapshots (per-entity change masks vs last acked).
 - Relevance/interest management (distance culling per client).
 - Lag compensation for hits (ADR constraint 7: ~1s transform history ring,
-  rewind DamageSystem's swept segment query to the shooter's view tick).
+  rewind DamageSystem's swept segment query to the shooter's view tick) — for
+  a future targeted/homing weapon; today's ballistic bullets don't need this
+  (see Phase 6's scope note).
 - Clock sync polish, connection quality HUD, host migration, encryption/auth.
 
 ---
