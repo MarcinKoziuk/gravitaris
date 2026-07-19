@@ -615,6 +615,127 @@ players see each other fly and shoot as team blue; closing one tab doesn't
 disturb the server or the other client. **Not yet met** — blocked on the
 above, plus the untested second-simultaneous-peer path (3.5.2).
 
+## Design direction — client-side simulation (decided 2026-07-19)
+
+This section is the architecture context for Phases 4–6 below; they are its
+execution steps, not independent features. Recorded so a future session can
+pick it up cold. **Decision: go the client-simulation route** (client runs the
+real sim as prediction, server stays authoritative and corrects), rather than
+the cheaper "thin mirror" fix. Motivation: bullets are *real traveling
+entities* (`ShipControlsSystem` → `EntitySpawner::SpawnBullet`, a physics body
+with velocity + lifetime, paced by `Controls::fireCooldown` — not hitscan), so
+at high ping aiming is unplayable unless the client both predicts its own ship
+and the server compensates for what the client actually saw when it fired.
+
+### Two distinct techniques (do not conflate)
+
+- **Client-side prediction** — makes *your own* ship/aim feel instant. Client
+  steps its own ship locally, applies input immediately, reconciles on
+  snapshot. In this game aiming *is* rotating your own ship, so prediction is
+  most of the "aim feels laggy" fix. → Phase 5.
+- **Lag compensation ("unlagged" — Quake 3 / "favor the shooter")** — makes
+  your *shots register against what you saw*. Server keeps a per-tick history
+  ring; a fire command stamped "I acted on tick T" is resolved by rewinding
+  the relevant entities to tick T, testing the hit there, applying the result
+  in the present. This is the "confirm the kill the client saw" behaviour.
+  → Phase 6 ("Lag compensation for hits").
+
+They are complementary: prediction alone leaves your shots resolving against a
+server world where the enemy is elsewhere; lag comp alone leaves your ship
+feeling laggy to fly. Both are needed.
+
+### The projectile wrinkle (scope honestly)
+
+Classic unlagged/Valve lag comp targets **hitscan**: rewind, raycast, done.
+Our bullets **travel for many ticks**, which is the harder, rarer case — you
+cannot lag-compensate a projectile's *entire* flight without it being both
+exploitable and unfair (shots landing on a target long after it took cover).
+Chosen treatment, matching what shipping games do for projectiles:
+
+1. **Predicted cosmetic bullet on the client** — spawned instantly on fire so
+   it looks immediate and flies through the world the player sees. Cosmetic,
+   never authoritative.
+2. **Server spawns the authoritative bullet** when the fire command arrives
+   (stamped with the client's predicted tick), and **lag-compensates the spawn
+   moment only** — rewind to place the muzzle/initial trajectory relative to
+   where the target was on the shooter's screen. The real bullet then travels
+   in server time.
+3. **Reconcile** — when the authoritative bullet appears in a snapshot, drop or
+   align the cosmetic one.
+
+So: near-range / fire-instant kills are confirmable; full "everything on my
+screen is authoritative" over 300–500ms of travel is explicitly *not* a goal.
+Server stays authoritative always — client sim is prediction, never a claim.
+
+### Why this dissolves camera/minimap challenges 1 & 2
+
+The current mirror world (`SnapshotApplier` into `CGame::m_mirrorWorld`) is a
+thin *presentation shadow*: it hand-builds only the components the renderer
+needs. That is why making the minimap and camera framing work in MP looked like
+two problems — (1) no client `PhysicsSystem` for planet radius, (2) the applier
+must reconstruct `Damageable`/`Planet`/star-ness. Under client-sim both vanish:
+
+- the client runs a **real `PhysicsSystem`** → planet radius query just works,
+  nothing to replicate;
+- entities are built by the **real `EntitySpawner`** → they already carry
+  `Damageable`, `Planet`, `Orbit`, `PhysicsRef`, `Renderable`, everything.
+
+The mirror stops being an entity *factory* and becomes a *correction*
+mechanism (nudge/snap authoritative transforms + hp onto entities the client
+already simulates, keyed by `NetId`). Camera (`CameraDirector::Update`) and
+minimap (`MinimapRenderer::Render`) then run against a real sim world,
+**identical to single-player** — no world-agnostic parameterization required,
+and `CameraDirector::UpdateNetClient` (the interim hard-follow added
+2026-07-19) gets deleted. Making the two consumers world/`PhysicsSystem`
+-agnostic is still a reasonable tidy-up but is no longer load-bearing.
+
+### Prerequisites already in place (why this is feasible)
+
+- **Deterministic fixed-step sim**, proven bit-identical by
+  `gravitaris-sim-test`'s checksum across runs. Determinism is usually *the*
+  blocker for prediction/replay; it is already verified here.
+- **Tick clock + tick-stamped input** — `NetClient::EstimateCurrentServerTick()`
+  + `INPUT_LEAD_TICKS` (added 2026-07-19) is exactly the "I fired at tick T"
+  basis lag comp needs.
+- **Snapshot history** — the server already produces full per-tick snapshots;
+  the rewind ring is "keep the last N of them" (ADR constraint 7: ~1s).
+- **`NetId`** cross-world identity links a local predicted entity to its
+  authoritative counterpart.
+- **Replicated events** (`BulletFired`, …) give fire/hit signalling a channel.
+
+### Sequencing (order matters)
+
+1. **Phase 4 — interpolation** for entities you do *not* predict (other
+   players' ships: you have no inputs to replay for them, so render them in the
+   past and lerp). Substrate everything else assumes.
+2. **Phase 5 — predict + reconcile your own ship.** Where "aim feels off at
+   high ping" mostly goes away. ADR constraint 6 approximation stands: replay
+   pending inputs against gravity + static bodies only, no ship-ship contacts
+   during replay, document the artifacts.
+3. **Phase 6 — bullets + lag comp**: predicted-cosmetic bullet + authoritative
+   server bullet with lag-compensated spawn resolution.
+
+Do *not* attempt a big-bang "client runs everything authoritatively." Two
+reconciliation regimes coexist by design: your own ship replays inputs; remote
+ships/bullets are interpolated or snapped (no inputs to replay for them).
+
+### Risks / accepted approximations
+
+- Full ship-ship contact reconciliation stays deferred/approximated (ADR 6).
+- Projectile lag comp is spawn-moment only, not full-flight (above).
+- Server remains sole authority; any client-authoritative hit claim is a cheat
+  vector and is out of scope.
+
+### Open questions for the implementing session
+
+- Client sim seeding: run `BuildClassicScenario` client-side and spawn ships as
+  players join (server drives join order), reconciling by `NetId` — confirm
+  entity-identity mapping when the client's locally-created entity must adopt a
+  server `NetId` it hasn't seen yet.
+- Correction policy for remote (non-predicted) entities: pure interpolation vs
+  let-local-physics-run-and-snap. Interpolation is simpler and recommended.
+- Visual smoothing of own-ship correction (blend over ~100ms) vs hard snap.
+
 ## Phase 4 — Interpolation
 
 Remote entities render ~100ms behind: per-entity buffer of the last N
