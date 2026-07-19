@@ -55,7 +55,10 @@ set(GT_LIBDATACHANNEL_TAG "d5d31c7d794345d7aa536c074a9e17cbec95089d") # master @
 FetchContent_Declare(Corrade
     GIT_REPOSITORY  https://github.com/mosra/corrade.git
     GIT_TAG         ${GT_CORRADE_TAG}
-    GIT_SHALLOW     TRUE
+    # No GIT_SHALLOW: a shallow clone only has the branch tip, so checking
+    # out a pinned commit hash fails in any fresh build tree (same for every
+    # SHA-pinned dep below; the release-tag-pinned ones can stay shallow).
+    GIT_SHALLOW     FALSE
     OVERRIDE_FIND_PACKAGE
 )
 FetchContent_MakeAvailable(Corrade)
@@ -192,7 +195,7 @@ set(MAGNUM_WITH_TRADE      OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(Magnum
     GIT_REPOSITORY  https://github.com/mosra/magnum.git
     GIT_TAG         ${GT_MAGNUM_TAG}
-    GIT_SHALLOW     TRUE
+    GIT_SHALLOW     FALSE
     OVERRIDE_FIND_PACKAGE
 )
 FetchContent_MakeAvailable(Magnum)
@@ -326,7 +329,7 @@ FetchContent_MakeAvailable(RmlUi)
 FetchContent_Declare(poly2tri
     GIT_REPOSITORY  https://github.com/jhasse/poly2tri.git
     GIT_TAG         ${GT_POLY2TRI_TAG}
-    GIT_SHALLOW     TRUE
+    GIT_SHALLOW     FALSE
 )
 FetchContent_MakeAvailable(poly2tri)
 
@@ -359,7 +362,7 @@ set(MAGNUM_INCLUDE_INSTALL_DIR include/Magnum)
 FetchContent_Declare(MagnumIntegration
     GIT_REPOSITORY  https://github.com/mosra/magnum-integration.git
     GIT_TAG         ${GT_MAGNUMINT_TAG}
-    GIT_SHALLOW     TRUE
+    GIT_SHALLOW     FALSE
     OVERRIDE_FIND_PACKAGE
 )
 FetchContent_MakeAvailable(MagnumIntegration)
@@ -425,7 +428,7 @@ if(NOT EMSCRIPTEN)
     FetchContent_Declare(LibDataChannel
         GIT_REPOSITORY  https://github.com/paullouisageneau/libdatachannel.git
         GIT_TAG         ${GT_LIBDATACHANNEL_TAG}
-        GIT_SHALLOW     TRUE
+        GIT_SHALLOW     FALSE
         GIT_SUBMODULES_RECURSE TRUE
     )
     FetchContent_MakeAvailable(LibDataChannel)
@@ -440,7 +443,7 @@ else()
     FetchContent_Declare(DatachannelWasm
         GIT_REPOSITORY  https://github.com/paullouisageneau/datachannel-wasm.git
         GIT_TAG         ${GT_DATACHANNEL_WASM_TAG}
-        GIT_SHALLOW     TRUE
+        GIT_SHALLOW     FALSE
     )
     FetchContent_MakeAvailable(DatachannelWasm)
 
@@ -539,6 +542,10 @@ add_executable(GravitarisNG
     src/game/system/bullet-lifetime-system.cpp
     include/gravitaris/game/system/damage-system.hpp
     src/game/system/damage-system.cpp
+    include/gravitaris/game/system/landing-state-system.hpp
+    src/game/system/landing-state-system.cpp
+    include/gravitaris/game/system/conquest-system.hpp
+    src/game/system/conquest-system.cpp
     include/gravitaris/game/system/death-system.hpp
     src/game/system/death-system.cpp
     include/gravitaris/game/system/physics-system.hpp
@@ -787,6 +794,8 @@ add_executable(gravitaris-sim-test
     src/game/system/ship-controls-system.cpp
     src/game/system/bullet-lifetime-system.cpp
     src/game/system/damage-system.cpp
+    src/game/system/landing-state-system.cpp
+    src/game/system/conquest-system.cpp
     src/game/system/death-system.cpp
     src/game/system/physics-system.cpp
     src/game/system/orbit-system.cpp
@@ -877,6 +886,8 @@ if(NOT EMSCRIPTEN)
         src/game/system/ship-controls-system.cpp
         src/game/system/bullet-lifetime-system.cpp
         src/game/system/damage-system.cpp
+        src/game/system/landing-state-system.cpp
+        src/game/system/conquest-system.cpp
         src/game/system/death-system.cpp
         src/game/system/physics-system.cpp
         src/game/system/orbit-system.cpp
