@@ -744,9 +744,99 @@ between straddling snapshots (slerp-equivalent shortest-arc for rot).
 Tunables in a debug tab (delay, extrapolation cap ~50ms). Player's own ship
 still snaps (prediction is Phase 5).
 
+- [x] **`NetClient` buffers snapshot history, not just the latest.**
+  `m_snapshotHistory` (bounded, `SNAPSHOT_HISTORY_CAPACITY = 32`, strictly
+  tick-ascending) replaces the old single-snapshot overwrite. Guards against
+  the data channel's unordered delivery: a decoded snapshot with `tick <=`
+  the current back is dropped rather than appended, so a late/reordered
+  packet can't roll the buffer (or `m_lastAckedSnapshotTick`) backward.
+  `GetSnapshotHistory()` exposes it for the interpolator; `GetLatestSnapshot()`
+  keeps its original signature/behavior via a `m_latestSnapshot` member kept
+  in sync alongside the buffer (see the dangling-reference bug below for why
+  it isn't just derived from `m_snapshotHistory.back()` on demand).
+- [x] **`SnapshotInterpolator`** (`cgame/net/snapshot-interpolator.hpp/cpp`):
+  `Compute(history, renderTick, exemptNetId, tickRate, params)` turns the
+  buffered history into one synthetic `SnapshotData` for `renderTick`,
+  reusing the *existing* `SnapshotApplier::Apply()` unchanged — the
+  interpolator only ever produces another `SnapshotData`, it doesn't touch
+  entity lifecycle itself. Three cases: `renderTick` before the earliest
+  buffered snapshot clamps to it (covers "just connected"); at/past the
+  newest one extrapolates via velocity, capped at `params.
+  extrapolationCapSeconds` (default 50ms, per spec); otherwise finds the
+  straddling pair (binary search, history is sorted) and lerps
+  position/scale/velocity, shortest-arc-lerps rotation (wraps the raw delta
+  into `(-pi, pi]` before scaling by `t` — verified in the sim-test proof
+  below, e.g. 170deg->-170deg interpolates through the 180deg wrap, not back
+  through 0deg). Presence (entity created/destroyed) follows the *newer*
+  straddling snapshot: absent-in-newer is omitted (already gone at
+  `renderTick`), present-only-in-newer gets its exact state (freshly
+  spawned, nothing to interpolate from). `exemptNetId` (the local player's
+  own ship) always gets the latest known state instead of the interpolated
+  one, matching "player's own ship still snaps" — lives in `cgame/net/`
+  (SnapshotApplier's neighbor) but has zero GL dependency, so it's also
+  compiled into `gravitaris-sim-test` for the math proof (see ADR 0001
+  constraint 1's own enforcement mechanism: if it ever gains a real
+  dependency, that target simply stops linking).
+- [x] **Wired into `CGame::RenderNetClient`**: computes `renderTick =
+  NetClient::EstimateCurrentServerTick() - interpDelayTicks` (the latter
+  already added alongside `EstimateCurrentServerTick()` in Phase 3.5's
+  tail-end work), feeds `SnapshotInterpolator::Compute`'s output into the
+  existing `SnapshotApplier::Apply()` in place of the raw latest snapshot.
+- [x] **Net debug tab** (`src/cgame/ui/debug/net-panel.{hpp,cpp}`): interp
+  delay slider (0-300ms, default 100ms), extrapolation cap slider
+  (0-150ms, default 50ms), and read-only diagnostics (buffered snapshot
+  count, estimated server tick, render tick). Disabled with an explanatory
+  message in single-player.
+- [x] **Sim-test proof** (`TestSnapshotInterpolation`, no `Game`/transport
+  needed — pure `SnapshotData`-in/out math against hand-built history):
+  straddled lerp correctness including the shortest-arc rotation case,
+  extrapolation-past-newest capping, own-ship exemption snapping to latest
+  rather than interpolating, and presence handling for an entity that
+  despawns vs. one that spawns between two buffered snapshots.
+
+**A real bug this surfaced**: the first `GetLatestSnapshot()` rewrite
+returned `std::optional<SnapshotData>` *by value* (derived fresh from
+`m_snapshotHistory.back()` each call) instead of the original `const
+std::optional<SnapshotData>&`. Every existing call site did `const
+SnapshotData& s = *client.GetLatestSnapshot();` — binding a reference to a
+subobject of the return value. That pattern is only safe when the reference
+binds *directly* to a temporary; here it binds to what `operator*()` (a
+function call) returns a reference *into*, and lifetime extension does not
+propagate through that call boundary — the temporary `optional` is
+destroyed at the end of the full expression, and `s` dangles immediately
+after. This is silent UB, not a crash: reading `s.entities.size()` off
+freed memory returned 0 (a plausible, non-crashing value) rather than
+faulting, which is exactly why `TestNetRoundtrip` failed with "snapshot
+contains no entities" instead of an obvious segfault — and why it only
+reproduced with a large-enough entity count/allocation history to actually
+get the freed memory reused before the read (small/short-lived tests
+happened not to trip it). Fixed by keeping `m_latestSnapshot` as a real
+member again (updated alongside the history buffer) rather than trying to
+derive a reference-returning API from a container access on demand.
+
+**Deviation from the sketch**: no jitter-injection wrapper (the doc's
+suggested "debug-tunable delay queue in LoopbackTransport/ENet wrapper")
+was built this pass — "stays playable" is an inherently subjective, by-eye
+judgment the sim-test can't assert, and the substantive engineering risk
+(the interpolation math itself) is what the sim-test proof above actually
+covers. Worth adding later if jitter-under-load ever needs to be reproduced
+on demand rather than waited for on a real connection.
+
 **Done when:** at a simulated 20Hz snapshot rate motion looks as smooth as
 local play; artificial 100ms +30ms jitter (add a debug-tunable delay queue in
 LoopbackTransport/ENet wrapper) stays playable.
+
+**Verification status**: `GravitarisNG` (native + Emscripten) and
+`gravitaris-sim-test` all build clean; the interpolation math proof and the
+full two-run determinism/net-roundtrip suite all pass. Done from an
+unattended session. **Not yet manually verified**: the actual "does it look
+smooth" visual gate — needs a real multiplayer session (two clients, one
+`gravitaris-server`) with the Net debug tab open, watching a remote ship
+under real network jitter at various interp-delay settings. The Phase 3.5
+browser-environment blocker (`document.hidden` suspending the wasm main
+loop in the automated browser tool) still applies to verifying this
+in-browser from an unattended session — a real foregrounded browser tab (or
+two native `--connect` clients) is needed for the interactive pass.
 
 ## Phase 5 — Prediction & reconciliation (own ship only)
 

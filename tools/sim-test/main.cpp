@@ -29,6 +29,7 @@
 #include <gravitaris/game/net/net-client.hpp>
 #include <gravitaris/game/net/webrtc-server-transport.hpp>
 #include <gravitaris/game/net/webrtc-transport.hpp>
+#include <gravitaris/cgame/net/snapshot-interpolator.hpp>
 #include <gravitaris/gravitaris.hpp>
 
 using namespace Gravitaris;
@@ -78,6 +79,119 @@ void TestByteStream()
     ByteReader truncated(w.Data(), 3);
     (void)truncated.ReadU32();
     Require(!truncated.Ok(), "overrun latches !Ok()");
+}
+
+// docs/networking-plan.md Phase 4: SnapshotInterpolator's math, exercised
+// directly against hand-built snapshot history -- no transport/Game needed,
+// this is pure SnapshotData-in/SnapshotData-out logic.
+void TestSnapshotInterpolation()
+{
+    constexpr float TICK_RATE = 60.f;
+
+    EntityState remote{};
+    remote.netId = 1;
+    remote.type = NetEntityType::Ship;
+
+    EntityState own{};
+    own.netId = 2;
+    own.type = NetEntityType::Ship;
+
+    // Straddled lerp: remote entity moves (0,0)->(100,0) and rotates
+    // 170deg -> -170deg (the short way, through 180, a 20deg delta -- not
+    // the naive 340deg the long way around) between tick 10 and tick 20;
+    // own entity (exempt) sits still at both.
+    SnapshotData older;
+    older.tick = 10;
+    remote.pos = {0.f, 0.f};
+    remote.rot = 170.f * (3.14159265f / 180.f);
+    own.pos = {5.f, 5.f};
+    older.entities = {remote, own};
+
+    SnapshotData newer;
+    newer.tick = 20;
+    remote.pos = {100.f, 0.f};
+    remote.rot = -170.f * (3.14159265f / 180.f);
+    own.pos = {50.f, 50.f}; // own moved too, but exemption should still show this (the *latest*), not an interpolated mid-point
+    newer.entities = {remote, own};
+
+    std::deque<SnapshotData> history{older, newer};
+
+    {
+        const std::optional<SnapshotData> mid = SnapshotInterpolator::Compute(
+                history, 15, /*exemptNetId*/ 2, TICK_RATE, SnapshotInterpolator::Params{});
+        Require(mid.has_value(), "interp: straddled render tick produces a result");
+        const auto find = [&](std::uint32_t netId) -> const EntityState* {
+            for (const EntityState& e : mid->entities) {
+                if (e.netId == netId) return &e;
+            }
+            return nullptr;
+        };
+        const EntityState* remoteMid = find(1);
+        Require(remoteMid != nullptr, "interp: remote entity present at the straddled tick");
+        Require(std::fabs(remoteMid->pos.x() - 50.f) < 0.01f, "interp: position lerped to the halfway point");
+        // Shortest-arc: halfway between 170deg and -170deg (through the
+        // 180deg wrap) is 180deg (== -180deg), not 0deg (the naive lerp).
+        // Wrap the actual-vs-expected difference into (-pi, pi] before
+        // comparing, since 180deg and -180deg are the same angle.
+        const float expectedRot = 3.14159265f;
+        float rotDiff = std::fmod(remoteMid->rot - expectedRot + 3.14159265f, 2.f * 3.14159265f);
+        if (rotDiff < 0.f) rotDiff += 2.f * 3.14159265f;
+        rotDiff -= 3.14159265f;
+        Require(std::fabs(rotDiff) < 0.01f,
+                "interp: rotation takes the shortest arc through the wrap, not the long way round");
+
+        const EntityState* ownMid = find(2);
+        Require(ownMid != nullptr, "interp: exempt (own) entity present at the straddled tick");
+        Require(std::fabs(ownMid->pos.x() - 50.f) < 0.01f && std::fabs(ownMid->pos.y() - 50.f) < 0.01f,
+                "interp: exempt entity snaps to the latest known state, not the interpolated one");
+    }
+    {
+        // Extrapolation past the newest snapshot, capped: remote entity has
+        // vel (50,0) at tick 20; rendering at tick 20 + 6 ticks (0.1s) with
+        // a 0.05s cap should only extrapolate 0.05s worth (2.5 units), not
+        // the full 0.1s (5 units).
+        SnapshotData withVel = newer;
+        withVel.entities[0].vel = {50.f, 0.f};
+        std::deque<SnapshotData> velHistory{older, withVel};
+
+        SnapshotInterpolator::Params params;
+        params.extrapolationCapSeconds = 0.05f;
+        const std::optional<SnapshotData> extrap =
+                SnapshotInterpolator::Compute(velHistory, 26, /*exemptNetId*/ 0, TICK_RATE, params);
+        Require(extrap.has_value(), "interp: extrapolation past the newest snapshot produces a result");
+        const EntityState& remoteExtrap = extrap->entities[0];
+        Require(std::fabs(remoteExtrap.pos.x() - 102.5f) < 0.01f, "interp: extrapolation is capped, not unbounded");
+    }
+    {
+        // Presence follows the newer straddling snapshot: an entity
+        // destroyed between two snapshots must not appear at a render tick
+        // between them; one freshly spawned must appear at its exact state.
+        EntityState doomed{};
+        doomed.netId = 3;
+        doomed.pos = {1.f, 1.f};
+        EntityState spawned{};
+        spawned.netId = 4;
+        spawned.pos = {2.f, 2.f};
+
+        SnapshotData a;
+        a.tick = 100;
+        a.entities = {doomed};
+        SnapshotData b;
+        b.tick = 110;
+        b.entities = {spawned};
+        std::deque<SnapshotData> lifecycleHistory{a, b};
+
+        const std::optional<SnapshotData> mid = SnapshotInterpolator::Compute(
+                lifecycleHistory, 105, /*exemptNetId*/ 0, TICK_RATE, SnapshotInterpolator::Params{});
+        Require(mid.has_value(), "interp: lifecycle straddled tick produces a result");
+        bool hasDoomed = false, hasSpawned = false;
+        for (const EntityState& e : mid->entities) {
+            if (e.netId == 3) hasDoomed = true;
+            if (e.netId == 4) hasSpawned = true;
+        }
+        Require(!hasDoomed, "interp: an entity destroyed between snapshots doesn't linger");
+        Require(hasSpawned, "interp: an entity spawned between snapshots appears at its exact state");
+    }
 }
 
 // docs/networking-plan.md 2.3: gather -> serialize -> parse -> re-serialize
@@ -362,6 +476,7 @@ int main()
     HasEnteredMain = true;
 
     TestByteStream();
+    TestSnapshotInterpolation();
     TestWebRtcRoundtrip();
     TestWebRtcSignalingRoundtrip();
 

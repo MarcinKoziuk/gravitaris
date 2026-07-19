@@ -39,6 +39,22 @@ class NetClient {
     // matches InputQueue's own "resend, let the far end dedupe" model.
     std::deque<InputCommand> m_recentCommands;
 
+    // Bounded, strictly tick-ascending buffer for Phase 4 interpolation
+    // (docs/networking-plan.md): the data channel is unordered, so a
+    // snapshot can arrive after a newer one -- anything not strictly newer
+    // than the current back() is dropped rather than appended, which is
+    // also what keeps this (and m_lastAckedSnapshotTick) monotonic. Capacity
+    // is generous headroom for jitter/reordering, not a tuned interpolation
+    // delay (that's SnapshotInterpolator's job, cgame-side).
+    static constexpr std::size_t SNAPSHOT_HISTORY_CAPACITY = 32;
+    std::deque<SnapshotData> m_snapshotHistory;
+    // Mirrors m_snapshotHistory.back() for GetLatestSnapshot()'s reference
+    // -returning API: `*GetLatestSnapshot()` binding to a subobject of a
+    // by-value std::optional<SnapshotData> return does NOT lifetime-extend
+    // the optional through the operator*() call boundary (only a *direct*
+    // reference binding to a temporary does) -- that dangled every existing
+    // `const SnapshotData& s = *client.GetLatestSnapshot();` call site.
+    // Keeping this as a real member sidesteps the trap entirely.
     std::optional<SnapshotData> m_latestSnapshot;
 
 public:
@@ -76,9 +92,13 @@ public:
     [[nodiscard]] std::uint32_t GetTickRate() const { return m_tickRate; }
 
     // The most recently decoded snapshot, or nullopt if none has arrived yet.
-    // Consuming (moving out / clearing) is the caller's responsibility --
-    // this just always holds the latest.
     [[nodiscard]] const std::optional<SnapshotData>& GetLatestSnapshot() const { return m_latestSnapshot; }
+
+    // Strictly tick-ascending buffer of every accepted snapshot still held
+    // (up to SNAPSHOT_HISTORY_CAPACITY deep), for SnapshotInterpolator
+    // (cgame/net/) to render a delayed, interpolated position from instead
+    // of snapping to the latest one every frame.
+    [[nodiscard]] const std::deque<SnapshotData>& GetSnapshotHistory() const { return m_snapshotHistory; }
 };
 
 } // namespace Gravitaris

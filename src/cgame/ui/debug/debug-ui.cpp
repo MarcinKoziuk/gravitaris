@@ -14,6 +14,7 @@
 #include "camera-panel.hpp"
 #include "hud-panel.hpp"
 #include "physics-panel.hpp"
+#include "net-panel.hpp"
 
 namespace Gravitaris {
 
@@ -97,6 +98,10 @@ void DebugUi::BuildFrame()
             }
             if (ImGui::BeginTabItem("Starfield")) {
                 DrawStarfieldPanel(m_game);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Net")) {
+                DrawNetPanel(m_game);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Performance")) {

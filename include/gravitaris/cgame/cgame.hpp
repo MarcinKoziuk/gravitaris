@@ -15,6 +15,7 @@
 
 #include <gravitaris/cgame/camera.hpp>
 #include <gravitaris/cgame/net/snapshot-applier.hpp>
+#include <gravitaris/cgame/net/snapshot-interpolator.hpp>
 #include <gravitaris/cgame/camera-director.hpp>
 #include <gravitaris/cgame/autopilot.hpp>
 #include <gravitaris/cgame/renderer/simple-model-renderer.hpp>
@@ -73,6 +74,18 @@ protected:
     // -framing on a remote client yet).
     std::unique_ptr<WebRtcTransport> m_netTransport;
     std::unique_ptr<NetClient> m_netClient;
+
+    // Phase 4 tunables (Net debug tab): how far behind the estimated server
+    // tick remote entities render (smooths jitter, at the cost of latency)
+    // and how far past the newest received snapshot extrapolation is
+    // allowed to guess before snapping to it instead.
+    float m_interpDelaySeconds = 0.1f;
+    SnapshotInterpolator::Params m_interpParams;
+    // Diagnostics from the most recent RenderNetClient call, for the Net
+    // debug tab (estimating/rendering happens every frame; the tab just
+    // reads the last computed values rather than recomputing them itself).
+    std::uint64_t m_lastEstimatedServerTick = 0;
+    std::uint64_t m_lastRenderTick = 0;
 
     void RenderNetClient(float dtSeconds);
 
@@ -250,6 +263,17 @@ public:
     {
         if (m_netClient) m_netClient->SendInput(flags);
     }
+
+    // Net debug tab (Phase 4 interpolation tunables + diagnostics).
+    [[nodiscard]] float GetInterpDelaySeconds() const { return m_interpDelaySeconds; }
+    void SetInterpDelaySeconds(float seconds) { m_interpDelaySeconds = std::max(seconds, 0.f); }
+    [[nodiscard]] SnapshotInterpolator::Params& GetInterpParams() { return m_interpParams; }
+    [[nodiscard]] std::size_t GetSnapshotHistorySize() const
+    {
+        return m_netClient ? m_netClient->GetSnapshotHistory().size() : 0;
+    }
+    [[nodiscard]] std::uint64_t GetLastEstimatedServerTick() const { return m_lastEstimatedServerTick; }
+    [[nodiscard]] std::uint64_t GetLastRenderTick() const { return m_lastRenderTick; }
 };
 
 } // namespace Gravitaris

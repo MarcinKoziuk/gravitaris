@@ -505,6 +505,8 @@ add_executable(GravitarisNG
     src/game/net/webrtc-transport.cpp
     include/gravitaris/cgame/net/snapshot-applier.hpp
     src/cgame/net/snapshot-applier.cpp
+    include/gravitaris/cgame/net/snapshot-interpolator.hpp
+    src/cgame/net/snapshot-interpolator.cpp
     include/gravitaris/game/util/splitmix.hpp
     include/gravitaris/game/input/input-command.hpp
     include/gravitaris/game/input/input-log.hpp
@@ -610,6 +612,8 @@ add_executable(GravitarisNG
     src/cgame/ui/debug/audio-panel.cpp
     src/cgame/ui/debug/renderer-panel.hpp
     src/cgame/ui/debug/renderer-panel.cpp
+    src/cgame/ui/debug/net-panel.hpp
+    src/cgame/ui/debug/net-panel.cpp
     src/cgame/ui/debug/spawn-panel.hpp
     src/cgame/ui/debug/spawn-panel.cpp
     src/cgame/ui/debug/trajectory-panel.hpp
@@ -788,6 +792,11 @@ add_executable(gravitaris-sim-test
     src/game/net/net-client.cpp
     src/game/net/webrtc-signaling.cpp
     src/game/net/webrtc-transport.cpp
+    # Lives under cgame/net/ (SnapshotApplier's neighbor, its output feeds
+    # Apply()) but has zero GL/rendering dependency itself -- pure SnapshotData
+    # transformation -- so it's fair game here; if it ever gains one, this
+    # target will simply stop linking, exactly ADR 0001 constraint 1's point.
+    src/cgame/net/snapshot-interpolator.cpp
     src/game/game.cpp
 )
 

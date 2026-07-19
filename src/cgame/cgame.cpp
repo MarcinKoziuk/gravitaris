@@ -63,8 +63,20 @@ void CGame::ConnectToServer(const std::string& wsUrl)
 void CGame::RenderNetClient(float dtSeconds)
 {
     m_netClient->Update();
-    if (const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot()) {
-        m_snapshotApplier.Apply(*snapshot);
+
+    const std::uint64_t estimatedServerTick = m_netClient->EstimateCurrentServerTick();
+    const auto interpDelayTicks =
+            static_cast<std::uint64_t>(m_interpDelaySeconds * static_cast<float>(m_netClient->GetTickRate()));
+    const std::uint64_t renderTick =
+            estimatedServerTick > interpDelayTicks ? estimatedServerTick - interpDelayTicks : 0;
+    m_lastEstimatedServerTick = estimatedServerTick;
+    m_lastRenderTick = renderTick;
+
+    if (const std::optional<SnapshotData> interpolated =
+                SnapshotInterpolator::Compute(m_netClient->GetSnapshotHistory(), renderTick,
+                                              m_netClient->GetYourShipNetId(),
+                                              static_cast<float>(m_netClient->GetTickRate()), m_interpParams)) {
+        m_snapshotApplier.Apply(*interpolated);
     }
 
     const flecs::entity ship = m_snapshotApplier.EntityForNetId(m_netClient->GetYourShipNetId());

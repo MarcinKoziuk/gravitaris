@@ -44,11 +44,19 @@ void NetClient::Update()
                     case PacketType::Snapshot: {
                         SnapshotData snapshot;
                         if (!ReadSnapshot(reader, snapshot)) break;
+                        // Unordered transport: a snapshot older than (or
+                        // equal to -- a resend) what's already buffered
+                        // must not roll the tick/history back or duplicate
+                        // an entry.
+                        if (!m_snapshotHistory.empty() && snapshot.tick <= m_snapshotHistory.back().tick) break;
+
                         m_lastAckedSnapshotTick = snapshot.tick;
                         m_lastAckedSnapshotRecvTime = std::chrono::steady_clock::now();
                         for (const GameEvent& e : snapshot.events) {
                             if (e.seq > m_lastAckedEventSeq) m_lastAckedEventSeq = e.seq;
                         }
+                        m_snapshotHistory.push_back(snapshot);
+                        while (m_snapshotHistory.size() > SNAPSHOT_HISTORY_CAPACITY) m_snapshotHistory.pop_front();
                         m_latestSnapshot = std::move(snapshot);
                         break;
                     }

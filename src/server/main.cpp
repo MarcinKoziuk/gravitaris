@@ -32,6 +32,10 @@ using namespace Gravitaris;
 
 namespace {
 
+// M_PI is a POSIX/GNU <cmath> extension, not standard C++ -- MSVC doesn't
+// define it without _USE_MATH_DEFINES set before every <cmath> include.
+constexpr double PI = 3.14159265358979323846;
+
 // Background stdin reader: std::cin has no non-blocking read, so the main
 // tick loop can't just poll it directly without stalling on the syscall. A
 // dedicated thread blocks on getline() and hands finished lines to the main
@@ -104,7 +108,7 @@ void HandleCommand(const std::string& line, Game& game, NetServer& server, bool&
         count = std::clamp(count, 1, 100);
         const id_t shipModel = "models/ships/fighter-1"_id;
         for (int i = 0; i < count; ++i) {
-            const double angle = (2. * M_PI * static_cast<double>(i)) / static_cast<double>(count);
+            const double angle = (2. * PI * static_cast<double>(i)) / static_cast<double>(count);
             const Vector2d pos{600. * std::cos(angle), 600. * std::sin(angle)};
             game.GetEntitySpawner().SpawnAIShip(shipModel, pos, *preset);
         }
