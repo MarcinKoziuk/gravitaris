@@ -21,10 +21,10 @@ CGame::CGame(IFilesystem &filesystem)
     , m_mirrorRenderer2(m_mirrorWorld, filesystem, m_resourceLoader)
     , m_snapshotApplier(m_mirrorWorld, m_resourceLoader)
     , m_starfieldRenderer(filesystem)
-    , m_minimapRenderer(m_registry, m_physicsSystem, filesystem)
+    , m_minimapRenderer(m_registry, filesystem)
     , m_audioSystem(m_registry, m_resourceLoader, m_eventQueue)
     , m_hitFlashSystem(m_registry, m_eventQueue, *m_entitySpawner)
-    , m_cameraDirector(m_registry, m_physicsSystem, Defaults::cameraZoom)
+    , m_cameraDirector(m_registry, Defaults::cameraZoom)
     , m_indicatorRenderer(m_registry, m_resourceLoader, m_modelRenderer2)
     , m_clientPrediction(m_registry, m_physicsSystem, *m_entitySpawner, m_eventQueue)
     , m_autopilot(m_registry, m_physicsSystem)
@@ -43,7 +43,7 @@ void CGame::RenderMinimap()
 {
     const std::optional<flecs::entity> player = GetPlayer();
     const Transform* transform = player ? player->try_get<Transform>() : nullptr;
-    if (!transform) return; // between death and respawn: freeze the last frame
+    if (!transform) return; // between death and respawn (or MP: no snapshot yet): freeze the last frame
 
     const Camera& camera = m_cameraDirector.GetCamera();
     const Magnum::Vector2 playerPos{static_cast<float>(transform->pos.x()),
@@ -52,7 +52,11 @@ void CGame::RenderMinimap()
 
     // Static, not player-centered: the solar system is laid out symmetrically
     // around the origin (see Game::Start), so that's the whole map's center.
-    m_minimapRenderer.Render(Magnum::Vector2{0.f, 0.f}, playerPos, camera.GetPosition(), viewHalfExtent);
+    // In MP, everything but the own ship lives in m_mirrorWorld (see
+    // m_netClient's field comment) -- sweep it too so remote ships/planets
+    // show up exactly like single-player's real registry entities do.
+    m_minimapRenderer.Render(Magnum::Vector2{0.f, 0.f}, playerPos, camera.GetPosition(), viewHalfExtent,
+                             m_netClient ? &m_mirrorWorld : nullptr);
 }
 
 void CGame::ConnectToServer(const std::string& wsUrl)
@@ -139,9 +143,10 @@ void CGame::RenderNetClient(float dtSeconds)
     }
 
     // Real single-player camera logic against m_registry -- works for the
-    // own ship (dead-zone follow, dynamic zoom); enemy/planet framing won't
-    // engage since those only exist in the mirror world, not here.
-    m_cameraDirector.Update(GetPlayer(), m_viewportSize, dtSeconds);
+    // own ship (dead-zone follow, dynamic zoom); m_mirrorWorld is swept
+    // alongside it for enemy/planet framing, since every entity but the own
+    // ship lives there in this mode (see m_netClient's field comment).
+    m_cameraDirector.Update(GetPlayer(), m_viewportSize, dtSeconds, &m_mirrorWorld);
     Camera& camera = m_cameraDirector.GetCamera();
 
     // Blend out any reconciliation snap over ~100ms by nudging the camera,

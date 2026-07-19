@@ -13,9 +13,6 @@
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/orbit.hpp>
-#include <gravitaris/game/component/physics.hpp>
-#include <gravitaris/game/system/physics-system.hpp>
-#include <gravitaris/game/resource/body.hpp>
 
 #include <gravitaris/game/logging.hpp>
 
@@ -109,9 +106,8 @@ void EmitRect(std::vector<LineVertex>& out, const Vector2& center, const Vector2
 
 } // namespace
 
-MinimapRenderer::MinimapRenderer(flecs::world& registry, PhysicsSystem& physicsSystem, IFilesystem& filesystem)
+MinimapRenderer::MinimapRenderer(flecs::world& registry, IFilesystem& filesystem)
         : m_registry(registry)
-        , m_physicsSystem(physicsSystem)
         , m_shader(filesystem)
         , m_framebuffer({{}, TextureSize()})
 {
@@ -144,7 +140,8 @@ MinimapRenderer::MinimapRenderer(flecs::world& registry, PhysicsSystem& physicsS
 }
 
 void MinimapRenderer::Render(const Vector2& mapCenter, const Vector2& playerPos,
-                             const Vector2& viewCenter, const Vector2& viewHalfExtent)
+                             const Vector2& viewCenter, const Vector2& viewHalfExtent,
+                             flecs::world* remoteWorld)
 {
     m_framebuffer.setViewport({{}, TextureSize()})
                  .clearColor(0, BACKGROUND)
@@ -160,31 +157,35 @@ void MinimapRenderer::Render(const Vector2& mapCenter, const Vector2& playerPos,
 
     // Planets/suns: rings at their true world radius (with a visibility
     // floor). A sun has no Orbit (it sits still); an orbiting planet does --
-    // that also picks the floor and color to match the world assets.
-    m_registry.each([&](flecs::entity entity, const Transform& t, const PhysicsRef& ref) {
-        if (!entity.has<Planet>()) return;
+    // that also picks the floor and color to match the world assets. Radius
+    // comes straight off the replicated Planet component (see its own doc
+    // comment) -- no PhysicsSystem/PhysicsRef needed, so the same query works
+    // against `remoteWorld` (multiplayer's mirror world) too, swept alongside
+    // `m_registry` when set.
+    const auto considerPlanet = [&](flecs::entity entity, const Transform& t, const Planet& planet) {
         const bool isStar = !entity.has<Orbit>();
         const Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
 
-        float radius = (isStar ? m_params.starMinPx : m_params.planetMinPx) / ppu;
-        const PhysicsBody& body = m_physicsSystem.GetBody(ref);
-        if (body.body && !body.body->GetCircleShapes().empty()) {
-            radius = std::max(radius, static_cast<float>(body.body->GetCircleShapes().front().radius)
-                                              * static_cast<float>(t.scale.x()));
-        }
+        const float floorRadius = (isStar ? m_params.starMinPx : m_params.planetMinPx) / ppu;
+        const float radius = std::max(floorRadius, planet.radius * static_cast<float>(t.scale.x()));
 
         if ((pos - mapCenter).length() - radius > worldRadius) return;
         EmitBillboard(vertices, pos, radius, isStar ? SUN_COLOR : PLANET_COLOR, PRIM_RING);
-    });
+    };
+    m_registry.each(considerPlanet);
+    if (remoteWorld) remoteWorld->each(considerPlanet);
 
     // Ships: team-colored dots (same "enemy/ship" notion as the HUD arrows:
-    // damageable + real team; bullets/shrapnel have neither).
-    m_registry.each([&](flecs::entity, const Transform& t, const Team& team, const Damageable&) {
+    // damageable + real team; bullets/shrapnel have neither). Same
+    // both-worlds sweep as planets above.
+    const auto considerShip = [&](flecs::entity, const Transform& t, const Team& team, const Damageable&) {
         if (team.id == TeamId::None) return;
         const Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
         if ((pos - mapCenter).length() > worldRadius) return;
         EmitBillboard(vertices, pos, m_params.shipDotPx / ppu, Vector3{TeamColor(team.id)}, PRIM_DISC);
-    });
+    };
+    m_registry.each(considerShip);
+    if (remoteWorld) remoteWorld->each(considerShip);
 
     // Player marker: brighter, ringed, drawn on top of the team dots.
     EmitBillboard(vertices, playerPos, m_params.playerDotPx / ppu, PLAYER_COLOR, PRIM_DISC);

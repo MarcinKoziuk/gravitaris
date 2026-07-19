@@ -4,9 +4,13 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/planet.hpp>
+#include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/input/input-command.hpp>
+#include <gravitaris/game/resource/body.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 
 #include <gravitaris/cgame/resource/model.hpp>
@@ -57,9 +61,33 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot)
             }
             if (state.type == NetEntityType::Ship) {
                 entity.emplace<Controls>();
+                // Only ships are ever Team+Damageable in the real sim (see
+                // camera/minimap's "enemy"/"ship dot" queries) -- bullets can
+                // carry Team too (friendly-fire check) but never Damageable,
+                // so gating on Ship here matches that exactly.
+                entity.emplace<Damageable>(state.hp, 100.f);
             }
             if (state.type == NetEntityType::Planet) {
                 entity.emplace<GravitySource>(GravitySource{state.gravityMass, state.gravityMultiplier});
+                // Same source PhysicsSystem::GetBody(ref) used to read
+                // server-side -- reconstructed once here from the same Body
+                // resource by modelId, so camera/minimap radius queries work
+                // against this mirror world with no live PhysicsSystem (see
+                // Planet's own doc comment). Never re-derived after creation:
+                // a planet's model (and so its radius) never changes.
+                const ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(state.modelId);
+                const float radius = body->GetCircleShapes().empty()
+                        ? 0.f : static_cast<float>(body->GetCircleShapes().front().radius);
+                entity.emplace<Planet>(radius);
+                // Presence-only marker (never read for its own field values --
+                // OrbitSystem never runs against this world): camera/minimap's
+                // star-vs-planet check is `!entity.has<Orbit>()` for the real
+                // sim too, so mirroring just the presence bit (state.isStar,
+                // see its own doc comment) keeps that one check working
+                // identically in both worlds, no separate mirror-only path.
+                if (!state.isStar) {
+                    entity.emplace<Orbit>();
+                }
             }
             entity.emplace<Renderable>(m_resourceLoader.Load<Model>(state.modelId));
             entity.emplace<HitFlash>();
@@ -76,6 +104,9 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot)
 
         if (Controls* controls = entity.try_get_mut<Controls>()) {
             controls->actionFlags = UnpackControlFlags(state.controlsFlags);
+        }
+        if (Damageable* damageable = entity.try_get_mut<Damageable>()) {
+            damageable->hp = state.hp;
         }
         if (GravitySource* source = entity.try_get_mut<GravitySource>()) {
             source->mass = state.gravityMass;

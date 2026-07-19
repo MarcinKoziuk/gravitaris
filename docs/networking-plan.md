@@ -956,18 +956,44 @@ wired into net-client mode (also would likely work now that there's a real
    rather than re-guessing a fixed constant — the right value depends on
    real ship speeds/network conditions this session couldn't observe
    directly.
-3. **Minimap (and, by the same cause, other players) invisible in
-   multiplayer.** `MinimapRenderer::Render()` queries `m_registry` directly
-   for `Planet` and `Team`+`Damageable` entities — it was never told to
-   look anywhere else, and only the own ship is real `m_registry` state
-   this phase (everyone/everything else lives in the presentation-only
-   mirror world). **Not fixed yet** — this is the same root cause as the
-   already-documented "no enemy/planet camera framing" gap above, just a
-   second, independently-noticed symptom of it; a proper fix needs either
-   `MinimapRenderer` to accept an explicit world per call (it also reads
-   `PhysicsRef` for planet radius, which mirror entities don't have —
-   `EntityState::scale` could stand in) or a second minimap instance bound
-   to the mirror world. Deferred as a scoped follow-up rather than rushed.
+3. **Minimap (and, by the same cause, other players/enemy+planet camera
+   framing) invisible in multiplayer.** `MinimapRenderer::Render()` and
+   `CameraDirector`'s enemy/planet framing both queried `m_registry`
+   directly — never told to look anywhere else, and only the own ship is
+   real `m_registry` state in net-client mode (everyone/everything else
+   lives in the presentation-only mirror world). **Fixed same day
+   (2026-07-19, follow-up session)**:
+   - `Planet` promoted from an empty tag to a real component holding the
+     body's true collision radius (`float radius`, world units before
+     `Transform::scale`). Populated once at creation from the same `Body`
+     resource by modelId both in the real sim (`EntitySpawner::
+     SpawnCelestial`) and in `SnapshotApplier` for mirror-world planets —
+     no live `PhysicsSystem`/`PhysicsRef` needed to read it, which is what
+     let both consumers stop depending on `PhysicsSystem` entirely.
+   - `SnapshotApplier` also now reconstructs `Damageable` (Ship-typed
+     entities; `hp` was already on the wire) and a presence-only `Orbit`
+     (bumped `SNAPSHOT_VERSION` to 3 for one new bit, `EntityState::isStar`
+     — a sun has none) purely so the existing `!entity.has<Orbit>()`
+     star-vs-planet check keeps working unmodified in the mirror world.
+   - `CameraDirector::Update()` and `MinimapRenderer::Render()` both gained
+     an optional `flecs::world* remoteWorld` parameter: every per-entity
+     query (enemy search, planet-framing sweep, minimap's planet-ring and
+     ship-dot loops) now runs once against the primary world and, if set,
+     again against `remoteWorld` via the same shared lambda — one code
+     path, not a duplicated multiplayer variant. `CGame` passes
+     `&m_mirrorWorld` from `RenderNetClient`/`RenderMinimap`, `nullptr`
+     (i.e. unchanged behavior) from single-player's `Render()`.
+   - **Cross-world entity-identity bug caught before it shipped**:
+     `CameraDirector`'s sticky enemy-framing (`m_framedEnemy`) compares
+     `flecs::entity` handles with `==`/`!=` — but `flecs::entity`'s only
+     comparison is via its implicit `operator id_t()`, which exposes just
+     the raw 64-bit id, not which `flecs::world` it came from. Two
+     *different* worlds (`m_registry`, `m_mirrorWorld`) assign ids
+     independently, so a same-numeric-id collision across them would have
+     silently mis-identified an unrelated entity as the framed one. Fixed
+     with `CameraDirector::SameEntity(a, b)` (raw id equality *and*
+     `a.world().c_ptr() == b.world().c_ptr()`), used everywhere
+     `m_framedEnemy` is compared.
 
 **Verification status**: all four targets (native `GravitarisNG`,
 Emscripten `GravitarisNG`, `gravitaris-sim-test`, `gravitaris-server`) build
@@ -988,6 +1014,19 @@ under real (non-zero, jittery) RTT specifically — the sim-test proof drives
 `Step`/`Reconcile` directly with synthetic data, not through a live
 `NetClient`/transport round-trip the way Phase 3's `TestWebRtcRoundtrip`
 did for the protocol layer.
+
+**Follow-up (2026-07-19): minimap/camera-framing fix verification.** All
+four targets (native `GravitarisNG`, Emscripten `GravitarisNG`,
+`gravitaris-sim-test`, `gravitaris-server`) rebuilt clean after the item-3
+fix above; the full sim-test suite (including `TestClientPrediction` and
+`TestSnapshotInterpolation`, both of which build `SnapshotData`/`EntityState`
+values directly) passes unchanged, checksum-identical to before the fix —
+expected, since `Planet::radius`/`isStar` aren't part of
+`Game::ComputeStateChecksum()`'s hashed fields. **Not yet manually
+verified**: the actual "does the minimap show remote ships/planets" and
+"does enemy/planet camera framing engage for a remote target" visual gates
+— needs a real multiplayer session (two clients, one `gravitaris-server`),
+same caveat as the rest of Phase 4/5's by-feel gates above.
 
 ## Phase 6 — Bullets: predicted-cosmetic bullet + immediate feedback
 

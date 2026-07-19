@@ -72,9 +72,11 @@ protected:
     // interpolation) instead of Render()'s usual local WriteSnapshot
     // round-trip, and the own ship is a real, locally-predicted m_registry
     // entity (Phase 5's ClientPrediction) rendered through the same
-    // CameraDirector/ModelRenderer2 single-player uses -- enemy/planet
-    // camera framing still won't engage, though, since only the own ship
-    // (not remote entities) is ever real m_registry state.
+    // CameraDirector/ModelRenderer2/MinimapRenderer single-player uses.
+    // Enemy/planet camera framing and the minimap both sweep m_mirrorWorld
+    // alongside m_registry for this (CameraDirector::Update/
+    // MinimapRenderer::Render's remoteWorld parameter), since every entity
+    // but the own ship lives there, not in m_registry, in this mode.
     std::unique_ptr<WebRtcTransport> m_netTransport;
     std::unique_ptr<NetClient> m_netClient;
     ClientPrediction m_clientPrediction;

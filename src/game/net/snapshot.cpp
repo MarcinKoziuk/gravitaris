@@ -6,6 +6,7 @@
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/planet.hpp>
+#include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
@@ -17,7 +18,7 @@ namespace Gravitaris {
 
 // Bump on any wire-layout change; ReadSnapshot rejects mismatches outright
 // (no cross-version compatibility until there's a reason to have it).
-static constexpr std::uint8_t SNAPSHOT_VERSION = 2; // v2: +EntityState::gravityMass/gravityMultiplier
+static constexpr std::uint8_t SNAPSHOT_VERSION = 3; // v3: +EntityState::isStar (v2: +gravityMass/gravityMultiplier)
 
 // Sanity caps so a garbage buffer can't make ReadSnapshot allocate wildly.
 static constexpr std::uint32_t MAX_ENTITIES = 4096;
@@ -57,6 +58,9 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             state.gravityMass = static_cast<float>(source->mass);
             state.gravityMultiplier = source->multiplier;
         }
+        if (state.type == NetEntityType::Planet) {
+            state.isStar = !entity.has<Orbit>();
+        }
         out.entities.push_back(state);
     });
 
@@ -91,6 +95,7 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteF32(e.hp);
         out.WriteF32(e.gravityMass);
         out.WriteF32(e.gravityMultiplier);
+        out.WriteU8(e.isStar ? 1 : 0);
     }
 
     out.WriteU32(static_cast<std::uint32_t>(snapshot.events.size()));
@@ -152,6 +157,7 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.hp = in.ReadF32();
         e.gravityMass = in.ReadF32();
         e.gravityMultiplier = in.ReadF32();
+        e.isStar = in.ReadU8() != 0;
         out.entities.push_back(e);
     }
 

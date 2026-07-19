@@ -7,9 +7,18 @@ namespace Gravitaris {
 // is a planet for its whole life -- so a real component rather than a field on
 // something else (see CLAUDE.md's ECS component design note).
 //
-// Empty tag: add with entity.add<Planet>(), test with entity.has<Planet>();
-// flecs stores zero-sized types as tags, which can't be fetched as data in a
-// query term.
-struct Planet {};
+// Carries the body's true collision radius (world units, *before*
+// Transform::scale -- callers multiply by t.scale.x() themselves, same as the
+// PhysicsBody-based lookup this replaced). A real data component (not an
+// empty tag) so camera framing and the minimap can read it directly as a
+// query term, without a live PhysicsSystem: a net client reconstructs it once
+// at creation from the same Body resource by modelId (see
+// SnapshotApplier::Apply), so this never needs to travel on the wire itself.
+//
+// Replication class: replicated (server -> clients), but derived client-side
+// from already-replicated data (modelId) rather than sent directly.
+struct Planet {
+    float radius = 0.f;
+};
 
 } // namespace Gravitaris

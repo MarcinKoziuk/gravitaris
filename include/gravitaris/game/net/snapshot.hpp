@@ -47,6 +47,14 @@ struct EntityState {
     // with the server's.
     float gravityMass = 0.f;
     float gravityMultiplier = 1.f;
+    // Only meaningful for NetEntityType::Planet: true for a body with no
+    // Orbit (a sun, sitting still), false for one that does (an orbiting
+    // planet) -- camera/minimap's star-vs-planet color/size choice. Not the
+    // full Orbit component (center/mass/radius/theta/direction): those drive
+    // client-side position derivation, which nothing needs yet since planet
+    // position already comes from Transform like everything else; only the
+    // bit actually consumed client-side is replicated.
+    bool isStar = false;
 };
 
 // One decoded snapshot: entities in ascending-NetId order (flecs iteration

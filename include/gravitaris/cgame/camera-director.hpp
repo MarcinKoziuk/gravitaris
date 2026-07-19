@@ -17,7 +17,7 @@ namespace Gravitaris {
 // it: dead-zone follow, sticky enemy framing, dynamic (speed-driven) zoom,
 // wheel-manual zoom override, plus zoom-out-to-fit for a nearby enemy or
 // planet/sun and a zoom-in for close combat. Nothing here mutates the sim --
-// it only reads Transform/Team/Planet/PhysicsRef and writes its own Camera.
+// it only reads Transform/Team/Planet/Damageable and writes its own Camera.
 class CameraDirector {
 public:
     // Tunables for the camera director (exposed in the Camera debug tab).
@@ -60,7 +60,13 @@ public:
 
 private:
     flecs::world& m_registry;
-    PhysicsSystem& m_physicsSystem;
+
+    // Second world swept alongside m_registry for enemy/planet framing, set
+    // for the duration of one Update() call (see its own parameter doc) --
+    // multiplayer's mirror world, where every entity except the local
+    // player's own (real, m_registry-resident) predicted ship lives. Null in
+    // single-player, where m_registry alone already has everything.
+    flecs::world* m_remoteWorld = nullptr;
 
     Camera m_camera;
     bool m_cameraFollow = true;
@@ -97,6 +103,13 @@ private:
     // the framed target only switches when a rival is decisively closer
     // (FRAMING_SWITCH_FACTOR) -- pure nearest-wins would snap the pan target
     // between ships every few frames.
+    //
+    // May come from m_registry or m_remoteWorld -- two *different*
+    // flecs::world instances, each assigning ids independently, so a
+    // same-world identity check is required wherever this is compared
+    // (flecs::entity's operator== only compares the raw 64-bit id via its
+    // implicit conversion, not which world it came from -- ids from two
+    // worlds can and do collide). See SameEntity().
     flecs::entity m_framedEnemy{};
     // Eased enemy-relative offset (world units) used for the pan bias.
     // Smoothed toward the framed enemy's true offset so a target switch that
@@ -125,15 +138,20 @@ private:
 
     CameraParams m_params;
 
+    // True identity check across possibly-different worlds -- see
+    // m_framedEnemy's field comment for why raw == isn't enough.
+    static bool SameEntity(const flecs::entity& a, const flecs::entity& b);
+
     // Updates m_framedEnemy (sticky nearest hostile, see field comment) and
     // returns the framed enemy's current position, or nullopt when nothing is
     // in range. `outCoverDist` receives the distance to the farthest in-range
-    // enemy (0 if none), for the group zoom-fit.
+    // enemy (0 if none), for the group zoom-fit. Sweeps m_registry and, if
+    // set, m_remoteWorld.
     std::optional<Magnum::Vector2> SelectFramedEnemy(const Magnum::Vector2& from, TeamId playerTeam,
                                                      float& outCoverDist);
 
 public:
-    CameraDirector(flecs::world& registry, PhysicsSystem& physicsSystem, float initialZoom);
+    CameraDirector(flecs::world& registry, float initialZoom);
 
     Camera& GetCamera() { return m_camera; }
     CameraParams& GetCameraParams() { return m_params; }
@@ -151,8 +169,13 @@ public:
     // Per-frame camera director: eases position (with enemy framing) and zoom
     // (speed-driven, enemy-fit, planet-fit, close-combat, or manual override)
     // toward their targets. `player` may be a dead/invalid entity (between
-    // death and respawn) -- the update is then a no-op.
-    void Update(std::optional<flecs::entity> player, const Magnum::Vector2& viewportSize, float dtSeconds);
+    // death and respawn) -- the update is then a no-op. `remoteWorld`, when
+    // non-null, is swept alongside `player`'s own world for enemy/planet
+    // framing -- multiplayer's mirror world, so a remote ship/planet the
+    // player never locally simulates can still be framed exactly like
+    // single-player frames a local one.
+    void Update(std::optional<flecs::entity> player, const Magnum::Vector2& viewportSize, float dtSeconds,
+               flecs::world* remoteWorld = nullptr);
 };
 
 } // namespace Gravitaris

@@ -102,10 +102,16 @@ flecs::entity EntitySpawner::SpawnCelestial(id_t modelId, Vector2d position)
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
 
+    // Same source PhysicsSystem::GetBody(ref) used to read for camera/minimap
+    // radius -- baked into the Planet component now instead, so those readers
+    // don't need a live PhysicsSystem (see Planet's own doc comment).
+    const float radius = body->GetCircleShapes().empty()
+            ? 0.f : static_cast<float>(body->GetCircleShapes().front().radius);
+
     auto entity = m_registry.entity();
     entity.emplace<Transform>(position);
     entity.emplace<RigidBodyDesc>("main"_id, body);
-    entity.add<Planet>();
+    entity.emplace<Planet>(radius);
     if (body->IsGravitySource()) {
         entity.emplace<GravitySource>(
                 GravitySource{body->GetMass(), static_cast<float>(body->GetGravityMultiplier())});
