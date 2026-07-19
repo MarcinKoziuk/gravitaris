@@ -102,7 +102,21 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             InputQueue& queue = it->second.ship.get_mut<InputQueue>();
             for (const InputCommand& cmd : input.commands) {
                 if (cmd.tick <= it->second.lastQueuedInputTick) continue; // already queued, part of the resend window
-                if (cmd.tick < currentTick) ++it->second.staleInputCount; // queued anyway; InputSystem drops it itself
+                if (cmd.tick < currentTick) {
+                    // Diagnostic (2026-07-19): this command is already stale
+                    // by the time it's queued -- InputSystem will drop it on
+                    // sight (tick < step) and repeat the last-consumed flags
+                    // instead, which is a candidate cause for the "own ship
+                    // teleports" reconciliation symptom (see CGame::
+                    // ReconcileOwnShipIfNeeded's matching log). Lateness in
+                    // ticks roughly indicates whether INPUT_LEAD_TICKS is
+                    // enough slack for this connection's real RTT/jitter.
+                    ++it->second.staleInputCount;
+                    LOG(trace) << "net: peer " << peer << " input for tick " << cmd.tick
+                              << " arrived " << (currentTick - cmd.tick) << " ticks late (currentTick "
+                              << currentTick << "), dropped by InputSystem -- " << it->second.staleInputCount
+                              << " stale so far";
+                }
                 queue.Push(cmd);
                 it->second.lastQueuedInputTick = cmd.tick;
                 it->second.idleInjected = false; // fresh input: stall episode (if any) is over

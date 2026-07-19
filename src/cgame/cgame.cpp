@@ -144,6 +144,15 @@ void CGame::ReconcileOwnShipIfNeeded()
     const Magnum::Vector2 correctedPos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
     const Magnum::Vector2 preCorrectionPos{static_cast<float>(preCorrection->x()), static_cast<float>(preCorrection->y())};
     m_visualCorrectionOffset += preCorrectionPos - correctedPos;
+
+    // Diagnostic (2026-07-19): correlate correction magnitude/frequency
+    // against NetServer's "peer N input timed out"/stale-input logs to
+    // check whether corrections this large are caused by input arriving
+    // past its stamped tick (INPUT_LEAD_TICKS too tight for real RTT/
+    // jitter -- dropped server-side, repeat-last-command diverges from
+    // what was predicted) rather than ordinary f32/quantization noise.
+    LOG(trace) << "net: reconciled tick " << snapshot->tick << ", correction magnitude "
+              << (preCorrectionPos - correctedPos).length() << " world units";
 }
 
 void CGame::RenderNetClient(float dtSeconds)

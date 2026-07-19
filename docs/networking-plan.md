@@ -1297,6 +1297,47 @@ CameraDirector — so no new proof here; it's cgame-only, GL-dependent
 code). **Not yet manually verified**: needs a real multiplayer session to
 confirm the rectangle-framing jitter is actually gone.
 
+**Correction (2026-07-19, same playtest): not a camera bug.** Reproducing
+further, the symptom persisted even while the camera frame itself wasn't
+moving — the jitter is the *ship* teleporting 10-50 world units, which
+reconciliation (`ClientPrediction::Reconcile`, called from
+`ReconcileOwnShipIfNeeded`) can legitimately do: it hard-snaps the real
+Transform whenever prediction and the authoritative snapshot diverge past
+`m_positionEpsilon`, by design, so replay continues from the correct state.
+The position-framing-smoothing fix above is very likely still worth
+keeping (it closes a real, separate architectural gap — camera framing
+should never consume a mid-frame snap raw, regardless of how often
+corrections happen), but it doesn't explain 10-50-unit teleports; those are
+either large, infrequent corrections (plausible always, at that
+magnitude), or a symptom of something making corrections both large *and*
+frequent.
+
+**Leading hypothesis, not yet confirmed**: `NetClient::INPUT_LEAD_TICKS =
+2` (33ms) may be too tight for real RTT/jitter. `InputSystem` drops any
+command whose tick has already passed with zero tolerance and repeats the
+last-consumed flags instead (quake3-style) — if lead time is insufficient,
+a chunk of input arrives already stale, gets silently discarded
+server-side, and the server keeps simulating the *previous* command while
+the client predicts the *new* one; once a snapshot reveals that gap,
+reconciliation has real ground to cover, and the correction looks abrupt
+because it is one. This is a hypothesis, not a confirmed cause — added
+logging instead of guess-fixing it:
+- `CGame::ReconcileOwnShipIfNeeded` now logs (`LOG(trace)`) every
+  correction's tick and magnitude.
+- `NetServer::HandlePacket` now logs (`LOG(trace)`) every command that
+  arrives already stale, with exactly how many ticks late it was.
+- Both intentionally at the lowest severity (`trace`) — this codebase's
+  logger has no level filter (every `LOG()` call always prints, see
+  `src/game/logging.cpp`), so these are always-on and meant to be
+  correlated by eye during a real session, not gated behind a flag.
+
+Next step once real numbers are in hand: if stale-input lateness clusters
+near or above `INPUT_LEAD_TICKS`, that confirms the hypothesis and the fix
+is to grow the lead (or make it adaptive to observed RTT/jitter rather than
+a fixed constant). If corrections are large but stale-input logging stays
+quiet, the cause is elsewhere (e.g. genuine physics divergence between
+client and server Chipmunk state) and needs a different investigation.
+
 ## Phase 8 — Deferred (needs its own design pass when reached)
 
 - Delta-compressed snapshots (per-entity change masks vs last acked).
