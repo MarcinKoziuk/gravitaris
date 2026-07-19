@@ -40,7 +40,23 @@ fi
 # default, which fails with an assertion deep inside emcc.py that looks
 # unrelated to PATH at a glance. Point it at emsdk's own vendored interpreter
 # explicitly so this can't happen regardless of the calling shell's default.
-EMSDK_PYTHON="$(ls -d "$EMSDK_FOUND"/python/*/bin/python3 2>/dev/null | head -1)"
+# Two layouts to check: Mac/Linux (python/<ver>/bin/python3) and Windows
+# (python/<ver>_64bit/python.exe -- no bin/ subdir, .exe suffix, no "3" in
+# the name). A glob matching only one layout makes `ls` fail on the other
+# platform, and with `set -o pipefail` above that failure silently kills the
+# whole script via `set -e` before the first echo below ever runs -- nullglob
+# + a plain bash glob (no external `ls`) avoids that trap entirely: a
+# non-matching pattern just contributes zero loop iterations instead of an
+# error.
+EMSDK_PYTHON=""
+shopt -s nullglob
+for candidate in "$EMSDK_FOUND"/python/*/bin/python3 "$EMSDK_FOUND"/python/*/python.exe; do
+    if [[ -x "$candidate" ]]; then
+        EMSDK_PYTHON="$candidate"
+        break
+    fi
+done
+shopt -u nullglob
 if [[ -n "$EMSDK_PYTHON" ]]; then
     export EMSDK_PYTHON
 fi
