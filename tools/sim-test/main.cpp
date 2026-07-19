@@ -296,9 +296,16 @@ void TestClientPrediction()
     const std::optional<Vector2d> stale = prediction.Reconcile(5, divergent, planets);
     Require(!stale.has_value(), "prediction: re-reconciling an already-replayed tick finds nothing");
 
-    // Phase 6: predicted-cosmetic bullet + local fire feedback (same
-    // ClientPrediction/Game, continuing from tick 10).
-    auto countBullets = [&]() {
+    // Phase 6: local fire feedback (same ClientPrediction/Game, continuing
+    // from tick 10). No cosmetic bullet entity is spawned (removed
+    // 2026-07-19 -- see ClientPrediction::Step's own doc comment: one used
+    // to be, but firing at the ship's current local position/rotation while
+    // the real bullet fires INPUT_LEAD_TICKS later at wherever the ship has
+    // since moved routinely showed as two clearly separate, non-aligned
+    // bullets). Only the instant BulletFired event (driving the fire sound)
+    // is checked here now -- cooldown cadence is observable via how many
+    // times that event's seq actually advances.
+    auto countBulletEntities = [&]() {
         std::size_t count = 0;
         game.GetRegistry().each([&](flecs::entity, Bullet&) { ++count; });
         return count;
@@ -307,18 +314,19 @@ void TestClientPrediction()
     ControlFlags firing{};
     firing.firePrimary = true;
     prediction.Step(10, firing, planets);
-    Require(countBullets() == 1, "prediction: firePrimary spawns exactly one cosmetic bullet");
     Require(eventQueue.LatestSeq() == 1, "prediction: firing emits a local BulletFired event");
+    Require(countBulletEntities() == 0,
+            "prediction: no cosmetic bullet entity is spawned, only the sound-driving event");
 
     // Cooldown gates the cadence: holding the trigger for FIRE_COOLDOWN_TICKS
-    // - 1 more ticks must not spawn another bullet yet.
+    // - 1 more ticks must not emit another event yet.
     for (std::uint64_t tick = 11; tick < 10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS; ++tick) {
         prediction.Step(tick, firing, planets);
     }
-    Require(countBullets() == 1, "prediction: fire cooldown gates cadence, no bullet mid-cooldown");
+    Require(eventQueue.LatestSeq() == 1, "prediction: fire cooldown gates cadence, no event mid-cooldown");
 
     prediction.Step(10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS, firing, planets);
-    Require(countBullets() == 2, "prediction: cooldown expiring lets the next held shot fire");
+    Require(eventQueue.LatestSeq() == 2, "prediction: cooldown expiring lets the next held shot fire");
 
     // Phase 7: planet collision proxies have real collision geometry, not
     // just gravitational pull -- place a real planet body (not the earlier

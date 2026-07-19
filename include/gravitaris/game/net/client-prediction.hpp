@@ -74,12 +74,6 @@ public:
     [[nodiscard]] double GetPositionEpsilon() const { return m_positionEpsilon; }
     void SetPositionEpsilon(double epsilon) { m_positionEpsilon = std::max(epsilon, 0.0); }
 
-    // Cosmetic bullets only need to live until the server's authoritative
-    // bullet arrives and renders (~RTT/2 + input lead + interp delay), not
-    // the real BULLET_LIFETIME_SECONDS -- otherwise both streams stay
-    // visible side by side for seconds per shot.
-    static constexpr double COSMETIC_BULLET_LIFETIME_SECONDS = 0.35;
-
     // How many predicted ticks are kept -- generous headroom (3s @ 60Hz) for
     // however long a snapshot round-trip takes; older entries are dropped
     // (Reconcile() then has nothing to compare against for that tick and
@@ -100,15 +94,21 @@ public:
     // applies `flags` (rotation/thrust, and now firePrimary -- Phase 6), the
     // same weapon cooldown ShipControlsSystem uses so cadence matches, gravity
     // from `planets` (this snapshot's Planet-typed EntityStates), integrates,
-    // and records the result keyed by `tick`. On firing, spawns a sensor
-    // bullet directly into the registry (cosmetic only -- expired by the
-    // caller's own BulletLifetimeSystem, never reconciled against the
-    // server's real bullet) and emits a local BulletFired event into
-    // `eventQueue` purely so AudioSystem's existing event-driven one-shot
-    // path plays the fire sound; this event is never serialized/sent. The
-    // caller owns tick numbering (see NetClient::SendInput -- the same
-    // number must be sent on the wire for Reconcile() to later find this
-    // entry). No-op if SpawnOwnShip hasn't been called yet.
+    // and records the result keyed by `tick`. On firing, emits a local
+    // BulletFired event into `eventQueue` purely so AudioSystem's existing
+    // event-driven one-shot path plays the fire sound instantly; this event
+    // is never serialized/sent, and (as of 2026-07-19) no cosmetic bullet
+    // entity is spawned alongside it -- one used to be, but it fired at the
+    // ship's *current local* position/rotation while the real bullet the
+    // server spawns fires INPUT_LEAD_TICKS later at wherever the ship has
+    // since moved/rotated to, which routinely showed as two clearly
+    // separate, non-aligned bullets rather than one briefly doubled. The
+    // sound is the part that needs to feel instant; the only bullet ever
+    // drawn now is the real one, arriving via ordinary Phase 4
+    // interpolation, always aimed correctly. The caller owns tick numbering
+    // (see NetClient::SendInput -- the same number must be sent on the wire
+    // for Reconcile() to later find this entry). No-op if SpawnOwnShip
+    // hasn't been called yet.
     void Step(std::uint64_t tick, const ControlFlags& flags, const std::vector<EntityState>& planets);
 
     // Compares the authoritative state for `authoritativeTick` (from a

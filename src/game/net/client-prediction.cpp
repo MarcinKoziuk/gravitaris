@@ -3,7 +3,6 @@
 
 #include <chipmunk/chipmunk.h>
 
-#include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/net-id.hpp>
@@ -119,12 +118,23 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags, const
     if (flags.firePrimary && m_fireCooldown == 0) {
         m_fireCooldown = ShipControlsSystem::FIRE_COOLDOWN_TICKS;
 
-        const auto [pos, vel] = ShipControlsSystem::ComputeBulletSpawn(
-                m_ownShip.get<Transform>(), m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()));
-        const flecs::entity bullet = m_entitySpawner.SpawnBullet(
-                "models/bullets/bullet-0"_id, pos, vel, /*sensor=*/true);
-        bullet.emplace<Bullet>(COSMETIC_BULLET_LIFETIME_SECONDS, TeamId::Blue, 0.f);
-
+        // No cosmetic bullet entity here anymore (removed 2026-07-19; see
+        // docs/networking-plan.md's Phase 6 follow-up). It used to fire at
+        // the ship's *current local* position/rotation, while the real
+        // (authoritative) bullet the server actually spawns fires
+        // INPUT_LEAD_TICKS later at wherever the ship has since moved or
+        // rotated to -- once that lead grew from 2 to 8 ticks (fixing a
+        // worse bug), the gap became large enough to routinely show as two
+        // clearly separate, non-aligned bullets rather than the intended
+        // "one bullet, briefly doubled." The part that actually needs to
+        // feel instant is the sound, not the tracer, so the event alone
+        // (still driving AudioSystem's fire-and-forget one-shot) is kept;
+        // the only bullet ever drawn is the real one, arriving with
+        // ordinary Phase 4 interpolation and always aimed correctly.
+        const Magnum::Vector2d pos =
+                ShipControlsSystem::ComputeBulletSpawn(m_ownShip.get<Transform>(),
+                                                       m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()))
+                        .first;
         m_eventQueue.Emit(GameEventType::BulletFired, m_ownShip,
                           Magnum::Vector2{static_cast<float>(pos.x()), static_cast<float>(pos.y())});
     }

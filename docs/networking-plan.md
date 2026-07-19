@@ -1472,6 +1472,51 @@ guessing again — two real, independent bugs in this area already turned
 out to look superficially similar ("jitter") but had unrelated root
 causes.
 
+**Confirmed fixed (2026-07-19, real multiplayer session).** The jitter is
+gone.
+
+## Phase 6 follow-up (2026-07-19, same day): cosmetic bullet removed — it no longer aligns with the real one
+
+Reported right after the jitter fix above: briefly tapping fire always
+produced two visibly non-aligned bullets, not one. Root cause is a direct
+side effect of the `INPUT_LEAD_TICKS` raise a few sections up: the
+cosmetic bullet (Phase 6) fires at the ship's *current local*
+position/rotation, while the real, authoritative bullet the server spawns
+fires `INPUT_LEAD_TICKS` later — which just grew from 2 to 8 — at wherever
+the ship has since moved or rotated to. At a 2-tick (33ms) lead the gap
+was small enough to read as "one bullet, briefly doubled" (the accepted
+Phase 6 approximation); at 8 ticks (133ms) it became large enough to
+routinely show as two clearly separate, differently-aimed bullets. Fixing
+the frequent-jitter bug made this one worse, purely as a side effect.
+
+Rather than try to keep two independently-simulated projectiles visually
+aligned across a lead time that exists specifically to absorb jitter (a
+losing trade against future jitter spikes), removed the cosmetic bullet
+entity entirely. `ClientPrediction::Step` still emits the `BulletFired`
+event immediately on fire (driving `AudioSystem`'s instant fire-and-forget
+sound, unchanged), but no longer spawns/tracks a `Bullet` entity for it —
+Phase 6's actual stated goal was the sound feeling instant ("play the shot
+sound on input, server confirms"), not the tracer; the tracer was the part
+causing the problem. The only bullet ever drawn now is the real,
+authoritative one, arriving via ordinary Phase 4 interpolation, always
+aimed correctly since it only ever reflects the server's own simulation.
+
+`ClientPrediction::COSMETIC_BULLET_LIFETIME_SECONDS` removed (no longer
+needed, nothing left to expire). Sim-test's firing proof
+(`TestClientPrediction`) updated to match: still proves the event fires
+once per shot and cooldown gates cadence correctly (via
+`eventQueue.LatestSeq()`, not a bullet count that would now always read
+zero), plus a new explicit assertion that no bullet entity is ever
+spawned by prediction.
+
+**Verification status**: all four targets build clean; full sim-test suite
+passes including the updated firing proof; determinism checksum unchanged.
+**Not yet manually verified**: needs a real session to confirm firing
+feels acceptable with only the sound as instant feedback (no visible
+tracer until the real bullet arrives, ~normal netcode latency later) — a
+genuine trade-off accepted here, worth confirming it still *feels* good
+before calling this done.
+
 ## Phase 8 — Deferred (needs its own design pass when reached)
 
 - Delta-compressed snapshots (per-entity change masks vs last acked).
