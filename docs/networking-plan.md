@@ -1338,6 +1338,50 @@ a fixed constant). If corrections are large but stale-input logging stays
 quiet, the cause is elsewhere (e.g. genuine physics divergence between
 client and server Chipmunk state) and needs a different investigation.
 
+**Real fix found (2026-07-19, same day): the ship model itself was never
+smoothed, only the camera.** Playtesting with the logging above still in
+progress, but the actual gap was found by inspection first:
+`ModelRenderer2::Render(double)`'s parameter is unused — this renderer does
+no prevPos/pos interpolation of its own at all (unlike a typical fixed-tick
+renderer), it draws `Transform::pos` directly. The camera-framing fix
+earlier this session gave `CameraDirector` a smoothed position, but the
+*ship model* was still drawn from the raw, just-corrected Transform — so a
+reconciliation snap was always going to look like the ship itself
+teleporting, independent of anything the camera does, and independent of
+whether corrections are caused by the `INPUT_LEAD_TICKS` hypothesis above
+or ordinary prediction noise. This is very likely most or all of the
+originally-reported "ship teleports 10-50 units."
+
+One more thing worth being precise about: there is no teleport-hack /
+client-authority concern here to fix in the first place. `NetClient::
+SendInput` only ever sends control *flags* (thrust/rotate/fire); the ship's
+position is never client-reported, it's fully server-simulated from those
+flags using the server's own `PhysicsSystem`. A margin already exists for
+exactly the "don't correct trivial prediction noise" purpose --
+`ClientPrediction::m_positionEpsilon` -- widening it further would trade
+*visible occasional snaps* for *invisible unbounded drift* (nothing would
+ever pull a small-enough divergence back), which is worse, not a fix, and
+still wouldn't touch the render-side gap above.
+
+Fix: `RenderNetClient` now draws the own ship at the same smoothed position
+already computed for the camera (`smoothedPlayerPos`) instead of the raw
+Transform -- save the real `Transform::pos`, overwrite it for just this one
+`ModelRenderer2::Render` call, restore it immediately after. The actual
+simulated state the next predicted tick builds on is never touched, only
+one frame's worth of what gets drawn. Safe specifically because the own
+ship is the *only* renderable entity ever in `m_registry` in net-client
+mode (Phase 7's planet proxies deliberately carry no `Renderable`), so
+there's no risk of this transient mutation leaking into any other entity's
+render this frame.
+
+**Verification status**: all four targets build clean; full sim-test suite
+passes unchanged (this is a `cgame`-only render-path change, not exercised
+by the headless suite). **Not yet manually verified**: needs a real
+multiplayer session — both to confirm the ship no longer visibly teleports,
+and to check whether the `INPUT_LEAD_TICKS`-lateness logging above shows
+anything now that the dominant *visible* symptom should be gone regardless
+of its outcome.
+
 ## Phase 8 — Deferred (needs its own design pass when reached)
 
 - Delta-compressed snapshots (per-entity change masks vs last acked).

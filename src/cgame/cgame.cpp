@@ -225,11 +225,29 @@ void CGame::RenderNetClient(float dtSeconds)
 
     // Own ship: real local sim, drawn through the same renderer/world
     // single-player uses -- m_registry holds nothing else in this mode.
+    // ModelRenderer2::Render draws Transform::pos directly with no
+    // interpolation of its own (its `delta` parameter is unused -- unlike a
+    // typical fixed-tick renderer, there's no prevPos/pos blend here at
+    // all), so a reconciliation snap would make the ship itself visibly
+    // teleport even though the camera above already glides past it via
+    // `smoothedPlayerPos`. Draw at that same smoothed position instead: save
+    // the real Transform::pos, overwrite it just for this one render call,
+    // then restore it immediately after -- the actual simulated state (what
+    // the next predicted tick builds on) is never touched, only one frame's
+    // worth of what gets drawn.
     m_modelRenderer2.SetZoom(camera.GetZoom());
     m_modelRenderer2.SetCameraPosition(camera.GetPosition());
     m_modelRenderer2.SetLineWidth(m_lineWidthPixels);
     m_modelRenderer2.SetZoomWidthFactor(m_zoomWidthFactor);
-    m_modelRenderer2.Render(0.0);
+    if (const std::optional<flecs::entity> player = GetPlayer()) {
+        Transform& t = player->get_mut<Transform>();
+        const Vector2d realPos = t.pos;
+        t.pos = Vector2d{smoothedPlayerPos};
+        m_modelRenderer2.Render(0.0);
+        t.pos = realPos;
+    } else {
+        m_modelRenderer2.Render(0.0);
+    }
 }
 
 void CGame::Render(double delta)
