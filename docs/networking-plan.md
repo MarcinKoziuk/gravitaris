@@ -256,47 +256,198 @@ check the "Snapshot Mirror" perf section.
 
 Goal: two processes on localhost, second player visible and flying.
 
-- [ ] **3.1 Transport choice — constrained by the wasm port (2026-07-19).**
-  The browser build is a supported target, and browsers cannot open raw UDP
-  sockets: ENet only works native. So `INetTransport` (game/net/) is the
-  load-bearing decision, not ENet: `Send(peer, channel, bytes, reliable)`,
-  `Poll() -> {Connected, Disconnected, Packet}` events, implementations
-  per platform. Plan: `LoopbackTransport` first (in-process pair, protocol
-  tests in sim-test without sockets), then **WebSockets as the first real
-  transport** — Emscripten maps POSIX TCP sockets to WebSockets out of the
-  box, a native server can terminate them with a small library, and one
-  transport that works for BOTH native and browser beats maintaining two
-  from day one. TCP head-of-line blocking is acceptable at this stage (the
-  protocol's unreliable-by-redundancy design still applies; it just rides a
-  reliable pipe). ENet (or WebRTC datachannels for true unreliable-to-
-  browser) becomes a second `INetTransport` impl later **only if** HOL
-  blocking measurably hurts.
-- [ ] **3.2 Protocol v1** (all little-endian, first byte = packet type):
-  - `ClientHello {protocolVersion, name}` (reliable)
-  - `ServerWelcome {clientId, yourShipNetId, tickRate}` (reliable)
-  - `ClientInput {lastAckedSnapshotTick, count, InputCommand[count]}` —
-    unreliable, sent every client frame, containing the last ~8 commands
-    (redundancy instead of reliability, quake3-style; InputQueue dedupes by
-    tick on the server).
-  - `Snapshot {serverTick, eventSeqBase, payload}` — unreliable, 20Hz, full
-    snapshots v1 (ADR constraint 8 explicitly allows this; the EntityState
-    split is what makes deltas possible later). Events ride in every snapshot
-    from the client's acked seq; duplicates are fine (client drops seq ≤
-    cursor) — that's the loss-tolerance.
-- [ ] **3.3 Roles.** `--server [port]` (headless-capable), `--connect
-  host:port`, default = single-player (listen-server can wait; simpler to
-  debug two processes). Server: Game + transport, steps on a fixed-rate loop.
-  Client in remote mode: no local Game stepping — FeedInput sends
-  ClientInput; SnapshotApplier owns the world; render + audio consume it and
-  the replicated event stream (Phase 1/2 seams make this mostly wiring).
-- [ ] **3.4 Remote player's ship**: server spawns a player-type ship per
-  connected client and pushes that client's InputCommands into its
-  InputQueue — from the sim's perspective a network player IS the existing
-  seam, nothing new.
+- [x] **3.1a `INetTransport` + `LoopbackTransport`.** `include/gravitaris/game/net/transport.hpp`:
+  `INetTransport` (`Send(peer, channel, data, size, reliable)`, `Poll() ->
+  vector<NetEvent>` where `NetEvent` is `{Connected, Disconnected, Packet}`),
+  `PeerId`, and `SERVER_PEER = 1` — the transport-agnostic convention every
+  client-role transport must honor so `NetClient` can address "the server"
+  without knowing which transport it's actually running over.
+  `LoopbackTransport` (`game/net/loopback-transport.hpp/cpp`) connects
+  exactly two in-process endpoints via a shared pair of queues; zero platform
+  dependency by construction, so it's wasm-safe for free and is what the
+  sim-test target exercises the whole protocol over.
+- [x] **3.1b Real transport: WebRTC data channels via `libdatachannel`
+  (native) + `datachannel-wasm` (Emscripten), not WebSocket.** Still
+  constrained by the wasm port: the
+  browser build is a supported target and can't open raw UDP sockets, so
+  ENet-only was ruled out from the start. The original plan (this section,
+  previously) picked WebSockets as the one-transport-for-everyone answer.
+  Superseded after checking what WebRTC data channels actually buy over
+  WebSocket: they run SCTP-over-DTLS-over-**UDP** and support unordered/
+  unreliable delivery per channel, so a lost packet doesn't head-of-line
+  -block everything queued behind it the way TCP does — exactly the
+  loss-tolerance this protocol was already designed around (`ClientInput`'s
+  redundant last-8-commands window, `Snapshot`'s "duplicates are fine, drop
+  seq ≤ cursor" model both assume packets can just be dropped, not that they
+  must eventually arrive in order). WebSocket/TCP forces every one of those
+  redundant sends through an ordered, reliable pipe regardless — the
+  loss-tolerance design was fighting the transport instead of being served
+  by it.
+
+  `libdatachannel`/`datachannel-wasm` (both by paullouisageneau) are a
+  matched pair: `datachannel-wasm` exposes the *same C++ API* as
+  `libdatachannel`, compiled for Emscripten, delegating to the browser's own
+  built-in WebRTC implementation via JS glue — one API surface, two
+  backends, no fork of either (same "no forking libraries" rule as
+  everything else in this doc). This also resolves what looked like a
+  tension between "browser client needs WebRTC/WebSocket" and "native client
+  should be able to use something more efficient directly": a native peer
+  connecting via `libdatachannel`'s native mode *is* raw UDP/DTLS/SCTP, no
+  browser involved at all for a native-to-native connection — there's no
+  separate "efficient path" to add on top, `libdatachannel`-native already
+  is that path. The DTLS/SCTP tax (real, but modest — encryption is cheap on
+  modern hardware, framing is a handful of bytes) applies equally to native
+  and browser peers and buys built-in NAT traversal (ICE) for free, which
+  raw UDP/ENet would leave to build separately.
+
+  Tradeoff acknowledged: WebRTC's connection *setup* is genuinely heavier
+  than WebSocket's (ICE candidate gathering, a DTLS handshake, and — for
+  real internet play across NATs, not LAN/localhost testing — a STUN server;
+  a public one, e.g. Google's, is enough to start, no self-hosted
+  infrastructure required yet). Same escape-hatch philosophy as before, just
+  aimed the other way now: a leaner native-only transport (raw UDP/ENet)
+  only gets added later *if* profiling shows the DTLS/SCTP overhead actually
+  matters for native-to-native play, which is unlikely at this game's
+  traffic volume.
+
+  **Implementation (2026-07-19).** `game/net/webrtc-transport.hpp/cpp`:
+  `WebRtcTransport` wraps one `rtc::PeerConnection` + one `rtc::DataChannel`
+  (unordered, unreliable at creation, matching the protocol's own redundancy
+  design — `reliable` on `Send()` is currently ignored, same as
+  `LoopbackTransport`), constructed with a `Role` (`Offerer` = client,
+  `Answerer` = server) and handling exactly one peer connection, like
+  `LoopbackTransport`; a server juggling several WebRTC clients needs one
+  instance per client, left for whenever a real signaling server exists to
+  drive "a new client wants to connect" in the first place. WebRTC has no
+  built-in signaling — `SetLocalDescriptionCallback`/`SetLocalCandidateCallback`
+  hand the caller the SDP offer/answer and ICE candidates to relay to the
+  remote peer, `SetRemoteDescription`/`AddRemoteCandidate` feed in what
+  arrives from it; a `Connect()` method (separate from the constructor)
+  starts negotiation only after both callbacks are installed — installing
+  them after construction lost the race against the offer, which can fire
+  (and be dropped, uncaught) within microseconds of `createDataChannel`.
+
+  CMake (native): `libdatachannel` needs a TLS backend for DTLS; OpenSSL has
+  no CMake build (Perl/Configure-based), so MbedTLS (pure CMake) is fetched
+  the same FetchContent way as every other dependency. Two integration snags,
+  both fixed in `CMakeLists.txt`: (1) MbedTLS's own subdirectory build only
+  aliases `MbedTLS::mbedtls`/`mbedx509`/`mbedcrypto` individually, but
+  `libdatachannel` looks for one combined `MbedTLS::MbedTLS` target — aliased
+  manually, `mbedtls` already `PUBLIC`-links the other two so the alias pulls
+  both in transitively; (2) MbedTLS's `3rdparty/everest`/`p256m` helper libs
+  use a bare `add_library()` with no `STATIC`/`SHARED` keyword, inheriting
+  whatever `BUILD_SHARED_LIBS` RmlUi/SDL2 leave `ON` earlier in the same
+  configure — as DLLs they export no symbols (only ever linked into
+  `mbedcrypto`), so MSVC produces no `.lib` and the final link fails looking
+  for one; forced `BUILD_SHARED_LIBS OFF` scoped around just the MbedTLS
+  `FetchContent_MakeAvailable` call, restored after. Also needed:
+  `libdatachannel`'s DTLS transport unconditionally references the SRTP
+  keying-material extension (RFC 5764) even with its own `NO_MEDIA=1`, and
+  MbedTLS ships that disabled by default — enabled via
+  `cmake/mbedtls-user-config.h` + `MBEDTLS_USER_CONFIG_FILE`. CMake (wasm):
+  `datachannel-wasm` is fetched the same way and needs no extra dependency
+  wiring — it's Emscripten-only and self-contained. Both backends are linked
+  behind one `Gravitaris::WebRTC` alias target so `webrtc-transport.cpp`
+  never branches on platform.
+
+  **A real bug this surfaced, beyond the signaling race above**:
+  `NetClient::SendInput`'s `lastAckedSnapshotTick + 1` lead (the fix from
+  3.3/3.4's `LoopbackTransport` bug, below) assumed a round trip never takes
+  more than one tick — true for `LoopbackTransport`'s synchronous zero-latency
+  queue, false for any real transport, where actual RTT (WebRTC's DTLS/SCTP
+  scheduling, even on localhost) can span more than one 60Hz tick and land
+  every command already-stale on arrival, every time — the identical failure
+  mode, just caused by real latency instead of same-process queue timing.
+  Fixed by widening the lead to a named `NetClient::INPUT_LEAD_TICKS = 4`
+  constant; commands stamped further into the future than strictly needed
+  just wait harmlessly in `InputQueue` until their tick comes up (confirmed
+  by reading `InputSystem::Update`/`InputQueue`, not assumed), so this is
+  free slack, not a tuned-fragile number. Still an interim measure — real
+  clock sync / client-side prediction (Phase 5) replaces the guess entirely.
+- [x] **3.2 Protocol v1** (`game/net/protocol.hpp/cpp`, all little-endian,
+  first byte = `PacketType`): `ClientHello {protocolVersion, name}`,
+  `ServerWelcome {clientId, yourShipNetId, tickRate}`, `ClientInput
+  {lastAckedSnapshotTick, lastAckedEventSeq, commands[≤8]}`, and
+  `PacketType::Snapshot` followed directly by Phase 2's own
+  `SerializeSnapshot` bytes (no separate wrapper struct — the tick/entities/
+  events split it already has is the wire format). One deviation from the
+  sketch: `ClientInput` also carries `lastAckedEventSeq` alongside the
+  snapshot tick — the server needs to know which `GameEvent`s a peer has
+  already seen to compute the right `eventsSinceSeq` for that peer's next
+  snapshot, and it turned out cleaner to have the client report that
+  explicitly than infer it from the tick. In practice `NetServer` doesn't
+  even trust the client-reported value (see 3.4) — the field exists for a
+  future consumer, but isn't load-bearing yet.
+- [x] **3.3/3.4 `NetServer`/`NetClient` — protocol-and-spawn wiring, proven
+  over `LoopbackTransport`; real `--server`/`--connect` CLI roles not yet
+  wired into `GravitarisApplication`.** `NetServer` (`game/net/net-server.hpp
+  /cpp`) owns no `Game` itself — the caller drives the tick loop and calls
+  `IngestInput()` before `Game::Update()`, `BroadcastSnapshot()` after
+  (mirroring `GravitarisApplication`'s existing FeedInput-before/Render-after
+  split for local input). On `ClientHello` it spawns a player ship via the
+  existing `EntitySpawner::SpawnPlayer` seam and answers with
+  `ServerWelcome`; `ClientInput` commands get pushed straight into that
+  ship's `InputQueue` — from the sim's perspective a network player *is* the
+  existing input seam, confirming 3.4's premise. Snapshot broadcast tracks
+  each peer's already-sent event `seq` server-side (deliberately not trusting
+  the client's self-reported ack). `NetClient` (`game/net/net-client.hpp/
+  cpp`) sends `ClientHello` on its first `Connected` event, decodes
+  `ServerWelcome`/`Snapshot`, and exposes the latest decoded `SnapshotData`
+  to the caller — deliberately headless (ADR constraint 1): applying a
+  snapshot into a renderable world is cgame's `SnapshotApplier` (Phase 2),
+  kept a separate step so `NetClient` stays testable with zero GL dependency.
+  **A real bug this surfaced**: `NetClient::SendInput` originally took the
+  tick to stamp from the caller; `InputSystem` drops any command with
+  `tick < step` unconditionally (no staleness tolerance — see its own
+  comment). Once a command crosses any transport at all — even
+  `LoopbackTransport`'s same-process, zero-latency queue, because of the
+  one-loop-iteration gap between a client's send and the server's next poll
+  — it's already stale as soon as it's stamped with "the client's own current
+  tick," so it was being silently dropped every single time; with no clock
+  sync or local prediction yet (Phase 5), the fix was to have `NetClient`
+  stamp outgoing commands with `lastAckedSnapshotTick + 1` internally (its
+  only estimate of "the next tick the server hasn't simulated yet") rather
+  than accept a tick from the caller at all.
 
 **Done when:** two instances on one machine: both players see each other fly,
 shoot, take damage, die, respawn; kill -9 of the client doesn't disturb the
 server.
+
+**Verification status**: both targets build clean, natively (MSVC) and under
+Emscripten. `gravitaris-sim-test` extends its existing single-`Game` scenario
+with a `NetServer`/`NetClient` pair talking over a fresh
+`LoopbackTransport::CreatePair()`: asserts the handshake completes
+(`ServerWelcome` delivers a real `yourShipNetId`, `NetServer::PeerCount() ==
+1`), that the server-side entity for that NetId exists, that ticks of
+client-sent thrust input measurably move the server-side ship (`serverSpeed >
+1`, the assertion that caught the staleness bug above), and that the
+client's latest decoded snapshot's entity for its own ship cross-checks
+against the server's own `Transform` truth to within 0.5 world units (f32
+wire precision vs. the sim's doubles). Both runs of the two-run determinism
+comparison still match exactly, confirming the net code adds no
+nondeterminism.
+
+A second, separate proof (`TestWebRtcRoundtrip`, its own `Game`, deliberately
+outside the two-run determinism comparison since real ICE/DTLS timing isn't
+bit-exact) runs the identical `NetServer`/`NetClient` assertions over two
+real `WebRtcTransport` instances in one process — actual localhost UDP, DTLS
+handshake, SCTP data channel, no mocking — with the SDP offer/answer and ICE
+candidates shuttled directly between the two instances via in-process
+callbacks rather than a real signaling server (which doesn't exist yet). All
+assertions pass, confirming the transport itself (not just the protocol
+layer above it) works end to end on Windows/MSVC.
+
+Not yet attempted: verifying `datachannel-wasm` actually connects in a
+browser (the wasm build compiles and links, but nothing has driven a
+handshake through it — no signaling server exists to test against, and
+`gravitaris-sim-test` doesn't build for wasm); a real signaling server (a
+small piece of app-level infrastructure, not part of `game/`'s transport
+abstraction); WebRTC multi-peer server support (today's `WebRtcTransport` is
+1:1, like `LoopbackTransport` — a real server needs one instance per
+connected client, driven by whatever tells it a new client showed up);
+`--server`/`--connect` CLI wiring into `GravitarisApplication`. These are
+app-level integration and infrastructure decisions that deserve their own
+scoped pass rather than a blind extension of this one.
 
 ## Phase 4 — Interpolation
 

@@ -36,6 +36,8 @@ set(GT_RMLUI_TAG      "6.0")
 set(GT_POLY2TRI_TAG   "master")
 set(GT_IMGUI_TAG      "v1.91.5")
 set(GT_MAGNUMINT_TAG  "master")
+set(GT_MBEDTLS_TAG    "v3.6.2")
+set(GT_LIBDATACHANNEL_TAG "master")
 
 # ---------------------------------------------------------------------------
 # Corrade — must be fetched before Magnum; OVERRIDE_FIND_PACKAGE so that
@@ -354,6 +356,81 @@ FetchContent_Declare(MagnumIntegration
 FetchContent_MakeAvailable(MagnumIntegration)
 
 # ---------------------------------------------------------------------------
+# WebRTC transport (docs/networking-plan.md 3.1b): libdatachannel (native) /
+# datachannel-wasm (Emscripten) present the same rtc:: API, so game/net/
+# webrtc-transport.cpp compiles unchanged against either backend -- only the
+# CMake wiring below differs per platform.
+#
+# Native: libdatachannel needs a TLS backend for DTLS. OpenSSL has no CMake
+# build (Perl/Configure-based), which doesn't fit this project's
+# FetchContent-only, no-external-installs pattern -- MbedTLS is pure CMake,
+# so it's fetched the same way as every other dependency above.
+# ---------------------------------------------------------------------------
+if(NOT EMSCRIPTEN)
+    set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_TESTING  OFF CACHE BOOL "" FORCE)
+    set(MBEDTLS_USER_CONFIG_FILE "${CMAKE_SOURCE_DIR}/cmake/mbedtls-user-config.h" CACHE FILEPATH "" FORCE)
+
+    FetchContent_Declare(MbedTLS
+        GIT_REPOSITORY  https://github.com/Mbed-TLS/mbedtls.git
+        GIT_TAG         ${GT_MBEDTLS_TAG}
+        GIT_SHALLOW     TRUE
+        OVERRIDE_FIND_PACKAGE
+    )
+    # MbedTLS's own 3rdparty helper libs (everest, p256m) use a bare
+    # add_library() with no STATIC/SHARED keyword, inheriting whatever
+    # BUILD_SHARED_LIBS RmlUi/SDL2 leave ON above -- as DLLs they export no
+    # symbols (they're only ever linked into mbedcrypto), so MSVC emits no
+    # matching .lib and the final link fails looking for one. Force static
+    # for this one dependency, then restore.
+    set(_gtSavedBuildSharedLibs "${BUILD_SHARED_LIBS}")
+    set(BUILD_SHARED_LIBS OFF)
+    FetchContent_MakeAvailable(MbedTLS)
+    set(BUILD_SHARED_LIBS "${_gtSavedBuildSharedLibs}")
+
+    # MbedTLS's own CMakeLists (as a subdirectory, not installed) only
+    # aliases MbedTLS::mbedtls/mbedx509/mbedcrypto individually; libdatachannel
+    # looks for one combined MbedTLS::MbedTLS target and skips find_package()
+    # entirely if it already exists (its CMakeLists checks `if(NOT TARGET
+    # MbedTLS::MbedTLS)` first) -- mbedtls already PUBLIC-links mbedx509,
+    # which PUBLIC-links mbedcrypto, so aliasing just the top one pulls in
+    # the rest transitively.
+    if(TARGET mbedtls AND NOT TARGET MbedTLS::MbedTLS)
+        add_library(MbedTLS::MbedTLS ALIAS mbedtls)
+    endif()
+
+    set(USE_MBEDTLS  ON  CACHE BOOL "" FORCE)
+    set(NO_WEBSOCKET ON  CACHE BOOL "" FORCE) # we use raw data channels, not libdatachannel's WebSocket client
+    set(NO_MEDIA     ON  CACHE BOOL "" FORCE) # no audio/video tracks, data channels only
+    set(NO_EXAMPLES  ON  CACHE BOOL "" FORCE)
+    set(NO_TESTS     ON  CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(LibDataChannel
+        GIT_REPOSITORY  https://github.com/paullouisageneau/libdatachannel.git
+        GIT_TAG         ${GT_LIBDATACHANNEL_TAG}
+        GIT_SHALLOW     TRUE
+        GIT_SUBMODULES_RECURSE TRUE
+    )
+    FetchContent_MakeAvailable(LibDataChannel)
+
+    add_library(Gravitaris::WebRTC ALIAS datachannel-static)
+else()
+    # datachannel-wasm exposes the same rtc:: header API as libdatachannel
+    # (a subset -- no media/tracks, which we don't use) compiled against the
+    # browser's own WebRTC implementation, so game/net/webrtc-transport.cpp
+    # links against one alias regardless of platform.
+    set(GT_DATACHANNEL_WASM_TAG "master")
+    FetchContent_Declare(DatachannelWasm
+        GIT_REPOSITORY  https://github.com/paullouisageneau/datachannel-wasm.git
+        GIT_TAG         ${GT_DATACHANNEL_WASM_TAG}
+        GIT_SHALLOW     TRUE
+    )
+    FetchContent_MakeAvailable(DatachannelWasm)
+
+    add_library(Gravitaris::WebRTC ALIAS datachannel-wasm)
+endif()
+
+# ---------------------------------------------------------------------------
 # Main target
 # ---------------------------------------------------------------------------
 add_executable(GravitarisNG
@@ -405,6 +482,17 @@ add_executable(GravitarisNG
     include/gravitaris/game/net/byte-stream.hpp
     include/gravitaris/game/net/snapshot.hpp
     src/game/net/snapshot.cpp
+    include/gravitaris/game/net/transport.hpp
+    include/gravitaris/game/net/loopback-transport.hpp
+    src/game/net/loopback-transport.cpp
+    include/gravitaris/game/net/protocol.hpp
+    src/game/net/protocol.cpp
+    include/gravitaris/game/net/net-server.hpp
+    src/game/net/net-server.cpp
+    include/gravitaris/game/net/net-client.hpp
+    src/game/net/net-client.cpp
+    include/gravitaris/game/net/webrtc-transport.hpp
+    src/game/net/webrtc-transport.cpp
     include/gravitaris/cgame/net/snapshot-applier.hpp
     src/cgame/net/snapshot-applier.cpp
     include/gravitaris/game/util/splitmix.hpp
@@ -592,6 +680,8 @@ target_link_libraries(GravitarisNG PRIVATE
 
     poly2tri
 
+    Gravitaris::WebRTC
+
     "${CMAKE_DL_LIBS}"
 )
 
@@ -675,6 +765,11 @@ add_executable(gravitaris-sim-test
     src/game/spawner/entity-spawner.cpp
     src/game/scenario/classic-scenario.cpp
     src/game/net/snapshot.cpp
+    src/game/net/loopback-transport.cpp
+    src/game/net/protocol.cpp
+    src/game/net/net-server.cpp
+    src/game/net/net-client.cpp
+    src/game/net/webrtc-transport.cpp
     src/game/game.cpp
 )
 
@@ -699,6 +794,7 @@ target_link_libraries(gravitaris-sim-test PRIVATE
     chipmunk_static
     yaml-cpp::yaml-cpp
     Magnum::Magnum
+    Gravitaris::WebRTC
     "${CMAKE_DL_LIBS}"
 )
 

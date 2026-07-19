@@ -8,17 +8,26 @@
 // sim depends on something outside (state, commands, dt) -- wall-clock,
 // unseeded RNG, iteration-order-dependent hashing, etc.
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
+#include <thread>
 
 #include <gravitaris/game/fs/filesystem-physfs.hpp>
+#include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/net/byte-stream.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
+#include <gravitaris/game/net/loopback-transport.hpp>
+#include <gravitaris/game/net/net-server.hpp>
+#include <gravitaris/game/net/net-client.hpp>
+#include <gravitaris/game/net/webrtc-transport.hpp>
 #include <gravitaris/gravitaris.hpp>
 
 using namespace Gravitaris;
@@ -100,6 +109,138 @@ void TestSnapshotRoundtrip(Game& game)
             "re-serialized snapshot is byte-identical");
 }
 
+// docs/networking-plan.md 3.2-3.4: a NetServer/NetClient pair talking over a
+// LoopbackTransport (no sockets -- proves the protocol/spawn/broadcast wiring
+// itself, independent of whatever real transport Phase 3.1 eventually picks).
+// Runs entirely inside RunSimulation()'s own Game, so it shares that Game's
+// determinism gate rather than needing a second one.
+void TestNetRoundtrip(Game& game)
+{
+    auto [serverTransport, clientTransport] = LoopbackTransport::CreatePair();
+    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), *serverTransport);
+    NetClient client(*clientTransport, "sim-test-client");
+
+    // A few ticks to land the handshake (Connected -> ClientHello ->
+    // ServerWelcome), then hold thrust for a while so the round-tripped
+    // snapshot shows real motion, not just a spawn position.
+    for (int i = 0; i < 5; ++i) {
+        server.IngestInput(game.GetStep());
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+    }
+    Require(client.IsWelcomed(), "net: client welcomed after handshake");
+    Require(client.GetYourShipNetId() != 0, "net: client got a real ship NetId");
+    Require(server.PeerCount() == 1, "net: server sees exactly one peer");
+
+    const std::uint32_t shipNetId = client.GetYourShipNetId();
+    const flecs::entity shipEntity = game.GetEntitySpawner().EntityForNetId(shipNetId);
+    Require(shipEntity.is_alive(), "net: server-side entity for the welcomed NetId exists");
+
+    ControlFlags thrust{};
+    thrust.thrustForward = true;
+    for (int i = 0; i < 30; ++i) {
+        server.IngestInput(game.GetStep());
+        client.SendInput(thrust);
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+    }
+
+    Require(client.GetLatestSnapshot().has_value(), "net: client received at least one snapshot");
+    const SnapshotData& snapshot = *client.GetLatestSnapshot();
+
+    const auto it = std::find_if(snapshot.entities.begin(), snapshot.entities.end(),
+                                 [&](const EntityState& e) { return e.netId == shipNetId; });
+    Require(it != snapshot.entities.end(), "net: latest snapshot contains the client's own ship");
+
+    const Transform& serverTransform = shipEntity.get<Transform>();
+    const float serverSpeed = static_cast<float>(serverTransform.vel.length());
+    Require(serverSpeed > 1.f, "net: sustained thrust actually moved the server-side ship");
+
+    // Cross-check the replicated state against the server's own truth: f32
+    // wire precision should track a double to well under 1 world unit here.
+    const Magnum::Vector2 serverPos{static_cast<float>(serverTransform.pos.x()),
+                                    static_cast<float>(serverTransform.pos.y())};
+    Require((it->pos - serverPos).length() < 0.5f, "net: replicated position matches server truth");
+}
+
+// docs/networking-plan.md 3.1b: same NetServer/NetClient wiring as
+// TestNetRoundtrip, but over two real WebRtcTransport instances instead of
+// LoopbackTransport -- proves the actual DataChannel path (real localhost
+// UDP, DTLS, SCTP) end to end, with signaling shuttled directly between the
+// two in-process instances instead of through a real signaling server (which
+// doesn't exist yet -- see the class comment on WebRtcTransport).
+//
+// Runs in its own Game, separate from RunSimulation()'s two determinism-
+// compared runs: unlike LoopbackTransport, real ICE/DTLS establishment runs
+// on libdatachannel's own worker threads and takes a variable amount of wall
+// -clock time, so it can't be part of a bit-exact checksum comparison.
+void TestWebRtcRoundtrip()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    game.Start();
+
+    WebRtcTransport serverTransport(WebRtcTransport::Role::Answerer);
+    WebRtcTransport clientTransport(WebRtcTransport::Role::Offerer);
+
+    clientTransport.SetLocalDescriptionCallback(
+            [&](const std::string& sdp, const std::string& type) { serverTransport.SetRemoteDescription(sdp, type); });
+    clientTransport.SetLocalCandidateCallback([&](const std::string& candidate, const std::string& mid) {
+        serverTransport.AddRemoteCandidate(candidate, mid);
+    });
+    serverTransport.SetLocalDescriptionCallback(
+            [&](const std::string& sdp, const std::string& type) { clientTransport.SetRemoteDescription(sdp, type); });
+    serverTransport.SetLocalCandidateCallback([&](const std::string& candidate, const std::string& mid) {
+        clientTransport.AddRemoteCandidate(candidate, mid);
+    });
+
+    serverTransport.Connect();
+    clientTransport.Connect();
+
+    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), serverTransport);
+    NetClient client(clientTransport, "sim-test-webrtc-client");
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!client.IsWelcomed() && std::chrono::steady_clock::now() < deadline) {
+        server.IngestInput(game.GetStep());
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    Require(client.IsWelcomed(), "webrtc: client welcomed after real DataChannel handshake");
+    Require(client.GetYourShipNetId() != 0, "webrtc: client got a real ship NetId");
+    Require(server.PeerCount() == 1, "webrtc: server sees exactly one peer");
+
+    const std::uint32_t shipNetId = client.GetYourShipNetId();
+    const flecs::entity shipEntity = game.GetEntitySpawner().EntityForNetId(shipNetId);
+    Require(shipEntity.is_alive(), "webrtc: server-side entity for the welcomed NetId exists");
+
+    ControlFlags thrust{};
+    thrust.thrustForward = true;
+    for (int i = 0; i < 60; ++i) {
+        server.IngestInput(game.GetStep());
+        client.SendInput(thrust);
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    Require(client.GetLatestSnapshot().has_value(), "webrtc: client received at least one snapshot");
+    const Transform& serverTransform = shipEntity.get<Transform>();
+    const float serverSpeed = static_cast<float>(serverTransform.vel.length());
+    Require(serverSpeed > 1.f, "webrtc: sustained thrust actually moved the server-side ship");
+
+    fs.Shutdown();
+}
+
 struct RunResult {
     std::uint64_t stateChecksum;
     std::uint64_t eventChecksum; // FNV over the full GameEvent stream
@@ -145,6 +286,7 @@ RunResult RunSimulation()
     }
 
     TestSnapshotRoundtrip(game);
+    TestNetRoundtrip(game);
 
     const RunResult result{game.ComputeStateChecksum(), eventHash, game.GetEventQueue().LatestSeq()};
     fs.Shutdown();
@@ -158,6 +300,7 @@ int main()
     HasEnteredMain = true;
 
     TestByteStream();
+    TestWebRtcRoundtrip();
 
     const RunResult a = RunSimulation();
     const RunResult b = RunSimulation();
