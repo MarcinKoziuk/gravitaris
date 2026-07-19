@@ -449,6 +449,172 @@ connected client, driven by whatever tells it a new client showed up);
 app-level integration and infrastructure decisions that deserve their own
 scoped pass rather than a blind extension of this one.
 
+## Phase 3.5 — First playable multiplayer (two browsers, one server)
+
+Goal, stated as the user asked it: **two browser instances connect to one
+native Gravitaris server and play together (as team blue)**. This is the
+minimum wiring pass that turns Phase 3's proven-but-headless pieces into a
+thing two people can actually fly around in. It deliberately reuses what
+exists instead of building new subsystems:
+
+- `NetServer` already handles multiple peers (`PeerId`-keyed map) — only the
+  *transport* is 1:1 today.
+- `SpawnPlayer` already assigns `TeamId::Blue` — "as team blue" costs one
+  spawn-offset tweak, nothing more.
+- The Phase 2 Mirror path (`SnapshotApplier` + `m_mirrorRenderer2` in
+  `cgame.cpp`) **is** the remote-client render path — it just needs to be fed
+  by `NetClient::GetLatestSnapshot()` instead of the local sim's
+  `WriteSnapshot` round-trip.
+
+Explicitly out of scope (defer, don't gold-plate): interpolation (Phase 4 —
+raw 60Hz snapshot application on LAN/localhost is playable, if slightly
+steppy), prediction (Phase 5), STUN/TURN (host candidates suffice on
+LAN/localhost), disconnect/rejoin UX, lobby/matchmaking, event-driven
+audio/fx on the remote client (`SnapshotApplier`'s documented v1 gap — ships
+fly and shoot silently on the client this pass if wiring events is any real
+effort).
+
+### 3.5.1 Signaling over WebSocket — the game server is its own signaling server
+
+The one genuinely missing piece of infrastructure. A browser can't be
+handed SDP through an in-process callback; it needs a network channel that
+exists *before* the data channel does. Minimal answer: the native server
+listens with `rtc::WebSocketServer` (built into libdatachannel — currently
+compiled out by our `NO_WEBSOCKET=ON`; flip it), and clients signal over
+`rtc::WebSocket` (datachannel-wasm ships a browser-native wrapper of the
+same API unconditionally; libdatachannel provides it natively). No separate
+signaling process, no JSON dependency — tiny text frames, e.g.
+`desc\n<type>\n<sdp>` / `cand\n<mid>\n<candidate>`. Client is the Offerer
+(matches the existing role split). After the data channel opens the
+WebSocket can simply be closed. `ws://` (not `wss://`) is fine: browsers
+allow plain `ws://` to localhost, and to any host when the page itself is
+served over plain `http://` (which it is, via `python -m http.server`).
+
+- [x] Flip `NO_WEBSOCKET` to `OFF` (native CMake block).
+- [x] `WebRtcTransport` (client role) grows a
+  `ConnectSignaling(const std::string& wsUrl)` path that runs the existing
+  seam over a `rtc::WebSocket` instead of manual callbacks. Kept the manual
+  seam — the sim-test proof depends on it and it stays the transport's
+  unit-test surface. Real bug caught here: registering the local
+  -description/candidate callbacks *after* constructing the `PeerConnection`
+  loses a real race for an `Offerer` — `createDataChannel` can fire
+  `onLocalDescription` within microseconds, before a caller-installed
+  handler exists to catch it (plain callback slots, not queues). Fixed by
+  splitting construction from negotiation: a new `Connect()` method starts
+  it, called only after both callbacks are installed.
+- [x] **Risk retired: `webrtc-transport.cpp` compiles clean under
+  Emscripten** against datachannel-wasm — no API drift.
+- [x] Wire format for signaling frames extracted into
+  `game/net/webrtc-signaling.hpp/cpp` (`EncodeDescriptionFrame`/
+  `EncodeCandidateFrame`/`DecodeSignalingFrame`), shared by both the client
+  and server sides so they can't drift apart.
+
+### 3.5.2 Multi-peer server transport + headless server binary
+
+- [x] `WebRtcServerTransport : INetTransport` (native-only, guarded in
+  CMake — browsers can't listen): owns the `rtc::WebSocketServer`, and per
+  incoming WebSocket assigns the next `PeerId` and builds a
+  `PeerConnection`/`DataChannel` pair (Answerer role, driven manually rather
+  than via `ConnectSignaling`, which is the Offerer/client path), emitting
+  `Connected`/`Disconnected`/`Packet` tagged with that `PeerId`. `Send(peer,
+  ...)` routes to that peer's channel. `NetServer` needed zero changes.
+- [x] `gravitaris-server` (`tools/server/main.cpp`): the sim-test pattern
+  promoted to a long-running process — `FilesystemPhysFS` + `Game` (started
+  via `BuildClassicScenario` directly, *not* `Game::Start()`, which would
+  spawn an uncontrolled, unreplicated local player) + `NetServer` +
+  `WebRtcServerTransport`, wall-clock-paced 60Hz loop, links `game/` only.
+  Logs peer connect/welcome via the normal `LOG()` macro.
+- [x] Spawn offsets: `NetServer`'s hello handler now spaces players 200
+  world units apart on X, keyed off how many peer slots are already taken.
+
+**Gate:** met, but only for **one** client at a time so far — 3.5.1's own
+proof (`TestWebRtcSignalingRoundtrip`, below) exercises exactly this stack
+(`WebRtcServerTransport` + `gravitaris-server`'s own code path) with a
+single real client over real localhost UDP/WebSocket. A *second*
+simultaneous peer (`PeerCount() == 2`) was not separately exercised this
+pass — worth a follow-up sim-test extension before relying on it.
+
+### 3.5.3 Client mode in the app
+
+- [x] `--connect ws://host:port` (native argv, plain scan — no getopt
+  dependency added); wasm reads `?connect=...` from `window.location.search`
+  via a small `EM_ASM_PTR` block (`GetConnectUrl` in `gravitaris.cpp`).
+  **Real bug caught**: `CORRADE_TARGET_EMSCRIPTEN` isn't defined until
+  `Corrade/configure.h` has been transitively included (via the Magnum
+  headers) — an `#ifdef CORRADE_TARGET_EMSCRIPTEN` guard placed *before*
+  those includes silently evaluates false even under Emscripten, so the
+  `#include <emscripten/emscripten.h>` never happened and `EM_ASM_PTR` was
+  an undeclared identifier at the call site (the compiler then parsed the
+  JS code block as literal, invalid C++). Fixed by moving the guarded
+  include after the Magnum includes. **Second bug**: `EM_ASM_PTR`
+  stringifies its code argument through the C preprocessor, which splits on
+  *any* top-level comma (even one nested only inside JS's own parens, per
+  `em_asm.h`'s own doc comment) — `stringToUTF8(value, ptr, bytes)`'s commas
+  broke this until the whole code block was wrapped in an extra `(( ... ))`.
+- [x] Client mode wiring in `GravitarisApplication`/`CGame`: `CGame::Render()`
+  now branches to a separate `RenderNetClient()` when `IsNetClient()` — no
+  `CameraDirector::Update()` (it's bound to `m_registry`, not
+  `m_mirrorWorld`, so it can't follow a mirror-world entity; the camera hard
+  -follows the tracked ship directly via `Camera::SetPosition`/`SetZoom`
+  instead — no dead-zone/enemy-framing on a remote client yet, deliberately).
+  `tickEvent()` skips the local accumulator/fixed-step loop entirely in this
+  mode (nothing to keep in step with real time) and just forwards
+  `m_currentInput` to `NetClient::SendInput` once per frame.
+  `SnapshotApplier` grew `EntityForNetId()` so the camera can find the
+  player's own mirror-world entity.
+- [x] Camera: follows via the mechanism above.
+
+### 3.5.4 Browser proof
+
+**Two real bugs found and fixed** getting this far, both build/link-time,
+neither visible from the sim-test (native-only, no browser):
+
+1. **datachannel-wasm's `PeerConnection()` no-arg constructor is declared
+   but never defined** — a link error (`undefined symbol:
+   rtc::PeerConnection::PeerConnection()`) that only appears once something
+   in the actually-linked call graph constructs a `WebRtcTransport` (nothing
+   did, before this phase). Fixed by always passing an explicit
+   `rtc::Configuration{}`, which both backends implement identically.
+2. **datachannel-wasm's JS glue (`wasm/js/webrtc.js`) reaches into
+   `Module['HEAPU8']`/`HEAPU32` directly** to marshal SDP/candidate strings
+   and binary payloads across the JS/wasm boundary — not exported by
+   default in this Emscripten version. Silent at build time; at runtime the
+   module **aborted permanently** (`Aborted('HEAPU8' was not exported...)`)
+   the moment signaling tried to send anything, which looked identical to
+   the already-known Chrome/wasm black-screen rendering bug until traced
+   via the browser console. Fixed with
+   `-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAPU32,UTF8ToString,stringToUTF8,lengthBytesUTF8`.
+
+With both fixed: the wasm client boots in Chrome, resolves `?connect=`,
+opens the signaling WebSocket, and **the real DataChannel handshake
+completes** — confirmed server-side (`gravitaris-server` logs "peer N
+connected", meaning that peer's `WebRtcTransport::BindDataChannel`'s
+`onOpen` fired, i.e. real DTLS/SCTP established from an actual browser).
+This proves the browser/wasm side of 3.1b end to end for the first time.
+
+**What's not verified**: the client never reaches `ServerWelcome` in this
+environment, and the game canvas renders a single black frame. Traced to
+`document.hidden === true` / `document.visibilityState === "hidden"` in
+this specific browser-automation tool — Chrome fully suspends a
+`requestAnimationFrame`-driven main loop (which is how Magnum's Emscripten
+`Sdl2Application` backend runs `tickEvent`/`drawEvent`) for a
+non-foregrounded tab. This reproduces identically with **zero** networking
+code involved (a plain `?connect`-less single-player load in a second tab
+hangs the same way) — confirming it's an environment property of this
+testing tool, not a regression from this phase's changes: WebRTC/WebSocket
+connection setup happens on the browser's own networking stack, independent
+of the render loop, which is exactly why the handshake gets as far as a
+real data channel while nothing C++-side ever runs again to react to it
+(`NetClient::Update()`, which sends `ClientHello`, only runs from inside
+`tickEvent`/`Render`). **Needs verification in a real foregrounded browser
+tab** — expected to work, since everything upstream of the stalled main
+loop is now proven.
+
+**Done when (the phase gate):** two browser tabs + one native server; both
+players see each other fly and shoot as team blue; closing one tab doesn't
+disturb the server or the other client. **Not yet met** — blocked on the
+above, plus the untested second-simultaneous-peer path (3.5.2).
+
 ## Phase 4 — Interpolation
 
 Remote entities render ~100ms behind: per-entity buffer of the last N

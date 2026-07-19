@@ -27,6 +27,7 @@
 #include <gravitaris/game/net/loopback-transport.hpp>
 #include <gravitaris/game/net/net-server.hpp>
 #include <gravitaris/game/net/net-client.hpp>
+#include <gravitaris/game/net/webrtc-server-transport.hpp>
 #include <gravitaris/game/net/webrtc-transport.hpp>
 #include <gravitaris/gravitaris.hpp>
 
@@ -241,6 +242,67 @@ void TestWebRtcRoundtrip()
     fs.Shutdown();
 }
 
+// docs/networking-plan.md 3.5.1/3.5.2: proves the WebSocket signaling path
+// (WebRtcTransport::ConnectSignaling) against the multi-peer server
+// transport (WebRtcServerTransport) that gravitaris-server will drive --
+// same NetServer/NetClient assertions as TestWebRtcRoundtrip, but this time
+// the client never touches the server's PeerConnection/DataChannel
+// directly: it only knows a ws:// URL, exactly like a real remote client
+// would. Own Game, same reasoning as TestWebRtcRoundtrip for why it's kept
+// out of the two-run determinism comparison.
+void TestWebRtcSignalingRoundtrip()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    game.Start();
+
+    constexpr std::uint16_t port = 17890;
+    WebRtcServerTransport serverTransport(port);
+    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), serverTransport);
+
+    WebRtcTransport clientTransport(WebRtcTransport::Role::Offerer);
+    NetClient client(clientTransport, "sim-test-signaling-client");
+    clientTransport.ConnectSignaling("ws://127.0.0.1:" + std::to_string(port));
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!client.IsWelcomed() && std::chrono::steady_clock::now() < deadline) {
+        server.IngestInput(game.GetStep());
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    Require(client.IsWelcomed(), "webrtc-signaling: client welcomed via ws:// signaling + WebRtcServerTransport");
+    Require(client.GetYourShipNetId() != 0, "webrtc-signaling: client got a real ship NetId");
+    Require(server.PeerCount() == 1, "webrtc-signaling: server sees exactly one peer");
+
+    const std::uint32_t shipNetId = client.GetYourShipNetId();
+    const flecs::entity shipEntity = game.GetEntitySpawner().EntityForNetId(shipNetId);
+    Require(shipEntity.is_alive(), "webrtc-signaling: server-side entity for the welcomed NetId exists");
+
+    ControlFlags thrust{};
+    thrust.thrustForward = true;
+    for (int i = 0; i < 60; ++i) {
+        server.IngestInput(game.GetStep());
+        client.SendInput(thrust);
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    Require(client.GetLatestSnapshot().has_value(), "webrtc-signaling: client received at least one snapshot");
+    const Transform& serverTransform = shipEntity.get<Transform>();
+    const float serverSpeed = static_cast<float>(serverTransform.vel.length());
+    Require(serverSpeed > 1.f, "webrtc-signaling: sustained thrust actually moved the server-side ship");
+
+    fs.Shutdown();
+}
+
 struct RunResult {
     std::uint64_t stateChecksum;
     std::uint64_t eventChecksum; // FNV over the full GameEvent stream
@@ -301,6 +363,7 @@ int main()
 
     TestByteStream();
     TestWebRtcRoundtrip();
+    TestWebRtcSignalingRoundtrip();
 
     const RunResult a = RunSimulation();
     const RunResult b = RunSimulation();

@@ -32,6 +32,14 @@ public:
     SnapshotApplier(flecs::world& world, ResourceLoader& resourceLoader);
 
     void Apply(const SnapshotData& snapshot);
+
+    // The mirror-world entity for a replicated NetId, or an invalid entity if
+    // none exists (not yet applied, or absent from the latest snapshot).
+    [[nodiscard]] flecs::entity EntityForNetId(std::uint32_t netId) const
+    {
+        const auto it = m_byNetId.find(netId);
+        return it != m_byNetId.end() ? it->second : flecs::entity{};
+    }
 };
 
 } // namespace Gravitaris

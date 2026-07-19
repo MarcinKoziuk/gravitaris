@@ -5,6 +5,8 @@
 #include <memory>
 #include <chrono>
 #include <cmath>
+#include <string>
+#include <string_view>
 
 #include <flecs.h>
 
@@ -15,6 +17,13 @@
 #include <Magnum/Math/Color.h>
 #include <Magnum/Platform/Sdl2Application.h>
 #include <Magnum/Platform/GLContext.h>
+
+// CORRADE_TARGET_EMSCRIPTEN isn't defined until Corrade/configure.h (pulled
+// in transitively above) has been seen, so this must come after the Magnum
+// includes, not before.
+#ifdef CORRADE_TARGET_EMSCRIPTEN
+#include <emscripten/emscripten.h>
+#endif
 
 #include <gravitaris/gravitaris.hpp>
 #include <gravitaris/game/fs/filesystem-physfs.hpp>
@@ -42,6 +51,10 @@ bool HasEnteredMain = false;
 static double GetTime();
 static Application::Configuration CreateConfiguration(const Application::Arguments& arguments);
 static Application::GLConfiguration CreateGLConfiguration(const Application::Arguments& arguments);
+// Native: scans argv for "--connect <ws-url>". Emscripten: reads ?connect=
+// from the page's own URL (argv is never populated from it). Empty string
+// means single-player.
+static std::string GetConnectUrl(const Application::Arguments& arguments);
 
 class GravitarisApplication : public Magnum::Platform::Application {
 private:
@@ -122,7 +135,17 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     // Game before UI: the HUD document (ui/hud.rml) references the minimap's
     // live texture, which must be registered before RmlUi first resolves it.
     m_game = std::make_unique<CGame>(m_filesystem);
-    m_game->Start();
+
+    // docs/networking-plan.md 3.5.3: --connect ws://host:port (native) or
+    // ?connect=ws://host:port (wasm, read from the page URL) switches into
+    // multiplayer-client mode instead of the usual local single-player sim.
+    const std::string connectUrl = GetConnectUrl(arguments);
+    if (!connectUrl.empty()) {
+        m_game->ConnectToServer(connectUrl);
+    }
+    else {
+        m_game->Start();
+    }
 
     m_ui.RegisterLiveTexture("minimap", m_game->GetMinimapRenderer().TextureId(),
                              MinimapRenderer::TextureSize().x(), MinimapRenderer::TextureSize().y());
@@ -150,6 +173,20 @@ void GravitarisApplication::tickEvent()
     const double frameTime = std::min(rawFrameTime, .25);
 
     m_prevTime = curTime;
+
+    // Multiplayer client: no local sim to step (the server is authoritative;
+    // Render() drives NetClient::Update()/applies snapshots itself). Just
+    // forward the live keyboard state once per frame -- no accumulator/fixed
+    // -step catch-up needed since there's no local physics to keep in step
+    // with real time.
+    if (m_game->IsNetClient()) {
+        m_game->SendNetInput(m_currentInput);
+        m_currentInput.fireSecondary = false; // one-shot, same as FeedInput()
+        redraw();
+        ScopedPerfTimer timer(m_game->GetPerfMonitor(), "UI Update");
+        m_ui.Update();
+        return;
+    }
 
     m_frameTimeAccumulator += frameTime;
 
@@ -555,6 +592,40 @@ static Application::Configuration CreateConfiguration(const Application::Argumen
     conf.setWindowFlags(Application::Configuration::WindowFlag::Resizable);
     return conf;
 }
+
+#ifdef CORRADE_TARGET_EMSCRIPTEN
+static std::string GetConnectUrl(const Application::Arguments&)
+{
+    // argv is never populated from the page URL under Emscripten, so this is
+    // the only way in: read ?connect=... from window.location.search
+    // ourselves. EM_ASM_PTR hands back a malloc'd C string (per Emscripten's
+    // own convention for returning strings across the JS/C++ boundary);
+    // freed immediately after copying into the std::string we actually keep.
+    // The code block contains a comma (stringToUTF8's arg list) -- per
+    // em_asm.h's own doc comment, that requires wrapping the whole block in
+    // an extra layer of parens so the C preprocessor doesn't split it into
+    // separate macro arguments.
+    char* raw = reinterpret_cast<char*>(EM_ASM_PTR(({
+        const params = new URLSearchParams(window.location.search);
+        const value = params.get("connect") || "";
+        const bytes = lengthBytesUTF8(value) + 1;
+        const ptr = _malloc(bytes);
+        stringToUTF8(value, ptr, bytes);
+        return ptr;
+    })));
+    std::string url(raw);
+    free(raw);
+    return url;
+}
+#else
+static std::string GetConnectUrl(const Application::Arguments& arguments)
+{
+    for (int i = 1; i + 1 < arguments.argc; ++i) {
+        if (std::string_view{arguments.argv[i]} == "--connect") return arguments.argv[i + 1];
+    }
+    return {};
+}
+#endif
 
 static Application::GLConfiguration CreateGLConfiguration(const Application::Arguments&)
 {

@@ -13,6 +13,7 @@
 namespace rtc {
 class PeerConnection;
 class DataChannel;
+class WebSocket;
 } // namespace rtc
 
 namespace Gravitaris {
@@ -66,6 +67,16 @@ public:
     // just starts listening for the remote-created one via onDataChannel.
     void Connect();
 
+    // Offerer/client-role convenience: drives the signaling seam above over
+    // an rtc::WebSocket instead of manual callbacks (docs/networking-plan.md
+    // 3.5.1 -- the WebSocket carries only signaling frames, never game
+    // traffic). Installs its own local-description/candidate callbacks and
+    // calls Connect() once the socket is open, then closes the socket once
+    // the data channel itself opens. Do not also call
+    // SetLocalDescriptionCallback/SetLocalCandidateCallback/Connect() when
+    // using this path -- it owns them.
+    void ConnectSignaling(const std::string& wsUrl);
+
     // `reliable` is currently ignored: the data channel's reliability mode is
     // fixed (unordered, unreliable) at creation to match the protocol's own
     // redundancy-based design -- see the class comment.
@@ -79,6 +90,7 @@ private:
     Role m_role;
     std::shared_ptr<rtc::PeerConnection> m_pc;
     std::shared_ptr<rtc::DataChannel> m_dc;
+    std::shared_ptr<rtc::WebSocket> m_ws; // only set when using ConnectSignaling()
 
     // Poll() runs on the game thread; libdatachannel's onOpen/onMessage
     // callbacks fire from its own internal thread.

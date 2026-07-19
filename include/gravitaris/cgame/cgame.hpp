@@ -3,12 +3,15 @@
 #include <algorithm>
 #include <chrono>
 #include <optional>
+#include <string>
 
 #include <Magnum/Math/Vector2.h>
 
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/net/byte-stream.hpp>
+#include <gravitaris/game/net/net-client.hpp>
+#include <gravitaris/game/net/webrtc-transport.hpp>
 
 #include <gravitaris/cgame/camera.hpp>
 #include <gravitaris/cgame/net/snapshot-applier.hpp>
@@ -58,6 +61,20 @@ protected:
     IndicatorRenderer m_indicatorRenderer;
 
     RendererKind m_activeRenderer = RendererKind::Baked;
+
+    // Multiplayer client (docs/networking-plan.md 3.5.3): set by
+    // ConnectToServer, null otherwise (single-player, unchanged behavior).
+    // When set, Render() takes an entirely separate path -- no local sim
+    // (Game::Update() must not be called; see IsNetClient()'s doc), the
+    // mirror world is fed from real snapshots instead of Render()'s usual
+    // local WriteSnapshot round-trip, and the camera hard-follows the
+    // tracked ship directly (CameraDirector is bound to m_registry, not
+    // m_mirrorWorld, so it can't be reused here -- no dead-zone/enemy
+    // -framing on a remote client yet).
+    std::unique_ptr<WebRtcTransport> m_netTransport;
+    std::unique_ptr<NetClient> m_netClient;
+
+    void RenderNetClient();
 
     Magnum::Vector2 m_viewportSize{1280.f, 720.f};
 
@@ -213,6 +230,26 @@ public:
     std::optional<ControlFlags> ComputeAutopilotControls() { return m_autopilot.ComputeControls(GetPlayer()); }
 
     void Render(double delta);
+
+    // Switches this CGame into multiplayer-client mode: connects over the
+    // WebSocket signaling path to a gravitaris-server at wsUrl (e.g.
+    // "ws://host:port"). Call instead of Game::Start() -- the local sim
+    // never runs in this mode (see IsNetClient()), so starting it first
+    // would spawn an uncontrolled, unreplicated local player ship.
+    void ConnectToServer(const std::string& wsUrl);
+
+    // True once ConnectToServer has been called. While true, the caller
+    // (GravitarisApplication) must not call Game::Update()/CGame's normal
+    // FeedInput path -- there is no local sim to feed. Render() handles the
+    // net-client path itself either way.
+    [[nodiscard]] bool IsNetClient() const { return m_netClient != nullptr; }
+
+    // No-ops until IsNetClient() and the handshake has completed (there's no
+    // ship to control yet).
+    void SendNetInput(const ControlFlags& flags)
+    {
+        if (m_netClient) m_netClient->SendInput(flags);
+    }
 };
 
 } // namespace Gravitaris

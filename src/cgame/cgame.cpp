@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <memory>
 #include <optional>
 
 #include <gravitaris/game/logging.hpp>
@@ -52,8 +53,46 @@ void CGame::RenderMinimap()
     m_minimapRenderer.Render(Magnum::Vector2{0.f, 0.f}, playerPos, camera.GetPosition(), viewHalfExtent);
 }
 
+void CGame::ConnectToServer(const std::string& wsUrl)
+{
+    m_netTransport = std::make_unique<WebRtcTransport>(WebRtcTransport::Role::Offerer);
+    m_netClient = std::make_unique<NetClient>(*m_netTransport, "gravitaris-client");
+    m_netTransport->ConnectSignaling(wsUrl);
+}
+
+void CGame::RenderNetClient()
+{
+    m_netClient->Update();
+    if (const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot()) {
+        m_snapshotApplier.Apply(*snapshot);
+    }
+
+    Camera& camera = m_cameraDirector.GetCamera();
+    const flecs::entity ship = m_snapshotApplier.EntityForNetId(m_netClient->GetYourShipNetId());
+    if (ship.is_alive()) {
+        const Transform& t = ship.get<Transform>();
+        camera.SetPosition(Magnum::Vector2{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())});
+    }
+    camera.SetZoom(Defaults::cameraZoom);
+
+    m_starfieldRenderer.SetZoom(camera.GetZoom());
+    m_starfieldRenderer.SetCameraPosition(camera.GetPosition());
+    m_starfieldRenderer.Render();
+
+    m_mirrorRenderer2.SetZoom(camera.GetZoom());
+    m_mirrorRenderer2.SetCameraPosition(camera.GetPosition());
+    m_mirrorRenderer2.SetLineWidth(m_lineWidthPixels);
+    m_mirrorRenderer2.SetZoomWidthFactor(m_zoomWidthFactor);
+    m_mirrorRenderer2.Render(0.0);
+}
+
 void CGame::Render(double delta)
 {
+    if (m_netClient) {
+        RenderNetClient();
+        return;
+    }
+
     // Real wall-clock dt for the camera director (Render's `delta` is a fixed-
     // step interpolation fraction, not seconds). Clamped so a stall doesn't
     // snap the camera.

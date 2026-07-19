@@ -400,7 +400,7 @@ if(NOT EMSCRIPTEN)
     endif()
 
     set(USE_MBEDTLS  ON  CACHE BOOL "" FORCE)
-    set(NO_WEBSOCKET ON  CACHE BOOL "" FORCE) # we use raw data channels, not libdatachannel's WebSocket client
+    set(NO_WEBSOCKET OFF CACHE BOOL "" FORCE) # docs/networking-plan.md 3.5.1: WebSocket carries only signaling (SDP/ICE), never game traffic
     set(NO_MEDIA     ON  CACHE BOOL "" FORCE) # no audio/video tracks, data channels only
     set(NO_EXAMPLES  ON  CACHE BOOL "" FORCE)
     set(NO_TESTS     ON  CACHE BOOL "" FORCE)
@@ -491,6 +491,8 @@ add_executable(GravitarisNG
     src/game/net/net-server.cpp
     include/gravitaris/game/net/net-client.hpp
     src/game/net/net-client.cpp
+    include/gravitaris/game/net/webrtc-signaling.hpp
+    src/game/net/webrtc-signaling.cpp
     include/gravitaris/game/net/webrtc-transport.hpp
     src/game/net/webrtc-transport.cpp
     include/gravitaris/cgame/net/snapshot-applier.hpp
@@ -718,6 +720,13 @@ if(EMSCRIPTEN)
         # Embeds data/ into MEMFS at /data, populated before main() runs; see
         # the matching PHYSFS_mount("/data", ...) in filesystem-phys-fs.cpp.
         "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/data@/data"
+        # datachannel-wasm's JS glue (wasm/js/webrtc.js) reaches into the
+        # wasm heap directly (HEAPU8/HEAPU32) to marshal SDP/candidate
+        # strings and binary data-channel payloads across the JS/C++
+        # boundary -- not exported by default in this Emscripten version,
+        # which aborted the whole module (not a GL/rendering issue) the
+        # moment signaling actually tried to send anything.
+        "-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAPU32,UTF8ToString,stringToUTF8,lengthBytesUTF8"
     )
 endif()
 
@@ -769,9 +778,18 @@ add_executable(gravitaris-sim-test
     src/game/net/protocol.cpp
     src/game/net/net-server.cpp
     src/game/net/net-client.cpp
+    src/game/net/webrtc-signaling.cpp
     src/game/net/webrtc-transport.cpp
     src/game/game.cpp
 )
+
+# WebRtcServerTransport is native-only (rtc::WebSocketServer doesn't exist
+# under datachannel-wasm -- a browser can't listen) and this target is never
+# built for Emscripten in practice (tools/wasm/build.sh only builds
+# GravitarisNG), but guard it explicitly rather than rely on that.
+if(NOT EMSCRIPTEN)
+    target_sources(gravitaris-sim-test PRIVATE src/game/net/webrtc-server-transport.cpp)
+endif()
 
 target_include_directories(gravitaris-sim-test PRIVATE
     src/
@@ -804,4 +822,77 @@ elseif(TARGET physfs-static)
     target_link_libraries(gravitaris-sim-test PRIVATE physfs-static)
 elseif(TARGET physfs)
     target_link_libraries(gravitaris-sim-test PRIVATE physfs)
+endif()
+
+# ---------------------------------------------------------------------------
+# gravitaris-server -- headless dedicated server (docs/networking-plan.md
+# 3.5.2). Same game/-only sources as gravitaris-sim-test plus WebRtcServerTransport,
+# which needs rtc::WebSocketServer (native-only -- a browser can't listen).
+# ---------------------------------------------------------------------------
+if(NOT EMSCRIPTEN)
+    add_executable(gravitaris-server
+        tools/server/main.cpp
+        src/game/resource/body.cpp
+        extlibs/nanosvg/nanosvg.c
+        extlibs/clipper/clipper.cpp
+        extlibs/physfs/physfs.cpp
+        src/game/fs/filesystem-phys-fs.cpp
+        src/game/id.cpp
+        src/game/logging.cpp
+        src/game/perf-monitor.cpp
+        src/game/resource/detail/shape-common.cpp
+        src/game/resource/detail/casteljau.cpp
+        src/game/input/input-log.cpp
+        src/game/system/input-system.cpp
+        src/game/system/ai-pilot-system.cpp
+        src/game/system/ship-controls-system.cpp
+        src/game/system/bullet-lifetime-system.cpp
+        src/game/system/damage-system.cpp
+        src/game/system/death-system.cpp
+        src/game/system/physics-system.cpp
+        src/game/system/orbit-system.cpp
+        src/game/gnc/nav/trajectory-predictor.cpp
+        src/game/gnc/control/flight-controller.cpp
+        src/game/gnc/guidance/behaviors.cpp
+        src/game/gnc/ai-personality-presets.cpp
+        src/game/spawner/entity-spawner.cpp
+        src/game/scenario/classic-scenario.cpp
+        src/game/net/snapshot.cpp
+        src/game/net/protocol.cpp
+        src/game/net/net-server.cpp
+        src/game/net/webrtc-signaling.cpp
+        src/game/net/webrtc-transport.cpp
+        src/game/net/webrtc-server-transport.cpp
+        src/game/game.cpp
+    )
+
+    target_include_directories(gravitaris-server PRIVATE
+        src/
+        include/
+        extlibs/
+        ${chipmunk2d_SOURCE_DIR}/include
+    )
+
+    target_compile_definitions(gravitaris-server PRIVATE
+        GRAVITARIS_COMPILETIME_SOURCE_PATH="${CMAKE_SOURCE_DIR}"
+    )
+
+    target_compile_features(gravitaris-server PRIVATE cxx_std_20)
+
+    target_link_libraries(gravitaris-server PRIVATE
+        flecs::flecs_static
+        chipmunk_static
+        yaml-cpp::yaml-cpp
+        Magnum::Magnum
+        Gravitaris::WebRTC
+        "${CMAKE_DL_LIBS}"
+    )
+
+    if(TARGET PhysFS::PhysFS)
+        target_link_libraries(gravitaris-server PRIVATE PhysFS::PhysFS)
+    elseif(TARGET physfs-static)
+        target_link_libraries(gravitaris-server PRIVATE physfs-static)
+    elseif(TARGET physfs)
+        target_link_libraries(gravitaris-server PRIVATE physfs)
+    endif()
 endif()

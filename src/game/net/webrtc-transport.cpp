@@ -1,12 +1,17 @@
 #include <rtc/rtc.hpp>
 
+#include <gravitaris/game/net/webrtc-signaling.hpp>
 #include <gravitaris/game/net/webrtc-transport.hpp>
 
 namespace Gravitaris {
 
 WebRtcTransport::WebRtcTransport(Role role)
         : m_role(role)
-        , m_pc(std::make_shared<rtc::PeerConnection>())
+        // rtc::PeerConnection's no-arg constructor is declared but never
+        // defined in datachannel-wasm (link error under Emscripten only) --
+        // pass an explicit empty Configuration, which both backends
+        // implement and behaves identically to the no-arg ctor on native.
+        , m_pc(std::make_shared<rtc::PeerConnection>(rtc::Configuration{}))
 {}
 
 WebRtcTransport::~WebRtcTransport() = default;
@@ -28,6 +33,7 @@ void WebRtcTransport::BindDataChannel(std::shared_ptr<rtc::DataChannel> channel)
     m_dc = std::move(channel);
 
     m_dc->onOpen([this]() {
+        if (m_ws) m_ws->close(); // signaling's job is done once the data channel itself is up
         std::lock_guard lock(m_mutex);
         m_incoming.push(NetEvent{NetEventType::Connected, SERVER_PEER, {}});
     });
@@ -68,6 +74,34 @@ void WebRtcTransport::SetRemoteDescription(const std::string& sdp, const std::st
 void WebRtcTransport::AddRemoteCandidate(const std::string& candidate, const std::string& mid)
 {
     m_pc->addRemoteCandidate(rtc::Candidate(candidate, mid));
+}
+
+void WebRtcTransport::ConnectSignaling(const std::string& wsUrl)
+{
+    SetLocalDescriptionCallback([this](const std::string& sdp, const std::string& type) {
+        if (m_ws && m_ws->isOpen()) m_ws->send(EncodeDescriptionFrame(sdp, type));
+    });
+    SetLocalCandidateCallback([this](const std::string& candidate, const std::string& mid) {
+        if (m_ws && m_ws->isOpen()) m_ws->send(EncodeCandidateFrame(candidate, mid));
+    });
+
+    m_ws = std::make_shared<rtc::WebSocket>();
+    m_ws->onOpen([this]() { Connect(); });
+    m_ws->onMessage(
+            [](rtc::binary) {}, // signaling is text-only
+            [this](rtc::string data) {
+                const std::optional<SignalingFrame> frame = DecodeSignalingFrame(data);
+                if (!frame) return;
+                switch (frame->kind) {
+                    case SignalingFrame::Kind::Description:
+                        SetRemoteDescription(frame->b, frame->a);
+                        break;
+                    case SignalingFrame::Kind::Candidate:
+                        AddRemoteCandidate(frame->b, frame->a);
+                        break;
+                }
+            });
+    m_ws->open(wsUrl);
 }
 
 void WebRtcTransport::Send(PeerId peer, std::uint8_t /*channel*/, const std::uint8_t* data, std::size_t size,

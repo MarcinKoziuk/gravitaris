@@ -1,4 +1,5 @@
 #include <gravitaris/game/id.hpp>
+#include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/net/byte-stream.hpp>
@@ -23,6 +24,7 @@ void NetServer::IngestInput(std::uint64_t currentTick)
         switch (event.type) {
             case NetEventType::Connected:
                 m_peers.emplace(event.peer, PeerState{});
+                LOG(info) << "net: peer " << event.peer << " connected (" << m_peers.size() << " total)";
                 break;
             case NetEventType::Disconnected:
                 HandleDisconnect(event.peer);
@@ -52,8 +54,12 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
 
             // Placeholder spawn point/model until Phase 3 grows real player
             // -slot selection; matches Game::Start()'s single local player.
+            // Offset by however many peers already hold a slot (this one
+            // included, since Connected already inserted it) so players
+            // don't stack on top of each other.
             const id_t playerModel = "models/ships/fighter-1"_id;
-            const flecs::entity ship = m_entitySpawner.SpawnPlayer(playerModel, Vector2d{0., 0.});
+            const double spawnOffset = 200. * static_cast<double>(m_peers.size() - 1);
+            const flecs::entity ship = m_entitySpawner.SpawnPlayer(playerModel, Vector2d{spawnOffset, 0.});
             it->second.ship = ship;
             it->second.welcomed = true;
 
@@ -65,6 +71,8 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             ByteWriter writer;
             WriteServerWelcome(welcome, writer);
             m_transport.Send(peer, 0, writer.Data(), writer.Size(), true);
+            LOG(info) << "net: peer " << peer << " welcomed, ship NetId " << welcome.yourShipNetId
+                      << " at (" << spawnOffset << ", 0)";
             break;
         }
         case PacketType::ClientInput: {
