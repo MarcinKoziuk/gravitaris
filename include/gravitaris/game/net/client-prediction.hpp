@@ -116,10 +116,16 @@ public:
     // diverged past POSITION_EPSILON, snaps to the authoritative state and
     // replays every predicted tick after it (against `planets`, the same
     // snapshot's current known planet positions -- not each replayed tick's
-    // own historical ones, another accepted approximation). Returns the
-    // pre-correction predicted position (for the caller to blend a visual
-    // correction from) if a correction happened, nullopt if the tick wasn't
-    // found (already evicted, or not predicted yet) or was within epsilon.
+    // own historical ones, another accepted approximation). If a correction
+    // happened, returns where prediction currently says the ship is *right
+    // now* (i.e. the most recent predicted tick, before this correction --
+    // NOT the historical position at `authoritativeTick`, which can be many
+    // ticks in the past due to RTT + interp delay; using that instead was a
+    // real bug -- it conflated real correction error with pure travel
+    // distance covered since the reconciled tick, producing a systematic
+    // backward-then-forward-overshoot visual artifact on every correction).
+    // nullopt if the tick wasn't found (already evicted, or not predicted
+    // yet) or was within epsilon.
     std::optional<Magnum::Vector2d> Reconcile(std::uint64_t authoritativeTick, const EntityState& authoritative,
                                               const std::vector<EntityState>& planets);
 

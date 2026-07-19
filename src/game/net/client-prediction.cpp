@@ -145,12 +145,25 @@ std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t author
 
     const Magnum::Vector2d authoritativePos{static_cast<double>(authoritative.pos.x()),
                                             static_cast<double>(authoritative.pos.y())};
-    const Magnum::Vector2d preCorrectionPos = it->pos;
-    if ((preCorrectionPos - authoritativePos).length() < m_positionEpsilon) {
+    const Magnum::Vector2d oldPredictedPos = it->pos; // at the reconciled tick -- divergence check only, see below
+    if ((oldPredictedPos - authoritativePos).length() < m_positionEpsilon) {
         // Close enough: this and everything older is settled, no longer needed.
         m_history.erase(m_history.begin(), it);
         return std::nullopt;
     }
+
+    // For the caller's visual smoothing (CGame::m_visualCorrectionOffset),
+    // capture where prediction currently says the ship is *right now*
+    // (the most recent entry, before this correction) -- not `it->pos`
+    // above, which is the historical position at `authoritativeTick`. That
+    // tick can be many ticks behind "now" (RTT + interp delay), so using it
+    // here was a real bug: it made "how far to visually ease" conflate
+    // actual correction error with pure travel distance covered between the
+    // reconciled tick and now. Every correction then produced a systematic
+    // backward-then-forward-overshoot visual artifact proportional to how
+    // far the ship had moved since the reconciled tick, not to the error
+    // actually being corrected -- worse the faster the ship was moving.
+    const Magnum::Vector2d preCorrectionNowPos = m_history.back().pos;
 
     // Same current-snapshot planet positions for every replayed tick below,
     // not each one's own historical position -- an accepted approximation
@@ -175,7 +188,7 @@ std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t author
         m_history.push_back(CaptureTick(pending.tick, pending.flags));
     }
 
-    return preCorrectionPos;
+    return preCorrectionNowPos;
 }
 
 } // namespace Gravitaris

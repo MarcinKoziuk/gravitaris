@@ -1422,6 +1422,56 @@ stale-input log is still there to show whether lateness now clusters
 higher (raise further) or has gone quiet (the remaining jitter is a
 different cause and needs fresh log evidence, not a bigger constant).
 
+**Real bug found (2026-07-19, same day): `Reconcile()` was returning the
+wrong tick's position, and it's likely the dominant cause of the visible
+jitter, distinct from lead-time frequency.** The `INPUT_LEAD_TICKS` raise
+above didn't fix it: still jittery, and the shape was very specific —
+"teleported backward for ~200ms, then teleported forward past where I'd
+expect," on ordinary movement (right, then briefly left, then right +
+further). That "there and back, overshooting" shape doesn't match ordinary
+correction noise; it matches a *systematic* bug that fires on every
+correction proportional to how far the ship has traveled recently, not to
+how large the actual error is.
+
+Root cause, in `ClientPrediction::Reconcile`: it returned `it->pos` — the
+predicted position *at `authoritativeTick`*, a tick that can be many ticks
+in the past by the time the snapshot carrying it actually arrives (RTT +
+Phase 4's interpolation delay). `CGame::ReconcileOwnShipIfNeeded` then
+computed `m_visualCorrectionOffset += preCorrectionPos - correctedPos`,
+where `correctedPos` is the ship's position *right now* (after snap +
+replaying every pending tick forward to catch up). Comparing "predicted
+position back then" against "position now" measures almost entirely how
+far the ship traveled *between* those two ticks — which has nothing to do
+with correction error — not the actual divergence being corrected. The
+faster the ship was moving (or the longer RTT+interp delay made
+`authoritativeTick` lag behind "now"), the larger this bogus offset, which
+is exactly "teleport backward, hold, catch up forward past where expected"
+once the render-smoothing fix (above) started actually applying it to
+something the eye could see.
+
+Fix: `Reconcile()` now captures `m_history.back().pos` — where prediction
+says the ship is *right now*, before this correction — and returns that
+instead. Comparing "now, before" against "now, after" isolates the actual
+correction jump, nothing else. Proven in sim-test (`TestClientPrediction`):
+thrust in a straight line for many ticks so "now" is clearly far from an
+old reconciled tick, then reconcile against a target only *just* past
+epsilon from what was actually predicted back then (a real but tiny error)
+— the returned position must be close to "now", not close to the far-away
+old tick (which the old code would have returned, failing this check by
+construction, since the test asserts up front that "now" and "the old
+tick" are >50 units apart).
+
+**Verification status**: all four targets build clean; full sim-test suite
+passes including the new proof above; determinism checksum unchanged
+(`ClientPrediction` isn't part of the headless single-player sim path).
+**Not yet manually verified**: needs a real multiplayer session to confirm
+the specific "backward then overshoot" shape is gone. If jitter persists
+after both this and the `INPUT_LEAD_TICKS` raise, treat it as a third,
+distinct cause and go back to fresh log/reproduction evidence rather than
+guessing again — two real, independent bugs in this area already turned
+out to look superficially similar ("jitter") but had unrelated root
+causes.
+
 ## Phase 8 — Deferred (needs its own design pass when reached)
 
 - Delta-compressed snapshots (per-entity change masks vs last acked).

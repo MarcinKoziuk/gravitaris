@@ -342,6 +342,58 @@ void TestClientPrediction()
     Require((afterCollision - beforeCollision).length() > 0.1,
             "prediction: planet collision proxy has real shape, pushes the ship out of a deep overlap");
 
+    // Bug fix found via real multiplayer playtesting (2026-07-19):
+    // Reconcile() must return where prediction currently says the ship is
+    // ("now"), not the historical position at the reconciled tick -- using
+    // the latter conflated real correction error with pure travel distance
+    // covered since then, producing a "teleport backward, then re-catch-up
+    // forward" visual artifact on every correction (worse the more the ship
+    // had moved between the reconciled tick and now). Thrust in a straight
+    // line, no gravity, for many ticks so "now" is clearly far from an
+    // earlier reconciled tick; reconcile against a target only *just* past
+    // epsilon from what was actually predicted at that old tick (a real but
+    // tiny error, not a large intentional jump, and otherwise matching the
+    // real predicted rot/vel/angVel so the replay continues realistically)
+    // -- the returned position must be close to where the ship is right
+    // now, not close to the old tick's position (which, after many ticks of
+    // sustained thrust, is far away and would fail this check under the old
+    // buggy behavior).
+    const std::vector<EntityState> noPlanets{};
+    const std::uint64_t straightStart = collideTick + 1;
+    ControlFlags thrustOnly{};
+    thrustOnly.thrustForward = true;
+
+    Vector2d posAtReconcileTick{};
+    Magnum::Radd rotAtReconcileTick{0.};
+    Vector2d velAtReconcileTick{};
+    double angVelAtReconcileTick = 0.;
+    const std::uint64_t reconcileTick = straightStart + 5;
+    for (std::uint64_t tick = straightStart; tick < straightStart + 60; ++tick) {
+        prediction.Step(tick, thrustOnly, noPlanets);
+        if (tick == reconcileTick) {
+            const Transform& rt = prediction.GetOwnShip().get<Transform>();
+            posAtReconcileTick = rt.pos;
+            rotAtReconcileTick = rt.rot;
+            velAtReconcileTick = rt.vel;
+            angVelAtReconcileTick = rt.angVel;
+        }
+    }
+    const Vector2d posNow = prediction.GetOwnShip().get<Transform>().pos;
+    Require((posNow - posAtReconcileTick).length() > 50.0,
+            "prediction: sustained thrust moved the ship well past its position at the reconciled tick (test setup check)");
+
+    EntityState tinyDivergence{};
+    tinyDivergence.pos = Magnum::Vector2{static_cast<float>(posAtReconcileTick.x() + 9.0),
+                                        static_cast<float>(posAtReconcileTick.y())};
+    tinyDivergence.rot = static_cast<float>(static_cast<double>(rotAtReconcileTick));
+    tinyDivergence.vel = Magnum::Vector2{static_cast<float>(velAtReconcileTick.x()),
+                                        static_cast<float>(velAtReconcileTick.y())};
+    tinyDivergence.angVel = static_cast<float>(angVelAtReconcileTick);
+    const std::optional<Vector2d> preCorrectionNow = prediction.Reconcile(reconcileTick, tinyDivergence, noPlanets);
+    Require(preCorrectionNow.has_value(), "prediction: a just-past-epsilon divergence still triggers a correction");
+    Require((*preCorrectionNow - posNow).length() < 5.0,
+            "prediction: Reconcile's returned position reflects 'now', not the far-away reconciled tick");
+
     fs.Shutdown();
 }
 
