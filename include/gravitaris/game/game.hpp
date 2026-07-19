@@ -101,6 +101,9 @@ public:
     flecs::world& GetRegistry()
     { return m_registry; }
 
+    PhysicsSystem& GetPhysicsSystem()
+    { return m_physicsSystem; }
+
     std::optional<flecs::entity> GetPlayer()
     { return m_player; }
 

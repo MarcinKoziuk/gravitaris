@@ -23,9 +23,18 @@ include(FetchContent)
 
 # ---------------------------------------------------------------------------
 # Dependency versions — update these to pin to specific releases
+#
+# Several of these track no tagged release (mosra's Corrade/Magnum/
+# magnum-integration, poly2tri, libdatachannel, datachannel-wasm) -- pinned
+# below to their master HEAD as of 2026-07-19 instead of the branch name
+# itself. A moving GIT_TAG (a branch, not a commit) makes FetchContent
+# re-check the remote and potentially re-populate/rebuild that dependency on
+# every reconfigure, even when nothing local changed; pinning to a commit
+# makes the fetch idempotent. Bump these deliberately when picking up
+# upstream changes, not implicitly on every build.
 # ---------------------------------------------------------------------------
-set(GT_CORRADE_TAG    "master")
-set(GT_MAGNUM_TAG     "master")
+set(GT_CORRADE_TAG    "370491c25b964592e23e586130d49c5c9699840c") # master @ 2026-07-19
+set(GT_MAGNUM_TAG     "862ae78d4ba2932ec821c1a7b2ffffab37f48dfd") # master @ 2026-07-19
 set(GT_SDL2_TAG       "release-2.28.5")
 set(GT_CHIPMUNK_TAG   "Chipmunk-7.0.3")
 set(GT_PHYSFS_TAG     "release-3.2.0")
@@ -33,11 +42,11 @@ set(GT_FLECS_TAG      "v4.1.6")
 set(GT_YAMLCPP_TAG    "0.8.0")
 set(GT_FREETYPE_TAG   "VER-2-13-2")
 set(GT_RMLUI_TAG      "6.0")
-set(GT_POLY2TRI_TAG   "master")
+set(GT_POLY2TRI_TAG   "bf2be13216445181452bf3937410973a6dbb122f") # master @ 2026-07-19
 set(GT_IMGUI_TAG      "v1.91.5")
-set(GT_MAGNUMINT_TAG  "master")
+set(GT_MAGNUMINT_TAG  "af4754a1cf736901626fdd8d7b8fd739f7a02112") # master @ 2026-07-19
 set(GT_MBEDTLS_TAG    "v3.6.2")
-set(GT_LIBDATACHANNEL_TAG "master")
+set(GT_LIBDATACHANNEL_TAG "d5d31c7d794345d7aa536c074a9e17cbec95089d") # master @ 2026-07-19
 
 # ---------------------------------------------------------------------------
 # Corrade — must be fetched before Magnum; OVERRIDE_FIND_PACKAGE so that
@@ -427,7 +436,7 @@ else()
     # (a subset -- no media/tracks, which we don't use) compiled against the
     # browser's own WebRTC implementation, so game/net/webrtc-transport.cpp
     # links against one alias regardless of platform.
-    set(GT_DATACHANNEL_WASM_TAG "master")
+    set(GT_DATACHANNEL_WASM_TAG "3d88eb88fb7d6729e498079477dd3ae46d30ac38") # master @ 2026-07-19
     FetchContent_Declare(DatachannelWasm
         GIT_REPOSITORY  https://github.com/paullouisageneau/datachannel-wasm.git
         GIT_TAG         ${GT_DATACHANNEL_WASM_TAG}
@@ -499,6 +508,8 @@ add_executable(GravitarisNG
     src/game/net/net-server.cpp
     include/gravitaris/game/net/net-client.hpp
     src/game/net/net-client.cpp
+    include/gravitaris/game/net/client-prediction.hpp
+    src/game/net/client-prediction.cpp
     include/gravitaris/game/net/webrtc-signaling.hpp
     src/game/net/webrtc-signaling.cpp
     include/gravitaris/game/net/webrtc-transport.hpp
@@ -790,6 +801,7 @@ add_executable(gravitaris-sim-test
     src/game/net/protocol.cpp
     src/game/net/net-server.cpp
     src/game/net/net-client.cpp
+    src/game/net/client-prediction.cpp
     src/game/net/webrtc-signaling.cpp
     src/game/net/webrtc-transport.cpp
     # Lives under cgame/net/ (SnapshotApplier's neighbor, its output feeds

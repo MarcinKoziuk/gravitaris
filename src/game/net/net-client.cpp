@@ -79,12 +79,12 @@ std::uint64_t NetClient::EstimateCurrentServerTick() const
     return m_lastAckedSnapshotTick + elapsedTicks;
 }
 
-void NetClient::SendInput(const ControlFlags& flags)
+void NetClient::SendInput(std::uint64_t tick, const ControlFlags& flags)
 {
     if (!m_welcomed) return;
 
     InputCommand cmd;
-    cmd.tick = EstimateCurrentServerTick() + INPUT_LEAD_TICKS;
+    cmd.tick = tick;
     cmd.flags = flags;
     m_recentCommands.push_back(cmd);
     while (m_recentCommands.size() > CLIENT_INPUT_BACKUP) m_recentCommands.pop_front();

@@ -4,7 +4,10 @@
 
 #include <flecs.h>
 
+#include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/fwd.hpp>
+
+struct cpBody;
 
 namespace Gravitaris {
 
@@ -34,6 +37,14 @@ public:
     ~ShipControlsSystem() = default;
 
     void Update(std::uint64_t step);
+
+    // Rotation damping/turn + forward thrust only -- no weapons. Shared by
+    // Update() (every ship, every tick) and client-side prediction
+    // (docs/networking-plan.md Phase 5, own ship only): predicting a ship's
+    // movement without also predicting weapon fire (which would need
+    // client-assigned NetIds to reconcile against the server's -- Phase 6)
+    // still needs the exact same force/torque the real sim applies.
+    static void ApplyMovement(cpBody* body, const ControlFlags& flags);
 };
 
 } // namespace Gravitaris

@@ -77,15 +77,18 @@ public:
     // and InputSystem silently dropped it as stale.
     [[nodiscard]] std::uint64_t EstimateCurrentServerTick() const;
 
-    // Appends a command to the resend window and sends a ClientInput packet,
-    // targeting `EstimateCurrentServerTick() + INPUT_LEAD_TICKS`.
-    // INPUT_LEAD_TICKS is now just slack for one-way trip + jitter on top of
-    // the extrapolated estimate (rather than the estimate itself, as before):
-    // queued commands with a future tick just wait in InputQueue until due,
-    // so leading further than strictly needed costs nothing. No-ops before
-    // the handshake completes (there's no ship to control yet).
+    // Appends a command to the resend window and sends a ClientInput packet
+    // stamped with `tick`. The caller supplies it explicitly (typically
+    // `EstimateCurrentServerTick() + INPUT_LEAD_TICKS`, but see
+    // ClientPrediction: it needs the *exact* tick number it locally
+    // predicted with -- re-deriving a fresh, possibly-jittery estimate here
+    // instead would desync the two). INPUT_LEAD_TICKS is slack for one-way
+    // trip + jitter on top of the estimate: queued commands with a future
+    // tick just wait in InputQueue until due, so leading further than
+    // strictly needed costs nothing. No-ops before the handshake completes
+    // (there's no ship to control yet).
     static constexpr std::uint64_t INPUT_LEAD_TICKS = 2;
-    void SendInput(const ControlFlags& flags);
+    void SendInput(std::uint64_t tick, const ControlFlags& flags);
 
     [[nodiscard]] bool IsWelcomed() const { return m_welcomed; }
     [[nodiscard]] std::uint32_t GetYourShipNetId() const { return m_yourShipNetId; }

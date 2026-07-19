@@ -11,10 +11,12 @@ namespace Gravitaris {
 // Turns NetClient's buffered snapshot history into one synthetic snapshot
 // for a target render tick (docs/networking-plan.md Phase 4 -- "render
 // ~100ms behind, lerp between straddling snapshots"). Entities other than
-// `exemptNetId` (the local player's own ship -- prediction is Phase 5, it
-// still snaps to the latest known state) are interpolated between the two
-// snapshots straddling `renderTick`, or extrapolated (capped) past the
-// newest one if the client is running ahead of what it's received.
+// `exemptNetId` (the local player's own ship, rendered instead via Phase
+// 5's ClientPrediction -- a real, locally-simulated entity, so it's omitted
+// here entirely rather than given some snapshot-derived position) are
+// interpolated between the two snapshots straddling `renderTick`, or
+// extrapolated (capped) past the newest one if the client is running ahead
+// of what it's received.
 //
 // Presence (entity created/destroyed) follows the newer of the two
 // straddling snapshots: an entity destroyed between them is already absent

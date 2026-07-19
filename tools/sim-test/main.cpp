@@ -27,6 +27,7 @@
 #include <gravitaris/game/net/loopback-transport.hpp>
 #include <gravitaris/game/net/net-server.hpp>
 #include <gravitaris/game/net/net-client.hpp>
+#include <gravitaris/game/net/client-prediction.hpp>
 #include <gravitaris/game/net/webrtc-server-transport.hpp>
 #include <gravitaris/game/net/webrtc-transport.hpp>
 #include <gravitaris/cgame/net/snapshot-interpolator.hpp>
@@ -99,7 +100,8 @@ void TestSnapshotInterpolation()
     // Straddled lerp: remote entity moves (0,0)->(100,0) and rotates
     // 170deg -> -170deg (the short way, through 180, a 20deg delta -- not
     // the naive 340deg the long way around) between tick 10 and tick 20;
-    // own entity (exempt) sits still at both.
+    // own entity (exempt) is present in both but should never appear in the
+    // output (Phase 5: rendered via ClientPrediction instead).
     SnapshotData older;
     older.tick = 10;
     remote.pos = {0.f, 0.f};
@@ -111,7 +113,7 @@ void TestSnapshotInterpolation()
     newer.tick = 20;
     remote.pos = {100.f, 0.f};
     remote.rot = -170.f * (3.14159265f / 180.f);
-    own.pos = {50.f, 50.f}; // own moved too, but exemption should still show this (the *latest*), not an interpolated mid-point
+    own.pos = {50.f, 50.f};
     newer.entities = {remote, own};
 
     std::deque<SnapshotData> history{older, newer};
@@ -140,10 +142,7 @@ void TestSnapshotInterpolation()
         Require(std::fabs(rotDiff) < 0.01f,
                 "interp: rotation takes the shortest arc through the wrap, not the long way round");
 
-        const EntityState* ownMid = find(2);
-        Require(ownMid != nullptr, "interp: exempt (own) entity present at the straddled tick");
-        Require(std::fabs(ownMid->pos.x() - 50.f) < 0.01f && std::fabs(ownMid->pos.y() - 50.f) < 0.01f,
-                "interp: exempt entity snaps to the latest known state, not the interpolated one");
+        Require(find(2) == nullptr, "interp: exempt (own) entity is omitted, not given a snapshot-derived position");
     }
     {
         // Extrapolation past the newest snapshot, capped: remote entity has
@@ -192,6 +191,78 @@ void TestSnapshotInterpolation()
         Require(!hasDoomed, "interp: an entity destroyed between snapshots doesn't linger");
         Require(hasSpawned, "interp: an entity spawned between snapshots appears at its exact state");
     }
+}
+
+// docs/networking-plan.md Phase 5: ClientPrediction's Step/Reconcile against
+// a real (headless) Game's PhysicsSystem/EntitySpawner, so this exercises
+// actual Chipmunk integration, not just hand-computed math.
+void TestClientPrediction()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    // No game.Start() -- ClientPrediction only needs PhysicsSystem/
+    // EntitySpawner, not a populated scenario.
+    Game game(fs);
+
+    ClientPrediction prediction(game.GetRegistry(), game.GetPhysicsSystem(), game.GetEntitySpawner());
+    prediction.SpawnOwnShip("models/ships/fighter-1"_id, Vector2d{0., 0.});
+    Require(prediction.HasOwnShip(), "prediction: own ship spawns");
+
+    EntityState planet{};
+    planet.netId = 99;
+    planet.type = NetEntityType::Planet;
+    planet.pos = {1000.f, 0.f};
+    planet.gravityMass = 5000000.f; // large enough to produce a measurable pull over a few ticks
+    planet.gravityMultiplier = 1.f;
+    const std::vector<EntityState> planets{planet};
+
+    ControlFlags noInput{};
+    EntityState closeMatch{}; // captured at tick 5, below, for the no-correction case
+    for (std::uint64_t tick = 0; tick < 10; ++tick) {
+        prediction.Step(tick, noInput, planets);
+        if (tick == 5) {
+            const Transform& t = prediction.GetOwnShip().get<Transform>();
+            closeMatch.pos = Magnum::Vector2{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
+            closeMatch.rot = static_cast<float>(static_cast<double>(t.rot));
+            closeMatch.vel = Magnum::Vector2{static_cast<float>(t.vel.x()), static_cast<float>(t.vel.y())};
+            closeMatch.angVel = static_cast<float>(t.angVel);
+        }
+    }
+    const Transform& predicted = prediction.GetOwnShip().get<Transform>();
+    Require(predicted.pos.x() > 0.0, "prediction: gravity from a replicated planet pulls the predicted ship toward it");
+
+    // A close authoritative match at an already-predicted tick (exactly what
+    // was predicted for tick 5, captured above) should not trigger a
+    // correction.
+    const std::optional<Vector2d> noCorrection = prediction.Reconcile(5, closeMatch, planets);
+    Require(!noCorrection.has_value(), "prediction: an authoritative state matching the prediction triggers no correction");
+
+    // A divergent authoritative state should snap + replay.
+    EntityState divergent{};
+    divergent.pos = {500.f, 500.f}; // far from wherever tick 5 was actually predicted
+    divergent.rot = 0.f;
+    divergent.vel = {0.f, 0.f};
+    divergent.angVel = 0.f;
+    const std::optional<Vector2d> correction = prediction.Reconcile(5, divergent, planets);
+    Require(correction.has_value(), "prediction: a large divergence triggers a correction");
+
+    const Transform& corrected = prediction.GetOwnShip().get<Transform>();
+    // Ticks 6-9 replay from (500,500) under the same gravity/input as
+    // before, so the result won't be exactly (500,500) but should stay
+    // close to it (a handful of PHYSICS_DELTA ticks of drift, not a jump
+    // back toward the old, pre-correction predicted path).
+    Require((corrected.pos - Vector2d{500., 500.}).length() < 20.0,
+            "prediction: after reconciliation the ship is near the authoritative correction, replayed forward");
+
+    // Re-querying the same tick again finds nothing -- it was consumed by
+    // the replay above (history now only holds ticks after it).
+    const std::optional<Vector2d> stale = prediction.Reconcile(5, divergent, planets);
+    Require(!stale.has_value(), "prediction: re-reconciling an already-replayed tick finds nothing");
+
+    fs.Shutdown();
 }
 
 // docs/networking-plan.md 2.3: gather -> serialize -> parse -> re-serialize
@@ -256,7 +327,7 @@ void TestNetRoundtrip(Game& game)
     thrust.thrustForward = true;
     for (int i = 0; i < 30; ++i) {
         server.IngestInput(game.GetStep());
-        client.SendInput(thrust);
+        client.SendInput(client.EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS, thrust);
         game.Update();
         server.BroadcastSnapshot(game.GetStep());
         client.Update();
@@ -341,7 +412,7 @@ void TestWebRtcRoundtrip()
     thrust.thrustForward = true;
     for (int i = 0; i < 60; ++i) {
         server.IngestInput(game.GetStep());
-        client.SendInput(thrust);
+        client.SendInput(client.EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS, thrust);
         game.Update();
         server.BroadcastSnapshot(game.GetStep());
         client.Update();
@@ -402,7 +473,7 @@ void TestWebRtcSignalingRoundtrip()
     thrust.thrustForward = true;
     for (int i = 0; i < 60; ++i) {
         server.IngestInput(game.GetStep());
-        client.SendInput(thrust);
+        client.SendInput(client.EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS, thrust);
         game.Update();
         server.BroadcastSnapshot(game.GetStep());
         client.Update();
@@ -477,6 +548,7 @@ int main()
 
     TestByteStream();
     TestSnapshotInterpolation();
+    TestClientPrediction();
     TestWebRtcRoundtrip();
     TestWebRtcSignalingRoundtrip();
 

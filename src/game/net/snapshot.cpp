@@ -7,6 +7,7 @@
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/input/input-command.hpp>
 #include <gravitaris/game/net/byte-stream.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
@@ -15,7 +16,7 @@ namespace Gravitaris {
 
 // Bump on any wire-layout change; ReadSnapshot rejects mismatches outright
 // (no cross-version compatibility until there's a reason to have it).
-static constexpr std::uint8_t SNAPSHOT_VERSION = 1;
+static constexpr std::uint8_t SNAPSHOT_VERSION = 2; // v2: +EntityState::gravityMass/gravityMultiplier
 
 // Sanity caps so a garbage buffer can't make ReadSnapshot allocate wildly.
 static constexpr std::uint32_t MAX_ENTITIES = 4096;
@@ -51,6 +52,10 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
         if (const Damageable* damageable = entity.try_get<Damageable>()) {
             state.hp = damageable->hp;
         }
+        if (const GravitySource* source = entity.try_get<GravitySource>()) {
+            state.gravityMass = static_cast<float>(source->mass);
+            state.gravityMultiplier = source->multiplier;
+        }
         out.entities.push_back(state);
     });
 
@@ -83,6 +88,8 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteF32(e.angVel);
         out.WriteU8(e.controlsFlags);
         out.WriteF32(e.hp);
+        out.WriteF32(e.gravityMass);
+        out.WriteF32(e.gravityMultiplier);
     }
 
     out.WriteU32(static_cast<std::uint32_t>(snapshot.events.size()));
@@ -130,6 +137,8 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.angVel = in.ReadF32();
         e.controlsFlags = in.ReadU8();
         e.hp = in.ReadF32();
+        e.gravityMass = in.ReadF32();
+        e.gravityMultiplier = in.ReadF32();
         out.entities.push_back(e);
     }
 

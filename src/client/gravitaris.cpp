@@ -174,13 +174,25 @@ void GravitarisApplication::tickEvent()
 
     m_prevTime = curTime;
 
-    // Multiplayer client: no local sim to step (the server is authoritative;
-    // Render() drives NetClient::Update()/applies snapshots itself). Just
-    // forward the live keyboard state once per frame -- no accumulator/fixed
-    // -step catch-up needed since there's no local physics to keep in step
-    // with real time.
+    // Multiplayer client: the server is authoritative, but the own ship is
+    // locally predicted (docs/networking-plan.md Phase 5) and needs the
+    // same fixed-step catch-up single-player physics gets, so predicted
+    // ticks stay exactly Game::PHYSICS_DELTA apart regardless of frame
+    // rate. Render() still drives NetClient::Update()/reconciliation/
+    // remote-entity interpolation itself.
     if (m_game->IsNetClient()) {
-        m_game->SendNetInput(m_currentInput);
+        m_frameTimeAccumulator += frameTime;
+        static constexpr int MAX_STEPS_PER_FRAME = 5;
+        int steps = 0;
+        while (m_frameTimeAccumulator >= Game::PHYSICS_DELTA) {
+            if (steps >= MAX_STEPS_PER_FRAME) {
+                m_frameTimeAccumulator = 0.0;
+                break;
+            }
+            m_game->TickNetClient(m_currentInput);
+            m_frameTimeAccumulator -= Game::PHYSICS_DELTA;
+            ++steps;
+        }
         m_currentInput.fireSecondary = false; // one-shot, same as FeedInput()
         redraw();
         ScopedPerfTimer timer(m_game->GetPerfMonitor(), "UI Update");

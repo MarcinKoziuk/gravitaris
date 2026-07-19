@@ -286,22 +286,4 @@ void CameraDirector::Update(std::optional<flecs::entity> player, const Magnum::V
     m_camera.SetZoom(m_cameraZoom);
 }
 
-void CameraDirector::UpdateNetClient(const Magnum::Vector2& shipPos, float baseZoom, float dtSeconds)
-{
-    m_camera.SetPosition(shipPos);
-
-    if (m_manualZoomActive) {
-        m_manualZoomGraceRemaining -= dtSeconds;
-        if (m_manualZoomGraceRemaining <= 0.f) {
-            m_manualZoomActive = false;
-        }
-    }
-
-    const float zoomTarget = m_manualZoomActive ? m_manualZoom : baseZoom;
-    const float tau = m_manualZoomActive ? m_params.manualZoomTau : m_params.zoomTau;
-    const float alpha = 1.f - std::exp(-dtSeconds / std::max(tau, 1e-3f));
-    m_cameraZoom += (zoomTarget - m_cameraZoom) * alpha;
-    m_camera.SetZoom(m_cameraZoom);
-}
-
 } // namespace Gravitaris

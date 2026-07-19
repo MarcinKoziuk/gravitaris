@@ -31,6 +31,18 @@ void DrawNetPanel(CGame& game)
     ImGui::SetItemTooltip("How far past the newest received snapshot entities are allowed to "
                           "extrapolate (via velocity) before snapping to it instead.");
 
+    ImGui::SeparatorText("Prediction (docs/networking-plan.md Phase 5)");
+
+    float epsilon = static_cast<float>(game.GetPredictionEpsilon());
+    ImGui::SetNextItemWidth(160.f);
+    if (ImGui::SliderFloat("Reconcile epsilon (world units)", &epsilon, 0.f, 50.f, "%.1f")) {
+        game.SetPredictionEpsilon(epsilon);
+    }
+    ImGui::SetItemTooltip("Position error past which the own ship snaps to the server's "
+                          "authoritative state and replays pending input. Too low corrects on "
+                          "ordinary prediction noise (visible as camera jitter); too high lets "
+                          "real desyncs linger uncorrected.");
+
     ImGui::SeparatorText("Diagnostics");
     ImGui::Text("Snapshot history: %zu buffered", game.GetSnapshotHistorySize());
     ImGui::Text("Estimated server tick: %llu", static_cast<unsigned long long>(game.GetLastEstimatedServerTick()));

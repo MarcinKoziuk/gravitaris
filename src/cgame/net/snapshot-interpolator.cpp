@@ -113,16 +113,15 @@ std::optional<SnapshotData> SnapshotInterpolator::Compute(const std::deque<Snaps
         out.events = newer.events;
     }
 
-    // Own ship: prediction is Phase 5, so it still snaps to the latest known
-    // state rather than rendering delayed/interpolated like everything else.
+    // Own ship: Phase 5's ClientPrediction renders it via a real, locally
+    // -simulated entity instead, so it's omitted here entirely rather than
+    // included at some snapshot-derived position (interpolated, latest, or
+    // otherwise) -- there would be two competing sources of truth for the
+    // same ship on screen otherwise.
     if (exemptNetId != 0) {
-        const EntityState* latestOwn = FindByNetId(history.back(), exemptNetId);
-        if (latestOwn) {
-            const auto it = std::find_if(out.entities.begin(), out.entities.end(),
-                                         [&](const EntityState& e) { return e.netId == exemptNetId; });
-            if (it != out.entities.end()) *it = *latestOwn;
-            else out.entities.push_back(*latestOwn);
-        }
+        out.entities.erase(std::remove_if(out.entities.begin(), out.entities.end(),
+                                          [&](const EntityState& e) { return e.netId == exemptNetId; }),
+                           out.entities.end());
     }
 
     return out;

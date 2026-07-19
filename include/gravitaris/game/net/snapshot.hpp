@@ -40,6 +40,13 @@ struct EntityState {
     float angVel = 0.f;
     std::uint8_t controlsFlags = 0; // PackControlFlags(); drives remote thruster visuals
     float hp = 0.f;
+    // Only meaningful for NetEntityType::Planet (0 otherwise): GravitySource's
+    // fields, replicated so client-side prediction (Phase 5) can compute
+    // gravity from known planet positions/masses without running a second,
+    // independently-seeded orbit simulation that would drift out of phase
+    // with the server's.
+    float gravityMass = 0.f;
+    float gravityMultiplier = 1.f;
 };
 
 // One decoded snapshot: entities in ascending-NetId order (flecs iteration

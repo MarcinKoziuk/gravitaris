@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <optional>
 
@@ -25,6 +26,7 @@ CGame::CGame(IFilesystem &filesystem)
     , m_hitFlashSystem(m_registry, m_eventQueue, *m_entitySpawner)
     , m_cameraDirector(m_registry, m_physicsSystem, Defaults::cameraZoom)
     , m_indicatorRenderer(m_registry, m_resourceLoader, m_modelRenderer2)
+    , m_clientPrediction(m_registry, m_physicsSystem, *m_entitySpawner)
     , m_autopilot(m_registry, m_physicsSystem)
 {
     m_modelRenderer2.SetReferenceZoom(Defaults::cameraZoom);
@@ -60,6 +62,58 @@ void CGame::ConnectToServer(const std::string& wsUrl)
     m_netTransport->ConnectSignaling(wsUrl);
 }
 
+void CGame::TickNetClient(const ControlFlags& flags)
+{
+    if (!m_netClient->IsWelcomed()) return;
+
+    if (!m_clientPrediction.HasOwnShip()) {
+        // Wait for a snapshot that actually confirms this NetId and where
+        // it is, so the predicted ship spawns at the real position instead
+        // of popping in from the origin once the first reconciliation runs.
+        const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot();
+        if (!snapshot) return;
+        const auto it = std::find_if(snapshot->entities.begin(), snapshot->entities.end(),
+                                     [&](const EntityState& e) { return e.netId == m_netClient->GetYourShipNetId(); });
+        if (it == snapshot->entities.end()) return;
+
+        m_clientPrediction.SpawnOwnShip(
+                it->modelId, Vector2d{static_cast<double>(it->pos.x()), static_cast<double>(it->pos.y())});
+        m_player = m_clientPrediction.GetOwnShip();
+        m_nextPredictedTick = m_netClient->EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS;
+    }
+
+    const std::uint64_t tick = m_nextPredictedTick++;
+    m_netClient->SendInput(tick, flags);
+
+    if (const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot()) {
+        m_clientPrediction.Step(tick, flags, snapshot->entities);
+    }
+}
+
+void CGame::ReconcileOwnShipIfNeeded()
+{
+    if (!m_clientPrediction.HasOwnShip()) return;
+
+    const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot();
+    if (!snapshot || snapshot->tick <= m_lastReconciledTick) return;
+    m_lastReconciledTick = snapshot->tick;
+
+    const auto it = std::find_if(snapshot->entities.begin(), snapshot->entities.end(),
+                                 [&](const EntityState& e) { return e.netId == m_netClient->GetYourShipNetId(); });
+    if (it == snapshot->entities.end()) return;
+
+    const std::optional<Vector2d> preCorrection = m_clientPrediction.Reconcile(snapshot->tick, *it, snapshot->entities);
+    if (!preCorrection) return;
+
+    // The ship's real Transform now holds the corrected position; blend the
+    // visual gap out via the camera (see m_visualCorrectionOffset's doc)
+    // instead of touching it.
+    const Transform& t = m_clientPrediction.GetOwnShip().get<Transform>();
+    const Magnum::Vector2 correctedPos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
+    const Magnum::Vector2 preCorrectionPos{static_cast<float>(preCorrection->x()), static_cast<float>(preCorrection->y())};
+    m_visualCorrectionOffset += preCorrectionPos - correctedPos;
+}
+
 void CGame::RenderNetClient(float dtSeconds)
 {
     m_netClient->Update();
@@ -72,6 +126,10 @@ void CGame::RenderNetClient(float dtSeconds)
     m_lastEstimatedServerTick = estimatedServerTick;
     m_lastRenderTick = renderTick;
 
+    ReconcileOwnShipIfNeeded();
+
+    // Remote entities only (the own ship is real m_registry state now,
+    // Phase 5) via Phase 4 interpolation into the mirror world.
     if (const std::optional<SnapshotData> interpolated =
                 SnapshotInterpolator::Compute(m_netClient->GetSnapshotHistory(), renderTick,
                                               m_netClient->GetYourShipNetId(),
@@ -79,18 +137,19 @@ void CGame::RenderNetClient(float dtSeconds)
         m_snapshotApplier.Apply(*interpolated);
     }
 
-    const flecs::entity ship = m_snapshotApplier.EntityForNetId(m_netClient->GetYourShipNetId());
-    // Zoom is a pure client preference here (never replicated -- see
-    // CameraDirector::UpdateNetClient's doc), so it still runs even between
-    // death/respawn when there's no ship to follow yet.
-    Magnum::Vector2 shipPos = m_cameraDirector.GetCamera().GetPosition();
-    if (ship.is_alive()) {
-        const Transform& t = ship.get<Transform>();
-        shipPos = Magnum::Vector2{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
-    }
-    m_cameraDirector.UpdateNetClient(shipPos, Defaults::cameraZoom, dtSeconds);
+    // Real single-player camera logic against m_registry -- works for the
+    // own ship (dead-zone follow, dynamic zoom); enemy/planet framing won't
+    // engage since those only exist in the mirror world, not here.
+    m_cameraDirector.Update(GetPlayer(), m_viewportSize, dtSeconds);
+    Camera& camera = m_cameraDirector.GetCamera();
 
-    const Camera& camera = m_cameraDirector.GetCamera();
+    // Blend out any reconciliation snap over ~100ms by nudging the camera,
+    // never the real simulated Transform (which must stay exactly correct
+    // for the next predicted tick to build on).
+    static constexpr float CORRECTION_SMOOTH_SECONDS = 0.1f;
+    m_visualCorrectionOffset *= std::exp(-dtSeconds / CORRECTION_SMOOTH_SECONDS);
+    camera.SetPosition(camera.GetPosition() - m_visualCorrectionOffset);
+
     m_starfieldRenderer.SetZoom(camera.GetZoom());
     m_starfieldRenderer.SetCameraPosition(camera.GetPosition());
     m_starfieldRenderer.Render();
@@ -100,6 +159,14 @@ void CGame::RenderNetClient(float dtSeconds)
     m_mirrorRenderer2.SetLineWidth(m_lineWidthPixels);
     m_mirrorRenderer2.SetZoomWidthFactor(m_zoomWidthFactor);
     m_mirrorRenderer2.Render(0.0);
+
+    // Own ship: real local sim, drawn through the same renderer/world
+    // single-player uses -- m_registry holds nothing else in this mode.
+    m_modelRenderer2.SetZoom(camera.GetZoom());
+    m_modelRenderer2.SetCameraPosition(camera.GetPosition());
+    m_modelRenderer2.SetLineWidth(m_lineWidthPixels);
+    m_modelRenderer2.SetZoomWidthFactor(m_zoomWidthFactor);
+    m_modelRenderer2.Render(0.0);
 }
 
 void CGame::Render(double delta)

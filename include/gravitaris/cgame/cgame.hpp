@@ -10,6 +10,7 @@
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/net/byte-stream.hpp>
+#include <gravitaris/game/net/client-prediction.hpp>
 #include <gravitaris/game/net/net-client.hpp>
 #include <gravitaris/game/net/webrtc-transport.hpp>
 
@@ -66,14 +67,33 @@ protected:
     // Multiplayer client (docs/networking-plan.md 3.5.3): set by
     // ConnectToServer, null otherwise (single-player, unchanged behavior).
     // When set, Render() takes an entirely separate path -- no local sim
-    // (Game::Update() must not be called; see IsNetClient()'s doc), the
-    // mirror world is fed from real snapshots instead of Render()'s usual
-    // local WriteSnapshot round-trip, and the camera hard-follows the
-    // tracked ship directly (CameraDirector is bound to m_registry, not
-    // m_mirrorWorld, so it can't be reused here -- no dead-zone/enemy
-    // -framing on a remote client yet).
+    // (Game::Update() must not be called; see IsNetClient()'s doc), remote
+    // entities are fed into the mirror world from real snapshots (Phase 4
+    // interpolation) instead of Render()'s usual local WriteSnapshot
+    // round-trip, and the own ship is a real, locally-predicted m_registry
+    // entity (Phase 5's ClientPrediction) rendered through the same
+    // CameraDirector/ModelRenderer2 single-player uses -- enemy/planet
+    // camera framing still won't engage, though, since only the own ship
+    // (not remote entities) is ever real m_registry state.
     std::unique_ptr<WebRtcTransport> m_netTransport;
     std::unique_ptr<NetClient> m_netClient;
+    ClientPrediction m_clientPrediction;
+    // Own local monotonic tick counter for prediction, seeded from
+    // NetClient::EstimateCurrentServerTick() once the own ship is spawned
+    // (see TickNetClient) -- kept independent of that (wall-clock, jittery)
+    // estimate afterward so consecutive predicted ticks are always exactly
+    // one PHYSICS_DELTA apart, matching what's actually being simulated.
+    std::uint64_t m_nextPredictedTick = 0;
+    // Newest snapshot tick already reconciled against, so a snapshot
+    // arriving before the next rendered frame (or one with nothing new)
+    // isn't reprocessed.
+    std::uint64_t m_lastReconciledTick = 0;
+    // Visual-only nudge (applied to the camera, never the real simulated
+    // Transform) that blends a reconciliation snap in over ~100ms instead
+    // of popping -- see ReconcileOwnShipIfNeeded.
+    Magnum::Vector2 m_visualCorrectionOffset{0.f, 0.f};
+
+    void ReconcileOwnShipIfNeeded();
 
     // Phase 4 tunables (Net debug tab): how far behind the estimated server
     // tick remote entities render (smooths jitter, at the cost of latency)
@@ -257,12 +277,13 @@ public:
     // net-client path itself either way.
     [[nodiscard]] bool IsNetClient() const { return m_netClient != nullptr; }
 
-    // No-ops until IsNetClient() and the handshake has completed (there's no
-    // ship to control yet).
-    void SendNetInput(const ControlFlags& flags)
-    {
-        if (m_netClient) m_netClient->SendInput(flags);
-    }
+    // One fixed PHYSICS_DELTA tick of multiplayer-client-side work: spawns
+    // the locally-predicted own ship the first time a snapshot confirms
+    // where it should appear (nothing to do before that -- no-op), then
+    // predicts one more tick of its own movement and sends `flags` to the
+    // server. Call from the same fixed-step accumulator loop single-player
+    // drives Game::Update() from.
+    void TickNetClient(const ControlFlags& flags);
 
     // Net debug tab (Phase 4 interpolation tunables + diagnostics).
     [[nodiscard]] float GetInterpDelaySeconds() const { return m_interpDelaySeconds; }
@@ -274,6 +295,10 @@ public:
     }
     [[nodiscard]] std::uint64_t GetLastEstimatedServerTick() const { return m_lastEstimatedServerTick; }
     [[nodiscard]] std::uint64_t GetLastRenderTick() const { return m_lastRenderTick; }
+
+    // Net debug tab (Phase 5 prediction/reconciliation tunable).
+    [[nodiscard]] double GetPredictionEpsilon() const { return m_clientPrediction.GetPositionEpsilon(); }
+    void SetPredictionEpsilon(double epsilon) { m_clientPrediction.SetPositionEpsilon(epsilon); }
 };
 
 } // namespace Gravitaris

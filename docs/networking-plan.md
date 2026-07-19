@@ -686,8 +686,10 @@ already simulates, keyed by `NetId`). Camera (`CameraDirector::Update`) and
 minimap (`MinimapRenderer::Render`) then run against a real sim world,
 **identical to single-player** — no world-agnostic parameterization required,
 and `CameraDirector::UpdateNetClient` (the interim hard-follow added
-2026-07-19) gets deleted. Making the two consumers world/`PhysicsSystem`
--agnostic is still a reasonable tidy-up but is no longer load-bearing.
+2026-07-19) gets deleted -- done, see Phase 5's status below. Making
+`MinimapRenderer`/enemy-framing world/`PhysicsSystem`-agnostic (so they'd
+also work for entities that stay presentation-only, i.e. everyone but the
+own ship) is still a reasonable tidy-up but is no longer load-bearing.
 
 ### Prerequisites already in place (why this is feasible)
 
@@ -852,6 +854,138 @@ the client. Smoothing: blend visual correction over ~100ms.
 **Done when:** at 100ms simulated latency your own ship feels local; firing
 feels immediate (fire events also predicted locally: play the shot sound on
 input, server confirms).
+
+- [x] **Protocol: `GravitySource` replicated for planets.** `EntityState`
+  gains `gravityMass`/`gravityMultiplier` (bumped `SNAPSHOT_VERSION` to 2);
+  `GatherSnapshot` populates them from `GravitySource`, `SnapshotApplier`
+  emplaces `GravitySource` on Planet-typed mirror entities. Exists so
+  prediction can compute gravity from the server's own live planet
+  positions instead of running a second, independently-seeded orbit
+  simulation client-side — the two would need their phase (where in its
+  orbit each planet currently is) synchronized somehow, since the client
+  joins long after the server's own orbit sim started; reading the
+  already-correct, already-interpolated replicated position sidesteps that
+  entirely, at the cost of needing this one extra replicated field.
+- [x] **`ClientPrediction`** (`game/net/client-prediction.hpp/cpp`,
+  headless): owns the locally-predicted own ship, spawned via the same
+  `EntitySpawner::SpawnPlayer` single-player uses — a real Chipmunk body on
+  the `"main"_id` space. Since nothing else is ever spawned into a
+  net-client's `m_registry`, that body is alone in its space: **"no
+  ship-ship contacts during replay" falls out automatically from there
+  being nothing else in the space to hit, not from any filtering code.**
+  `Step(tick, flags, planets)` applies `ShipControlsSystem::ApplyMovement`
+  (extracted from `Update()` — rotation/thrust only, no weapons, shared by
+  both so prediction can't drift from the real sim's force/torque
+  constants) plus gravity computed manually against `planets` (this
+  snapshot's Planet-typed `EntityState`s), then steps `PhysicsSystem`
+  normally and records the result in a 180-tick (3s) ring.
+  `Reconcile(authoritativeTick, authoritative, planets)` looks up that tick
+  in the ring; within `POSITION_EPSILON` (1 world unit) it's a no-op (and
+  prunes everything older, no longer needed), otherwise it snaps the real
+  body to `authoritative` and replays every predicted tick after it.
+  **Accepted approximation beyond the ADR's own one:** the predicted ship
+  has no shape to collide with at all during prediction/replay (not even a
+  planet), since gravity is read from replicated data rather than a second
+  local `PhysicsSystem`-simulated planet — a landing/crash briefly looks
+  wrong during prediction and corrects on the next reconciliation once the
+  server's real collision response arrives.
+- [x] **`NetClient::SendInput` takes an explicit tick** now, instead of
+  deriving `EstimateCurrentServerTick() + INPUT_LEAD_TICKS` internally: the
+  client's own prediction ring and the wire-stamped tick must use the exact
+  same number for `Reconcile` to find a match, and re-deriving a fresh
+  (wall-clock, jittery) estimate on every `SendInput` call could silently
+  desync the two. `CGame` now owns a simple local counter
+  (`m_nextPredictedTick`), seeded once from the estimate when the own ship
+  first spawns, incrementing by exactly one per predicted tick after that —
+  deliberately *not* re-querying the noisy wall-clock estimate every tick.
+- [x] **Wired into `CGame`**: `GravitarisApplication::tickEvent()`'s
+  net-client branch grew back a fixed-step accumulator loop (mirroring
+  single-player's), calling the new `CGame::TickNetClient(flags)` once per
+  `PHYSICS_DELTA` — it spawns the own ship the first time a snapshot
+  confirms where it should appear (avoids popping in from the origin),
+  predicts one tick, and sends input. `RenderNetClient` reconciles once per
+  newly arrived snapshot (`ReconcileOwnShipIfNeeded`, tracking
+  `m_lastReconciledTick` so the same snapshot isn't reprocessed) and blends
+  the correction via a **camera-space offset** rather than touching the
+  real simulated `Transform` (which must stay exactly correct for the next
+  predicted tick) — decays exponentially over `CORRECTION_SMOOTH_SECONDS`
+  (0.1s). `SnapshotInterpolator` now *omits* the exempt (own) NetId
+  entirely instead of including it at latest-known position, since it has
+  a real rendering source now and showing both would be two competing
+  ships on screen. Camera/minimap switched from the old `UpdateNetClient`
+  hard-follow (now deleted, dead code) to the *real* single-player
+  `CameraDirector::Update`/`RenderMinimap` against `m_registry` — dead-zone
+  follow and dynamic zoom now work identically to single-player; enemy/
+  planet auto-framing still won't engage, since only the own ship (not
+  remote entities) is ever real `m_registry` state this phase.
+
+**Known gaps, explicitly out of scope this pass** (own ship *movement*
+prediction was the ask; these are natural next steps, not oversights):
+firing is not predicted locally at all (no cosmetic bullet, no immediate
+shot sound) — the doc's own "Done when" gate mentions this, but predicting
+a bullet client-side needs a client-assigned NetId reconciled against the
+server's once the real one arrives, which is exactly Phase 6's "predicted
+-cosmetic + lag-compensated-spawn" design, not a small add-on here; no
+damage/hit-flash feedback on the locally predicted ship (`HitFlashSystem`
+isn't wired into the net-client path — it would work today if it were,
+since `m_registry` has a real entity now, but nothing currently damages it
+locally since `DamageSystem` doesn't run there either); autopilot isn't
+wired into net-client mode (also would likely work now that there's a real
+`m_registry` entity — untried).
+
+**Real bugs found from actual playtesting (2026-07-19), fixed same-day:**
+
+1. **Thrust exhaust never showed.** `ClientPrediction::Step`/`Reconcile`
+   applied `flags` to the Chipmunk body via `ShipControlsSystem::
+   ApplyMovement` but never wrote them to the ship's own `Controls`
+   component — `ModelRenderer2`'s `_thrust` tag group gates on `Controls::
+   actionFlags.thrustForward`, which stayed permanently false. Fixed: both
+   `Step` and each replayed step in `Reconcile` now set
+   `m_ownShip.get_mut<Controls>().actionFlags` too.
+2. **Camera "smooth jitter", worst while accelerating/decelerating.**
+   `POSITION_EPSILON` (1.0 world units) was far tighter than real ship
+   speeds warrant — ordinary f32-wire/quantization noise routinely exceeded
+   it, triggering a reconciliation correction on nearly every snapshot;
+   each one nudges the visual-correction camera offset (see Phase 5's own
+   wiring notes above), and frequent small nudges read as jitter. Fixed:
+   raised the default to 8.0 and made it a runtime-tunable
+   (`ClientPrediction::{Get,Set}PositionEpsilon`, `CGame::{Get,Set}
+   PredictionEpsilon`, exposed as "Reconcile epsilon" in the Net debug tab)
+   rather than re-guessing a fixed constant — the right value depends on
+   real ship speeds/network conditions this session couldn't observe
+   directly.
+3. **Minimap (and, by the same cause, other players) invisible in
+   multiplayer.** `MinimapRenderer::Render()` queries `m_registry` directly
+   for `Planet` and `Team`+`Damageable` entities — it was never told to
+   look anywhere else, and only the own ship is real `m_registry` state
+   this phase (everyone/everything else lives in the presentation-only
+   mirror world). **Not fixed yet** — this is the same root cause as the
+   already-documented "no enemy/planet camera framing" gap above, just a
+   second, independently-noticed symptom of it; a proper fix needs either
+   `MinimapRenderer` to accept an explicit world per call (it also reads
+   `PhysicsRef` for planet radius, which mirror entities don't have —
+   `EntityState::scale` could stand in) or a second minimap instance bound
+   to the mirror world. Deferred as a scoped follow-up rather than rushed.
+
+**Verification status**: all four targets (native `GravitarisNG`,
+Emscripten `GravitarisNG`, `gravitaris-sim-test`, `gravitaris-server`) build
+clean. `TestClientPrediction` (sim-test) exercises `ClientPrediction`
+against a real headless `Game`'s `PhysicsSystem`/`EntitySpawner` (not just
+hand-computed math, unlike the Phase 4 interpolation proof) — gravity from
+a replicated planet measurably pulls the predicted ship, a close
+authoritative match triggers no correction, a large divergence snaps +
+replays and lands near the corrected path, and re-reconciling an
+already-replayed tick correctly finds nothing. The full two-run determinism
+suite and all earlier net/WebRTC proofs still pass unchanged. Done from an
+unattended session. **Not yet manually verified**: the actual "does my own
+ship feel local" and "camera feels like single-player" gates — both are
+inherently by-feel judgments that need a real multiplayer session (two
+clients, one `gravitaris-server`) with actual network latency, not
+something the sim-test can assert. Also not exercised: reconciliation
+under real (non-zero, jittery) RTT specifically — the sim-test proof drives
+`Step`/`Reconcile` directly with synthetic data, not through a live
+`NetClient`/transport round-trip the way Phase 3's `TestWebRtcRoundtrip`
+did for the protocol layer.
 
 ## Phase 6 — Deferred (needs its own design pass when reached)
 

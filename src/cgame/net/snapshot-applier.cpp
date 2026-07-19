@@ -5,6 +5,7 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/net-id.hpp>
+#include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/input/input-command.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 
@@ -57,6 +58,9 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot)
             if (state.type == NetEntityType::Ship) {
                 entity.emplace<Controls>();
             }
+            if (state.type == NetEntityType::Planet) {
+                entity.emplace<GravitySource>(GravitySource{state.gravityMass, state.gravityMultiplier});
+            }
             entity.emplace<Renderable>(m_resourceLoader.Load<Model>(state.modelId));
             entity.emplace<HitFlash>();
             m_byNetId[state.netId] = entity;
@@ -72,6 +76,10 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot)
 
         if (Controls* controls = entity.try_get_mut<Controls>()) {
             controls->actionFlags = UnpackControlFlags(state.controlsFlags);
+        }
+        if (GravitySource* source = entity.try_get_mut<GravitySource>()) {
+            source->mass = state.gravityMass;
+            source->multiplier = state.gravityMultiplier;
         }
     }
 }

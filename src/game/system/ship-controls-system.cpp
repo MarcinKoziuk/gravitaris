@@ -68,26 +68,32 @@ static std::pair<Vector2d, Vector2d> GetBulletSpawnPosAndVel(const Transform& tr
     }
 }
 
+void ShipControlsSystem::ApplyMovement(cpBody* body, const ControlFlags& flags)
+{
+    cpFloat ang = cpBodyGetAngularVelocity(body);
+    const cpFloat maxAng = 15.0;
+
+    cpBodyApplyTorque(body, -ang * 4);
+
+    if (flags.rotateLeft && ang < maxAng) {
+        cpBodyApplyTorque(body, 20.0);
+    }
+    if (flags.rotateRight && ang > -maxAng) {
+        cpBodyApplyTorque(body, -20.0);
+    }
+    if (flags.thrustForward) {
+        cpBodyApplyForceAtLocalPoint(body, cpv(0, -ShipControlsSystem::THRUST_FORCE), cpv(0, 0));
+    }
+}
+
 void ShipControlsSystem::Update(std::uint64_t step)
 {
     m_registry.each([&](flecs::entity entity, Transform& transf, PhysicsRef& ref, Controls& scontrols) {
         PhysicsBody& phys = m_physicsSystem.GetBody(ref);
         cpBody* body = phys.cp.body.get();
 
-        cpFloat ang = cpBodyGetAngularVelocity(body);
-        const cpFloat maxAng = 15.0;
+        ApplyMovement(body, scontrols.actionFlags);
 
-        cpBodyApplyTorque(body, -ang * 4);
-
-        if (scontrols.actionFlags.rotateLeft && ang < maxAng) {
-            cpBodyApplyTorque(body, 20.0);
-        }
-        if (scontrols.actionFlags.rotateRight && ang > -maxAng) {
-            cpBodyApplyTorque(body, -20.0);
-        }
-        if (scontrols.actionFlags.thrustForward) {
-            cpBodyApplyForceAtLocalPoint(body, cpv(0, -ShipControlsSystem::THRUST_FORCE), cpv(0, 0));
-        }
         if (scontrols.fireCooldown > 0) {
             --scontrols.fireCooldown;
         }
