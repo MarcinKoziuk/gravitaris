@@ -6,7 +6,7 @@
 
 namespace Gravitaris {
 
-void BuildClassicScenario(EntitySpawner& entitySpawner)
+flecs::entity BuildClassicScenario(EntitySpawner& entitySpawner)
 {
     // The suns are the dominant gravity wells; the orbiting planets attract
     // too, far less.
@@ -25,13 +25,15 @@ void BuildClassicScenario(EntitySpawner& entitySpawner)
     };
 
     const double sunAMass = effectiveMass(entitySpawner.SpawnStar(sun, sunA));
-    entitySpawner.SpawnOrbitingPlanet(planet, sunA, sunAMass, 2000., 1.0, 0.0);
+    const flecs::entity homePlanet = entitySpawner.SpawnOrbitingPlanet(planet, sunA, sunAMass, 2000., 1.0, 0.0);
     entitySpawner.SpawnOrbitingPlanet(planet, sunA, sunAMass, 3400., -1.0, 2.1);
     entitySpawner.SpawnOrbitingPlanet(planet, sunA, sunAMass, 4800., 1.0, 4.0);
 
     const double sunBMass = effectiveMass(entitySpawner.SpawnStar(sun, sunB));
     entitySpawner.SpawnOrbitingPlanet(planet, sunB, sunBMass, 2200., -1.0, 1.0);
     entitySpawner.SpawnOrbitingPlanet(planet, sunB, sunBMass, 4000., 1.0, 3.5);
+
+    return homePlanet;
 }
 
 } // namespace Gravitaris

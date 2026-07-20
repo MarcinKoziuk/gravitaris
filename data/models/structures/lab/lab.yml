@@ -1,0 +1,5 @@
+scale: 1.0
+physics:
+    kinematic: true
+    friction: 5.0
+    restitution: 0.3

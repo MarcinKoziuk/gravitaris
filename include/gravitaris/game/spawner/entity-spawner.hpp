@@ -10,6 +10,7 @@
 
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/id.hpp>
+#include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/gnc/ai-personality-presets.hpp>
 
@@ -38,6 +39,14 @@ protected:
     // physics.kinematic) tagged Planet, with a GravitySource attached when the
     // Body declares one.
     flecs::entity SpawnCelestial(id_t modelId, Vector2d position);
+
+    // Shared setup for both structure flavors below: kinematic body, Team,
+    // Damageable, and the Structure component itself. Callers attach
+    // whichever PlanetSurfaceAttachment/PlanetOrbitAttachment applies and
+    // set the real initial position (StructureAttachmentSystem overwrites it
+    // on the very next tick anyway, but a fresh entity should never render
+    // one tick at the origin).
+    flecs::entity SpawnStructureBase(StructureType type, id_t modelId, Vector2d initialPos, TeamId team);
 
 private:
     std::uint32_t m_nextNetId = 1; // 0 stays reserved as "invalid" (see NetId)
@@ -78,6 +87,19 @@ public:
     // sensor: true for bullets whose hits are resolved by DamageSystem's
     // segment query rather than Chipmunk collision response (see RigidBodyDesc).
     flecs::entity SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity, bool sensor = false);
+
+    // A structure fixed at `localOffset` from `planet`'s center (planetside:
+    // Base, Colony, Lab, Comm Center) -- StructureAttachmentSystem keeps it
+    // riding the planet's own motion every tick.
+    flecs::entity SpawnStructure(StructureType type, id_t modelId, flecs::entity planet, TeamId team,
+                                 Vector2d localOffset);
+
+    // A structure on a circular orbit around `planet` (orbital: High Port,
+    // and Space Dock/Sensor Array attached to one) -- same StructureAttachmentSystem
+    // upkeep as SpawnStructure, orbit math instead of a fixed offset.
+    // `direction`/`phase` match SpawnOrbitingPlanet's own parameters.
+    flecs::entity SpawnOrbitingStructure(StructureType type, id_t modelId, flecs::entity planet, TeamId team,
+                                         double radius, double direction, double phase);
 
     // Resolves a NetId to its live entity, or a default (invalid) entity if no
     // entity currently holds that NetId.

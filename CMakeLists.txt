@@ -546,6 +546,12 @@ add_executable(GravitarisNG
     src/game/system/landing-state-system.cpp
     include/gravitaris/game/system/conquest-system.hpp
     src/game/system/conquest-system.cpp
+    include/gravitaris/game/system/structure-attachment-system.hpp
+    src/game/system/structure-attachment-system.cpp
+    include/gravitaris/game/system/structure-defense-system.hpp
+    src/game/system/structure-defense-system.cpp
+    include/gravitaris/game/component/structure.hpp
+    include/gravitaris/game/component/planet-attachment.hpp
     include/gravitaris/game/system/death-system.hpp
     src/game/system/death-system.cpp
     include/gravitaris/game/system/physics-system.hpp
@@ -580,6 +586,8 @@ add_executable(GravitarisNG
     src/game/spawner/entity-spawner.cpp
     include/gravitaris/game/scenario/classic-scenario.hpp
     src/game/scenario/classic-scenario.cpp
+    include/gravitaris/game/scenario/starting-complex.hpp
+    src/game/scenario/starting-complex.cpp
     include/gravitaris/cgame/spawner/centity-spawner.hpp
     src/cgame/spawner/centity-spawner.cpp
     include/gravitaris/cgame/fwd.hpp
@@ -796,6 +804,8 @@ add_executable(gravitaris-sim-test
     src/game/system/damage-system.cpp
     src/game/system/landing-state-system.cpp
     src/game/system/conquest-system.cpp
+    src/game/system/structure-attachment-system.cpp
+    src/game/system/structure-defense-system.cpp
     src/game/system/death-system.cpp
     src/game/system/physics-system.cpp
     src/game/system/orbit-system.cpp
@@ -805,6 +815,7 @@ add_executable(gravitaris-sim-test
     src/game/gnc/ai-personality-presets.cpp
     src/game/spawner/entity-spawner.cpp
     src/game/scenario/classic-scenario.cpp
+    src/game/scenario/starting-complex.cpp
     src/game/net/snapshot.cpp
     src/game/net/loopback-transport.cpp
     src/game/net/protocol.cpp
@@ -888,6 +899,8 @@ if(NOT EMSCRIPTEN)
         src/game/system/damage-system.cpp
         src/game/system/landing-state-system.cpp
         src/game/system/conquest-system.cpp
+        src/game/system/structure-attachment-system.cpp
+        src/game/system/structure-defense-system.cpp
         src/game/system/death-system.cpp
         src/game/system/physics-system.cpp
         src/game/system/orbit-system.cpp
@@ -897,6 +910,7 @@ if(NOT EMSCRIPTEN)
         src/game/gnc/ai-personality-presets.cpp
         src/game/spawner/entity-spawner.cpp
         src/game/scenario/classic-scenario.cpp
+        src/game/scenario/starting-complex.cpp
         src/game/net/snapshot.cpp
         src/game/net/protocol.cpp
         src/game/net/net-server.cpp

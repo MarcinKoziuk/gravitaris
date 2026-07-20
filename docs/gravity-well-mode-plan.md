@@ -146,31 +146,62 @@ Goal: all seven structure types exist as spawnable, damageable, team-owned
 entities; a hand-assembled starting complex spawns at the player's starting
 planet.
 
-- [ ] `Structure` component (replicated): `{ StructureType type; }` enum
-  Base/Colony/Lab/CommCenter/HighPort/SpaceDock/SensorArray, plus the
-  materials-store fields Phase 3's economy reads (`float rawMaterials,
-  finishedMaterials` — unused until then; keeping them here avoids a second
-  snapshot-version bump).
-- [ ] Planetside structures: static bodies placed at fixed offsets around
-  the planet (the original draws them as boxes within the planet outline);
-  `Team`, `Damageable`, `Transform`.
-- [ ] Orbital structures (High Port, and its attached Space Dock / Sensor
-  Array): kinematic `Orbit` around the planet, exactly like planets orbit
-  suns (IDEAS.md explicitly wants orbiting bases kinematic). Attachment =
-  same orbit at small phase offsets.
-- [ ] Simple SVG models under `data/models/structures/…` (copy the authoring
-  format of an existing model; visual polish later).
-- [ ] `EntitySpawner::SpawnStructure(type, planet, …)` following the
-  existing Spawn* patterns (NetId assignment etc.).
-- [ ] Defenses: Bases and High Ports fire at enemy ships in range on a
-  cooldown (reuse `SpawnBullet` sensor bullets + `DamageSystem`; lead the
-  target the way `AIPilotSystem`'s firing solution does — read that first).
-- [ ] Hand-assembled starting complex (Base, Colony, Lab, Comm Center, High
-  Port + attachments) spawned at the player's starting planet in the
-  scenario.
-- Sim-test: spawn a full complex headless; assert structures exist with
-  correct teams/orbits; a scripted enemy ship in range gets shot at;
-  checksum stable.
+- [x] `Structure` component (replicated): `{ StructureType type; float
+  rawMaterials, finishedMaterials }` (unused until Phase 3, wired into the
+  wire format now — `SNAPSHOT_VERSION` bumped to 4 — so that phase doesn't
+  need a second bump). New `NetEntityType::Structure`; `SnapshotApplier`
+  emplaces `Team`/`Damageable`/`Structure` for it, same shape as `Ship`.
+- [x] Planetside structures (Base/Colony/Lab/Comm Center): kinematic bodies
+  at a fixed offset from the planet's live position — genuinely *static*
+  bodies would drift away as the planet orbits its sun, so this reuses the
+  same kinematic-tracking idea `Orbit`/`OrbitSystem` already use for
+  planets, just centered on a moving parent instead of a fixed point (new
+  `PlanetSurfaceAttachment` component + `StructureAttachmentSystem`, since
+  `Orbit::center` is intentionally a fixed `Vector2d` and changing that
+  would complicate its existing replicated contract for planets-orbit-suns).
+- [x] Orbital structures (High Port + its Space Dock/Sensor Array): same
+  idea, real circular-orbit math around the live planet position (new
+  `PlanetOrbitAttachment` component, same system). Attached at the same
+  orbit radius, small phase offsets.
+- [x] Simple SVG box models under `data/models/structures/{base,colony,lab,
+  comm-center,high-port,space-dock,sensor-array}/`, team-colored stroke
+  (`#ff00ff` placeholder), sized to nest inside a ~60-unit-radius planet
+  (planetside) or orbit outside it (orbital radius 90). Visual polish later,
+  as planned.
+- [x] `EntitySpawner::SpawnStructure`/`SpawnOrbitingStructure`, following
+  the existing `Spawn*` patterns; a shared `SpawnStructureBase` private
+  helper does the common Team/Damageable/Structure/NetId setup.
+- [x] Defenses: `StructureDefenseSystem` — Bases and High Ports (marked by
+  a new server-only `StructureDefense{fireCooldown}` component) auto-fire
+  at enemy ships within `FIRE_RANGE` (400) on a 90-tick cooldown, leading
+  the target with the same intercept-time math `AIPilotSystem` uses (no
+  rotation/aim-tolerance needed -- a turret doesn't visually aim).
+- [x] Hand-assembled starting complex: new `BuildStartingComplex` (separate
+  from `BuildClassicScenario`, which now returns a designated "home" planet)
+  spawns the full complex there for `TeamId::Blue`, loosely matching
+  `docs/gwell/screenshots/start-game.png`. Wired into both `Game::Start()`
+  (single-player) and `gravitaris-server`'s startup (shared for now — real
+  per-faction starting planets are Phase 6's job).
+- [x] Sim-test `TestStructures`: spawns a full complex on a real orbiting
+  planet (real mass, so it actually moves); asserts all seven types exist
+  exactly once, a Base carries `StructureDefense`; runs 600 ticks and
+  asserts both a planetside structure's offset-from-planet and an orbital
+  structure's orbit-radius-from-planet stay put (i.e. they track the
+  planet's motion rather than drifting in fixed world space, which was the
+  whole point of the attachment system over reusing `Orbit` as-is); asserts
+  an enemy ship placed within a Base's `FIRE_RANGE` (but clear of every
+  structure's own collision shape, to avoid a spawn-overlap kill) takes
+  damage from defense fire.
+
+**Verification status** (2026-07-20): all four targets build clean (native
+`GravitarisNG`, wasm `GravitarisNG`, `gravitaris-sim-test`,
+`gravitaris-server`); sim-test passes with the new proof and the two-run
+determinism checksum stable; a native single-player smoke run loads/renders
+the new starting complex with no errors. **Not yet manually verified**: a
+real multiplayer session with the complex actually visible/fightable (no
+visual ownership feedback beyond the existing team-color rendering exists
+yet — that's UI phase U1/U2), and whether the layout/sizing reads well at
+actual camera zoom (visual polish explicitly deferred).
 
 Done when: the starting complex renders, orbits, and shoots back in a real
 playthrough; sim-test proof passes.

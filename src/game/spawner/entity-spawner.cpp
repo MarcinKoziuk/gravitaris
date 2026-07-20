@@ -13,6 +13,7 @@
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/orbit.hpp>
+#include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
@@ -155,6 +156,52 @@ flecs::entity EntitySpawner::SpawnBullet(id_t modelId, Vector2d position, Vector
     AssignNetId(entity);
     AddRenderable(entity, modelId);
 
+    return entity;
+}
+
+flecs::entity EntitySpawner::SpawnStructureBase(StructureType type, id_t modelId, Vector2d initialPos, TeamId team)
+{
+    ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
+
+    auto entity = m_registry.entity();
+    entity.emplace<Transform>(initialPos);
+    entity.emplace<RigidBodyDesc>("main"_id, body);
+    entity.emplace<Team>(team);
+    entity.emplace<Damageable>();
+    entity.emplace<Structure>(Structure{type, 0.f, 0.f});
+    if (type == StructureType::Base || type == StructureType::HighPort) {
+        entity.emplace<StructureDefense>();
+    }
+    AssignNetId(entity);
+    AddRenderable(entity, modelId);
+
+    return entity;
+}
+
+flecs::entity EntitySpawner::SpawnStructure(StructureType type, id_t modelId, flecs::entity planet, TeamId team,
+                                            Vector2d localOffset)
+{
+    const Vector2d initialPos = planet.get<Transform>().pos + localOffset;
+    flecs::entity entity = SpawnStructureBase(type, modelId, initialPos, team);
+    entity.emplace<PlanetSurfaceAttachment>(PlanetSurfaceAttachment{planet.get<NetId>().value, localOffset});
+    return entity;
+}
+
+flecs::entity EntitySpawner::SpawnOrbitingStructure(StructureType type, id_t modelId, flecs::entity planet,
+                                                    TeamId team, double radius, double direction, double phase)
+{
+    const Transform& planetTransf = planet.get<Transform>();
+    const Vector2d initialPos =
+            planetTransf.pos + Vector2d{std::cos(phase), std::sin(phase)} * radius;
+
+    double centerMass = 0.0;
+    if (const GravitySource* source = planet.try_get<GravitySource>()) {
+        centerMass = source->mass * static_cast<double>(source->multiplier);
+    }
+
+    flecs::entity entity = SpawnStructureBase(type, modelId, initialPos, team);
+    entity.emplace<PlanetOrbitAttachment>(
+            PlanetOrbitAttachment{planet.get<NetId>().value, centerMass, radius, phase, std::copysign(1.0, direction)});
     return entity;
 }
 

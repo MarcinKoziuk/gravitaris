@@ -9,6 +9,7 @@
 #include <Magnum/Math/Vector2.h>
 
 #include <gravitaris/game/id.hpp>
+#include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 
@@ -20,7 +21,8 @@ class ByteReader;
 enum class NetEntityType : std::uint8_t {
     Ship,
     Bullet,
-    Planet, // any celestial (suns included) -- they replicate identically
+    Planet,    // any celestial (suns included) -- they replicate identically
+    Structure, // a planetary/orbital installation (see the Structure component)
 };
 
 // One entity's replicated state (docs/networking-plan.md 2.2), the v1
@@ -55,6 +57,10 @@ struct EntityState {
     // position already comes from Transform like everything else; only the
     // bit actually consumed client-side is replicated.
     bool isStar = false;
+    // Only meaningful for NetEntityType::Structure.
+    StructureType structureType = StructureType::Base;
+    float rawMaterials = 0.f;
+    float finishedMaterials = 0.f;
 };
 
 // One decoded snapshot: entities in ascending-NetId order (flecs iteration

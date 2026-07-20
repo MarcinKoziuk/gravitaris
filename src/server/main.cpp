@@ -26,6 +26,7 @@
 #include <gravitaris/game/net/net-server.hpp>
 #include <gravitaris/game/net/webrtc-server-transport.hpp>
 #include <gravitaris/game/scenario/classic-scenario.hpp>
+#include <gravitaris/game/scenario/starting-complex.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/gravitaris.hpp>
 
@@ -179,7 +180,10 @@ int main(int argc, char** argv)
     // system (planets, AI ships) without it -- players arrive entirely
     // through NetServer's ClientHello handling.
     Game game(fs);
-    BuildClassicScenario(game.GetEntitySpawner());
+    const flecs::entity homePlanet = BuildClassicScenario(game.GetEntitySpawner());
+    // Single, shared starting complex for now (docs/gravity-well-mode-plan.md
+    // Phase 2) -- per-faction starting planets are Phase 6's job.
+    BuildStartingComplex(game.GetEntitySpawner(), homePlanet, TeamId::Blue);
 
     WebRtcServerTransport transport(port);
     NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), transport);

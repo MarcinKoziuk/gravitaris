@@ -7,6 +7,7 @@
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/orbit.hpp>
+#include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
@@ -18,7 +19,7 @@ namespace Gravitaris {
 
 // Bump on any wire-layout change; ReadSnapshot rejects mismatches outright
 // (no cross-version compatibility until there's a reason to have it).
-static constexpr std::uint8_t SNAPSHOT_VERSION = 3; // v3: +EntityState::isStar (v2: +gravityMass/gravityMultiplier)
+static constexpr std::uint8_t SNAPSHOT_VERSION = 4; // v4: +structureType/rawMaterials/finishedMaterials
 
 // Sanity caps so a garbage buffer can't make ReadSnapshot allocate wildly.
 static constexpr std::uint32_t MAX_ENTITIES = 4096;
@@ -36,7 +37,8 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
         state.netId = netId.value;
         state.type = entity.has<Planet>() ? NetEntityType::Planet
                    : entity.has<Bullet>() ? NetEntityType::Bullet
-                                          : NetEntityType::Ship;
+                   : entity.has<Structure>() ? NetEntityType::Structure
+                                             : NetEntityType::Ship;
         if (const RigidBodyDesc* desc = entity.try_get<RigidBodyDesc>()) {
             state.modelId = desc->body.Id();
         }
@@ -60,6 +62,11 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
         }
         if (state.type == NetEntityType::Planet) {
             state.isStar = !entity.has<Orbit>();
+        }
+        if (const Structure* structure = entity.try_get<Structure>()) {
+            state.structureType = structure->type;
+            state.rawMaterials = structure->rawMaterials;
+            state.finishedMaterials = structure->finishedMaterials;
         }
         out.entities.push_back(state);
     });
@@ -96,6 +103,9 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteF32(e.gravityMass);
         out.WriteF32(e.gravityMultiplier);
         out.WriteU8(e.isStar ? 1 : 0);
+        out.WriteU8(static_cast<std::uint8_t>(e.structureType));
+        out.WriteF32(e.rawMaterials);
+        out.WriteF32(e.finishedMaterials);
     }
 
     out.WriteU32(static_cast<std::uint32_t>(snapshot.events.size()));
@@ -158,6 +168,9 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.gravityMass = in.ReadF32();
         e.gravityMultiplier = in.ReadF32();
         e.isStar = in.ReadU8() != 0;
+        e.structureType = static_cast<StructureType>(in.ReadU8());
+        e.rawMaterials = in.ReadF32();
+        e.finishedMaterials = in.ReadF32();
         out.entities.push_back(e);
     }
 

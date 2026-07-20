@@ -7,6 +7,7 @@
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/orbit.hpp>
+#include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/input/input-command.hpp>
@@ -61,11 +62,16 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot)
             }
             if (state.type == NetEntityType::Ship) {
                 entity.emplace<Controls>();
-                // Only ships are ever Team+Damageable in the real sim (see
-                // camera/minimap's "enemy"/"ship dot" queries) -- bullets can
-                // carry Team too (friendly-fire check) but never Damageable,
-                // so gating on Ship here matches that exactly.
+                // Ships and structures are Team+Damageable in the real sim
+                // (see camera/minimap's "enemy"/"ship dot" queries, which
+                // structures aren't part of yet -- only Damageable matters
+                // here) -- bullets can carry Team too (friendly-fire check)
+                // but never Damageable, so gating like this matches that.
                 entity.emplace<Damageable>(state.hp, 100.f);
+            }
+            if (state.type == NetEntityType::Structure) {
+                entity.emplace<Damageable>(state.hp, 100.f);
+                entity.emplace<Structure>(Structure{state.structureType, state.rawMaterials, state.finishedMaterials});
             }
             if (state.type == NetEntityType::Planet) {
                 entity.emplace<GravitySource>(GravitySource{state.gravityMass, state.gravityMultiplier});
@@ -112,6 +118,10 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot)
         }
         if (Damageable* damageable = entity.try_get_mut<Damageable>()) {
             damageable->hp = state.hp;
+        }
+        if (Structure* structure = entity.try_get_mut<Structure>()) {
+            structure->rawMaterials = state.rawMaterials;
+            structure->finishedMaterials = state.finishedMaterials;
         }
         if (GravitySource* source = entity.try_get_mut<GravitySource>()) {
             source->mass = state.gravityMass;

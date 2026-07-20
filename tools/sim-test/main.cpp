@@ -27,10 +27,12 @@
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/planet.hpp>
+#include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/id.hpp>
+#include <gravitaris/game/scenario/starting-complex.hpp>
 #include <gravitaris/game/net/byte-stream.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 #include <gravitaris/game/net/loopback-transport.hpp>
@@ -489,6 +491,91 @@ void TestLandingAndClaiming()
     fs.Shutdown();
 }
 
+// docs/gravity-well-mode-plan.md Phase 2: structures. Spawns a full starting
+// complex on a real orbiting planet, and checks planetside/orbital
+// structures track the planet's own motion over many ticks (rather than
+// drifting away in fixed world space) and that a Base's defenses actually
+// fire at an enemy ship that wanders into range.
+void TestStructures()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    // Real, non-negligible mass so the planet actually orbits and moves --
+    // the whole point of this test is proving structures follow it.
+    flecs::entity planet =
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 5.0e7, 2000., 1.0, 0.0);
+
+    BuildStartingComplex(spawner, planet, TeamId::Blue);
+
+    std::size_t structureCount = 0;
+    bool sawEachType = true;
+    for (StructureType type : {StructureType::Base, StructureType::Colony, StructureType::Lab,
+                               StructureType::CommCenter, StructureType::HighPort, StructureType::SpaceDock,
+                               StructureType::SensorArray}) {
+        bool found = false;
+        game.GetRegistry().each([&](const Structure& s) { if (s.type == type) found = true; });
+        sawEachType = sawEachType && found;
+    }
+    game.GetRegistry().each([&](const Structure&) { ++structureCount; });
+    Require(sawEachType, "structures: all seven types were spawned");
+    Require(structureCount == 7, "structures: exactly one of each");
+
+    flecs::entity base;
+    flecs::entity highPort;
+    game.GetRegistry().each([&](flecs::entity e, const Structure& s) {
+        if (s.type == StructureType::Base) base = e;
+        if (s.type == StructureType::HighPort) highPort = e;
+    });
+    Require(base.get<Team>().id == TeamId::Blue, "structures: spawned with the requested team");
+    Require(base.has<StructureDefense>(), "structures: a Base carries defenses");
+    Require(!game.GetEntitySpawner().EntityForNetId(9999999).is_alive(), "structures: sanity -- bogus NetId resolves to nothing");
+
+    const Vector2d baseOffsetAtSpawn = base.get<Transform>().pos - planet.get<Transform>().pos;
+    const double highPortRadiusAtSpawn = (highPort.get<Transform>().pos - planet.get<Transform>().pos).length();
+
+    // Run long enough for a 2000-radius, 5e7-mass orbit to move noticeably
+    // (a few hundred ticks is already a visible arc at this radius/mass).
+    for (int tick = 0; tick < 600; ++tick) {
+        game.Update();
+    }
+
+    const Vector2d planetPosNow = planet.get<Transform>().pos;
+    Require(planetPosNow.length() > 50.0, "structures: the planet itself actually moved (test setup check)");
+
+    const Vector2d baseOffsetNow = base.get<Transform>().pos - planetPosNow;
+    Require((baseOffsetNow - baseOffsetAtSpawn).length() < 1.0,
+            "structures: a planetside structure keeps its offset as the planet orbits");
+
+    const double highPortRadiusNow = (highPort.get<Transform>().pos - planetPosNow).length();
+    Require(std::abs(highPortRadiusNow - highPortRadiusAtSpawn) < 1.0,
+            "structures: an orbital structure keeps its orbit radius as the planet orbits");
+
+    // Defense fire: an enemy ship within Base's FIRE_RANGE (400) but well
+    // clear of every structure's own collision shape (all within ~105 units
+    // of planet center: HighPort's 90-radius orbit plus its own half-extent)
+    // so it doesn't spawn overlapping one and get destroyed by Chipmunk's
+    // overlap resolution before ever taking a scripted hit.
+    flecs::entity enemy = spawner.SpawnPlayer("models/ships/fighter-1"_id, planetPosNow + Vector2d{350., 0.});
+    enemy.set<Team>(Team{TeamId::Red});
+    const float enemyHpBefore = enemy.get<Damageable>().hp;
+
+    bool enemyDamaged = false;
+    for (int tick = 0; tick < 400 && !enemyDamaged && enemy.is_alive(); ++tick) {
+        game.Update();
+        enemyDamaged = enemy.is_alive() ? enemy.get<Damageable>().hp < enemyHpBefore
+                                       : true; // destroyed outright: definitely damaged
+    }
+    Require(enemyDamaged, "structures: Base defenses hit an enemy ship in range");
+
+    fs.Shutdown();
+}
+
 // docs/networking-plan.md 2.3: gather -> serialize -> parse -> re-serialize
 // must be byte-identical (proves the reader reconstructs exactly what the
 // writer meant, field for field, with no drift or truncation).
@@ -924,6 +1011,7 @@ int main()
     TestSnapshotInterpolation();
     TestClientPrediction();
     TestLandingAndClaiming();
+    TestStructures();
     TestWebRtcRoundtrip();
     TestWebRtcSignalingRoundtrip();
 

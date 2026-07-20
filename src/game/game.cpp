@@ -6,10 +6,12 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/net-id.hpp>
+#include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/gnc/ai-personality-presets.hpp>
 #include <gravitaris/game/util/splitmix.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/scenario/classic-scenario.hpp>
+#include <gravitaris/game/scenario/starting-complex.hpp>
 #include <gravitaris/game/game.hpp>
 
 namespace Gravitaris {
@@ -20,6 +22,8 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_entitySpawner(std::move(entitySpawner))
         , m_physicsSystem(m_registry)
         , m_orbitSystem(m_registry, m_physicsSystem)
+        , m_structureAttachmentSystem(m_registry, *m_entitySpawner, m_physicsSystem)
+        , m_structureDefenseSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_inputSystem(m_registry)
         , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue)
         , m_bulletLifetimeSystem(m_registry)
@@ -45,7 +49,11 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
 void Game::Start()
 {
     m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, m_playerSpawnPos);
-    BuildClassicScenario(*m_entitySpawner);
+    const flecs::entity homePlanet = BuildClassicScenario(*m_entitySpawner);
+    // Single, shared starting complex for now (docs/gravity-well-mode-plan.md
+    // Phase 2) -- per-faction starting planets are Phase 6's job (sector
+    // generation).
+    BuildStartingComplex(*m_entitySpawner, homePlanet, TeamId::Blue);
 }
 
 Game::Game(IFilesystem& filesystem)
@@ -77,6 +85,8 @@ void Game::Update()
         // Place orbiting bodies on their rails before the step reads positions
         // for gravity and resolves collisions against them.
         m_orbitSystem.Update();
+        // Planet-attached structures ride the planets' just-updated positions.
+        m_structureAttachmentSystem.Update();
 
         // Debug/tuning only: reapplies every tick (cheap, one cpBodySetMass
         // call) so it stays in effect across a respawn's fresh body without
@@ -96,6 +106,7 @@ void Game::Update()
         // DamageSystem applies this step's bullet hits and landing impacts, so
         // DeathSystem (next) sees final hp and can explode ships the same tick.
         m_damageSystem.Update();
+        m_structureDefenseSystem.Update();
         m_landingStateSystem.Update();
         m_conquestSystem.Update();
         m_deathSystem.Update(m_step);

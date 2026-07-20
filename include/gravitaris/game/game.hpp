@@ -14,6 +14,8 @@
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/orbit-system.hpp>
+#include <gravitaris/game/system/structure-attachment-system.hpp>
+#include <gravitaris/game/system/structure-defense-system.hpp>
 #include <gravitaris/game/system/input-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 #include <gravitaris/game/system/bullet-lifetime-system.hpp>
@@ -44,6 +46,10 @@ protected:
     PhysicsSystem m_physicsSystem;
 
     OrbitSystem m_orbitSystem;
+
+    StructureAttachmentSystem m_structureAttachmentSystem;
+
+    StructureDefenseSystem m_structureDefenseSystem;
 
     InputSystem m_inputSystem;
 
