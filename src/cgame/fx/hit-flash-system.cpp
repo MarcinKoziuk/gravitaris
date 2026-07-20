@@ -34,7 +34,12 @@ void HitFlashSystem::Update(float dtSeconds)
         }
     });
 
-    m_registry.each([&](HitFlash& flash) {
+    Decay(m_registry, dtSeconds);
+}
+
+void HitFlashSystem::Decay(flecs::world& world, float dtSeconds)
+{
+    world.each([&](HitFlash& flash) {
         if (flash.amount > 0.f) {
             flash.amount = std::max(0.f, flash.amount - FLASH_DECAY_PER_SECOND * dtSeconds);
         }

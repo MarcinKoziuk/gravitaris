@@ -25,6 +25,13 @@ public:
     HitFlashSystem(flecs::world& registry, const GameEventQueue& eventQueue, const EntitySpawner& entitySpawner);
 
     void Update(float dtSeconds);
+
+    // Decays every HitFlash in `world` by the rendered frame's dt. Public
+    // and static so a world with no matching GameEventQueue/NetId registry
+    // of its own (the net-client mirror world, whose HitFlash amounts are
+    // set directly by CGame from replicated events instead) can still decay
+    // them the same way Update() does for m_registry.
+    static void Decay(flecs::world& world, float dtSeconds);
 };
 
 } // namespace Gravitaris

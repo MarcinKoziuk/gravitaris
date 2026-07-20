@@ -97,6 +97,21 @@ protected:
 
     void ReconcileOwnShipIfNeeded();
 
+    // Replicated GameEvents (docs/networking-plan.md's "events left to the
+    // caller" gap): walks the snapshot history for events past
+    // m_lastAppliedRemoteEventSeq, re-emits each into m_eventQueue (audio
+    // only needs event.pos, already world-space -- no NetId resolution) and,
+    // for Impact/LandingCrash, sets HitFlash directly on the right entity --
+    // the own predicted ship (matched by yourShipNetId) or, for anyone else,
+    // the mirror-world entity via m_snapshotApplier's NetId map. Skips
+    // BulletFired events sourced from the own ship: ClientPrediction already
+    // emitted the instant, locally-predicted version of that same shot into
+    // m_eventQueue directly, so replaying the server's (delayed, replicated)
+    // copy too would double the laser sound. Every other event type is never
+    // locally predicted for anyone, own ship included, so those always play.
+    std::uint32_t m_lastAppliedRemoteEventSeq = 0;
+    void ApplyRemoteEvents();
+
     // Phase 4 tunables (Net debug tab): how far behind the estimated server
     // tick remote entities render (smooths jitter, at the cost of latency)
     // and how far past the newest received snapshot extrapolation is

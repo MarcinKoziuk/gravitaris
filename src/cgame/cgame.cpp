@@ -7,7 +7,11 @@
 
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/component/transform.hpp>
+#include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
+
+#include <gravitaris/cgame/component/hit-flash.hpp>
+#include <gravitaris/cgame/fx/hit-flash-system.hpp>
 
 #include <gravitaris/cgame/spawner/centity-spawner.hpp>
 #include <gravitaris/cgame/cgame.hpp>
@@ -155,9 +159,37 @@ void CGame::ReconcileOwnShipIfNeeded()
               << (preCorrectionPos - correctedPos).length() << " world units";
 }
 
+void CGame::ApplyRemoteEvents()
+{
+    const std::uint32_t yourShipNetId = m_netClient->GetYourShipNetId();
+
+    for (const SnapshotData& snapshot : m_netClient->GetSnapshotHistory()) {
+        for (const GameEvent& event : snapshot.events) {
+            if (event.seq <= m_lastAppliedRemoteEventSeq) continue;
+            m_lastAppliedRemoteEventSeq = event.seq;
+
+            if (event.type == GameEventType::BulletFired && event.sourceNetId == yourShipNetId) continue;
+
+            m_eventQueue.Emit(event.type, flecs::entity{}, event.pos, event.param);
+
+            if (event.type != GameEventType::Impact && event.type != GameEventType::LandingCrash) continue;
+
+            const flecs::entity target = (event.sourceNetId == yourShipNetId)
+                    ? GetPlayer().value_or(flecs::entity{})
+                    : m_snapshotApplier.EntityForNetId(event.sourceNetId);
+            if (!target.is_alive()) continue; // e.g. the hit killed it this tick
+
+            if (HitFlash* flash = target.try_get_mut<HitFlash>()) {
+                flash->amount = 1.f;
+            }
+        }
+    }
+}
+
 void CGame::RenderNetClient(float dtSeconds)
 {
     m_netClient->Update();
+    ApplyRemoteEvents();
 
     const std::uint64_t estimatedServerTick = m_netClient->EstimateCurrentServerTick();
     const auto interpDelayTicks =
@@ -206,6 +238,15 @@ void CGame::RenderNetClient(float dtSeconds)
     // ship lives there in this mode (see m_netClient's field comment).
     m_cameraDirector.Update(GetPlayer(), m_viewportSize, dtSeconds, &m_mirrorWorld, smoothedPlayerPos);
     Camera& camera = m_cameraDirector.GetCamera();
+
+    // Decays HitFlash on both worlds; ApplyRemoteEvents above is what sets
+    // it (own ship directly, everyone else via the mirror world), since
+    // m_hitFlashSystem's own event consumption never finds a match here --
+    // the events it sees via m_eventQueue were re-emitted with no source
+    // entity (see ApplyRemoteEvents), same as ClientPrediction's own local
+    // BulletFired ones.
+    m_hitFlashSystem.Update(dtSeconds);
+    HitFlashSystem::Decay(m_mirrorWorld, dtSeconds);
 
     // Own-ship one-shots (BulletLifetimeSystem-tracked cosmetic bullets emit
     // BulletFired via m_clientPrediction) and thruster loop, via the same
