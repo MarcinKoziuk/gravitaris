@@ -12,6 +12,7 @@
 #include <Magnum/Math/Vector2.h>
 
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
@@ -84,8 +85,10 @@ public:
     ClientPrediction(flecs::world& registry, PhysicsSystem& physicsSystem, EntitySpawner& entitySpawner,
                      GameEventQueue& eventQueue, ResourceLoader& resourceLoader);
 
-    // Idempotent: only the first call actually spawns anything.
-    void SpawnOwnShip(id_t modelId, Magnum::Vector2d initialPos);
+    // Idempotent: only the first call actually spawns anything. `team`
+    // matters for local rendering (team color) -- pass NetClient::
+    // GetYourTeam() so it matches what the server actually assigned.
+    void SpawnOwnShip(id_t modelId, Magnum::Vector2d initialPos, TeamId team = TeamId::Blue);
 
     // Destructs the own ship (if any) and clears prediction state, so a
     // subsequent SpawnOwnShip starts clean. For when the server's ship for

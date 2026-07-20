@@ -671,6 +671,58 @@ void TestPeerRespawn(Game& game)
     Require(secondTransform.vel.length() > 1.0, "respawn: the new ship actually responds to input");
 }
 
+// docs/gravity-well-mode-plan.md's Multiplayer wiring track: per-peer team
+// assignment. LoopbackTransport is strictly one client/one server -- it
+// can't host two peers on the same NetServer, so round-robin advancing
+// across peers isn't provable here (it's a plain modulo counter; low risk).
+// What this proves: an explicit request is honored, an unrequested peer
+// auto-assigns to the roster's first team, SetPeerTeam reassigns live, and
+// a respawn keeps the reassigned team rather than the original request.
+void TestTeamAssignment(Game& game)
+{
+    auto [serverTransport, clientTransport] = LoopbackTransport::CreatePair();
+    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), *serverTransport);
+    NetClient client(*clientTransport, "sim-test-team-client");
+    client.SetRequestedTeam(TeamId::Red);
+
+    for (int i = 0; i < 5; ++i) {
+        server.IngestInput(game.GetStep());
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+    }
+
+    Require(client.IsWelcomed(), "team: client welcomed");
+    Require(client.GetYourTeam() == TeamId::Red, "team: explicit requestedTeam is honored");
+
+    const flecs::entity shipA = game.GetEntitySpawner().EntityForNetId(client.GetYourShipNetId());
+    Require(shipA.get<Team>().id == TeamId::Red, "team: the server-side ship's Team component matches");
+
+    // Explicit reassignment (server console command's underlying call).
+    // PeerId isn't the ship's NetId -- LoopbackTransport always uses
+    // SERVER_PEER (1) for its one connection, on both ends (see
+    // LoopbackTransport::CreatePair); NetClient correctly has no reason to
+    // expose its own PeerId (see transport.hpp), so this reuses that
+    // transport-level constant directly instead.
+    Require(server.SetPeerTeam(SERVER_PEER, TeamId::Cyan), "team: SetPeerTeam succeeds for a known peer");
+    Require(shipA.get<Team>().id == TeamId::Cyan, "team: SetPeerTeam updates the live ship immediately");
+    Require(!server.SetPeerTeam(9999, TeamId::Blue), "team: SetPeerTeam fails for an unknown peer");
+
+    // Kill A's ship and confirm the respawned one keeps the reassigned team
+    // (not the original request, not the roster default).
+    shipA.get_mut<Damageable>().hp = 0.f;
+    for (int i = 0; i < 100; ++i) {
+        server.IngestInput(game.GetStep());
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+    }
+    const flecs::entity respawned = game.GetEntitySpawner().EntityForNetId(client.GetYourShipNetId());
+    Require(respawned != shipA, "team: the ship actually respawned (test setup check)");
+    Require(respawned.get<Team>().id == TeamId::Cyan, "team: a respawn keeps the reassigned team, not the original");
+    Require(client.GetYourTeam() == TeamId::Cyan, "team: the client's own re-welcome reflects the kept team too");
+}
+
 // docs/networking-plan.md 3.1b: same NetServer/NetClient wiring as
 // TestNetRoundtrip, but over two real WebRtcTransport instances instead of
 // LoopbackTransport -- proves the actual DataChannel path (real localhost
@@ -855,6 +907,7 @@ RunResult RunSimulation()
     TestSnapshotRoundtrip(game);
     TestNetRoundtrip(game);
     TestPeerRespawn(game);
+    TestTeamAssignment(game);
 
     const RunResult result{game.ComputeStateChecksum(), eventHash, game.GetEventQueue().LatestSeq()};
     fs.Shutdown();

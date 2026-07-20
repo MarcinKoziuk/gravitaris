@@ -8,6 +8,7 @@
 
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/input/input-command.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 #include <gravitaris/game/net/transport.hpp>
@@ -28,6 +29,12 @@ class NetClient {
     std::uint32_t m_clientId = 0;
     std::uint32_t m_yourShipNetId = 0;
     std::uint32_t m_tickRate = 60;
+    TeamId m_yourTeam = TeamId::Blue;
+    // Sent with ClientHello; TeamId::None (the default) means "no
+    // preference, auto-assign" -- see ClientHelloPacket::requestedTeam.
+    // No round-setup UI exists yet to ever call SetRequestedTeam with
+    // anything else.
+    TeamId m_requestedTeam = TeamId::None;
 
     std::uint64_t m_lastAckedSnapshotTick = 0;
     std::uint32_t m_lastAckedEventSeq = 0;
@@ -106,9 +113,15 @@ public:
     static constexpr std::uint64_t INPUT_LEAD_TICKS = 8;
     void SendInput(std::uint64_t tick, const ControlFlags& flags);
 
+    // Must be called before the handshake fires (i.e. before the first
+    // Update() that observes a Connected event) to take effect -- ClientHello
+    // is built and sent the instant that event arrives.
+    void SetRequestedTeam(TeamId team) { m_requestedTeam = team; }
+
     [[nodiscard]] bool IsWelcomed() const { return m_welcomed; }
     [[nodiscard]] std::uint32_t GetYourShipNetId() const { return m_yourShipNetId; }
     [[nodiscard]] std::uint32_t GetTickRate() const { return m_tickRate; }
+    [[nodiscard]] TeamId GetYourTeam() const { return m_yourTeam; }
 
     // The most recently decoded snapshot, or nullopt if none has arrived yet.
     [[nodiscard]] const std::optional<SnapshotData>& GetLatestSnapshot() const { return m_latestSnapshot; }

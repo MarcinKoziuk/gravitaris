@@ -107,7 +107,8 @@ void CGame::TickNetClient(const ControlFlags& flags)
         if (it == snapshot->entities.end()) return;
 
         m_clientPrediction.SpawnOwnShip(
-                it->modelId, Vector2d{static_cast<double>(it->pos.x()), static_cast<double>(it->pos.y())});
+                it->modelId, Vector2d{static_cast<double>(it->pos.x()), static_cast<double>(it->pos.y())},
+                m_netClient->GetYourTeam());
         m_player = m_clientPrediction.GetOwnShip();
         m_nextPredictedTick = m_netClient->EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS;
     }

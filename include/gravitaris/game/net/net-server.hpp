@@ -4,6 +4,7 @@
 
 #include <ankerl/unordered_dense.h>
 
+#include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/net/transport.hpp>
 
@@ -58,8 +59,20 @@ class NetServer {
         // yet). Set to RESPAWN_DELAY_TICKS the first tick `ship` is found
         // dead; counts down in HandleRespawns.
         int respawnTimer = -1;
+        // This peer's team, chosen once at ClientHello (from an explicit
+        // request, or auto-assigned) and kept across every respawn -- a
+        // fresh ship after death must not silently switch sides.
+        TeamId team = TeamId::Blue;
     };
     ankerl::unordered_dense::map<PeerId, PeerState> m_peers;
+
+    // Round-robins unrequested peers across a small default roster so two
+    // players connecting with no team preference get a free versus match
+    // (the common playtest case) rather than everyone landing on Blue.
+    // Co-op (same team) or anything else is still available by requesting a
+    // team explicitly (ClientHelloPacket::requestedTeam) or via SetPeerTeam.
+    static constexpr TeamId AUTO_ASSIGN_ROSTER[] = {TeamId::Blue, TeamId::Red};
+    std::size_t m_nextAutoAssign = 0;
 
     // Dead-man timeout: if a welcomed peer hasn't landed a fresh command in
     // this many ticks, inject one synthetic all-clear command so repeat-last
@@ -106,6 +119,13 @@ public:
     void BroadcastSnapshot(std::uint64_t currentTick);
 
     [[nodiscard]] std::size_t PeerCount() const { return m_peers.size(); }
+
+    // Explicit reassignment (e.g. a server console command) for when
+    // requestedTeam/auto-assign didn't land where wanted. Updates the live
+    // ship's Team component immediately if the peer has one; always updates
+    // the stored team so a later respawn keeps the new side. No-op (returns
+    // false) for an unknown peer.
+    bool SetPeerTeam(PeerId peer, TeamId team);
 };
 
 } // namespace Gravitaris

@@ -41,10 +41,10 @@ void ClientPrediction::DestroyOwnShip()
     m_fireCooldown = 0;
 }
 
-void ClientPrediction::SpawnOwnShip(id_t modelId, Magnum::Vector2d initialPos)
+void ClientPrediction::SpawnOwnShip(id_t modelId, Magnum::Vector2d initialPos, TeamId team)
 {
     if (HasOwnShip()) return;
-    m_ownShip = m_entitySpawner.SpawnPlayer(modelId, initialPos);
+    m_ownShip = m_entitySpawner.SpawnPlayer(modelId, initialPos, team);
 }
 
 void ClientPrediction::SyncPlanetProxies(const std::vector<EntityState>& planets)

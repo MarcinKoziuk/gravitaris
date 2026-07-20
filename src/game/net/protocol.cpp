@@ -33,12 +33,14 @@ void WriteClientHello(const ClientHelloPacket& packet, ByteWriter& out)
     out.WriteU8(static_cast<std::uint8_t>(PacketType::ClientHello));
     out.WriteU32(packet.protocolVersion);
     WriteString(packet.name, out);
+    out.WriteU8(static_cast<std::uint8_t>(packet.requestedTeam));
 }
 
 bool ReadClientHelloBody(ByteReader& in, ClientHelloPacket& out)
 {
     out.protocolVersion = in.ReadU32();
     ReadString(in, out.name);
+    out.requestedTeam = static_cast<TeamId>(in.ReadU8());
     return in.Ok();
 }
 
@@ -48,6 +50,7 @@ void WriteServerWelcome(const ServerWelcomePacket& packet, ByteWriter& out)
     out.WriteU32(packet.clientId);
     out.WriteU32(packet.yourShipNetId);
     out.WriteU32(packet.tickRate);
+    out.WriteU8(static_cast<std::uint8_t>(packet.yourTeam));
 }
 
 bool ReadServerWelcomeBody(ByteReader& in, ServerWelcomePacket& out)
@@ -55,6 +58,7 @@ bool ReadServerWelcomeBody(ByteReader& in, ServerWelcomePacket& out)
     out.clientId = in.ReadU32();
     out.yourShipNetId = in.ReadU32();
     out.tickRate = in.ReadU32();
+    out.yourTeam = static_cast<TeamId>(in.ReadU8());
     return in.Ok();
 }
 

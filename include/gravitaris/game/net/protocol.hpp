@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/input/input-command.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 
@@ -22,7 +23,7 @@ enum class PacketType : std::uint8_t {
     Snapshot = 4,
 };
 
-inline constexpr std::uint32_t PROTOCOL_VERSION = 1;
+inline constexpr std::uint32_t PROTOCOL_VERSION = 2; // v2: +requestedTeam/yourTeam (per-peer team assignment)
 
 // How many trailing commands ClientInput carries per send -- redundancy
 // instead of reliability (quake3-style): as long as one of the last N sends
@@ -34,12 +35,20 @@ inline constexpr std::size_t CLIENT_INPUT_BACKUP = 8;
 struct ClientHelloPacket {
     std::uint32_t protocolVersion = PROTOCOL_VERSION;
     std::string name;
+    // TeamId::None here means "no preference, auto-assign" -- distinct from
+    // its sim meaning (the ownerless/hostile-to-everyone team, see Team's
+    // own doc comment), which never applies to a player's requested team.
+    // No round-setup UI exists yet (docs/gravity-well-mode-plan.md's
+    // Multiplayer wiring track) to ever send anything else, so every
+    // client auto-assigns today.
+    TeamId requestedTeam = TeamId::None;
 };
 
 struct ServerWelcomePacket {
     std::uint32_t clientId = 0;
     std::uint32_t yourShipNetId = 0;
     std::uint32_t tickRate = 60;
+    TeamId yourTeam = TeamId::Blue;
 };
 
 // Deviation from the plan's sketch: adds lastAckedEventSeq alongside

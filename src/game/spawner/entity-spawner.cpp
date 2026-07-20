@@ -63,7 +63,7 @@ flecs::entity EntitySpawner::EntityForNetId(std::uint32_t netId) const
     return it != m_netIdToEntity.end() ? it->second : flecs::entity{};
 }
 
-flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position)
+flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position, TeamId team)
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
 
@@ -72,7 +72,7 @@ flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position)
     entity.emplace<RigidBodyDesc>("main"_id, body);
     entity.emplace<Controls>();
     entity.emplace<InputQueue>();
-    entity.emplace<Team>(TeamId::Blue);
+    entity.emplace<Team>(team);
     entity.emplace<Damageable>();
     entity.emplace<LandingState>();
     AssignNetId(entity);

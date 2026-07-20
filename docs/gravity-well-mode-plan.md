@@ -280,16 +280,23 @@ code the server already runs, conquest state replicates via the existing
 per-entity `teamId`, and one-shots ride the `GameEvent` stream. The real
 gaps are the known netcode ones plus team assignment:
 
-- [ ] Per-peer team assignment: `NetServer` currently spawns every peer via
-  `SpawnPlayer` (hardcoded `TeamId::Blue`). The welcome/setup flow needs to
-  assign a team per peer — same team = co-op (multiple fighters per team is
-  by design), different teams = versus, and AI leaders can share or oppose
-  any of them.
-- [ ] Client consumes replicated `SnapshotData::events` (net task #34) —
-  without it, remote players never see/hear claims, explosions, or hits.
-- [ ] Peer respawn loop (net task #33) — becomes "respawn at the ship's
-  last friendly landing site" once Phase 4 lands, replacing the current
-  nothing.
+- [x] Per-peer team assignment — `ClientHelloPacket.requestedTeam` /
+  `ServerWelcomePacket.yourTeam` (protocol bumped to v2); `NetServer`
+  honors an explicit request or round-robins a `{Blue, Red}` default roster
+  (free versus for the common 2-player case with zero setup), remembers
+  each peer's team across respawns (`PeerState::team`), and exposes
+  `SetPeerTeam` for explicit reassignment (wired to a `team <peer-id>
+  <color>` `gravitaris-server` console command). Same team = co-op (already
+  supported — multiple fighters per team was always fine, nothing gated on
+  "exactly one ship per team"). AI leaders aren't wired to this yet (no AI
+  -side team selection exists) but share the same `Team` component, so
+  nothing blocks it. Verified live (two native clients round-robin to
+  different teams) and in sim-test (`TestTeamAssignment`).
+- [x] Client consumes replicated `SnapshotData::events` (net task #34) —
+  done.
+- [x] Peer respawn loop (net task #33) — done; still respawns at a fixed
+  point rather than "the ship's last friendly landing site" (Gravity Well
+  Phase 4's rule) since Phase 4 hasn't landed yet.
 - [ ] Round setup over the network (which team each peer joins; AI fill) —
   UI side lives in U4's setup screen.
 

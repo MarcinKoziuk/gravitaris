@@ -19,6 +19,7 @@ void NetClient::Update()
                 m_connected = true;
                 ClientHelloPacket hello;
                 hello.name = m_name;
+                hello.requestedTeam = m_requestedTeam;
                 ByteWriter writer;
                 WriteClientHello(hello, writer);
                 m_transport.Send(SERVER_PEER, 0, writer.Data(), writer.Size(), true);
@@ -38,6 +39,7 @@ void NetClient::Update()
                         m_clientId = welcome.clientId;
                         m_yourShipNetId = welcome.yourShipNetId;
                         m_tickRate = welcome.tickRate;
+                        m_yourTeam = welcome.yourTeam;
                         m_welcomed = true;
                         break;
                     }

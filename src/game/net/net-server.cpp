@@ -73,12 +73,13 @@ void NetServer::HandleRespawns()
         // docs/gravity-well-mode-plan.md's respawn-at-last-friendly-site
         // rule, once landing sites exist).
         const id_t playerModel = "models/ships/fighter-1"_id;
-        state.ship = m_entitySpawner.SpawnPlayer(playerModel, Vector2d{0., 0.});
+        state.ship = m_entitySpawner.SpawnPlayer(playerModel, Vector2d{0., 0.}, state.team);
 
         ServerWelcomePacket welcome;
         welcome.clientId = peer;
         welcome.yourShipNetId = state.ship.get<NetId>().value;
         welcome.tickRate = 60;
+        welcome.yourTeam = state.team;
 
         ByteWriter writer;
         WriteServerWelcome(welcome, writer);
@@ -102,6 +103,18 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             if (it == m_peers.end()) return; // Packet before Connected shouldn't happen; be defensive
             if (it->second.welcomed) return; // duplicate hello (resent, lost welcome) -- ignore
 
+            // TeamId::None means "no preference" here (see requestedTeam's
+            // own doc comment); auto-assign round-robins a small default
+            // roster so two players with no setup UI to pick a side still
+            // get a versus match instead of stacking on Blue.
+            if (hello.requestedTeam != TeamId::None) {
+                it->second.team = hello.requestedTeam;
+            } else {
+                it->second.team = AUTO_ASSIGN_ROSTER[m_nextAutoAssign % (sizeof(AUTO_ASSIGN_ROSTER)
+                                                                        / sizeof(AUTO_ASSIGN_ROSTER[0]))];
+                ++m_nextAutoAssign;
+            }
+
             // Placeholder spawn point/model until Phase 3 grows real player
             // -slot selection; matches Game::Start()'s single local player.
             // Offset by however many peers already hold a slot (this one
@@ -109,7 +122,8 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             // don't stack on top of each other.
             const id_t playerModel = "models/ships/fighter-1"_id;
             const double spawnOffset = 200. * static_cast<double>(m_peers.size() - 1);
-            const flecs::entity ship = m_entitySpawner.SpawnPlayer(playerModel, Vector2d{spawnOffset, 0.});
+            const flecs::entity ship =
+                    m_entitySpawner.SpawnPlayer(playerModel, Vector2d{spawnOffset, 0.}, it->second.team);
             it->second.ship = ship;
             it->second.welcomed = true;
             it->second.lastQueuedInputTick = currentTick; // dead-man baseline: "joined now", not tick 0
@@ -118,12 +132,13 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             welcome.clientId = peer;
             welcome.yourShipNetId = ship.get<NetId>().value;
             welcome.tickRate = 60;
+            welcome.yourTeam = it->second.team;
 
             ByteWriter writer;
             WriteServerWelcome(welcome, writer);
             m_transport.Send(peer, 0, writer.Data(), writer.Size(), true);
             LOG(info) << "net: peer " << peer << " welcomed, ship NetId " << welcome.yourShipNetId
-                      << " at (" << spawnOffset << ", 0)";
+                      << " at (" << spawnOffset << ", 0), team " << static_cast<int>(it->second.team);
             break;
         }
         case PacketType::ClientInput: {
@@ -169,6 +184,18 @@ void NetServer::HandleDisconnect(PeerId peer)
     if (it == m_peers.end()) return;
     if (it->second.ship.is_alive()) it->second.ship.destruct();
     m_peers.erase(it);
+}
+
+bool NetServer::SetPeerTeam(PeerId peer, TeamId team)
+{
+    const auto it = m_peers.find(peer);
+    if (it == m_peers.end()) return false;
+
+    it->second.team = team;
+    if (it->second.ship.is_alive()) {
+        it->second.ship.set<Team>(Team{team});
+    }
+    return true;
 }
 
 void NetServer::BroadcastSnapshot(std::uint64_t currentTick)

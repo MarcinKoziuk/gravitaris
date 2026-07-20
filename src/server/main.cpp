@@ -17,6 +17,7 @@
 #include <string>
 #include <thread>
 
+#include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/fs/filesystem-physfs.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/gnc/ai-personality-presets.hpp>
@@ -85,7 +86,20 @@ std::optional<AIPersonalityPreset> ParsePreset(const std::string& name)
     return std::nullopt;
 }
 
-// `spawn [count] [preset]`, `list`, `quit` -- see docs/networking-plan N5.
+std::optional<TeamId> ParseTeam(const std::string& name)
+{
+    if (name == "blue") return TeamId::Blue;
+    if (name == "red") return TeamId::Red;
+    if (name == "green") return TeamId::Green;
+    if (name == "yellow") return TeamId::Yellow;
+    if (name == "magenta") return TeamId::Magenta;
+    if (name == "cyan") return TeamId::Cyan;
+    return std::nullopt;
+}
+
+// `spawn [count] [preset]`, `list`, `team <peer-id> <color>`, `quit` -- see
+// docs/networking-plan N5 and docs/gravity-well-mode-plan.md's Multiplayer
+// wiring track (explicit team control until a round-setup UI exists).
 void HandleCommand(const std::string& line, Game& game, NetServer& server, bool& running)
 {
     std::istringstream iss(line);
@@ -115,10 +129,26 @@ void HandleCommand(const std::string& line, Game& game, NetServer& server, bool&
         std::printf("spawned %d %s ship(s)\n", count, presetName.c_str());
     } else if (verb == "list") {
         std::printf("peers: %zu\n", server.PeerCount());
+    } else if (verb == "team") {
+        std::uint32_t peer = 0;
+        std::string colorName;
+        iss >> peer >> colorName;
+        const auto team = ParseTeam(colorName);
+        if (!team) {
+            std::fprintf(stderr, "team: unknown color '%s' (blue|red|green|yellow|magenta|cyan)\n",
+                         colorName.c_str());
+            return;
+        }
+        if (!server.SetPeerTeam(peer, *team)) {
+            std::fprintf(stderr, "team: no such peer %u\n", peer);
+            return;
+        }
+        std::printf("peer %u set to %s\n", peer, colorName.c_str());
     } else if (verb == "quit") {
         running = false;
     } else {
-        std::fprintf(stderr, "unknown command '%s' (spawn [count] [preset]|list|quit)\n", verb.c_str());
+        std::fprintf(stderr, "unknown command '%s' (spawn [count] [preset]|list|team <peer-id> <color>|quit)\n",
+                     verb.c_str());
     }
 }
 
@@ -155,7 +185,7 @@ int main(int argc, char** argv)
     NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), transport);
 
     LOG(info) << "gravitaris-server: listening on ws://0.0.0.0:" << port;
-    std::printf("commands: spawn [count] [preset]|list|quit\n");
+    std::printf("commands: spawn [count] [preset]|list|team <peer-id> <color>|quit\n");
 
     StdinCommandQueue stdinQueue;
     bool running = true;
