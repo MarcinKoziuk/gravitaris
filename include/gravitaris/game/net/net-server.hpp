@@ -53,6 +53,11 @@ class NetServer {
         // injection per episode is enough -- InputSystem's repeat-last
         // -command then repeats *idle*, the safe steady state.
         bool idleInjected = false;
+        // Ticks left until a dead ship (destructed by DeathSystem) respawns;
+        // -1 = no respawn pending (ship is alive, or hasn't been noticed dead
+        // yet). Set to RESPAWN_DELAY_TICKS the first tick `ship` is found
+        // dead; counts down in HandleRespawns.
+        int respawnTimer = -1;
     };
     ankerl::unordered_dense::map<PeerId, PeerState> m_peers;
 
@@ -65,8 +70,21 @@ class NetServer {
     // gaps at the 60Hz send rate, far below "ship visibly flies away".
     static constexpr std::uint64_t INPUT_TIMEOUT_TICKS = 15;
 
+    // Ticks between a peer's ship dying and a fresh one being spawned for
+    // them (matches Game::RESPAWN_DELAY_TICKS, single-player's own respawn
+    // delay -- no shared constant since NetServer otherwise has no
+    // dependency on Game itself, only flecs::world&/EntitySpawner&).
+    static constexpr int RESPAWN_DELAY_TICKS = 90;
+
     void HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t size, std::uint64_t currentTick);
     void HandleDisconnect(PeerId peer);
+
+    // Spawns a fresh ship (and re-welcomes the peer with its new NetId) for
+    // any welcomed peer whose ship isn't alive, after RESPAWN_DELAY_TICKS.
+    // Without this, a peer whose ship dies (e.g. crashed into a sun) stays a
+    // permanent ghost: HandlePacket already refuses to queue input for a
+    // peer with a dead ship, and nothing else ever gives them a new one.
+    void HandleRespawns();
 
 public:
     NetServer(flecs::world& registry, EntitySpawner& entitySpawner, const GameEventQueue& eventQueue,
@@ -75,7 +93,10 @@ public:
     // Polls the transport: completes the ClientHello/ServerWelcome handshake
     // (spawning a player ship per new peer), pushes ClientInput commands into
     // the matching ship's InputQueue, and destroys a peer's ship on
-    // Disconnected. Call once per tick, before Game::Update().
+    // Disconnected. Also runs HandleRespawns -- called here (rather than
+    // after BroadcastSnapshot) so a fresh ship is queuing input and included
+    // in the very next snapshot, not one full tick later. Call once per
+    // tick, before Game::Update().
     void IngestInput(std::uint64_t currentTick);
 
     // Sends a full snapshot (this tick's state + events since what this peer

@@ -592,6 +592,85 @@ void TestNetRoundtrip(Game& game)
             "net: input dead-man timeout zeroed a silent peer's held thrust");
 }
 
+// docs/networking-plan.md's known-gap fix: a peer whose ship dies must not
+// become a permanent ghost. Own NetServer/NetClient pair (a second peer in
+// `game`, independent of TestNetRoundtrip's) so killing this ship can't
+// affect that test's assertions.
+void TestPeerRespawn(Game& game)
+{
+    auto [serverTransport, clientTransport] = LoopbackTransport::CreatePair();
+    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), *serverTransport);
+    NetClient client(*clientTransport, "sim-test-respawn-client");
+
+    for (int i = 0; i < 5; ++i) {
+        server.IngestInput(game.GetStep());
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+    }
+    Require(client.IsWelcomed(), "respawn: client welcomed");
+
+    const std::uint32_t firstNetId = client.GetYourShipNetId();
+    const flecs::entity firstShip = game.GetEntitySpawner().EntityForNetId(firstNetId);
+    Require(firstShip.is_alive(), "respawn: first ship exists");
+
+    // Kill it outright -- DeathSystem destructs any entity at hp <= 0 on the
+    // next Update().
+    firstShip.get_mut<Damageable>().hp = 0.f;
+    for (int i = 0; i < 10; ++i) {
+        server.IngestInput(game.GetStep());
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+    }
+    Require(!firstShip.is_alive(), "respawn: the killed ship is actually gone (test setup check)");
+
+    // Ticks up to (but not past) NetServer::RESPAWN_DELAY_TICKS: still a
+    // ghost -- input for the dead ship must stay refused, not silently
+    // queued into nothing, and the client must not have been re-welcomed
+    // yet.
+    ControlFlags thrust{};
+    thrust.thrustForward = true;
+    for (int i = 0; i < 60; ++i) {
+        server.IngestInput(game.GetStep());
+        client.SendInput(client.EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS, thrust);
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+    }
+    Require(client.GetYourShipNetId() == firstNetId,
+            "respawn: not yet re-welcomed mid-timer (test setup check)");
+
+    // Cross the respawn delay.
+    for (int i = 0; i < 40; ++i) {
+        server.IngestInput(game.GetStep());
+        client.SendInput(client.EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS, thrust);
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+    }
+
+    const std::uint32_t secondNetId = client.GetYourShipNetId();
+    Require(secondNetId != firstNetId, "respawn: client was re-welcomed with a new ship NetId");
+
+    const flecs::entity secondShip = game.GetEntitySpawner().EntityForNetId(secondNetId);
+    Require(secondShip.is_alive(), "respawn: the new ship exists server-side");
+    Require(secondShip != firstShip, "respawn: it's a genuinely new entity, not the old id reused");
+
+    // Held thrust since before the respawn should already be driving the new
+    // ship -- confirms input flows again rather than staying refused forever
+    // (the actual permanent-ghost bug this fixes).
+    for (int i = 0; i < 20; ++i) {
+        server.IngestInput(game.GetStep());
+        client.SendInput(client.EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS, thrust);
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+    }
+    const Transform& secondTransform = secondShip.get<Transform>();
+    Require(secondTransform.vel.length() > 1.0, "respawn: the new ship actually responds to input");
+}
+
 // docs/networking-plan.md 3.1b: same NetServer/NetClient wiring as
 // TestNetRoundtrip, but over two real WebRtcTransport instances instead of
 // LoopbackTransport -- proves the actual DataChannel path (real localhost
@@ -775,6 +854,7 @@ RunResult RunSimulation()
 
     TestSnapshotRoundtrip(game);
     TestNetRoundtrip(game);
+    TestPeerRespawn(game);
 
     const RunResult result{game.ComputeStateChecksum(), eventHash, game.GetEventQueue().LatestSeq()};
     fs.Shutdown();

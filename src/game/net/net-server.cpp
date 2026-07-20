@@ -51,6 +51,40 @@ void NetServer::IngestInput(std::uint64_t currentTick)
         LOG(info) << "net: peer " << peer << " input timed out (" << INPUT_TIMEOUT_TICKS
                   << " ticks silent, " << state.staleInputCount << " stale so far), zeroing controls";
     }
+
+    HandleRespawns();
+}
+
+void NetServer::HandleRespawns()
+{
+    for (auto& [peer, state] : m_peers) {
+        if (!state.welcomed || state.ship.is_alive()) {
+            state.respawnTimer = -1;
+            continue;
+        }
+        if (state.respawnTimer < 0) {
+            state.respawnTimer = RESPAWN_DELAY_TICKS;
+            continue;
+        }
+        if (--state.respawnTimer > 0) continue;
+
+        // Placeholder spawn point, same as the initial join (Phase 3 will
+        // grow real player-slot/respawn-site selection -- see
+        // docs/gravity-well-mode-plan.md's respawn-at-last-friendly-site
+        // rule, once landing sites exist).
+        const id_t playerModel = "models/ships/fighter-1"_id;
+        state.ship = m_entitySpawner.SpawnPlayer(playerModel, Vector2d{0., 0.});
+
+        ServerWelcomePacket welcome;
+        welcome.clientId = peer;
+        welcome.yourShipNetId = state.ship.get<NetId>().value;
+        welcome.tickRate = 60;
+
+        ByteWriter writer;
+        WriteServerWelcome(welcome, writer);
+        m_transport.Send(peer, 0, writer.Data(), writer.Size(), true);
+        LOG(info) << "net: peer " << peer << " respawned, ship NetId " << welcome.yourShipNetId;
+    }
 }
 
 void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t size, std::uint64_t currentTick)

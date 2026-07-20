@@ -74,6 +74,28 @@ void CGame::TickNetClient(const ControlFlags& flags)
 {
     if (!m_netClient->IsWelcomed()) return;
 
+    if (m_clientPrediction.HasOwnShip()) {
+        // The ship this client is predicting must still be the one the
+        // server has for it. It won't be if it died (crashed into a sun --
+        // ClientPrediction has no collision damage of its own, so this is
+        // the only way the local ship finds out) or was just replaced by a
+        // respawn under a new NetId (GetYourShipNetId() changes the instant
+        // the re-welcome packet arrives, ahead of any snapshot reflecting
+        // the new ship). Either way, an authoritative snapshot no longer
+        // containing this NetId means the local prediction is stale and
+        // must be dropped -- the spawn gate below then waits for a fresh
+        // snapshot with the (possibly new) NetId, same as the very first
+        // spawn.
+        const std::optional<SnapshotData>& current = m_netClient->GetLatestSnapshot();
+        const bool stillPresent = current && std::any_of(current->entities.begin(), current->entities.end(),
+                [&](const EntityState& e) { return e.netId == m_netClient->GetYourShipNetId(); });
+        if (!stillPresent) {
+            m_clientPrediction.DestroyOwnShip();
+            m_player.reset();
+            m_visualCorrectionOffset = {};
+        }
+    }
+
     if (!m_clientPrediction.HasOwnShip()) {
         // Wait for a snapshot that actually confirms this NetId and where
         // it is, so the predicted ship spawns at the real position instead

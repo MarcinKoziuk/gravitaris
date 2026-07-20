@@ -34,6 +34,13 @@ bool ClientPrediction::HasOwnShip() const
     return m_ownShip.is_alive();
 }
 
+void ClientPrediction::DestroyOwnShip()
+{
+    if (m_ownShip.is_alive()) m_ownShip.destruct();
+    m_history.clear();
+    m_fireCooldown = 0;
+}
+
 void ClientPrediction::SpawnOwnShip(id_t modelId, Magnum::Vector2d initialPos)
 {
     if (HasOwnShip()) return;

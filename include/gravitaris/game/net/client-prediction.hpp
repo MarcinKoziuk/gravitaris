@@ -87,6 +87,13 @@ public:
     // Idempotent: only the first call actually spawns anything.
     void SpawnOwnShip(id_t modelId, Magnum::Vector2d initialPos);
 
+    // Destructs the own ship (if any) and clears prediction state, so a
+    // subsequent SpawnOwnShip starts clean. For when the server's ship for
+    // this client is gone -- died, or replaced by a respawn under a new
+    // NetId -- and the caller (CGame) has detected that by the NetId it was
+    // tracking no longer appearing in snapshots. No-op if there's no ship.
+    void DestroyOwnShip();
+
     [[nodiscard]] bool HasOwnShip() const;
     [[nodiscard]] flecs::entity GetOwnShip() const { return m_ownShip; }
 
