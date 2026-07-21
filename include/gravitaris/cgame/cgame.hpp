@@ -97,6 +97,15 @@ protected:
 
     void ReconcileOwnShipIfNeeded();
 
+    // Draws a filled team-colored square at the center of every owned planet
+    // (Team != None) in `world`, via `renderer`'s overlay path -- immediate
+    // conquest feedback, matching the original's claimed-planet marker (see
+    // docs/gwell/screenshots). Single-player sweeps m_registry via
+    // m_modelRenderer2; net-client sweeps m_mirrorWorld via m_mirrorRenderer2
+    // (planets/ownership live in whichever world the mode simulates them in).
+    ResourcePtr<const Model> m_teamMarkerModel;
+    void SubmitPlanetOwnershipMarkers(flecs::world& world, ModelRenderer2& renderer);
+
     // Replicated GameEvents (docs/networking-plan.md's "events left to the
     // caller" gap): walks the snapshot history for events past
     // m_lastAppliedRemoteEventSeq, re-emits each into m_eventQueue (audio

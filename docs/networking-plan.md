@@ -1517,6 +1517,158 @@ tracer until the real bullet arrives, ~normal netcode latency later) — a
 genuine trade-off accepted here, worth confirming it still *feels* good
 before calling this done.
 
+## Phase 6 follow-up #2 (2026-07-21): cosmetic bullet restored, server now suppresses the shooter's own copy
+
+That "confirm it still feels good" check came back negative: with only the
+authoritative bullet drawn, firing while moving at constant velocity put
+the tracer visibly *behind* the muzzle. Root cause is the same temporal
+split the follow-up above was fighting, just seen from the other side —
+the own ship renders at roughly `serverTick + INPUT_LEAD_TICKS` (8, so
+prediction stays ahead of the server enough for input to land on time),
+while every replicated entity renders at `serverTick − interpolation
+delay` (6 ticks at the 0.1s default). That is a **~14-tick / ~230ms**
+gap, so the bullet trails the muzzle by `shipSpeed × 0.23s` — ~18 world
+units at 80 u/s, a couple of ship lengths. It is exactly zero while
+stationary, which is why it only ever showed up while moving.
+
+The previous fix removed the *wrong* copy. Drawing the predicted bullet is
+what makes firing feel right; the actual defect was drawing *both*. So the
+cosmetic bullet is back, and the double is now prevented at the source:
+`GatherSnapshot` takes `suppressBulletsOwnedBy` and `NetServer::
+BroadcastSnapshot` passes each peer its own ship's NetId, so a peer never
+receives the authoritative copies of its own shots. Other peers still
+receive them and interpolate normally.
+
+Filtering server-side rather than client-side deliberately keeps the wire
+format unchanged — omitting an entity needs no new field, whereas
+filtering on the client would have meant replicating a bullet owner id and
+bumping `SNAPSHOT_VERSION`. `Bullet` gained a server-only `ownerNetId`
+(set by `ShipControlsSystem` from the shooter's NetId; 0 for structure
+defenses and death shrapnel, which nobody predicts).
+
+Why the two copies stay consistent: bullets are explicitly excluded from
+gravity (`PhysicsSystem::ApplyGravity` skips `Bullet`) and are sensors, so
+both fly identical straight lines from the same muzzle math
+(`ShipControlsSystem::ComputeBulletSpawn`) off the same predicted state the
+server will reach for that tick.
+
+Accepted limitation: the predicted bullet is cosmetic (zero damage, and
+`DamageSystem` never runs client-side), so it flies *through* whatever the
+server says it hit and expires on its own rather than vanishing on impact.
+Damage/hit registration is unchanged and fully server-authoritative. If
+that reads badly in play, the fix is to destroy the local bullet when the
+replicated `Impact` event arrives near it (`CGame::ApplyRemoteEvents`
+already consumes those) — deliberately not done yet, pending whether it's
+actually noticeable.
+
+Sim-test: `TestClientPrediction`'s firing proof flipped back to asserting
+exactly one predicted bullet per shot (zero-damage, tagged with the
+shooter's NetId), plus a new `TestOwnBulletSuppression` proving
+`GatherSnapshot` omits a ship's own bullets from that ship's snapshot while
+still delivering another ship's. All four targets build; determinism
+checksum unchanged; a live two-peer session connects and syncs clean.
+**Not yet manually verified**: that the tracer now visually leaves the
+muzzle correctly while moving — that's the whole point of the change, but
+it needs eyes on a real session.
+
+## Remote-entity render smoothing (2026-07-21)
+
+Playtesting report, separate from the bullet issue above: another ship
+"stutters" while both it and the local player are moving, and specifically
+under lag it visibly moves *forward past where it should be, then snaps
+back*. Root cause is a real gap in Phase 4's design, not a display-refresh
+issue: `SnapshotInterpolator::Compute`'s extrapolation branch (used once a
+render tick outruns the newest buffered snapshot) is straight-line
+(`pos + vel * extrapolateSeconds`) and **capped** at
+`extrapolationCapSeconds` (50ms default) — past the cap it *freezes* in
+place rather than continuing to guess, while the real remote ship (under
+gravity, or its own thrust) keeps moving on a curved path the whole time.
+When the next real snapshot arrives, the render position snaps straight to
+wherever the ship actually is now — which, since the screen had it frozen,
+reads as jumping further forward than expected. Short/occasional gaps hide
+inside the interpolation delay buffer; sustained lag pushes this into
+repeated freeze-then-snap, matching "worse under lag."
+
+Fix: a per-entity decaying visual offset baked directly into the mirror
+world's `Transform::pos` (new `RemoteSmoothing` component,
+`SnapshotApplier::Apply`) — the same idea `CGame`'s own-ship reconciliation
+offset already uses, just applied to every remote entity instead of only
+the local player, and safe to bake straight into `Transform::pos` rather
+than keep separate, since the mirror world is pure presentation (nothing
+reads it back into simulation, unlike the real predicted ship). Each
+`Apply()` call: decay the existing offset (100ms time constant, same as
+the reconciliation case), compare the new authoritative position against
+where the entity's own last-reported velocity predicted it would land, and
+if that gap exceeds a small tolerance (3 world units — filters ordinary
+interpolation/quantization noise, not real discontinuities), fold the
+excess into the offset so the drawn position keeps moving continuously
+and catches up gradually instead of snapping.
+
+**Planets are deliberately exempt** — they're already exempt from
+interpolation/extrapolation entirely (always drawn at the newest known
+state; see `SnapshotInterpolator::Compute`'s own comment on why: landed
+-ship/proxy alignment and camera framing both need that), so there's no
+freeze-then-snap discontinuity to smooth here in the first place, and
+smoothing them would reintroduce the exact zoom-pulse/sink bug that
+exemption already fixed.
+
+`SnapshotApplier::Apply` gained an optional `dtSeconds` parameter (defaults
+to a 60Hz frame) to decay the offset by real render time; `CGame`'s real
+net-client path passes its own `dtSeconds` through.
+
+**Verification status**: all four targets build clean; sim-test unaffected
+(cgame-only change, not linked into the headless target) and still passes
+with the checksum unchanged; a live two-peer session connects and syncs
+with no errors. **Not yet manually verified**: whether the stutter is
+actually gone under real lag — that's the whole point of the change, but
+needs eyes on a real laggy session (the earlier bullet-offset fix was
+verified the same way, after the fact, when the first attempt turned out
+to have fixed the wrong half of the problem — worth treating this one with
+the same "confirm before calling it done" discipline).
+
+### Follow-up (2026-07-21): fixed a compounding-offset regression in the smoothing above
+
+The smoothing fix above shipped a bug: playtesting found that after a
+client-side lag spike, freighters and planet-orbiting structures appeared to
+"disappear" or "get destroyed." Nothing is actually destroyed
+server-side — `FreighterSystem`, `EconomySystem`, and
+`StructureDefenseSystem` are all fully server-authoritative and never react
+to client hiccups — this was a pure client-side rendering artifact.
+
+Root cause: the jump-detection math extrapolated from `t.pos` (`predicted =
+t.pos + t.vel * dtSeconds`), but `t.pos` already had the *previous* frame's
+`smooth.offset` baked into it (`Apply` writes `t.pos = newAuthoritativePos +
+smooth.offset`). After one real discontinuity was correctly detected and
+smoothed, `t.pos` stayed near the *stale* predicted position rather than
+converging toward the true one, so the very next frame re-extrapolated from
+that stale point, found roughly the same gap again, and treated it as a
+*brand new* jump — adding to `smooth.offset` (`+=`) instead of letting it
+decay. Entities with real sustained velocity (freighters in transit,
+orbiting structures inheriting their planet's orbital velocity) kept
+compounding this every frame, so the offset grew rather than shrank,
+eventually rendering them far from their true position (or oscillating) —
+reading as "destroyed."
+
+Fix: `RemoteSmoothing` now separately tracks the entity's true last-known
+continuity (`lastAuthoritativePos`/`lastAuthoritativeVel`, plus a `hasLast`
+flag for the first frame an entity exists), decoupled from
+`Transform::pos`. Jump-detection extrapolates from these fields instead of
+from `t.pos`, so each frame's check is always measured against the real
+trajectory, not against whatever offset-corrupted value was drawn last
+frame — a genuine discontinuity is detected once, folded into the offset,
+and then that offset decays normally instead of being continuously
+re-added.
+
+**Verification status**: native and wasm targets build clean (cgame-only
+change; sim-test/server targets don't link `cgame/`, so not rebuilt for
+this fix). Live two-peer smoke test (server + 2 native clients): clean
+connect/welcome, no errors/fatals/asserts in any of the three logs.
+**Not yet manually verified**: reproducing a genuine multi-second lag spike
+against a freighter/orbiting structure and confirming it no longer runs
+away — the original regression was found by playtesting under real lag
+conditions that aren't practical to script here, so this still needs eyes
+on a real laggy session, same caveat as the fix above.
+
 ## Phase 8 — Deferred (needs its own design pass when reached)
 
 - Delta-compressed snapshots (per-entity change masks vs last acked).

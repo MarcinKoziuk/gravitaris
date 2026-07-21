@@ -203,8 +203,14 @@ void NetServer::BroadcastSnapshot(std::uint64_t currentTick)
     for (auto& [peer, state] : m_peers) {
         if (!state.welcomed) continue;
 
+        // This peer predicts and draws its own shots locally, so it must not
+        // also receive the authoritative copies (see GatherSnapshot's
+        // suppressBulletsOwnedBy). Every other peer still gets them.
+        const std::uint32_t ownShipNetId =
+                state.ship.is_alive() ? state.ship.get<NetId>().value : 0u;
+
         SnapshotData snapshot;
-        GatherSnapshot(m_registry, m_eventQueue, currentTick, state.lastSentEventSeq, snapshot);
+        GatherSnapshot(m_registry, m_eventQueue, currentTick, state.lastSentEventSeq, snapshot, ownShipNetId);
         if (!snapshot.events.empty()) {
             state.lastSentEventSeq = snapshot.events.back().seq;
         }

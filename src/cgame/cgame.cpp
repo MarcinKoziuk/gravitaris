@@ -5,13 +5,18 @@
 
 #include <gravitaris/game/logging.hpp>
 
+#include <Magnum/Math/Matrix3.h>
+
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/component/transform.hpp>
+#include <gravitaris/game/component/planet.hpp>
+#include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 
 #include <gravitaris/cgame/component/hit-flash.hpp>
 #include <gravitaris/cgame/fx/hit-flash-system.hpp>
+#include <gravitaris/cgame/team-color.hpp>
 
 #include <gravitaris/cgame/spawner/centity-spawner.hpp>
 #include <gravitaris/cgame/cgame.hpp>
@@ -41,6 +46,23 @@ CGame::CGame(IFilesystem &filesystem)
     // Headless Games (sim-test) never call this, so their determinism is
     // unaffected by this specific value.
     SetShipWeightMultiplier(0.667f);
+
+    // Loaded here (after both renderers' OnCreate<Model> observers exist, in
+    // their own constructors above) so both m_modelRenderer2 and
+    // m_mirrorRenderer2 bake it for SubmitPlanetOwnershipMarkers.
+    m_teamMarkerModel = m_resourceLoader.Load<Model>("models/ui/team-marker"_id);
+}
+
+void CGame::SubmitPlanetOwnershipMarkers(flecs::world& world, ModelRenderer2& renderer)
+{
+    static constexpr float MARKER_WORLD_SIZE = 22.f;
+    world.each([&](const Planet&, const Transform& t, const Team& team) {
+        if (team.id == TeamId::None) return;
+        const Magnum::Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
+        const Matrix3 transform =
+                Matrix3::translation(pos) * Matrix3::scaling({MARKER_WORLD_SIZE, MARKER_WORLD_SIZE});
+        renderer.SubmitOverlay(m_teamMarkerModel.Id(), transform, Magnum::Vector3{TeamColor(team.id)});
+    });
 }
 
 void CGame::RenderMinimap()
@@ -230,7 +252,7 @@ void CGame::RenderNetClient(float dtSeconds)
                 SnapshotInterpolator::Compute(m_netClient->GetSnapshotHistory(), renderTick,
                                               m_netClient->GetYourShipNetId(),
                                               static_cast<float>(m_netClient->GetTickRate()), m_interpParams)) {
-        m_snapshotApplier.Apply(*interpolated);
+        m_snapshotApplier.Apply(*interpolated, dtSeconds);
     }
 
     // Blend out any reconciliation snap over ~100ms by decaying the offset
@@ -281,6 +303,7 @@ void CGame::RenderNetClient(float dtSeconds)
     m_starfieldRenderer.SetCameraPosition(camera.GetPosition());
     m_starfieldRenderer.Render();
 
+    SubmitPlanetOwnershipMarkers(m_mirrorWorld, m_mirrorRenderer2);
     m_mirrorRenderer2.SetZoom(camera.GetZoom());
     m_mirrorRenderer2.SetCameraPosition(camera.GetPosition());
     m_mirrorRenderer2.SetLineWidth(m_lineWidthPixels);
@@ -353,6 +376,7 @@ void CGame::Render(double delta)
     // runs this frame -- otherwise the overlay scratch grows unboundedly.
     if (m_activeRenderer == RendererKind::Baked) {
         m_indicatorRenderer.Update(GetPlayer(), camera.GetPosition(), camera.GetZoom(), m_viewportSize, m_pixelScale);
+        SubmitPlanetOwnershipMarkers(m_registry, m_modelRenderer2);
     }
 
     {

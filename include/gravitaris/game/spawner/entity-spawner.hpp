@@ -10,6 +10,7 @@
 
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/id.hpp>
+#include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/gnc/ai-personality-presets.hpp>
@@ -100,6 +101,13 @@ public:
     // `direction`/`phase` match SpawnOrbitingPlanet's own parameters.
     flecs::entity SpawnOrbitingStructure(StructureType type, id_t modelId, flecs::entity planet, TeamId team,
                                          double radius, double direction, double phase);
+
+    // A freighter dispatched to build `buildOrder` at `targetPlanet` --
+    // kinematic (FreighterSystem drives its transit, then a real
+    // PlanetOrbitAttachment once arrived), Team+Damageable like a ship
+    // (interceptable), but no Controls/InputQueue -- nothing pilots it.
+    flecs::entity SpawnFreighter(id_t modelId, Vector2d position, TeamId team, flecs::entity targetPlanet,
+                                 BuildOrder buildOrder);
 
     // Resolves a NetId to its live entity, or a default (invalid) entity if no
     // entity currently holds that NetId.

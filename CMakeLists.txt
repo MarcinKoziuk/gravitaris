@@ -550,8 +550,13 @@ add_executable(GravitarisNG
     src/game/system/structure-attachment-system.cpp
     include/gravitaris/game/system/structure-defense-system.hpp
     src/game/system/structure-defense-system.cpp
+    include/gravitaris/game/system/freighter-system.hpp
+    src/game/system/freighter-system.cpp
+    include/gravitaris/game/system/economy-system.hpp
+    src/game/system/economy-system.cpp
     include/gravitaris/game/component/structure.hpp
     include/gravitaris/game/component/planet-attachment.hpp
+    include/gravitaris/game/component/freighter.hpp
     include/gravitaris/game/system/death-system.hpp
     src/game/system/death-system.cpp
     include/gravitaris/game/system/physics-system.hpp
@@ -579,6 +584,7 @@ add_executable(GravitarisNG
     include/gravitaris/cgame/renderer/simple-model-renderer.hpp
     include/gravitaris/cgame/component/renderable.hpp
     include/gravitaris/cgame/component/hit-flash.hpp
+    include/gravitaris/cgame/component/remote-smoothing.hpp
     src/cgame/renderer/simple-model-renderer.cpp
     include/gravitaris/game/resource/common/detail/resource-wrapper.hpp
     include/gravitaris/game/system/ship-controls-system.hpp
@@ -806,6 +812,8 @@ add_executable(gravitaris-sim-test
     src/game/system/conquest-system.cpp
     src/game/system/structure-attachment-system.cpp
     src/game/system/structure-defense-system.cpp
+    src/game/system/freighter-system.cpp
+    src/game/system/economy-system.cpp
     src/game/system/death-system.cpp
     src/game/system/physics-system.cpp
     src/game/system/orbit-system.cpp
@@ -901,6 +909,8 @@ if(NOT EMSCRIPTEN)
         src/game/system/conquest-system.cpp
         src/game/system/structure-attachment-system.cpp
         src/game/system/structure-defense-system.cpp
+        src/game/system/freighter-system.cpp
+        src/game/system/economy-system.cpp
         src/game/system/death-system.cpp
         src/game/system/physics-system.cpp
         src/game/system/orbit-system.cpp

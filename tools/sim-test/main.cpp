@@ -26,7 +26,9 @@
 #include <gravitaris/game/component/landing-state.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/physics.hpp>
+#include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/planet.hpp>
+#include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/transform.hpp>
@@ -307,14 +309,10 @@ void TestClientPrediction()
     Require(!stale.has_value(), "prediction: re-reconciling an already-replayed tick finds nothing");
 
     // Phase 6: local fire feedback (same ClientPrediction/Game, continuing
-    // from tick 10). No cosmetic bullet entity is spawned (removed
-    // 2026-07-19 -- see ClientPrediction::Step's own doc comment: one used
-    // to be, but firing at the ship's current local position/rotation while
-    // the real bullet fires INPUT_LEAD_TICKS later at wherever the ship has
-    // since moved routinely showed as two clearly separate, non-aligned
-    // bullets). Only the instant BulletFired event (driving the fire sound)
-    // is checked here now -- cooldown cadence is observable via how many
-    // times that event's seq actually advances.
+    // from tick 10). Firing spawns the cosmetic bullet this client renders
+    // (the server omits a peer's own bullets from its snapshots, so this is
+    // the only tracer on screen) plus the instant BulletFired event driving
+    // the fire sound.
     auto countBulletEntities = [&]() {
         std::size_t count = 0;
         game.GetRegistry().each([&](flecs::entity, Bullet&) { ++count; });
@@ -325,8 +323,15 @@ void TestClientPrediction()
     firing.firePrimary = true;
     prediction.Step(10, firing, planets);
     Require(eventQueue.LatestSeq() == 1, "prediction: firing emits a local BulletFired event");
-    Require(countBulletEntities() == 0,
-            "prediction: no cosmetic bullet entity is spawned, only the sound-driving event");
+    Require(countBulletEntities() == 1, "prediction: firing spawns exactly one locally-predicted bullet");
+
+    // Cosmetic only: damage stays server-authoritative, and it carries the
+    // shooter's NetId so GatherSnapshot can suppress the server's copy.
+    bool ownedAndHarmless = false;
+    game.GetRegistry().each([&](flecs::entity, Bullet& b) {
+        ownedAndHarmless = b.damage == 0.f && b.ownerNetId == prediction.GetOwnShip().get<NetId>().value;
+    });
+    Require(ownedAndHarmless, "prediction: the predicted bullet is zero-damage and tagged with the shooter's NetId");
 
     // Cooldown gates the cadence: holding the trigger for FIRE_COOLDOWN_TICKS
     // - 1 more ticks must not emit another event yet.
@@ -572,6 +577,161 @@ void TestStructures()
                                        : true; // destroyed outright: definitely damaged
     }
     Require(enemyDamaged, "structures: Base defenses hit an enemy ship in range");
+
+    fs.Shutdown();
+}
+
+// docs/gravity-well-mode-plan.md Phase 3: freighters + materials economy.
+// Seeds a fully developed home complex (BuildStartingComplex) and a second,
+// claimed-but-empty planet nearby, then checks: (1) materials actually flow
+// on their own (Colony production -> Base conversion) over a short natural
+// window; (2) gifting the home Base/High Port funds so dispatch doesn't
+// have to wait on that slow ramp, the empty planet grows Base -> Colony ->
+// High Port in that order, entirely hands-off, with freighters actually
+// consumed on arrival.
+void TestFreighterEconomy()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    // Near-zero orbit centerMass (same trick TestLandingAndClaiming uses):
+    // this is the planet's OWN orbital motion around its (notional) sun,
+    // independent of its own GravitySource mass (authored on the Body,
+    // pulls ships/structures same as ever) -- keeping it ~stationary here
+    // just keeps this test's freighter-transit distance predictable instead
+    // of chasing a fast-moving target around a 2000-radius orbit.
+    flecs::entity homePlanet =
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 1e-9, 2000., 1.0, 0.0);
+    BuildStartingComplex(spawner, homePlanet, TeamId::Blue);
+
+    // Second planet, close by (so freighter transit -- 40 u/s -- doesn't
+    // dominate the test's runtime) and pre-claimed (bypassing Phase 1's
+    // landing/claiming system, which isn't what this test is about).
+    flecs::entity emptyPlanet =
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{300., 0.}, 1e-9, 2000., 1.0, 0.0);
+    emptyPlanet.set<Team>(Team{TeamId::Blue});
+
+    flecs::entity homeColony, homeBase, homeHighPort;
+    game.GetRegistry().each([&](flecs::entity e, const Structure& s, const PlanetSurfaceAttachment& attach) {
+        if (attach.planetNetId != homePlanet.get<NetId>().value) return;
+        if (s.type == StructureType::Colony) homeColony = e;
+        if (s.type == StructureType::Base) homeBase = e;
+    });
+    game.GetRegistry().each([&](flecs::entity e, const Structure& s, const PlanetOrbitAttachment& attach) {
+        if (attach.planetNetId == homePlanet.get<NetId>().value && s.type == StructureType::HighPort) homeHighPort = e;
+    });
+    Require(homeColony.is_alive() && homeBase.is_alive() && homeHighPort.is_alive(),
+            "economy: home complex has the structures this test needs (setup check)");
+
+    // (1) Natural production/supply/conversion, no gifting. Colony's own
+    // rawMaterials isn't a useful thing to assert on here: local supply
+    // drains whatever it produces to Base/High Port the same tick it's
+    // produced (by design -- see EconomySystem's per-tick ordering), so it
+    // reads ~0 at rest even though production is very much happening.
+    // What should visibly grow is Base's stores, fed by that supply.
+    for (int tick = 0; tick < 50; ++tick) game.Update();
+    const Structure& baseAfter50 = homeBase.get<Structure>();
+    Require(baseAfter50.rawMaterials + baseAfter50.finishedMaterials > 0.f,
+            "economy: a Colony's production reaches its Base as supplied raw and/or converted finished materials");
+
+    // (2) Gift funds so Lab/Space Dock can afford freighters immediately,
+    // isolating the build-sequence/consumption assertions from the slow
+    // natural ramp (already proven above).
+    homeBase.get_mut<Structure>().finishedMaterials = 1000.f;
+    homeHighPort.get_mut<Structure>().finishedMaterials = 1000.f;
+
+    const std::uint32_t emptyNetId = emptyPlanet.get<NetId>().value;
+    const auto hasStructure = [&](StructureType type) {
+        bool found = false;
+        game.GetRegistry().each([&](const Structure& s, const PlanetSurfaceAttachment& attach) {
+            if (attach.planetNetId == emptyNetId && s.type == type) found = true;
+        });
+        game.GetRegistry().each([&](const Structure& s, const PlanetOrbitAttachment& attach) {
+            if (attach.planetNetId == emptyNetId && s.type == type) found = true;
+        });
+        return found;
+    };
+    const auto countFreighters = [&]() {
+        std::size_t count = 0;
+        game.GetRegistry().each([&](const Freighter&) { ++count; });
+        return count;
+    };
+
+    bool sawAnyFreighter = false;
+    bool baseBuilt = false, colonyBuilt = false, highPortBuilt = false;
+    for (int tick = 0; tick < 3000; ++tick) {
+        game.Update();
+        if (countFreighters() > 0) sawAnyFreighter = true;
+        if (!baseBuilt && hasStructure(StructureType::Base)) baseBuilt = true;
+        if (!colonyBuilt && hasStructure(StructureType::Colony)) {
+            Require(baseBuilt, "economy: Colony never appears before Base");
+            colonyBuilt = true;
+        }
+        if (!highPortBuilt && hasStructure(StructureType::HighPort)) {
+            Require(colonyBuilt, "economy: High Port never appears before Colony");
+            highPortBuilt = true;
+            break; // full sequence done -- no need to keep ticking
+        }
+    }
+    Require(sawAnyFreighter, "economy: at least one freighter was actually dispatched");
+    Require(baseBuilt, "economy: the empty planet grew a Base");
+    Require(colonyBuilt, "economy: the empty planet grew a Colony");
+    Require(highPortBuilt, "economy: the empty planet grew a High Port");
+    Require(countFreighters() == 0, "economy: every dispatched freighter was consumed, none left idling");
+
+    fs.Shutdown();
+}
+
+// A peer predicts and draws its own shots locally (ClientPrediction::Step),
+// so the server must not also send it the authoritative copies -- otherwise
+// the same shot draws twice, ~14 ticks apart (own ship renders ahead by
+// INPUT_LEAD_TICKS, replicated entities behind by the interpolation delay).
+// Everyone else's bullets must still come through.
+void TestOwnBulletSuppression()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    flecs::entity mine = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.});
+    flecs::entity theirs = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{5000., 0.});
+
+    flecs::entity myBullet =
+            spawner.SpawnBullet("models/bullets/bullet-0"_id, Vector2d{40., 0.}, Vector2d{100., 0.}, true);
+    myBullet.emplace<Bullet>(3.0, TeamId::Blue, 10.f, mine.get<NetId>().value);
+
+    flecs::entity theirBullet =
+            spawner.SpawnBullet("models/bullets/bullet-0"_id, Vector2d{5040., 0.}, Vector2d{100., 0.}, true);
+    theirBullet.emplace<Bullet>(3.0, TeamId::Red, 10.f, theirs.get<NetId>().value);
+
+    const auto contains = [](const SnapshotData& s, std::uint32_t netId) {
+        return std::any_of(s.entities.begin(), s.entities.end(),
+                           [&](const EntityState& e) { return e.netId == netId; });
+    };
+
+    SnapshotData unfiltered;
+    GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), 0, 0, unfiltered);
+    Require(contains(unfiltered, myBullet.get<NetId>().value)
+                    && contains(unfiltered, theirBullet.get<NetId>().value),
+            "bullet suppression: an unfiltered snapshot carries every bullet (setup check)");
+
+    SnapshotData forMe;
+    GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), 0, 0, forMe, mine.get<NetId>().value);
+    Require(!contains(forMe, myBullet.get<NetId>().value),
+            "bullet suppression: my own bullet is omitted from my own snapshot");
+    Require(contains(forMe, theirBullet.get<NetId>().value),
+            "bullet suppression: another ship's bullet still reaches me");
+    Require(contains(forMe, mine.get<NetId>().value),
+            "bullet suppression: only bullets are filtered, my ship itself still replicates");
 
     fs.Shutdown();
 }
@@ -1012,6 +1172,8 @@ int main()
     TestClientPrediction();
     TestLandingAndClaiming();
     TestStructures();
+    TestFreighterEconomy();
+    TestOwnBulletSuppression();
     TestWebRtcRoundtrip();
     TestWebRtcSignalingRoundtrip();
 

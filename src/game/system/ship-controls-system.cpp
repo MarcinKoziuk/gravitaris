@@ -7,6 +7,7 @@
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/bullet.hpp>
+#include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/event/game-event.hpp>
@@ -103,11 +104,13 @@ void ShipControlsSystem::Update(std::uint64_t step)
             std::pair<Vector2d, Vector2d> ret = ShipControlsSystem::ComputeBulletSpawn(transf, phys);
 
             const Team* shooterTeam = entity.try_get<Team>();
+            const NetId* shooterNetId = entity.try_get<NetId>();
             flecs::entity bulletEntity = m_entitySpawner.SpawnBullet(
                     "models/bullets/bullet-0"_id, ret.first, ret.second, /*sensor=*/true);
             bulletEntity.emplace<Bullet>(ShipControlsSystem::BULLET_LIFETIME_SECONDS,
                                          shooterTeam ? shooterTeam->id : TeamId::Blue,
-                                         BULLET_DAMAGE);
+                                         BULLET_DAMAGE,
+                                         shooterNetId ? shooterNetId->value : 0u);
 
             m_eventQueue.Emit(GameEventType::BulletFired, entity,
                               Magnum::Vector2{static_cast<float>(ret.first.x()),

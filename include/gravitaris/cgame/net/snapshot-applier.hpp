@@ -31,7 +31,11 @@ class SnapshotApplier {
 public:
     SnapshotApplier(flecs::world& world, ResourceLoader& resourceLoader);
 
-    void Apply(const SnapshotData& snapshot);
+    // `dtSeconds`: real render-frame time, for decaying RemoteSmoothing's
+    // per-entity offset (see its own doc comment). Defaults to a 60Hz frame
+    // so existing callers/tests that don't care about smoothing don't need
+    // updating.
+    void Apply(const SnapshotData& snapshot, float dtSeconds = 1.f / 60.f);
 
     // The mirror-world entity for a replicated NetId, or an invalid entity if
     // none exists (not yet applied, or absent from the latest snapshot).

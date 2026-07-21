@@ -205,6 +205,23 @@ flecs::entity EntitySpawner::SpawnOrbitingStructure(StructureType type, id_t mod
     return entity;
 }
 
+flecs::entity EntitySpawner::SpawnFreighter(id_t modelId, Vector2d position, TeamId team, flecs::entity targetPlanet,
+                                            BuildOrder buildOrder)
+{
+    ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
+
+    auto entity = m_registry.entity();
+    entity.emplace<Transform>(position);
+    entity.emplace<RigidBodyDesc>("main"_id, body);
+    entity.emplace<Team>(team);
+    entity.emplace<Damageable>();
+    entity.emplace<Freighter>(Freighter{targetPlanet.get<NetId>().value, buildOrder, false});
+    AssignNetId(entity);
+    AddRenderable(entity, modelId);
+
+    return entity;
+}
+
 void EntitySpawner::AddRenderable(flecs::entity entity, id_t modelId)
 {}
 

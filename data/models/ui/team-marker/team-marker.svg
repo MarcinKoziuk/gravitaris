@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Ownership marker: a filled square drawn at a claimed planet's center in
+     the team's color (see CGame planet-ownership overlay). Fill AND stroke
+     are the team-color placeholder (#ff00ff) so the per-instance color drives
+     the whole glyph, same convention as arrow-1.svg. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape">
+  <g inkscape:label="model" inkscape:groupmode="layer">
+    <rect style="fill:#ff00ff;fill-opacity:1;stroke:#ff00ff;stroke-width:2px"
+          width="100" height="100" x="-50" y="-50" />
+  </g>
+  <g inkscape:label="@origin" inkscape:groupmode="layer" style="display:none">
+    <circle style="fill:#ff0000;fill-opacity:0;stroke:#d45500" cx="0" cy="0" r="2.5" />
+  </g>
+</svg>

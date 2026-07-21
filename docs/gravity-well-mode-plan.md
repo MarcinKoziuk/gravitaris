@@ -212,38 +212,65 @@ Goal: the original's automated economy, physically: colonies produce,
 freighters haul and build, bases convert. Claiming a fresh planet results —
 hands-off — in a complex growing there. The heart of the mode.
 
-- [ ] Freighter model: new SVG+YAML under `data/models/ships/freighter-0/`
-  (hull + two visible cargo pods, per the annotated screenshot). Slow: own
-  `GuidanceParams` (low `maxSpeed`/`accel`).
-- [ ] Freighter movement: GNC `GotoPoint`/`InterceptEntity` for the transit
-  leg; **on arrival, snap into a kinematic `Orbit` around the target planet**
-  (no landing, no Land behavior needed). Departure = leave the orbit, resume
-  GNC flight. Keep transitions deterministic.
-- [ ] Economy rules, one system (`src/game/system/economy-system.cpp`),
-  mirroring the manual's model (see gravity-well-1997.md "Economic model"):
-  - Colony produces raw per tick; supplies its Base and the High Port
-    overhead.
-  - Base/High Port convert raw → finished at a rate; repairs (structures,
-    docked/landed fighters) consume finished from the host.
-  - Freighters in orbit at a colony planet load raw; at a needy planet
-    (no colony) unload; a **full** freighter at a friendly claimed planet
-    missing a structure **builds it — Base → Colony → High Port order — and
-    is consumed** (entity destroyed, structure spawned, emit
-    `GameEventType::StructureBuilt`).
-  - New-unit rule: only build if no living unit of that type is already
-    on/above that planet.
-- [ ] Freighter brain: small state machine component + system
-  (`src/game/system/freighter-system.cpp`): Idle-in-orbit → LoadAtColony →
-  Transit → OrbitTarget → (unload | build). Target selection: nearest
-  friendly planet needing supply or construction, claimed-but-undeveloped
-  first; break distance ties by NetId (determinism).
-- [ ] Freighter production: Labs and Space Docks build freighters from their
-  host's finished materials when a friendly planet needs one and no friendly
-  freighter is already tasked to it.
-- Sim-test: seed a developed complex + one claimed empty planet; run N
-  ticks; assert Base then Colony then High Port appear in order, freighters
-  were consumed, materials actually flowed (colony store drained into
-  builds); two-run checksum stable.
+- [x] Freighter model: `data/models/ships/freighter-0/` (hull + two visible
+  cargo pods). Kinematic, slow.
+- [x] Freighter movement: **scope simplification** — transit is a plain
+  constant-speed kinematic seek toward the target planet's live position,
+  not full GNC `GotoPoint`/`InterceptEntity` inertial flight. Freighters are
+  background economy actors the player never pilots or dogfights (only
+  shoots at, as a target); wiring up `FlightController`/`GuidanceParams`
+  per freighter is real extra plumbing for no gameplay-visible benefit here,
+  and a plain homing seek is far easier to keep deterministic. On arrival
+  (within `FreighterSystem::ARRIVAL_RADIUS`), it gets a **real
+  `PlanetOrbitAttachment`** — the exact mechanism High Port already uses —
+  so `StructureAttachmentSystem` takes over its motion; no separate landing
+  or departure state needed since it's consumed on build, never idles.
+- [x] Economy rules, `src/game/system/economy-system.cpp`: Colony produces
+  raw/tick (capped); supplies its own planet's Base and (independently)
+  High Port, two separate draws against the same store; Base/High Port
+  convert raw → finished/tick (capped). Lab/Space Dock dispatch a freighter
+  when **the structure they accompany** (Base for Lab, High Port for Space
+  Dock — matching gravity-well-1997.md's "constructs Freighter from
+  finished materials of the Base/High Port it accompanies"; Lab/Space Dock
+  hold no materials store of their own) can afford `FREIGHTER_COST`, to the
+  nearest friendly claimed planet still missing Base/Colony/High Port (in
+  that order) with no freighter already tasked to it — ties broken by
+  NetId. New-unit rule re-checked fresh at build time (`FreighterSystem`),
+  not trusted from dispatch time.
+- [x] Freighter brain, `src/game/system/freighter-system.cpp`: **scope
+  simplification** — two states, not four (Transit → Arrived-and-build),
+  since freighters are pre-loaded at spawn (cost already paid by the
+  funding structure at dispatch), so there's no separate "visit a colony to
+  load cargo" trip for this construction role. On arrival, re-validates and
+  builds the next missing structure (or is simply consumed without building
+  if someone else already did — an accepted rare-race edge case), emitting
+  the new `GameEventType::StructureBuilt`.
+- [x] Freighter production: done as part of EconomySystem above.
+- [x] Sim-test `TestFreighterEconomy`: seeds a fully developed home complex
+  + one claimed-but-empty planet; confirms materials flow naturally over a
+  short window (Colony → Base) before gifting funds to isolate the
+  build-sequence timing from the (correctly slow) natural ramp; asserts
+  Base → Colony → High Port appear in that order, at least one freighter
+  was actually dispatched, and every dispatched freighter was consumed
+  (none left idling). Two-run determinism checksum stable.
+
+**Known gap, explicitly deferred**: resupplying an already-complete but
+materials-starved planet (the original's *other* freighter role, for a
+planet with no Colony of its own) isn't modeled — only the construction
+case (missing structures) triggers a dispatch. Also: Lab/Space Dock's own
+`Structure::rawMaterials`/`finishedMaterials` fields are simply never
+written to (by design, per the manual's "the Base/High Port it accompanies"
+wording) — worth remembering if a future phase reads them expecting
+non-zero values.
+
+**Verification status** (2026-07-20): all four targets build clean; a
+native single-player smoke run (starting complex + economy actually ticking
+live) shows no errors; sim-test's new proof passes, determinism stable.
+**Not yet manually verified**: watching a freighter actually fly and build
+in a real playthrough (the sim-test proof gifts materials to keep runtime
+sane — a real game would take a while at the tuned production rates before
+the first freighter launches; that pacing itself hasn't been eyeballed for
+feel).
 
 Done when: claim a fresh planet in a real playthrough and watch the complex
 grow unattended; sim-test proof passes.

@@ -26,13 +26,20 @@ static constexpr std::uint32_t MAX_ENTITIES = 4096;
 static constexpr std::uint32_t MAX_EVENTS = GameEventQueue::CAPACITY;
 
 void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::uint64_t tick,
-                    std::uint32_t eventsSinceSeq, SnapshotData& out)
+                    std::uint32_t eventsSinceSeq, SnapshotData& out, std::uint32_t suppressBulletsOwnedBy)
 {
     out.tick = tick;
     out.entities.clear();
     out.events.clear();
 
     world.each([&](flecs::entity entity, const NetId& netId, const Transform& t) {
+        if (suppressBulletsOwnedBy != 0) {
+            if (const Bullet* bullet = entity.try_get<Bullet>();
+                bullet && bullet->ownerNetId == suppressBulletsOwnedBy) {
+                return;
+            }
+        }
+
         EntityState state;
         state.netId = netId.value;
         state.type = entity.has<Planet>() ? NetEntityType::Planet

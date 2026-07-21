@@ -24,6 +24,8 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_orbitSystem(m_registry, m_physicsSystem)
         , m_structureAttachmentSystem(m_registry, *m_entitySpawner, m_physicsSystem)
         , m_structureDefenseSystem(m_registry, *m_entitySpawner, m_eventQueue)
+        , m_freighterSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue)
+        , m_economySystem(m_registry, *m_entitySpawner)
         , m_inputSystem(m_registry)
         , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue)
         , m_bulletLifetimeSystem(m_registry)
@@ -85,6 +87,10 @@ void Game::Update()
         // Place orbiting bodies on their rails before the step reads positions
         // for gravity and resolves collisions against them.
         m_orbitSystem.Update();
+        // Freighters may arrive and get a real PlanetOrbitAttachment this
+        // tick -- must run before StructureAttachmentSystem so that
+        // attachment is already driven the same tick it's added.
+        m_freighterSystem.Update();
         // Planet-attached structures ride the planets' just-updated positions.
         m_structureAttachmentSystem.Update();
 
@@ -109,6 +115,7 @@ void Game::Update()
         m_structureDefenseSystem.Update();
         m_landingStateSystem.Update();
         m_conquestSystem.Update();
+        m_economySystem.Update();
         m_deathSystem.Update(m_step);
         // Detect a player death from DeathSystem before any system reads m_player.
         HandlePlayerRespawn();

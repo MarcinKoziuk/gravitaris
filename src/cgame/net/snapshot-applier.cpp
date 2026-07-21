@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include <gravitaris/game/component/transform.hpp>
@@ -17,7 +18,23 @@
 #include <gravitaris/cgame/resource/model.hpp>
 #include <gravitaris/cgame/component/renderable.hpp>
 #include <gravitaris/cgame/component/hit-flash.hpp>
+#include <gravitaris/cgame/component/remote-smoothing.hpp>
 #include <gravitaris/cgame/net/snapshot-applier.hpp>
+
+namespace {
+
+// Same 100ms convention CGame's own-ship reconciliation offset decays over.
+constexpr float SMOOTH_TAU_SECONDS = 0.1f;
+
+// Below this, a frame-to-frame gap between "where we predicted this entity
+// would be" and "where the snapshot says it actually is" is ordinary
+// interpolation/quantization noise, not a real discontinuity worth
+// smoothing (see SnapshotApplier::Apply) -- same epsilon-gating idea as
+// ClientPrediction::m_positionEpsilon, independently tuned for this much
+// lower-stakes cosmetic purpose.
+constexpr double JUMP_TOLERANCE = 3.0;
+
+} // namespace
 
 namespace Gravitaris {
 
@@ -26,7 +43,7 @@ SnapshotApplier::SnapshotApplier(flecs::world& world, ResourceLoader& resourceLo
         , m_resourceLoader(resourceLoader)
 {}
 
-void SnapshotApplier::Apply(const SnapshotData& snapshot)
+void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
 {
     // Destroy entities absent from this snapshot first (full snapshots: not
     // being in one means the entity is gone). snapshot.entities is sorted by
@@ -97,12 +114,54 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot)
             }
             entity.emplace<Renderable>(m_resourceLoader.Load<Model>(state.modelId));
             entity.emplace<HitFlash>();
+            entity.emplace<RemoteSmoothing>();
             m_byNetId[state.netId] = entity;
         }
 
         Transform& t = entity.get_mut<Transform>();
-        t.prevPos = t.pos;
-        t.pos = Vector2d{state.pos};
+        const Vector2d newAuthoritativePos{state.pos};
+
+        // Planets are deliberately exempt: they're always drawn at the
+        // newest known state already (see SnapshotInterpolator::Compute's
+        // own comment on why -- landed-ship/proxy alignment and camera
+        // framing both need that, not smoothed motion), so there's no
+        // extrapolation-freeze discontinuity to smooth here in the first
+        // place.
+        if (state.type != NetEntityType::Planet) {
+            RemoteSmoothing& smooth = entity.get_mut<RemoteSmoothing>();
+            smooth.offset *= std::exp(-static_cast<double>(dtSeconds) / SMOOTH_TAU_SECONDS);
+
+            // Where this entity's own last-reported velocity said it should
+            // have ended up, continuing from the last snapshot's true
+            // authoritative state -- NOT from t.pos, which already has this
+            // (possibly still-decaying) offset baked in. Extrapolating from
+            // t.pos would make next frame's prediction chase its own tail:
+            // a still-large offset shifts "predicted" away from the real
+            // trajectory, so the same discontinuity gets re-detected as new
+            // every frame and the offset keeps growing instead of decaying
+            // (see RemoteSmoothing's own doc comment). SnapshotInterpolator's
+            // straight-line extrapolation freezing at its cap, then a real
+            // snapshot snapping past that frozen point, is the jump this
+            // catches -- see the Phase 6 follow-up in docs/networking-plan.md.
+            if (smooth.hasLast) {
+                const Vector2d predicted =
+                        smooth.lastAuthoritativePos + smooth.lastAuthoritativeVel * static_cast<double>(dtSeconds);
+                const Vector2d jump = newAuthoritativePos - predicted;
+                if (jump.length() > JUMP_TOLERANCE) {
+                    smooth.offset += predicted - newAuthoritativePos;
+                }
+            }
+            smooth.lastAuthoritativePos = newAuthoritativePos;
+            smooth.lastAuthoritativeVel = Vector2d{state.vel};
+            smooth.hasLast = true;
+
+            t.prevPos = t.pos;
+            t.pos = newAuthoritativePos + smooth.offset;
+        }
+        else {
+            t.prevPos = t.pos;
+            t.pos = newAuthoritativePos;
+        }
         t.rot = Radd{static_cast<double>(state.rot)};
         t.scale = Vector2d{state.scale};
         t.vel = Vector2d{state.vel};

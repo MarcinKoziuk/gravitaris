@@ -104,18 +104,16 @@ public:
     // applies `flags` (rotation/thrust, and now firePrimary -- Phase 6), the
     // same weapon cooldown ShipControlsSystem uses so cadence matches, gravity
     // from `planets` (this snapshot's Planet-typed EntityStates), integrates,
-    // and records the result keyed by `tick`. On firing, emits a local
-    // BulletFired event into `eventQueue` purely so AudioSystem's existing
-    // event-driven one-shot path plays the fire sound instantly; this event
-    // is never serialized/sent, and (as of 2026-07-19) no cosmetic bullet
-    // entity is spawned alongside it -- one used to be, but it fired at the
-    // ship's *current local* position/rotation while the real bullet the
-    // server spawns fires INPUT_LEAD_TICKS later at wherever the ship has
-    // since moved/rotated to, which routinely showed as two clearly
-    // separate, non-aligned bullets rather than one briefly doubled. The
-    // sound is the part that needs to feel instant; the only bullet ever
-    // drawn now is the real one, arriving via ordinary Phase 4
-    // interpolation, always aimed correctly. The caller owns tick numbering
+    // and records the result keyed by `tick`. On firing, spawns the
+    // cosmetic bullet this client actually sees (zero damage -- hits stay
+    // server-authoritative) and emits a local BulletFired event into
+    // `eventQueue` so AudioSystem's event-driven one-shot plays the fire
+    // sound instantly; neither is ever serialized/sent. The server omits
+    // this peer's own bullets from its snapshots (GatherSnapshot's
+    // suppressBulletsOwnedBy), so exactly one tracer is ever on screen per
+    // shot -- drawing both is what made an earlier attempt show two
+    // separate tracers, the own ship rendering ~INPUT_LEAD_TICKS ahead of
+    // where replicated entities render. The caller owns tick numbering
     // (see NetClient::SendInput -- the same number must be sent on the wire
     // for Reconcile() to later find this entry). No-op if SpawnOwnShip
     // hasn't been called yet.

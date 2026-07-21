@@ -5,7 +5,9 @@
 
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
+#include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/net-id.hpp>
+#include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/event/game-event.hpp>
@@ -125,23 +127,29 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags, const
     if (flags.firePrimary && m_fireCooldown == 0) {
         m_fireCooldown = ShipControlsSystem::FIRE_COOLDOWN_TICKS;
 
-        // No cosmetic bullet entity here anymore (removed 2026-07-19; see
-        // docs/networking-plan.md's Phase 6 follow-up). It used to fire at
-        // the ship's *current local* position/rotation, while the real
-        // (authoritative) bullet the server actually spawns fires
-        // INPUT_LEAD_TICKS later at wherever the ship has since moved or
-        // rotated to -- once that lead grew from 2 to 8 ticks (fixing a
-        // worse bug), the gap became large enough to routinely show as two
-        // clearly separate, non-aligned bullets rather than the intended
-        // "one bullet, briefly doubled." The part that actually needs to
-        // feel instant is the sound, not the tracer, so the event alone
-        // (still driving AudioSystem's fire-and-forget one-shot) is kept;
-        // the only bullet ever drawn is the real one, arriving with
-        // ordinary Phase 4 interpolation and always aimed correctly.
-        const Magnum::Vector2d pos =
+        // The bullet this client actually sees. The server's authoritative
+        // copy of this same shot never arrives (GatherSnapshot omits a
+        // peer's own bullets), so there is exactly one on screen -- which is
+        // what makes predicting it safe: an earlier attempt drew both, and
+        // since the own ship renders at ~serverTick + INPUT_LEAD_TICKS while
+        // replicated entities render at serverTick - the interpolation
+        // delay, the pair showed up ~14 ticks apart as two separate tracers.
+        // Same muzzle math the server uses, from the same predicted state
+        // the server will reach for this tick, so the trajectory matches;
+        // bullets take no gravity (see PhysicsSystem::ApplyGravity) and are
+        // sensors, so both copies fly identical straight lines.
+        //
+        // Cosmetic only -- zero damage, and DamageSystem never runs on this
+        // client -- so it flies through whatever the server says it hit and
+        // expires on its own; hits/damage stay entirely server-authoritative.
+        const auto [pos, vel] =
                 ShipControlsSystem::ComputeBulletSpawn(m_ownShip.get<Transform>(),
-                                                       m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()))
-                        .first;
+                                                       m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()));
+        const flecs::entity bullet = m_entitySpawner.SpawnBullet(
+                "models/bullets/bullet-0"_id, pos, vel, /*sensor=*/true);
+        bullet.emplace<Bullet>(ShipControlsSystem::BULLET_LIFETIME_SECONDS, m_ownShip.get<Team>().id, 0.f,
+                               m_ownShip.get<NetId>().value);
+
         m_eventQueue.Emit(GameEventType::BulletFired, m_ownShip,
                           Magnum::Vector2{static_cast<float>(pos.x()), static_cast<float>(pos.y())});
     }

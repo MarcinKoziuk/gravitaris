@@ -1,5 +1,6 @@
 #include <Magnum/Math/Vector2.h>
 
+#include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/scenario/starting-complex.hpp>
 
@@ -7,6 +8,11 @@ namespace Gravitaris {
 
 void BuildStartingComplex(EntitySpawner& entitySpawner, flecs::entity planet, TeamId team)
 {
+    // Your home planet is yours from the start (matches the original: you
+    // begin with an established complex on a claimed planet) -- also what
+    // makes the ownership marker show immediately, no landing needed.
+    planet.set<Team>(Team{team});
+
     // Planetside: small offsets from the planet's center, well within its
     // ~60-unit true radius (data/models/planets/simple) so they render
     // nested inside the outline like the original's screenshots.

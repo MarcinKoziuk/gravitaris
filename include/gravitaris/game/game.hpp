@@ -16,6 +16,8 @@
 #include <gravitaris/game/system/orbit-system.hpp>
 #include <gravitaris/game/system/structure-attachment-system.hpp>
 #include <gravitaris/game/system/structure-defense-system.hpp>
+#include <gravitaris/game/system/freighter-system.hpp>
+#include <gravitaris/game/system/economy-system.hpp>
 #include <gravitaris/game/system/input-system.hpp>
 #include <gravitaris/game/system/ship-controls-system.hpp>
 #include <gravitaris/game/system/bullet-lifetime-system.hpp>
@@ -50,6 +52,10 @@ protected:
     StructureAttachmentSystem m_structureAttachmentSystem;
 
     StructureDefenseSystem m_structureDefenseSystem;
+
+    FreighterSystem m_freighterSystem;
+
+    EconomySystem m_economySystem;
 
     InputSystem m_inputSystem;
 

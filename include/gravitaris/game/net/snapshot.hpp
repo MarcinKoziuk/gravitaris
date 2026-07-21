@@ -75,8 +75,18 @@ struct SnapshotData {
 
 // Collects the replicated state of every NetId-bearing entity plus events
 // with seq > eventsSinceSeq. Reads only replicated components.
+//
+// `suppressBulletsOwnedBy` (0 = suppress nothing) omits bullets fired by that
+// ship NetId. A client predicts its own shots locally and renders those (see
+// ClientPrediction::Step), so shipping it the authoritative copy too would
+// draw the same shot twice, ~14 ticks apart -- the own ship renders at
+// roughly serverTick + NetClient::INPUT_LEAD_TICKS while replicated entities
+// render at serverTick - the interpolation delay. Filtering per peer here,
+// rather than adding an owner field to EntityState and filtering client-side,
+// keeps the wire format unchanged: an omitted entity needs no new field.
 void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::uint64_t tick,
-                    std::uint32_t eventsSinceSeq, SnapshotData& out);
+                    std::uint32_t eventsSinceSeq, SnapshotData& out,
+                    std::uint32_t suppressBulletsOwnedBy = 0);
 
 void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out);
 
