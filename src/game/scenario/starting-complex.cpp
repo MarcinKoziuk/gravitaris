@@ -27,7 +27,7 @@ void BuildStartingComplex(EntitySpawner& entitySpawner, flecs::entity planet, Te
 
     // Orbital: High Port plus its Space Dock/Sensor Array on the same orbit
     // radius at small phase offsets, past the planet's own outline.
-    constexpr double orbitRadius = 90.;
+    constexpr double orbitRadius = 180.;
     entitySpawner.SpawnOrbitingStructure(StructureType::HighPort, "models/structures/high-port"_id, planet, team,
                                          orbitRadius, 1.0, 0.0);
     entitySpawner.SpawnOrbitingStructure(StructureType::SpaceDock, "models/structures/space-dock"_id, planet, team,

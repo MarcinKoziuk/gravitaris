@@ -25,6 +25,7 @@
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
 #include <gravitaris/game/component/net-id.hpp>
+#include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/planet.hpp>
@@ -237,6 +238,132 @@ void TestSnapshotInterpolation()
     }
 }
 
+// Playtesting fix (2026-07-21): planets used to always render at their raw
+// latest-snapshot position (see TestSnapshotInterpolation's "planet uses the
+// newest known state" case above) and ClientPrediction's gravity proxies
+// were positioned the same way -- both meant a planet's apparent/simulated
+// position was always somewhat stale (raw network jitter unfiltered into
+// its rendered motion; a systematic RTT+lead-tick lag in where the client
+// thought gravity wells were, read as drift needing periodic reconciliation
+// even while just coasting in a stable orbit). Fix: replicate enough of
+// Orbit (center/radius/theta/angularSpeed) for EvaluateOrbit to re-derive
+// the exact analytic position at any tick. This proves that math directly
+// against hand-computed values, independent of SnapshotInterpolator/
+// ClientPrediction's own use of it.
+void TestOrbitReplication()
+{
+    EntityState planet{};
+    planet.type = NetEntityType::Planet;
+    planet.orbitCenter = {1000.f, 0.f};
+    planet.orbitRadius = 200.f;
+    planet.orbitTheta = 0.f;
+    planet.orbitAngularSpeed = 0.5f; // rad/s
+
+    // One full second later (60 ticks at the standard 60Hz tick rate):
+    // theta should have advanced by exactly angularSpeed * 1.0s = 0.5 rad.
+    Vector2d pos, vel;
+    EvaluateOrbit(planet, /*baseTick*/ 1000, /*atTick*/ 1060, pos, vel);
+
+    const double expectedTheta = 0.5;
+    const Vector2d expectedPos = Vector2d{1000., 0.} + Vector2d{std::cos(expectedTheta), std::sin(expectedTheta)} * 200.;
+    const Vector2d expectedVel = Vector2d{-std::sin(expectedTheta), std::cos(expectedTheta)} * (0.5 * 200.);
+
+    Require((pos - expectedPos).length() < 0.1,
+            "orbit: EvaluateOrbit re-derives the exact analytic position after 1s of orbit");
+    Require((vel - expectedVel).length() < 0.1,
+            "orbit: EvaluateOrbit's velocity matches the analytic tangential velocity");
+
+    // Evaluating at the *same* tick as the baseline must reproduce it
+    // exactly (zero elapsed time) -- the degenerate case every real caller
+    // (a snapshot's own tick, or a replay of a not-yet-newer tick) can hit.
+    Vector2d pos0, vel0;
+    EvaluateOrbit(planet, 1000, 1000, pos0, vel0);
+    Require((pos0 - Vector2d{1200., 0.}).length() < 0.01,
+            "orbit: EvaluateOrbit at baseTick itself reproduces orbitCenter+orbitRadius exactly");
+
+    // SnapshotInterpolator's own planet-override path: a straddled render
+    // tick must use this analytic evaluation (based on the newest known
+    // snapshot), not freeze to that snapshot's raw (pre-evaluated) pos --
+    // this is the wobble fix, proven by checking the *interpolator's*
+    // output matches EvaluateOrbit exactly rather than the raw stored pos.
+    EntityState raw = planet;
+    raw.pos = {1200.f, 0.f}; // whatever the server happened to store at tick 1000
+    raw.netId = 7;
+
+    SnapshotData older;
+    older.tick = 990;
+    older.entities = {raw};
+    SnapshotData newer;
+    newer.tick = 1000;
+    newer.entities = {raw};
+    std::deque<SnapshotData> history{older, newer};
+
+    constexpr float TICK_RATE = 60.f;
+    const std::optional<SnapshotData> rendered = SnapshotInterpolator::Compute(
+            history, /*renderTick*/ 1060, /*exemptNetId*/ 0, TICK_RATE, SnapshotInterpolator::Params{});
+    Require(rendered.has_value(), "orbit: interpolator produces a result for an orbiting planet");
+    Require(rendered->entities.size() == 1 && rendered->entities[0].netId == 7,
+            "orbit: the orbiting planet is present in the interpolator's output");
+    const Magnum::Vector2 renderedPos = rendered->entities[0].pos;
+    Require(std::fabs(renderedPos.x() - static_cast<float>(expectedPos.x())) < 0.1f
+                    && std::fabs(renderedPos.y() - static_cast<float>(expectedPos.y())) < 0.1f,
+            "orbit: interpolator evaluates an orbiting planet analytically at renderTick, not frozen to raw pos");
+
+    // Regression (2026-07-21): a landed ship visibly desynced from the
+    // rendered planet surface, worse the higher the interpolation delay
+    // setting -- ClientPrediction's gravity/collision proxies are
+    // positioned at the tick actually being predicted (ahead of
+    // renderTick), but the very first version of this fix evaluated the
+    // *rendered* planet at renderTick too, silently reintroducing a tick
+    // mismatch between what's simulated and what's drawn. `planetTick` (an
+    // explicit, separate parameter) must be used for planets instead of
+    // renderTick when the caller supplies one.
+    const std::uint64_t divergentPlanetTick = 2000; // far from renderTick (1060) above
+    const std::optional<SnapshotData> renderedWithPlanetTick = SnapshotInterpolator::Compute(
+            history, /*renderTick*/ 1060, /*exemptNetId*/ 0, TICK_RATE, SnapshotInterpolator::Params{},
+            divergentPlanetTick);
+    Require(renderedWithPlanetTick.has_value(), "orbit: interpolator produces a result with an explicit planetTick");
+    Vector2d expectedAtPlanetTick, unusedVel;
+    EvaluateOrbit(raw, /*baseTick*/ 1000, divergentPlanetTick, expectedAtPlanetTick, unusedVel);
+    const Magnum::Vector2 renderedAtPlanetTick = renderedWithPlanetTick->entities[0].pos;
+    Require(std::fabs(renderedAtPlanetTick.x() - static_cast<float>(expectedAtPlanetTick.x())) < 0.1f
+                    && std::fabs(renderedAtPlanetTick.y() - static_cast<float>(expectedAtPlanetTick.y())) < 0.1f,
+            "orbit: an explicit planetTick overrides renderTick for planet evaluation (landing-alignment fix)");
+    Require((renderedAtPlanetTick - renderedPos).length() > 1.f,
+            "orbit: planetTick actually changes the result versus renderTick (the two ticks really do diverge)");
+
+    // Regression (2026-07-21): orbit.theta is a double that accumulates
+    // unbounded for as long as the server process runs; replicated as f32,
+    // a long-running server's large theta values lose real precision in
+    // the wire truncation, and since every new snapshot re-bases
+    // EvaluateOrbit's calculation from a freshly (and independently)
+    // quantized theta, that precision loss reads as the planet wobbling --
+    // worse the longer the server's been up. OrbitSystem must wrap theta
+    // into [0, 2*PI) every tick so this can't happen regardless of session
+    // length. Forces the component directly to a large multi-thousand
+    // -radian value (simulating hours of uptime) rather than looping
+    // millions of ticks to get there.
+    {
+        FilesystemPhysFS fs;
+        if (!fs.Init()) {
+            std::fprintf(stderr, "sim-test: filesystem init failed\n");
+            std::exit(1);
+        }
+        Game game(fs);
+        const flecs::entity orbitingPlanet = game.GetEntitySpawner().SpawnOrbitingPlanet(
+                "models/planets/simple"_id, Vector2d{0., 0.}, 5000000., 500., 1.0, 0.0);
+
+        Orbit& orbit = orbitingPlanet.get_mut<Orbit>();
+        orbit.theta = 12345.6789; // ~1964 full turns -- far past float32's precise-integer range
+        game.Update();
+
+        const double wrappedTheta = orbitingPlanet.get<Orbit>().theta;
+        Require(wrappedTheta >= 0.0 && wrappedTheta < 2.0 * 3.14159265358979323846,
+                "orbit: OrbitSystem wraps theta into [0, 2*PI) regardless of how large it was before this tick");
+        fs.Shutdown();
+    }
+}
+
 // docs/networking-plan.md Phase 5: ClientPrediction's Step/Reconcile against
 // a real (headless) Game's PhysicsSystem/EntitySpawner, so this exercises
 // actual Chipmunk integration, not just hand-computed math.
@@ -268,7 +395,7 @@ void TestClientPrediction()
     ControlFlags noInput{};
     EntityState closeMatch{}; // captured at tick 5, below, for the no-correction case
     for (std::uint64_t tick = 0; tick < 10; ++tick) {
-        prediction.Step(tick, noInput, planets);
+        prediction.Step(tick, noInput, planets, tick);
         if (tick == 5) {
             const Transform& t = prediction.GetOwnShip().get<Transform>();
             closeMatch.pos = Magnum::Vector2{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
@@ -321,7 +448,7 @@ void TestClientPrediction()
 
     ControlFlags firing{};
     firing.firePrimary = true;
-    prediction.Step(10, firing, planets);
+    prediction.Step(10, firing, planets, 10);
     Require(eventQueue.LatestSeq() == 1, "prediction: firing emits a local BulletFired event");
     Require(countBulletEntities() == 1, "prediction: firing spawns exactly one locally-predicted bullet");
 
@@ -336,11 +463,12 @@ void TestClientPrediction()
     // Cooldown gates the cadence: holding the trigger for FIRE_COOLDOWN_TICKS
     // - 1 more ticks must not emit another event yet.
     for (std::uint64_t tick = 11; tick < 10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS; ++tick) {
-        prediction.Step(tick, firing, planets);
+        prediction.Step(tick, firing, planets, tick);
     }
     Require(eventQueue.LatestSeq() == 1, "prediction: fire cooldown gates cadence, no event mid-cooldown");
 
-    prediction.Step(10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS, firing, planets);
+    prediction.Step(10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS, firing, planets,
+                    10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS);
     Require(eventQueue.LatestSeq() == 2, "prediction: cooldown expiring lets the next held shot fire");
 
     // Phase 7: planet collision proxies have real collision geometry, not
@@ -360,7 +488,7 @@ void TestClientPrediction()
     const std::vector<EntityState> collidingPlanets{collidingPlanet};
 
     const std::uint64_t collideTick = 10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS + 1;
-    prediction.Step(collideTick, ControlFlags{}, collidingPlanets);
+    prediction.Step(collideTick, ControlFlags{}, collidingPlanets, collideTick);
     const Magnum::Vector2d afterCollision = prediction.GetOwnShip().get<Transform>().pos;
     Require((afterCollision - beforeCollision).length() > 0.1,
             "prediction: planet collision proxy has real shape, pushes the ship out of a deep overlap");
@@ -392,7 +520,7 @@ void TestClientPrediction()
     double angVelAtReconcileTick = 0.;
     const std::uint64_t reconcileTick = straightStart + 5;
     for (std::uint64_t tick = straightStart; tick < straightStart + 60; ++tick) {
-        prediction.Step(tick, thrustOnly, noPlanets);
+        prediction.Step(tick, thrustOnly, noPlanets, tick);
         if (tick == reconcileTick) {
             const Transform& rt = prediction.GetOwnShip().get<Transform>();
             posAtReconcileTick = rt.pos;
@@ -1169,6 +1297,7 @@ int main()
 
     TestByteStream();
     TestSnapshotInterpolation();
+    TestOrbitReplication();
     TestClientPrediction();
     TestLandingAndClaiming();
     TestStructures();

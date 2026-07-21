@@ -2,12 +2,15 @@
 #include <cmath>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include <gravitaris/game/logging.hpp>
 
 #include <Magnum/Math/Matrix3.h>
 
 #include <gravitaris/game/resource/common/resource-loader.hpp>
+#include <gravitaris/game/component/bullet.hpp>
+#include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/team.hpp>
@@ -158,6 +161,9 @@ void CGame::TickNetClient(const ControlFlags& flags)
         if (drift > RESYNC_THRESHOLD_TICKS) {
             LOG(info) << "net: predicted-tick drift of " << drift << " ticks (throttled tab?), resyncing "
                       << m_nextPredictedTick << " -> " << target;
+            ++m_resyncEventCount;
+            m_lastResyncDriftTicks = drift;
+            m_driftHistory.Record(static_cast<float>(drift));
             m_nextPredictedTick = target;
         }
     }
@@ -166,9 +172,65 @@ void CGame::TickNetClient(const ControlFlags& flags)
     m_netClient->SendInput(tick, flags);
 
     if (const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot()) {
-        m_clientPrediction.Step(tick, flags, snapshot->entities);
+        m_clientPrediction.Step(tick, flags, snapshot->entities, snapshot->tick);
         m_bulletLifetimeSystem.Update(PHYSICS_DELTA);
+        CheckLocalBulletHits();
     }
+}
+
+// Cosmetic-only stop for the shooter's own locally-predicted bullet
+// (ClientPrediction::Step; zero damage, DamageSystem never runs against it
+// -- see the Bullet component's own doc comment). This is deliberately
+// independent of the server's replicated Impact event (also handled, in
+// ApplyRemoteEvents): playtesting found the shooter's bullet sometimes
+// never stopped despite a real, server-confirmed hit, traced to
+// GameEventQueue's actual delivery contract -- its own doc comment
+// describes a "loss-tolerance model" of re-sending everything since the
+// client's last acked seq, but NetServer::BroadcastSnapshot deliberately
+// does NOT use client acks for this (see PeerState::lastSentEventSeq's own
+// comment: a peer that never acks correctly must not wedge its own event
+// stream), so in practice a single dropped packet permanently loses that
+// event for that peer -- no resend ever happens. Checking locally instead
+// means this doesn't depend on any network message arriving at all.
+//
+// Approximate on purpose: the mirror world is presentation-only (no
+// physics runs against it, ADR 0001), so there's no real collision shape to
+// query -- this checks distance from each hostile ship's rendered position
+// to the bullet's swept segment (prevPos -> pos, so a fast bullet can't
+// tunnel past a check done only at its instantaneous position) against a
+// fixed radius approximating ship size, rather than exact geometry.
+void CGame::CheckLocalBulletHits()
+{
+    static constexpr double LOCAL_HIT_RADIUS = 18.0;
+    const std::uint32_t yourShipNetId = m_netClient->GetYourShipNetId();
+
+    std::vector<flecs::entity> hitBullets;
+    m_registry.each([&](flecs::entity bulletEnt, const Bullet& bullet, const Transform& bulletTransf) {
+        if (bullet.ownerNetId != yourShipNetId) return;
+
+        const Vector2d& a = bulletTransf.prevPos;
+        const Vector2d& b = bulletTransf.pos;
+        const Vector2d ab = b - a;
+        const double abLengthSq = ab.dot();
+
+        bool hit = false;
+        m_mirrorWorld.each([&](flecs::entity, const Team& shipTeam, const Controls&, const Transform& shipTransf) {
+            if (hit) return;
+            if (shipTeam.id == bullet.team) return; // no friendly fire
+
+            double distSq;
+            if (abLengthSq < 1e-9) {
+                distSq = (shipTransf.pos - a).dot();
+            } else {
+                const double t = std::clamp(Magnum::Math::dot(shipTransf.pos - a, ab) / abLengthSq, 0.0, 1.0);
+                distSq = (shipTransf.pos - (a + ab * t)).dot();
+            }
+            if (distSq <= LOCAL_HIT_RADIUS * LOCAL_HIT_RADIUS) hit = true;
+        });
+        if (hit) hitBullets.push_back(bulletEnt);
+    });
+
+    for (flecs::entity bulletEnt : hitBullets) bulletEnt.destruct();
 }
 
 void CGame::ReconcileOwnShipIfNeeded()
@@ -200,8 +262,15 @@ void CGame::ReconcileOwnShipIfNeeded()
     // past its stamped tick (INPUT_LEAD_TICKS too tight for real RTT/
     // jitter -- dropped server-side, repeat-last-command diverges from
     // what was predicted) rather than ordinary f32/quantization noise.
+    const float correctionMagnitude = (preCorrectionPos - correctedPos).length();
     LOG(trace) << "net: reconciled tick " << snapshot->tick << ", correction magnitude "
-              << (preCorrectionPos - correctedPos).length() << " world units";
+              << correctionMagnitude << " world units";
+    m_correctionHistory.Record(correctionMagnitude);
+    // Recorded on the same "genuinely new snapshot" gate as the correction
+    // above, so this lines up 1:1 with it in the Net debug tab's graphs --
+    // a real network gap shows up here; a local main-thread stall shows up
+    // as a drift/resync event above with this staying flat instead.
+    m_snapshotIntervalHistory.Record(m_netClient->GetLastSnapshotIntervalMs());
 }
 
 void CGame::ApplyRemoteEvents()
@@ -216,6 +285,34 @@ void CGame::ApplyRemoteEvents()
             if (event.type == GameEventType::BulletFired && event.sourceNetId == yourShipNetId) continue;
 
             m_eventQueue.Emit(event.type, flecs::entity{}, event.pos, event.param);
+
+            // Playtesting fix (2026-07-21): the shooter's own bullet is a
+            // purely cosmetic client-predicted copy (ClientPrediction::Step)
+            // -- zero damage, DamageSystem never runs against it -- so
+            // without this it would keep flying straight through whatever
+            // it actually hit for the rest of its lifetime instead of
+            // stopping, even though the server's real (suppressed, never
+            // sent back to this peer) bullet was destroyed the instant it
+            // registered the hit. No wire field ties an Impact event back
+            // to the bullet that caused it, so this matches by position
+            // instead: any of this client's own still-alive bullets
+            // (Bullet::ownerNetId == yourShipNetId) near where the hit was
+            // just registered. The radius is generous -- by the time this
+            // event has propagated through the snapshot/event pipeline, the
+            // real bullet already overshot the impact point along the same
+            // straight line the cosmetic copy is still flying, so an exact
+            // position match would almost never hit.
+            if (event.type == GameEventType::Impact) {
+                static constexpr double BULLET_IMPACT_MATCH_RADIUS = 100.0;
+                const Vector2d impactPos{static_cast<double>(event.pos.x()), static_cast<double>(event.pos.y())};
+                std::vector<flecs::entity> matchedBullets;
+                m_registry.each([&](flecs::entity bulletEnt, const Bullet& bullet, const Transform& transf) {
+                    if (bullet.ownerNetId != yourShipNetId) return;
+                    if ((transf.pos - impactPos).length() > BULLET_IMPACT_MATCH_RADIUS) return;
+                    matchedBullets.push_back(bulletEnt);
+                });
+                for (flecs::entity bulletEnt : matchedBullets) bulletEnt.destruct();
+            }
 
             if (event.type != GameEventType::Impact && event.type != GameEventType::LandingCrash) continue;
 
@@ -246,12 +343,24 @@ void CGame::RenderNetClient(float dtSeconds)
 
     ReconcileOwnShipIfNeeded();
 
+    // Planets must be rendered at the exact same tick ClientPrediction's
+    // gravity/collision proxies last used (TickNetClient's `tick`, i.e.
+    // `m_nextPredictedTick - 1` -- the most recent tick actually stepped),
+    // not `renderTick` (delayed behind the estimated server tick by the
+    // interpolation-delay setting) -- see SnapshotInterpolator::Compute's
+    // `planetTick` doc comment. Falls back to `renderTick` (nullopt) before
+    // the own ship exists yet, when nothing has stepped/synced a proxy to
+    // desync from in the first place.
+    const std::optional<std::uint64_t> planetTick =
+            m_clientPrediction.HasOwnShip() ? std::optional<std::uint64_t>(m_nextPredictedTick - 1) : std::nullopt;
+
     // Remote entities only (the own ship is real m_registry state now,
     // Phase 5) via Phase 4 interpolation into the mirror world.
     if (const std::optional<SnapshotData> interpolated =
                 SnapshotInterpolator::Compute(m_netClient->GetSnapshotHistory(), renderTick,
                                               m_netClient->GetYourShipNetId(),
-                                              static_cast<float>(m_netClient->GetTickRate()), m_interpParams)) {
+                                              static_cast<float>(m_netClient->GetTickRate()), m_interpParams,
+                                              planetTick)) {
         m_snapshotApplier.Apply(*interpolated, dtSeconds);
     }
 

@@ -43,6 +43,7 @@ StarfieldShader::StarfieldShader(IFilesystem& fileSystem)
     attachShaders({vert, frag});
 
     bindAttributeLocation(StarfieldShader::Center::Location, "center");
+    bindAttributeLocation(StarfieldShader::Parallax::Location, "parallax");
     bindAttributeLocation(StarfieldShader::Corner::Location, "corner");
     bindAttributeLocation(StarfieldShader::Params::Location, "params");
     bindAttributeLocation(StarfieldShader::StarColor::Location, "starColor");
@@ -51,9 +52,11 @@ StarfieldShader::StarfieldShader(IFilesystem& fileSystem)
 
     u_viewportSize = uniformLocation("viewportSize");
     u_viewProjection = uniformLocation("viewProjection");
+    u_cameraPos = uniformLocation("cameraPos");
 
     setViewportSize(Vector2{1280.f, 720.f});
     setViewProjection(Matrix3{});
+    setCameraPos(Vector2{0.f, 0.f});
 }
 
 StarfieldShader& StarfieldShader::setViewportSize(const Vector2& size)
@@ -65,6 +68,12 @@ StarfieldShader& StarfieldShader::setViewportSize(const Vector2& size)
 StarfieldShader& StarfieldShader::setViewProjection(const Matrix3& matrix)
 {
     setUniform(u_viewProjection, matrix);
+    return *this;
+}
+
+StarfieldShader& StarfieldShader::setCameraPos(const Vector2& pos)
+{
+    setUniform(u_cameraPos, pos);
     return *this;
 }
 

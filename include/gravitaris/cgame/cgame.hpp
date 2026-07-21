@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <optional>
 #include <string>
@@ -38,6 +39,27 @@ enum class RendererKind {
 };
 
 class CGame : public Game {
+public:
+    // Fixed-size rolling sample buffer for the Net debug tab's graphs --
+    // same ring-buffer shape as PerfMonitor::Section, kept separate rather
+    // than shoehorned into that (frame-timing-specific, ms-labeled) class
+    // for data that's ticks or world units, not milliseconds. Public so the
+    // debug UI (a separate translation unit) can spell the type; declared
+    // up here, ahead of the protected members below that use it.
+    struct RollingHistory {
+        static constexpr std::size_t SIZE = 120;
+        std::array<float, SIZE> samples{};
+        std::size_t writeIndex = 0;
+        std::size_t sampleCount = 0;
+
+        void Record(float value)
+        {
+            samples[writeIndex] = value;
+            writeIndex = (writeIndex + 1) % SIZE;
+            if (sampleCount < SIZE) ++sampleCount;
+        }
+    };
+
 protected:
     SimpleModelRenderer m_simpleModelRenderer;
     ModelRenderer2 m_modelRenderer2;
@@ -94,6 +116,26 @@ protected:
     // Transform) that blends a reconciliation snap in over ~100ms instead
     // of popping -- see ReconcileOwnShipIfNeeded.
     Magnum::Vector2 m_visualCorrectionOffset{0.f, 0.f};
+
+    // Cosmetic-only: stops the shooter's own locally-predicted bullet
+    // (Bullet::ownerNetId == this client's own ship) as soon as it visually
+    // reaches a hostile ship in the mirror world, independent of any
+    // network message. See its own doc comment (cgame.cpp) for why this
+    // exists alongside (not instead of) the Impact-event-based destroy in
+    // ApplyRemoteEvents.
+    void CheckLocalBulletHits();
+
+    // Net debug tab diagnostics: how often/how far the predicted-tick drift
+    // guard (see TickNetClient) has had to resync, and the magnitude of each
+    // reconciliation correction/snapshot-arrival gap -- recorded only when
+    // they actually happen (an irregular-event history, like PerfMonitor's
+    // own sections for code paths that don't run every frame). These stay
+    // behind getters like everything else here.
+    std::uint32_t m_resyncEventCount = 0;
+    std::uint64_t m_lastResyncDriftTicks = 0;
+    RollingHistory m_driftHistory;
+    RollingHistory m_correctionHistory;
+    RollingHistory m_snapshotIntervalHistory;
 
     void ReconcileOwnShipIfNeeded();
 
@@ -325,6 +367,27 @@ public:
     // Net debug tab (Phase 5 prediction/reconciliation tunable).
     [[nodiscard]] double GetPredictionEpsilon() const { return m_clientPrediction.GetPositionEpsilon(); }
     void SetPredictionEpsilon(double epsilon) { m_clientPrediction.SetPositionEpsilon(epsilon); }
+
+    // Net debug tab: connection-health diagnostics, for telling a real
+    // network gap (snapshot interval spikes) apart from a local main-thread
+    // stall (drift/resync fires with snapshot interval unaffected).
+    [[nodiscard]] std::uint32_t GetResyncEventCount() const { return m_resyncEventCount; }
+    [[nodiscard]] std::uint64_t GetLastResyncDriftTicks() const { return m_lastResyncDriftTicks; }
+    [[nodiscard]] const RollingHistory& GetDriftHistory() const { return m_driftHistory; }
+    [[nodiscard]] const RollingHistory& GetCorrectionHistory() const { return m_correctionHistory; }
+    [[nodiscard]] const RollingHistory& GetSnapshotIntervalHistory() const { return m_snapshotIntervalHistory; }
+    [[nodiscard]] float GetLastSnapshotIntervalMs() const
+    {
+        return m_netClient ? m_netClient->GetLastSnapshotIntervalMs() : 0.f;
+    }
+    [[nodiscard]] std::size_t GetAcceptedSnapshotCount() const
+    {
+        return m_netClient ? m_netClient->GetAcceptedSnapshotCount() : 0;
+    }
+    [[nodiscard]] std::size_t GetDroppedSnapshotCount() const
+    {
+        return m_netClient ? m_netClient->GetDroppedSnapshotCount() : 0;
+    }
 };
 
 } // namespace Gravitaris

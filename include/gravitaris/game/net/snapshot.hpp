@@ -51,12 +51,32 @@ struct EntityState {
     float gravityMultiplier = 1.f;
     // Only meaningful for NetEntityType::Planet: true for a body with no
     // Orbit (a sun, sitting still), false for one that does (an orbiting
-    // planet) -- camera/minimap's star-vs-planet color/size choice. Not the
-    // full Orbit component (center/mass/radius/theta/direction): those drive
-    // client-side position derivation, which nothing needs yet since planet
-    // position already comes from Transform like everything else; only the
-    // bit actually consumed client-side is replicated.
+    // planet) -- camera/minimap's star-vs-planet color/size choice, and
+    // whether the orbitX fields below mean anything (a star's are all zero).
     bool isStar = false;
+    // Only meaningful when isStar is false: enough of Orbit's state (center,
+    // radius, the angle at this snapshot's tick, and the current signed
+    // angular speed -- itself derived server-side from centerMass/direction/
+    // the live gravity multiplier, so replicating it directly means neither
+    // side of the wire needs to agree on those separately) for a client to
+    // re-derive this planet's exact position at any tick via the same
+    // closed-form circular-orbit math OrbitSystem itself uses (see
+    // EvaluateOrbit below) -- instead of only ever knowing its raw position
+    // as of whichever snapshot last happened to arrive. That raw-position
+    // approach (the v1-v4 wire format) had two real symptoms: the rendered
+    // planet's motion inherited raw network arrival jitter frame-to-frame
+    // (a planet is exempt from interpolation/extrapolation -- see
+    // SnapshotInterpolator::Compute's own comment on why -- so nothing was
+    // filtering that out), and ClientPrediction's gravity proxies
+    // (SyncPlanetProxies) were always ~INPUT_LEAD_TICKS+RTT behind the tick
+    // actually being predicted, a systematic lag in where the client thought
+    // the gravity wells were that read as slow drift needing periodic
+    // reconciliation even while just coasting in a stable orbit, un-driven
+    // by any input.
+    Magnum::Vector2 orbitCenter{};
+    float orbitRadius = 0.f;
+    float orbitTheta = 0.f;
+    float orbitAngularSpeed = 0.f;
     // Only meaningful for NetEntityType::Structure.
     StructureType structureType = StructureType::Base;
     float rawMaterials = 0.f;
@@ -97,5 +117,22 @@ void WriteSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::u
 // False on a truncated/garbage buffer (wrong version byte, counts that don't
 // fit the remaining bytes); `out` contents are unspecified then.
 bool ReadSnapshot(ByteReader& in, SnapshotData& out);
+
+// Re-derives a replicated orbiting planet's exact position/velocity at
+// `atTick`, extrapolating analytically from `planet`'s orbit snapshot
+// (captured at `baseTick`, i.e. the SnapshotData::tick it came from) via the
+// same closed-form circular-orbit math OrbitSystem uses server-side:
+// theta(t) = orbitTheta + orbitAngularSpeed * (t - baseTick) * PHYSICS_DELTA,
+// then pos = orbitCenter + (cos theta, sin theta) * orbitRadius. Exact for
+// any atTick (past, present, or future) as long as orbitAngularSpeed hasn't
+// changed since baseTick, which it doesn't during normal play (see
+// EntityState::orbitAngularSpeed's own comment) -- callers re-baseline every
+// time a newer snapshot arrives regardless, so a live change would only ever
+// be off between one snapshot and the next.
+//
+// Only meaningful when `planet.isStar` is false; callers must check that
+// themselves (a star has no orbit data to evaluate, and isn't moving anyway).
+void EvaluateOrbit(const EntityState& planet, std::uint64_t baseTick, std::uint64_t atTick,
+                   Magnum::Vector2d& outPos, Magnum::Vector2d& outVel);
 
 } // namespace Gravitaris

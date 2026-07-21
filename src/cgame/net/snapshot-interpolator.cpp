@@ -69,9 +69,11 @@ const EntityState* FindByNetId(const SnapshotData& snapshot, std::uint32_t netId
 
 std::optional<SnapshotData> SnapshotInterpolator::Compute(const std::deque<SnapshotData>& history,
                                                           std::uint64_t renderTick, std::uint32_t exemptNetId,
-                                                          float tickRate, const Params& params)
+                                                          float tickRate, const Params& params,
+                                                          std::optional<std::uint64_t> planetTick)
 {
     if (history.empty()) return std::nullopt;
+    const std::uint64_t evalPlanetsAt = planetTick.value_or(renderTick);
 
     SnapshotData out;
     out.tick = renderTick;
@@ -113,22 +115,53 @@ std::optional<SnapshotData> SnapshotInterpolator::Compute(const std::deque<Snaps
         out.events = newer.events;
     }
 
-    // Planets: always the newest known state, never delayed/lerped like
-    // everything else here. Two reasons. (1) They move on a perfectly
+    // Planets: evaluated at `evalPlanetsAt` (the caller's `planetTick`, NOT
+    // `renderTick`) via their replicated orbit parameters (EvaluateOrbit),
+    // not delayed/lerped/extrapolated like everything else here, and no
+    // longer simply frozen to whichever raw snapshot last happened to
+    // arrive either. Two reasons for not lerping/extrapolating raw
+    // positions like ordinary entities. (1) They move on a perfectly
     // smooth, deterministic orbit -- unlike input-driven ships, there's no
     // snapshot-rate jerkiness to hide, so delaying them buys nothing. (2)
     // Phase 7's ClientPrediction::SyncPlanetProxies collides the local ship
-    // against a planet proxy positioned from the *latest* raw snapshot
-    // (undelayed) -- rendering the visual planet ~100ms behind that made a
-    // landed ship look sunk into (or floating above) the surface by however
-    // far the planet moved in that gap, and the position discontinuity each
-    // time this function's lerp/extrapolate mode switched fed camera
-    // framing's nearestSurfaceDist, reading as a fast zoom pulse. Matching
-    // physics and visuals to the same (newest) state fixes both.
+    // against a planet proxy positioned at the tick actually being
+    // predicted -- typically estimatedServerTick + INPUT_LEAD_TICKS, ahead
+    // of `renderTick` (itself delayed behind estimatedServerTick by the
+    // interpolation-delay setting). The two MUST be evaluated at the exact
+    // same tick or a landed ship visibly desyncs from the rendered planet
+    // surface by however far apart they are -- worse the higher the
+    // interpolation delay is set, which is exactly the regression this
+    // caught (`planetTick` didn't exist yet; this used to evaluate at
+    // `renderTick` like everything else, silently reintroducing the same
+    // sunk-into-the-surface bug the old raw-latest-position approach had
+    // already fixed once). The caller is responsible for passing whatever
+    // tick its own ClientPrediction is actually using.
+    //
+    // Evaluating analytically (rather than copying history.back()'s raw
+    // position) additionally fixes a real wobble bug: planets used to be
+    // the one kind of entity exempted from every smoothing mechanism
+    // (interp delay, extrapolation, RemoteSmoothing), so their rendered
+    // motion inherited raw network arrival jitter unfiltered -- some frames
+    // render two arrivals' worth of movement, some render zero. Gated on
+    // orbitRadius > 0, not isStar (a camera/minimap color hint, not an
+    // "orbit data present" signal) -- see ClientPrediction::
+    // SyncPlanetProxies's identical guard for why. A non-orbiting body (a
+    // star, or a hand-built EntityState with no orbit fields set) has no
+    // orbit to evaluate and keeps the old raw-latest-position behavior.
     for (EntityState& e : out.entities) {
         if (e.type != NetEntityType::Planet) continue;
         if (const EntityState* latest = FindByNetId(history.back(), e.netId)) {
-            e = *latest;
+            if (latest->orbitRadius > 0.f) {
+                EntityState evaluated = *latest;
+                Magnum::Vector2d pos, vel;
+                EvaluateOrbit(*latest, history.back().tick, evalPlanetsAt, pos, vel);
+                evaluated.pos = Magnum::Vector2{static_cast<float>(pos.x()), static_cast<float>(pos.y())};
+                evaluated.vel = Magnum::Vector2{static_cast<float>(vel.x()), static_cast<float>(vel.y())};
+                e = evaluated;
+            }
+            else {
+                e = *latest;
+            }
         }
     }
 

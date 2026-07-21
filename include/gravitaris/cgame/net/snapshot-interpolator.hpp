@@ -36,8 +36,22 @@ public:
     // the server's tick rate (NetClient::GetTickRate()), needed to convert
     // tick deltas to seconds for the extrapolation cap. Returns nullopt only
     // if history is empty (nothing received yet).
+    //
+    // `planetTick` (defaults to `renderTick` if omitted -- fine for a caller
+    // that doesn't also run ClientPrediction, e.g. a test): the tick planets
+    // are analytically evaluated at (EvaluateOrbit), separate from
+    // `renderTick` used for every other entity. This MUST match whatever
+    // tick ClientPrediction::SyncPlanetProxies most recently positioned its
+    // gravity/collision proxies at (the last ticked prediction, typically
+    // `estimatedServerTick + NetClient::INPUT_LEAD_TICKS`) -- not the
+    // delayed `renderTick`, or a landed ship visibly desyncs from the
+    // rendered planet surface by however far apart the two ticks are (worse
+    // the higher the interpolation delay is set). See this class's own doc
+    // comment on why planets are otherwise exempt from `renderTick`-based
+    // interpolation/extrapolation.
     static std::optional<SnapshotData> Compute(const std::deque<SnapshotData>& history, std::uint64_t renderTick,
-                                                std::uint32_t exemptNetId, float tickRate, const Params& params);
+                                                std::uint32_t exemptNetId, float tickRate, const Params& params,
+                                                std::optional<std::uint64_t> planetTick = std::nullopt);
 };
 
 } // namespace Gravitaris

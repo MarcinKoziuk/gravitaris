@@ -23,6 +23,15 @@ struct Orbit {
     double radius = 0.0;
     double theta = 0.0;      // current orbital angle; advanced by OrbitSystem each tick
     double direction = 1.0;  // sign only (+1/-1): orbit direction
+    // Cached copy of the angular speed OrbitSystem computes fresh each tick
+    // (from centerMass/radius/direction and PhysicsSystem's live gravity
+    // multiplier) -- stored back here so GatherSnapshot can replicate it
+    // directly without also needing a PhysicsSystem reference, and a client
+    // can re-derive this planet's exact position at any tick from just
+    // (center, radius, theta, angularSpeed) + the shared tick (see
+    // EvaluateOrbit in game/net/snapshot.hpp) instead of only ever knowing
+    // its raw position as of whichever snapshot last happened to arrive.
+    double angularSpeed = 0.0;
 };
 
 } // namespace Gravitaris

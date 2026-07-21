@@ -1669,6 +1669,128 @@ away — the original regression was found by playtesting under real lag
 conditions that aren't practical to script here, so this still needs eyes
 on a real laggy session, same caveat as the fix above.
 
+## Orbit replication: analytic planet positions (2026-07-21)
+
+Playtesting found two related bugs, both traced to the same root cause.
+Planets were the one kind of entity replicated by raw position only (v1-v4
+wire format): `EntityState::isStar` told the client whether a planet orbits
+at all, but not the orbit itself, so a client only ever knew "wherever the
+last snapshot happened to say this planet was."
+
+1. **Visible wobble, worse zoomed in.** `SnapshotInterpolator::Compute`
+   deliberately exempts planets from interpolation/extrapolation/
+   `RemoteSmoothing` (see its own long-standing comment on why: landed-ship
+   alignment and camera framing both need the newest known state, not a
+   delayed one). That made planets the only entities whose rendered motion
+   inherited raw network arrival jitter completely unfiltered -- some frames
+   render two packets' worth of orbital movement, some render zero.
+2. **Periodic reconciliation corrections while coasting, no input at all.**
+   `ClientPrediction::SyncPlanetProxies` positioned each planet's local
+   gravity-collision proxy from the latest snapshot's raw (necessarily
+   somewhat stale) position/velocity, but the ship being predicted is always
+   somewhat ahead of that snapshot (`NetClient::INPUT_LEAD_TICKS` + one-way
+   latency + interp delay, typically 150-300ms). So the client's gravity
+   wells were always systematically behind where they really were -- a
+   coherent, non-zero-mean directional bias, not noise -- which integrates
+   into real positional drift purely from gravity, entirely independent of
+   input. Confirmed via the Net debug tab: correction magnitudes clustering
+   just above `m_positionEpsilon` (a sawtooth against a fixed deadband, not
+   scattered jitter) on a multi-second period that stretched roughly
+   proportionally when epsilon was raised -- the signature of constant-rate
+   drift against a threshold, not an event-driven cause.
+
+`Orbit`'s own doc comment already called this out as the intended design
+("a client re-derives the same positions from these parameters plus the
+shared tick") -- it just hadn't been wired up; `EntityState::isStar`'s own
+comment used to explicitly say "not the full Orbit component... nothing
+needs it yet."
+
+**Fix**: replicate enough of `Orbit` (`orbitCenter`, `orbitRadius`,
+`orbitTheta`, `orbitAngularSpeed` -- the last cached onto the component by
+`OrbitSystem` each tick, since it depends on `PhysicsSystem`'s live gravity
+multiplier that `GatherSnapshot` has no reference to) for a client to
+re-derive any planet's *exact* position/velocity at *any* tick via the same
+closed-form circular-orbit math `OrbitSystem` itself uses --
+`EvaluateOrbit(planet, baseTick, atTick, ...)`, `game/net/snapshot.hpp`.
+Wire format bumped to `SNAPSHOT_VERSION = 5`.
+
+Both bugs shared one fix once that existed:
+- `SnapshotInterpolator::Compute` evaluates each orbiting planet at the
+  actual `renderTick` instead of copying `history.back()`'s raw state --
+  smooth regardless of arrival jitter, no smoothing hack needed.
+- `ClientPrediction::SyncPlanetProxies` (now taking an explicit `atTick`)
+  evaluates at the tick actually being predicted, not the snapshot's own
+  tick -- the systematic lag is gone rather than tuned around. `Reconcile`
+  also now re-syncs planet proxies fresh for *every* replayed tick instead
+  of once for the whole replay against one frozen position (previously an
+  accepted approximation, no longer necessary now that it's cheap).
+
+A star (or any hand-built `EntityState` with no orbit data, e.g.
+`gravitaris-sim-test`'s existing fixtures) is detected via `orbitRadius > 0`,
+not `isStar` -- the latter is a camera/minimap color hint, not an
+"orbit data present" signal, and gating on it would have broken every
+existing test that constructs a `Planet`-typed `EntityState` by hand without
+populating `isStar`.
+
+**Verification status**: all four targets (native, wasm, sim-test, server)
+build clean. New `TestOrbitReplication` sim-test case pins `EvaluateOrbit`'s
+math against hand-computed values and proves `SnapshotInterpolator` uses it
+(not the raw stored position) for an orbiting planet; full sim-test suite
+still deterministic across two runs, checksum unchanged. Live two-peer smoke
+test (server + 2 native clients): clean connect/welcome, no errors. **Not
+yet manually verified**: the reported symptom itself (periodic reconciliation
+while orbiting, real WiFi) needs confirming fixed on the real network path
+that exhibited it -- a local loopback smoke test has no jitter/latency to
+reproduce it with in the first place.
+
+### Follow-up (2026-07-21): landing offset + wobble regressions in the fix above
+
+Playtesting the fix above immediately found two real regressions.
+
+1. **Landed ship visibly offset from the planet surface, worse the higher
+   the interpolation delay setting.** `SnapshotInterpolator::Compute`'s
+   planet override evaluated `EvaluateOrbit` at `renderTick` -- the same
+   (deliberately delayed, `estimatedServerTick - interpDelaySeconds`) tick
+   used for every other entity. But `ClientPrediction::SyncPlanetProxies`
+   positions the local gravity/collision proxy at the tick actually being
+   *predicted* (`estimatedServerTick + NetClient::INPUT_LEAD_TICKS`, ahead,
+   not delayed). Rendering and physics were now evaluating the same
+   analytic formula at two different ticks -- exactly the kind of mismatch
+   the original (pre-orbit-replication) raw-position code avoided by
+   construction, since both sides read the identical `state.pos` value.
+   Fix: `SnapshotInterpolator::Compute` gained an explicit `planetTick`
+   parameter (`std::optional<uint64_t>`, defaults to `renderTick` for
+   callers like tests that don't also run `ClientPrediction`), and
+   `RenderNetClient` now passes `m_nextPredictedTick - 1` -- the tick
+   `TickNetClient` most recently stepped, i.e. exactly what
+   `SyncPlanetProxies` last positioned its proxies at.
+2. **Planets still visibly wobbly**, independent of the above. Root cause:
+   `Orbit::theta` (a `double`) accumulates unbounded for as long as the
+   server process runs -- never wrapped. Replicated as `f32`
+   (`EntityState::orbitTheta`), a long-running server eventually pushes
+   `theta` into a range where float32's ~7 significant digits land an
+   increasingly coarse LSB on it. Every new snapshot re-bases
+   `EvaluateOrbit`'s closed-form calculation from a freshly, and
+   independently, quantized `theta` -- so each rebase introduced a small
+   but real discontinuity, worse the longer the server had been up. Fix:
+   `OrbitSystem::Update` now wraps `orbit.theta` into `[0, 2*PI)` every
+   tick (`std::fmod` + a sign correction) -- physically identical (`cos`/
+   `sin` only ever cared about `theta mod 2*PI`), but keeps the wire
+   truncation precise indefinitely regardless of session length.
+
+**Verification status**: all four targets build clean; sim-test
+deterministic, checksum unchanged. Two new regression cases added to
+`TestOrbitReplication`: an explicit `planetTick` diverging from `renderTick`
+is proven to override it (the alignment fix), and forcing `Orbit::theta` to
+a large (~12000 rad, simulating hours of uptime) value directly and running
+one `OrbitSystem::Update` proves it lands back in `[0, 2*PI)` (the wobble
+fix). Live two-peer smoke test: clean connect, no errors. **Not yet manually
+verified**: both fixes address root causes confirmed by code inspection
+rather than by reproducing the exact reported symptoms live (the landing
+offset needs eyes-on with the interpolation delay slider raised; the wobble
+fix specifically targets *long-running-server* precision loss, which a fresh
+short test session won't exhibit regardless of whether the fix is correct).
+
 ## Phase 8 — Deferred (needs its own design pass when reached)
 
 - Delta-compressed snapshots (per-entity change masks vs last acked).

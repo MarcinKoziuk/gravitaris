@@ -1,6 +1,8 @@
 #include <algorithm>
+#include <cmath>
 
 #include <gravitaris/game/logging.hpp>
+#include <gravitaris/game/game.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/net-id.hpp>
@@ -19,7 +21,7 @@ namespace Gravitaris {
 
 // Bump on any wire-layout change; ReadSnapshot rejects mismatches outright
 // (no cross-version compatibility until there's a reason to have it).
-static constexpr std::uint8_t SNAPSHOT_VERSION = 4; // v4: +structureType/rawMaterials/finishedMaterials
+static constexpr std::uint8_t SNAPSHOT_VERSION = 5; // v5: +orbitCenter/orbitRadius/orbitTheta/orbitAngularSpeed
 
 // Sanity caps so a garbage buffer can't make ReadSnapshot allocate wildly.
 static constexpr std::uint32_t MAX_ENTITIES = 4096;
@@ -69,6 +71,13 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
         }
         if (state.type == NetEntityType::Planet) {
             state.isStar = !entity.has<Orbit>();
+            if (const Orbit* orbit = entity.try_get<Orbit>()) {
+                state.orbitCenter = Magnum::Vector2{static_cast<float>(orbit->center.x()),
+                                                    static_cast<float>(orbit->center.y())};
+                state.orbitRadius = static_cast<float>(orbit->radius);
+                state.orbitTheta = static_cast<float>(orbit->theta);
+                state.orbitAngularSpeed = static_cast<float>(orbit->angularSpeed);
+            }
         }
         if (const Structure* structure = entity.try_get<Structure>()) {
             state.structureType = structure->type;
@@ -110,6 +119,11 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteF32(e.gravityMass);
         out.WriteF32(e.gravityMultiplier);
         out.WriteU8(e.isStar ? 1 : 0);
+        out.WriteF32(e.orbitCenter.x());
+        out.WriteF32(e.orbitCenter.y());
+        out.WriteF32(e.orbitRadius);
+        out.WriteF32(e.orbitTheta);
+        out.WriteF32(e.orbitAngularSpeed);
         out.WriteU8(static_cast<std::uint8_t>(e.structureType));
         out.WriteF32(e.rawMaterials);
         out.WriteF32(e.finishedMaterials);
@@ -175,6 +189,11 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.gravityMass = in.ReadF32();
         e.gravityMultiplier = in.ReadF32();
         e.isStar = in.ReadU8() != 0;
+        e.orbitCenter.x() = in.ReadF32();
+        e.orbitCenter.y() = in.ReadF32();
+        e.orbitRadius = in.ReadF32();
+        e.orbitTheta = in.ReadF32();
+        e.orbitAngularSpeed = in.ReadF32();
         e.structureType = static_cast<StructureType>(in.ReadU8());
         e.rawMaterials = in.ReadF32();
         e.finishedMaterials = in.ReadF32();
@@ -198,6 +217,28 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
     }
 
     return in.Ok();
+}
+
+void EvaluateOrbit(const EntityState& planet, std::uint64_t baseTick, std::uint64_t atTick,
+                   Magnum::Vector2d& outPos, Magnum::Vector2d& outVel)
+{
+    // Signed tick delta (atTick can be behind baseTick briefly -- e.g. a
+    // reconciliation replaying ticks not-yet-newer than the snapshot that
+    // just arrived) -- same math either direction, just run the clock
+    // backward.
+    const double elapsedSeconds = (static_cast<double>(atTick) - static_cast<double>(baseTick)) * Game::PHYSICS_DELTA;
+    const double theta = static_cast<double>(planet.orbitTheta)
+                        + static_cast<double>(planet.orbitAngularSpeed) * elapsedSeconds;
+
+    const double c = std::cos(theta);
+    const double s = std::sin(theta);
+    const Magnum::Vector2d center{static_cast<double>(planet.orbitCenter.x()),
+                                  static_cast<double>(planet.orbitCenter.y())};
+    const double radius = static_cast<double>(planet.orbitRadius);
+    const double angularSpeed = static_cast<double>(planet.orbitAngularSpeed);
+
+    outPos = center + Magnum::Vector2d{c, s} * radius;
+    outVel = Magnum::Vector2d{-s, c} * (angularSpeed * radius);
 }
 
 } // namespace Gravitaris

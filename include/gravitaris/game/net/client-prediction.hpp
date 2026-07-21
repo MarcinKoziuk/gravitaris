@@ -31,20 +31,26 @@ namespace Gravitaris {
 // filtering.
 //
 // Planets are real kinematic collision proxies now (Phase 7,
-// SyncPlanetProxies), positioned each tick from the replicated Planet
-// -typed EntityStates in the latest snapshot rather than by running a
-// second, independently-seeded OrbitSystem simulation locally: two orbit
-// simulations starting from different wall-clock moments (server boot vs.
-// this client's join time) would need their phase synchronized somehow, and
-// simply reading the already-correct, already-interpolated replicated
-// position sidesteps that entirely. Gravity is no longer a manual force
-// hack either -- PhysicsSystem::Simulate's own per-space ApplyGravity finds
-// these proxies' GravitySource components and just works, same as
-// single-player. Landing on a planet during prediction now behaves
-// correctly (real contact response against the moving kinematic surface);
-// ship-ship contact is still not predicted (see the proxies' own doc
-// comment on why that one stays out of scope) -- any discrepancy there is
-// corrected on the next reconciliation once the server's real collision
+// SyncPlanetProxies), positioned each tick by re-deriving their exact
+// analytic orbit position at the tick actually being predicted (EvaluateOrbit,
+// game/net/snapshot.hpp) rather than by running a second, independently
+// -seeded OrbitSystem simulation locally: two orbit simulations starting from
+// different wall-clock moments (server boot vs. this client's join time)
+// would need their phase synchronized somehow, and re-deriving from the
+// replicated orbit parameters sidesteps that entirely. This replaced an
+// earlier version that positioned proxies straight from the latest
+// snapshot's raw (necessarily stale) position -- since a snapshot's tick is
+// always behind the tick this client is predicting (RTT + interp delay), the
+// gravity wells were always somewhat behind where they really were, a
+// systematic bias that read as slow drift needing periodic reconciliation
+// even while coasting in a stable orbit under no input at all. Gravity is no
+// longer a manual force hack either -- PhysicsSystem::Simulate's own
+// per-space ApplyGravity finds these proxies' GravitySource components and
+// just works, same as single-player. Landing on a planet during prediction
+// now behaves correctly (real contact response against the moving kinematic
+// surface); ship-ship contact is still not predicted (see the proxies' own
+// doc comment on why that one stays out of scope) -- any discrepancy there
+// is corrected on the next reconciliation once the server's real collision
 // response arrives in a snapshot.
 //
 // Headless (game/-level, ADR constraint 1): built entirely from
@@ -117,14 +123,21 @@ public:
     // (see NetClient::SendInput -- the same number must be sent on the wire
     // for Reconcile() to later find this entry). No-op if SpawnOwnShip
     // hasn't been called yet.
-    void Step(std::uint64_t tick, const ControlFlags& flags, const std::vector<EntityState>& planets);
+    // `planetsBaseTick`: the snapshot tick `planets` came from (i.e. the
+    // orbit fields' own baseline -- see EvaluateOrbit), separate from `tick`
+    // (this Step's target predicted tick, always somewhat ahead of the
+    // latest snapshot) since planet proxies are positioned at the latter,
+    // not the former.
+    void Step(std::uint64_t tick, const ControlFlags& flags, const std::vector<EntityState>& planets,
+             std::uint64_t planetsBaseTick);
 
     // Compares the authoritative state for `authoritativeTick` (from a
     // newly arrived snapshot) against what was predicted for it; if they've
     // diverged past POSITION_EPSILON, snaps to the authoritative state and
-    // replays every predicted tick after it (against `planets`, the same
-    // snapshot's current known planet positions -- not each replayed tick's
-    // own historical ones, another accepted approximation). If a correction
+    // replays every predicted tick after it, positioning `planets` (that
+    // same snapshot's orbit-parameter EntityStates, based at
+    // `authoritativeTick`) freshly for each replayed tick via EvaluateOrbit
+    // rather than once for the whole replay. If a correction
     // happened, returns where prediction currently says the ship is *right
     // now* (i.e. the most recent predicted tick, before this correction --
     // NOT the historical position at `authoritativeTick`, which can be many
@@ -141,12 +154,14 @@ private:
     PredictedTick CaptureTick(std::uint64_t tick, const ControlFlags& flags);
 
     // Creates/updates/prunes the client-only kinematic collision proxies
-    // (Phase 7) for every Planet-typed EntityState in `planets`, keyed by
-    // NetId. Idempotent -- safe to call every Step()/Reconcile(). See the
-    // class doc comment for why these exist and what they deliberately
-    // don't do (no Renderable, no Planet component, no remote-ship
-    // equivalent).
-    void SyncPlanetProxies(const std::vector<EntityState>& planets);
+    // (Phase 7) for every Planet-typed EntityState in `planets` (all from
+    // the same snapshot, taken at `baseTick`), keyed by NetId, positioned at
+    // `atTick` -- not necessarily `baseTick` itself; see EvaluateOrbit --
+    // via each non-star planet's replicated orbit parameters. Idempotent --
+    // safe to call every Step()/Reconcile(). See the class doc comment for
+    // why these exist and what they deliberately don't do (no Renderable,
+    // no Planet component, no remote-ship equivalent).
+    void SyncPlanetProxies(const std::vector<EntityState>& planets, std::uint64_t baseTick, std::uint64_t atTick);
 
     flecs::world& m_registry;
     PhysicsSystem& m_physicsSystem;

@@ -50,10 +50,20 @@ void NetClient::Update()
                         // equal to -- a resend) what's already buffered
                         // must not roll the tick/history back or duplicate
                         // an entry.
-                        if (!m_snapshotHistory.empty() && snapshot.tick <= m_snapshotHistory.back().tick) break;
+                        if (!m_snapshotHistory.empty() && snapshot.tick <= m_snapshotHistory.back().tick) {
+                            ++m_droppedSnapshotCount;
+                            break;
+                        }
+
+                        const auto now = std::chrono::steady_clock::now();
+                        if (m_lastAckedSnapshotRecvTime) {
+                            m_lastSnapshotIntervalMs =
+                                    std::chrono::duration<float, std::milli>(now - *m_lastAckedSnapshotRecvTime).count();
+                        }
+                        ++m_acceptedSnapshotCount;
 
                         m_lastAckedSnapshotTick = snapshot.tick;
-                        m_lastAckedSnapshotRecvTime = std::chrono::steady_clock::now();
+                        m_lastAckedSnapshotRecvTime = now;
                         for (const GameEvent& e : snapshot.events) {
                             if (e.seq > m_lastAckedEventSeq) m_lastAckedEventSeq = e.seq;
                         }

@@ -9,8 +9,15 @@
 # now too; both are candidates to generalize later if this is ever run from
 # somewhere other than this one dev machine.
 #
-# Usage: tools/wasm/run-dev.sh [--no-server] [--no-browser] [--reconfigure]
+# Usage: tools/wasm/run-dev.sh [--release|--relwithdebinfo] [--no-server]
+#                               [--no-browser] [--reconfigure]
 #                               [--http-port N] [--ws-port N]
+#
+# Build type flags match tools/wasm/build.sh's (passed straight through to
+# it); no flag means Debug. Applies to the native gravitaris-server build
+# too, in its own out/windows-msvc-<type> tree -- a type that hasn't been
+# built here before gets a fresh CMake configure automatically (slow the
+# first time, same as any other from-scratch config).
 #
 # Ctrl+C stops both the server and the local HTTP server this script started
 # and cleans up after itself. Re-run any time to rebuild + get a fresh
@@ -21,6 +28,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+BUILD_TYPE="Debug"
+BUILD_FLAG=""
 RUN_SERVER=1
 OPEN_BROWSER=1
 RECONFIGURE_ARG=""
@@ -28,6 +37,8 @@ HTTP_PORT=8080
 WS_PORT=17890
 for arg in "$@"; do
     case "$arg" in
+        --release)         BUILD_TYPE="Release"; BUILD_FLAG="--release" ;;
+        --relwithdebinfo)  BUILD_TYPE="RelWithDebInfo"; BUILD_FLAG="--relwithdebinfo" ;;
         --no-server)    RUN_SERVER=0 ;;
         --no-browser)   OPEN_BROWSER=0 ;;
         --reconfigure)  RECONFIGURE_ARG="--reconfigure" ;;
@@ -36,6 +47,11 @@ for arg in "$@"; do
         *) echo "unknown argument: $arg" >&2; exit 1 ;;
     esac
 done
+
+# out/windows-msvc-<type> mirrors build.sh's own out/wasm-<type> naming, in
+# lowercase to match the one native tree that already existed before this
+# flag did (out/windows-msvc-debug, hand-configured via CLion).
+NATIVE_BUILD_TYPE_DIR="$(printf '%s' "$BUILD_TYPE" | tr '[:upper:]' '[:lower:]')"
 
 # Converts an MSYS-style path (/c/Program Files/...) to the backslash form
 # Windows tools (cmd.exe, paths embedded in a .bat) expect.
@@ -46,10 +62,10 @@ to_win_path() {
     printf '%s' "$p"
 }
 
-echo "==> Building wasm client (Debug)"
-"$SCRIPT_DIR/build.sh" $RECONFIGURE_ARG
+echo "==> Building wasm client ($BUILD_TYPE)"
+"$SCRIPT_DIR/build.sh" $BUILD_FLAG $RECONFIGURE_ARG
 
-WASM_OUT_DIR="$REPO_ROOT/out/wasm-Debug/Debug/bin"
+WASM_OUT_DIR="$REPO_ROOT/out/wasm-$BUILD_TYPE/$BUILD_TYPE/bin"
 
 # --- Native gravitaris-server ------------------------------------------------
 # Same CLion-bundled cmake + vcvars64.bat recipe used to build GravitarisNG.exe
@@ -57,7 +73,8 @@ WASM_OUT_DIR="$REPO_ROOT/out/wasm-Debug/Debug/bin"
 # point release or a different VS edition/year doesn't silently break this.
 # Override with CMAKE_EXE / VCVARS_BAT / NATIVE_BUILD_DIR env vars if none of
 # the candidates below match.
-SERVER_EXE="$REPO_ROOT/out/windows-msvc-debug/Debug/bin/gravitaris-server.exe"
+NATIVE_BUILD_DIR="${NATIVE_BUILD_DIR:-$REPO_ROOT/out/windows-msvc-$NATIVE_BUILD_TYPE_DIR}"
+SERVER_EXE="$NATIVE_BUILD_DIR/$BUILD_TYPE/bin/gravitaris-server.exe"
 if [[ "$RUN_SERVER" == "1" ]]; then
     if [[ -z "${CMAKE_EXE:-}" ]]; then
         shopt -s nullglob
@@ -71,7 +88,6 @@ if [[ "$RUN_SERVER" == "1" ]]; then
         shopt -u nullglob
         [[ ${#CANDIDATES[@]} -gt 0 ]] && VCVARS_BAT="${CANDIDATES[0]}"
     fi
-    NATIVE_BUILD_DIR="${NATIVE_BUILD_DIR:-$REPO_ROOT/out/windows-msvc-debug}"
 
     if [[ -z "${CMAKE_EXE:-}" || -z "${VCVARS_BAT:-}" ]]; then
         echo "error: could not find CLion's cmake and/or vcvars64.bat." >&2
@@ -80,7 +96,7 @@ if [[ "$RUN_SERVER" == "1" ]]; then
         exit 1
     fi
 
-    echo "==> Building native gravitaris-server (Debug)"
+    echo "==> Building native gravitaris-server ($BUILD_TYPE)"
     # A generated .bat, not an inline `cmd //c "..."` one-liner: MSYS bash's
     # argv->Win32-command-line re-quoting mangles nested quoted paths (the
     # vcvars/cmake paths below have spaces), so round-tripping through a
@@ -92,6 +108,13 @@ if [[ "$RUN_SERVER" == "1" ]]; then
     {
         echo "@echo off"
         echo "call \"$(to_win_path "$VCVARS_BAT")\" >nul"
+        # A build type that hasn't been used here before has no configured
+        # tree yet (out/windows-msvc-debug is the one CLion set up by hand;
+        # release/relwithdebinfo start out empty) -- configure it first, same
+        # one-time cost tools/wasm/build.sh's own --reconfigure path pays.
+        if [[ "$RECONFIGURE_ARG" == "--reconfigure" || ! -f "$NATIVE_BUILD_DIR/build.ninja" ]]; then
+            echo "\"$(to_win_path "$CMAKE_EXE")\" -S \"$(to_win_path "$REPO_ROOT")\" -B \"$(to_win_path "$NATIVE_BUILD_DIR")\" -G Ninja -DCMAKE_BUILD_TYPE=$BUILD_TYPE"
+        fi
         echo "\"$(to_win_path "$CMAKE_EXE")\" --build \"$(to_win_path "$NATIVE_BUILD_DIR")\" --target gravitaris-server"
     } > "$BUILD_SERVER_BAT"
     cmd //c "$BUILD_SERVER_BAT"
@@ -107,13 +130,20 @@ if [[ "$RUN_SERVER" == "1" ]]; then
         sleep 1
     fi
 
-    SERVER_LOG="$REPO_ROOT/out/server-dev.log"
-    echo "==> Starting gravitaris-server on ws://127.0.0.1:$WS_PORT (log: $SERVER_LOG)"
-    "$SERVER_EXE" "$WS_PORT" > "$SERVER_LOG" 2>&1 &
-    SERVER_PID=$!
+    # Its own real console window, not piped to a log file: the server reads
+    # operator commands (spawn/list/team/quit -- see src/server/main.cpp)
+    # from stdin, which only works with a real interactive console attached.
+    # A backgrounded/redirected process has no usable stdin for that. `start`
+    # returns immediately once the new window is up, so SERVER_PID below is
+    # useless for tracking the actual server.exe (it's cmd.exe's own,
+    # detached) -- cleanup() kills it by image name instead, same as the
+    # stale-process check above.
+    echo "==> Starting gravitaris-server on ws://127.0.0.1:$WS_PORT in its own console window"
+    echo "    (type commands there: spawn [count] [preset] | list | team <peer-id> <color> | quit)"
+    cmd //c start "Gravitaris Server" "$SERVER_EXE" "$WS_PORT"
 
     for _ in $(seq 1 30); do
-        if grep -q "listening on" "$SERVER_LOG" 2>/dev/null; then break; fi
+        if netstat -ano 2>/dev/null | grep "LISTENING" | grep -q ":${WS_PORT}[[:space:]]"; then break; fi
         sleep 0.2
     done
 fi
@@ -176,8 +206,11 @@ cleanup() {
     echo
     echo "==> Cleaning up"
     [[ -n "${HTTP_PID:-}" ]] && kill "$HTTP_PID" 2>/dev/null || true
-    if [[ "$RUN_SERVER" == "1" && -n "${SERVER_PID:-}" ]]; then
-        kill "$SERVER_PID" 2>/dev/null || true
+    # Killed by image name, not a tracked PID: it runs in its own console
+    # window (via `start`, see above), so there's no useful child PID to
+    # `kill` directly -- `start` itself already returned and exited.
+    if [[ "$RUN_SERVER" == "1" ]]; then
+        taskkill //F //IM gravitaris-server.exe >/dev/null 2>&1 || true
     fi
 }
 trap cleanup EXIT INT TERM
@@ -189,15 +222,21 @@ URL="http://127.0.0.1:$HTTP_PORT/?v=$TOKEN"
 
 if [[ "$OPEN_BROWSER" == "1" ]]; then
     echo "==> Opening $URL"
-    cmd //c start "" "$URL" >/dev/null 2>&1 || true
+    # A generated .bat, not an inline `cmd //c start "" "$URL"` -- same
+    # MSYS-argv-to-Win32-cmdline mangling as the server build's .bat (see its
+    # own comment), but tripped by `&` specifically here: `?v=...&connect=...`
+    # was silently getting split at the `&` as if it were a second shell
+    # command, so the browser opened with the connect param truncated off
+    # (found via a real playtesting session -- the auto-connect never fired).
+    OPEN_URL_BAT="$REPO_ROOT/out/.open-url.bat"
+    {
+        echo "@echo off"
+        echo "start \"\" \"$URL\""
+    } > "$OPEN_URL_BAT"
+    cmd //c "$OPEN_URL_BAT" >/dev/null 2>&1 || true
 else
     echo "==> Client ready at: $URL"
 fi
 
-echo "==> Running. Ctrl+C to stop."
-if [[ "$RUN_SERVER" == "1" ]]; then
-    tail -f "$SERVER_LOG" &
-    TAIL_PID=$!
-    trap 'kill "$TAIL_PID" 2>/dev/null || true; cleanup' EXIT INT TERM
-fi
+echo "==> Running. Ctrl+C to stop (the server's own console window closes separately -- Ctrl+C there or just leave it, cleanup kills it either way)."
 wait "$HTTP_PID"

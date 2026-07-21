@@ -49,7 +49,8 @@ void ClientPrediction::SpawnOwnShip(id_t modelId, Magnum::Vector2d initialPos, T
     m_ownShip = m_entitySpawner.SpawnPlayer(modelId, initialPos, team);
 }
 
-void ClientPrediction::SyncPlanetProxies(const std::vector<EntityState>& planets)
+void ClientPrediction::SyncPlanetProxies(const std::vector<EntityState>& planets, std::uint64_t baseTick,
+                                         std::uint64_t atTick)
 {
     for (const EntityState& state : planets) {
         if (state.type != NetEntityType::Planet) continue;
@@ -76,8 +77,24 @@ void ClientPrediction::SyncPlanetProxies(const std::vector<EntityState>& planets
             proxy.set<GravitySource>(GravitySource{state.gravityMass, state.gravityMultiplier});
         }
 
-        m_physicsSystem.SetKinematicMotion(proxy.get<PhysicsRef>(), Magnum::Vector2d{state.pos},
-                                           Magnum::Vector2d{state.vel});
+        // orbitRadius > 0 (not isStar -- that's a camera/minimap color hint,
+        // not an "orbit data present" signal, though the two coincide for
+        // any real server-generated snapshot) is the same "does this entity
+        // actually orbit" guard OrbitSystem itself uses server-side: a star
+        // has no Orbit component so this stays at its default zero, and it
+        // simply sits at its replicated position. An orbiting planet's exact
+        // position/velocity at `atTick` is re-derived analytically instead
+        // of trusted from the snapshot's own (necessarily somewhat stale)
+        // raw pos/vel -- see EvaluateOrbit and this method's own doc comment.
+        if (state.orbitRadius > 0.f) {
+            Magnum::Vector2d pos, vel;
+            EvaluateOrbit(state, baseTick, atTick, pos, vel);
+            m_physicsSystem.SetKinematicMotion(proxy.get<PhysicsRef>(), pos, vel);
+        }
+        else {
+            m_physicsSystem.SetKinematicMotion(proxy.get<PhysicsRef>(), Magnum::Vector2d{state.pos},
+                                               Magnum::Vector2d{state.vel});
+        }
     }
 
     // Prune proxies for planets no longer present. Doesn't normally happen
@@ -101,7 +118,8 @@ ClientPrediction::PredictedTick ClientPrediction::CaptureTick(std::uint64_t tick
     return PredictedTick{tick, flags, t.pos, t.rot, t.vel, t.angVel};
 }
 
-void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags, const std::vector<EntityState>& planets)
+void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags, const std::vector<EntityState>& planets,
+                            std::uint64_t planetsBaseTick)
 {
     if (!HasOwnShip()) return;
 
@@ -114,8 +132,10 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags, const
     // tick's step, so PhysicsSystem::Simulate's own per-space gravity pass
     // and Chipmunk's contact resolution both see them where they actually
     // are this tick -- gravity is no longer a manual force here at all, it
-    // falls out of that existing machinery once these proxies exist.
-    SyncPlanetProxies(planets);
+    // falls out of that existing machinery once these proxies exist. `tick`
+    // (this Step's target), not `planetsBaseTick` (the snapshot's own,
+    // always somewhat older tick) -- see SyncPlanetProxies/EvaluateOrbit.
+    SyncPlanetProxies(planets, planetsBaseTick, tick);
 
     cpBody* body = m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()).cp.body.get();
     ShipControlsSystem::ApplyMovement(body, flags);
@@ -190,12 +210,6 @@ std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t author
     // actually being corrected -- worse the faster the ship was moving.
     const Magnum::Vector2d preCorrectionNowPos = m_history.back().pos;
 
-    // Same current-snapshot planet positions for every replayed tick below,
-    // not each one's own historical position -- an accepted approximation
-    // (see the class doc comment), same as the gravity-from-current-snapshot
-    // one this replaces.
-    SyncPlanetProxies(planets);
-
     cpBody* body = m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()).cp.body.get();
     cpBodySetPosition(body, cpv(authoritativePos.x(), authoritativePos.y()));
     cpBodySetAngle(body, static_cast<cpFloat>(authoritative.rot));
@@ -206,6 +220,12 @@ std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t author
     std::vector<PredictedTick> toReplay(std::next(it), m_history.end());
     m_history.clear();
     for (const PredictedTick& pending : toReplay) {
+        // Planet proxies positioned fresh for each replayed tick (via
+        // EvaluateOrbit, cheap now that it's a closed form) rather than once
+        // for the whole replay against `authoritativeTick`'s positions --
+        // this used to be an accepted approximation (see Step's own history
+        // on why that mattered) but there's no reason to keep it now.
+        SyncPlanetProxies(planets, authoritativeTick, pending.tick);
         m_ownShip.get_mut<Controls>().actionFlags = pending.flags;
         ShipControlsSystem::ApplyMovement(body, pending.flags);
         m_physicsSystem.Simulate(Game::PHYSICS_DELTA);

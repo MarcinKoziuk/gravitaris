@@ -42,6 +42,19 @@ class NetClient {
     // Unset (nullopt) until the first snapshot arrives.
     std::optional<std::chrono::steady_clock::time_point> m_lastAckedSnapshotRecvTime;
 
+    // Net debug tab diagnostics: wall-clock gap since the *previous* accepted
+    // snapshot (not to be confused with m_lastAckedSnapshotRecvTime, which is
+    // a point in time, not a duration). Distinguishes a real network gap
+    // (this spikes) from a local main-thread stall (this stays regular while
+    // CGame's predicted-tick drift/resync still fires) -- see cgame.cpp's
+    // resync log and docs/networking-plan.md's Net debug tab section.
+    float m_lastSnapshotIntervalMs = 0.f;
+    std::size_t m_acceptedSnapshotCount = 0;
+    // Snapshots rejected as older-than-or-equal-to the buffered latest (see
+    // Update()'s out-of-order/resend guard) -- a genuinely unordered/lossy
+    // transport shows up here, not as a gap in m_lastSnapshotIntervalMs.
+    std::size_t m_droppedSnapshotCount = 0;
+
     // Rolling window sent with every ClientInput (CLIENT_INPUT_BACKUP deep);
     // matches InputQueue's own "resend, let the far end dedupe" model.
     std::deque<InputCommand> m_recentCommands;
@@ -131,6 +144,11 @@ public:
     // (cgame/net/) to render a delayed, interpolated position from instead
     // of snapping to the latest one every frame.
     [[nodiscard]] const std::deque<SnapshotData>& GetSnapshotHistory() const { return m_snapshotHistory; }
+
+    // Net debug tab diagnostics (see the fields' own doc comments).
+    [[nodiscard]] float GetLastSnapshotIntervalMs() const { return m_lastSnapshotIntervalMs; }
+    [[nodiscard]] std::size_t GetAcceptedSnapshotCount() const { return m_acceptedSnapshotCount; }
+    [[nodiscard]] std::size_t GetDroppedSnapshotCount() const { return m_droppedSnapshotCount; }
 };
 
 } // namespace Gravitaris
