@@ -1,4 +1,6 @@
 #include <cmath>
+#include <utility>
+#include <vector>
 
 #include <chipmunk/chipmunk.h>
 
@@ -8,6 +10,8 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
+#include <gravitaris/game/component/faction-state.hpp>
+#include <gravitaris/game/system/faction-system.hpp>
 #include <gravitaris/game/system/physics-system.hpp>
 #include <gravitaris/game/system/landing-state-system.hpp>
 
@@ -18,13 +22,22 @@ namespace Gravitaris {
 // standing rather than tipped against the surface.
 static constexpr double UPRIGHT_DOT_THRESHOLD = 0.82;
 
-LandingStateSystem::LandingStateSystem(flecs::world& registry, PhysicsSystem& physicsSystem)
+LandingStateSystem::LandingStateSystem(flecs::world& registry, PhysicsSystem& physicsSystem,
+                                       FactionSystem& factionSystem)
         : m_registry(registry)
         , m_physicsSystem(physicsSystem)
+        , m_factionSystem(factionSystem)
 {}
 
 void LandingStateSystem::Update()
 {
+    // Collected here, applied after the .each() below completes:
+    // FactionSystem::GetOrCreate can create an entity, a structural change
+    // flecs doesn't allow safely from inside an active iterator (observed
+    // as an intermittent crash) -- so no FactionSystem call can happen
+    // inside this loop itself.
+    std::vector<std::pair<TeamId, std::uint32_t>> friendlyLandings;
+
     m_registry.each([&](flecs::entity ship, LandingState& state, Transform& transf, PhysicsRef& ref) {
         struct Ctx {
             flecs::entity planet;
@@ -57,6 +70,7 @@ void LandingStateSystem::Update()
             const Team* planetTeam = ctx.planet.try_get<Team>();
             if (shipTeam && planetTeam && planetTeam->id == shipTeam->id) {
                 state.lastFriendlySiteNetId = state.landedOnNetId;
+                friendlyLandings.emplace_back(shipTeam->id, state.landedOnNetId);
             }
         }
         else {
@@ -65,6 +79,11 @@ void LandingStateSystem::Update()
             state.landedTicks = 0;
         }
     });
+
+    for (const auto& [team, landedOnNetId] : friendlyLandings) {
+        flecs::entity factionState = m_factionSystem.GetOrCreate(team);
+        factionState.get_mut<FactionState>().lastLandingSiteNetId = landedOnNetId;
+    }
 }
 
 } // namespace Gravitaris

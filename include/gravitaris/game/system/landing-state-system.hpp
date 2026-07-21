@@ -21,9 +21,10 @@ private:
     flecs::world& m_registry;
 
     PhysicsSystem& m_physicsSystem;
+    FactionSystem& m_factionSystem;
 
 public:
-    LandingStateSystem(flecs::world& registry, PhysicsSystem& physicsSystem);
+    LandingStateSystem(flecs::world& registry, PhysicsSystem& physicsSystem, FactionSystem& factionSystem);
 
     void Update();
 };

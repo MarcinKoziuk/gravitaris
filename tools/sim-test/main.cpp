@@ -815,6 +815,133 @@ void TestFreighterEconomy()
     fs.Shutdown();
 }
 
+// Phase 4's "self-development": a Base grows its own Lab then Comm Center,
+// a High Port its own Space Dock then Sensor Array, from their own finished
+// materials, same-planet and instant (no freighter trip). BuildStartingComplex
+// isn't useful here -- it hands out all seven structures already -- so this
+// spawns only a bare Base + High Port and lets EconomySystem grow the rest.
+void TestSelfDevelopment()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    flecs::entity planet =
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 1e-9, 2000., 1.0, 0.0);
+    planet.set<Team>(Team{TeamId::Blue});
+
+    flecs::entity base = spawner.SpawnStructure(StructureType::Base, "models/structures/base"_id, planet,
+                                                TeamId::Blue, Vector2d{-15., -10.});
+    flecs::entity highPort = spawner.SpawnOrbitingStructure(StructureType::HighPort, "models/structures/high-port"_id,
+                                                             planet, TeamId::Blue, 180., 1.0, 0.0);
+
+    // Gift funds directly -- isolating the build-sequence assertions from
+    // the (already covered elsewhere, in TestFreighterEconomy) production
+    // ramp.
+    base.get_mut<Structure>().finishedMaterials = 1000.f;
+    highPort.get_mut<Structure>().finishedMaterials = 1000.f;
+
+    const std::uint32_t planetNetId = planet.get<NetId>().value;
+    const auto hasStructure = [&](StructureType type) {
+        bool found = false;
+        game.GetRegistry().each([&](const Structure& s, const PlanetSurfaceAttachment& attach) {
+            if (attach.planetNetId == planetNetId && s.type == type) found = true;
+        });
+        game.GetRegistry().each([&](const Structure& s, const PlanetOrbitAttachment& attach) {
+            if (attach.planetNetId == planetNetId && s.type == type) found = true;
+        });
+        return found;
+    };
+
+    bool labBuilt = false, commCenterBuilt = false, spaceDockBuilt = false, sensorArrayBuilt = false;
+    for (int tick = 0; tick < 500; ++tick) {
+        game.Update();
+        if (!labBuilt && hasStructure(StructureType::Lab)) labBuilt = true;
+        if (!commCenterBuilt && hasStructure(StructureType::CommCenter)) {
+            Require(labBuilt, "self-development: Comm Center never appears before Lab");
+            commCenterBuilt = true;
+        }
+        if (!spaceDockBuilt && hasStructure(StructureType::SpaceDock)) spaceDockBuilt = true;
+        if (!sensorArrayBuilt && hasStructure(StructureType::SensorArray)) {
+            Require(spaceDockBuilt, "self-development: Sensor Array never appears before Space Dock");
+            sensorArrayBuilt = true;
+        }
+        if (commCenterBuilt && sensorArrayBuilt) break;
+    }
+    Require(labBuilt, "self-development: Base grew a Lab");
+    Require(commCenterBuilt, "self-development: Base grew a Comm Center");
+    Require(spaceDockBuilt, "self-development: High Port grew a Space Dock");
+    Require(sensorArrayBuilt, "self-development: High Port grew a Sensor Array");
+
+    fs.Shutdown();
+}
+
+// Phase 4's defeat/win rules (FactionSystem): a faction with zero colonies
+// AND zero freighters is defeated; a round is won once every claimed planet
+// belongs to one team. Both are sticky, edge-triggered GameEvents.
+void TestFactionDefeatAndWin()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    // Both planets Blue-claimed from the start -- every claimed planet
+    // already belongs to one team, so RoundOver should fire almost
+    // immediately without needing any in-sim claiming.
+    flecs::entity planetA =
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 1e-9, 2000., 1.0, 0.0);
+    BuildStartingComplex(spawner, planetA, TeamId::Blue);
+    flecs::entity planetB =
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{500., 0.}, 1e-9, 2000., 1.0, 0.0);
+    BuildStartingComplex(spawner, planetB, TeamId::Blue);
+
+    std::uint32_t cursor = 0;
+    bool sawRoundOver = false;
+    TeamId roundWinner = TeamId::None;
+    for (int tick = 0; tick < 10; ++tick) {
+        game.Update();
+        cursor = game.GetEventQueue().ConsumeSince(cursor, [&](const GameEvent& event) {
+            if (event.type == GameEventType::RoundOver) {
+                sawRoundOver = true;
+                roundWinner = static_cast<TeamId>(event.param);
+            }
+        });
+    }
+    Require(sawRoundOver, "faction: RoundOver fires once every claimed planet belongs to one team");
+    Require(roundWinner == TeamId::Blue, "faction: RoundOver reports the correct winning team");
+
+    // Destroy every Colony Blue owns (both planets') -- Blue has no
+    // freighters in flight either (none were dispatched in this short,
+    // ungifted window), so this should trip the defeat rule.
+    std::vector<flecs::entity> colonies;
+    game.GetRegistry().each([&](flecs::entity e, const Structure& s, const Team& t) {
+        if (s.type == StructureType::Colony && t.id == TeamId::Blue) colonies.push_back(e);
+    });
+    Require(!colonies.empty(), "faction: setup check -- Blue has at least one Colony to destroy");
+    for (flecs::entity colony : colonies) colony.destruct();
+
+    bool sawDefeated = false;
+    for (int tick = 0; tick < 10; ++tick) {
+        game.Update();
+        cursor = game.GetEventQueue().ConsumeSince(cursor, [&](const GameEvent& event) {
+            if (event.type == GameEventType::FactionDefeated && static_cast<TeamId>(event.param) == TeamId::Blue) {
+                sawDefeated = true;
+            }
+        });
+    }
+    Require(sawDefeated, "faction: FactionDefeated fires once a team has zero colonies and zero freighters");
+
+    fs.Shutdown();
+}
+
 // A peer predicts and draws its own shots locally (ClientPrediction::Step),
 // so the server must not also send it the authoritative copies -- otherwise
 // the same shot draws twice, ~14 ticks apart (own ship renders ahead by
@@ -902,7 +1029,8 @@ void TestSnapshotRoundtrip(Game& game)
 void TestNetRoundtrip(Game& game)
 {
     auto [serverTransport, clientTransport] = LoopbackTransport::CreatePair();
-    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), *serverTransport);
+    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
+                     *serverTransport);
     NetClient client(*clientTransport, "sim-test-client");
 
     // A few ticks to land the handshake (Connected -> ClientHello ->
@@ -974,7 +1102,8 @@ void TestNetRoundtrip(Game& game)
 void TestPeerRespawn(Game& game)
 {
     auto [serverTransport, clientTransport] = LoopbackTransport::CreatePair();
-    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), *serverTransport);
+    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
+                     *serverTransport);
     NetClient client(*clientTransport, "sim-test-respawn-client");
 
     for (int i = 0; i < 5; ++i) {
@@ -1056,7 +1185,8 @@ void TestPeerRespawn(Game& game)
 void TestTeamAssignment(Game& game)
 {
     auto [serverTransport, clientTransport] = LoopbackTransport::CreatePair();
-    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), *serverTransport);
+    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
+                     *serverTransport);
     NetClient client(*clientTransport, "sim-test-team-client");
     client.SetRequestedTeam(TeamId::Red);
 
@@ -1082,6 +1212,21 @@ void TestTeamAssignment(Game& game)
     Require(server.SetPeerTeam(SERVER_PEER, TeamId::Cyan), "team: SetPeerTeam succeeds for a known peer");
     Require(shipA.get<Team>().id == TeamId::Cyan, "team: SetPeerTeam updates the live ship immediately");
     Require(!server.SetPeerTeam(9999, TeamId::Blue), "team: SetPeerTeam fails for an unknown peer");
+
+    // A minimal Cyan complex: FactionSystem::TryRespawn (Phase 4) now
+    // requires a site (friendly planet/High Port) and an affordable funder
+    // (Base+Lab or High Port+Space Dock) before a fighter respawns at all --
+    // without this, Cyan legitimately has nowhere to respawn (same as any
+    // other faction that owns nothing), and the assertions below would never
+    // fire.
+    flecs::entity cyanPlanet = game.GetEntitySpawner().SpawnOrbitingPlanet(
+            "models/planets/simple"_id, Magnum::Vector2d{900., 900.}, 1e-9, 2000., 1.0, 0.0);
+    cyanPlanet.set<Team>(Team{TeamId::Cyan});
+    flecs::entity cyanBase = game.GetEntitySpawner().SpawnStructure(
+            StructureType::Base, "models/structures/base"_id, cyanPlanet, TeamId::Cyan, Magnum::Vector2d{-15., -10.});
+    game.GetEntitySpawner().SpawnStructure(StructureType::Lab, "models/structures/lab"_id, cyanPlanet, TeamId::Cyan,
+                                           Magnum::Vector2d{-15., 15.});
+    cyanBase.get_mut<Structure>().finishedMaterials = 1000.f;
 
     // Kill A's ship and confirm the respawned one keeps the reassigned team
     // (not the original request, not the roster default).
@@ -1136,7 +1281,8 @@ void TestWebRtcRoundtrip()
     serverTransport.Connect();
     clientTransport.Connect();
 
-    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), serverTransport);
+    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
+                     serverTransport);
     NetClient client(clientTransport, "sim-test-webrtc-client");
 
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
@@ -1194,7 +1340,8 @@ void TestWebRtcSignalingRoundtrip()
 
     constexpr std::uint16_t port = 17890;
     WebRtcServerTransport serverTransport(port);
-    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), serverTransport);
+    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
+                     serverTransport);
 
     WebRtcTransport clientTransport(WebRtcTransport::Role::Offerer);
     NetClient client(clientTransport, "sim-test-signaling-client");
@@ -1302,6 +1449,8 @@ int main()
     TestLandingAndClaiming();
     TestStructures();
     TestFreighterEconomy();
+    TestSelfDevelopment();
+    TestFactionDefeatAndWin();
     TestOwnBulletSuppression();
     TestWebRtcRoundtrip();
     TestWebRtcSignalingRoundtrip();

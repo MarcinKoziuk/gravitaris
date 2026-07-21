@@ -25,6 +25,7 @@ class NetServer {
     flecs::world& m_registry;
     EntitySpawner& m_entitySpawner;
     const GameEventQueue& m_eventQueue;
+    FactionSystem& m_factionSystem;
     INetTransport& m_transport;
 
     struct PeerState {
@@ -85,8 +86,8 @@ class NetServer {
 
     // Ticks between a peer's ship dying and a fresh one being spawned for
     // them (matches Game::RESPAWN_DELAY_TICKS, single-player's own respawn
-    // delay -- no shared constant since NetServer otherwise has no
-    // dependency on Game itself, only flecs::world&/EntitySpawner&).
+    // delay -- kept as its own constant rather than shared, since the two
+    // call sites are otherwise independent).
     static constexpr int RESPAWN_DELAY_TICKS = 90;
 
     void HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t size, std::uint64_t currentTick);
@@ -101,7 +102,7 @@ class NetServer {
 
 public:
     NetServer(flecs::world& registry, EntitySpawner& entitySpawner, const GameEventQueue& eventQueue,
-             INetTransport& transport);
+             FactionSystem& factionSystem, INetTransport& transport);
 
     // Polls the transport: completes the ClientHello/ServerWelcome handshake
     // (spawning a player ship per new peer), pushes ClientInput commands into

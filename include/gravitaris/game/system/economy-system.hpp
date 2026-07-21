@@ -37,12 +37,20 @@ public:
     // Finished materials a Lab/Space Dock spends to dispatch one freighter.
     static constexpr float FREIGHTER_COST = 60.f;
 
+    // Finished materials a Base spends on its own Lab then Comm Center, or a
+    // High Port on its own Space Dock then Sensor Array (Phase 4's "self
+    // -development" -- one at a time, new-unit rule applies, same as
+    // freighter construction but same-planet and instant, no freighter
+    // trip needed). Placeholder magnitude pending playtesting.
+    static constexpr float SELF_DEVELOPMENT_COST = 40.f;
+
 private:
     flecs::world& m_registry;
     EntitySpawner& m_entitySpawner;
+    GameEventQueue& m_eventQueue;
 
 public:
-    EconomySystem(flecs::world& registry, EntitySpawner& entitySpawner);
+    EconomySystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue);
 
     void Update();
 };

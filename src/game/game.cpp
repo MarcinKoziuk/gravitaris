@@ -25,13 +25,14 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_structureAttachmentSystem(m_registry, *m_entitySpawner, m_physicsSystem)
         , m_structureDefenseSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_freighterSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue)
-        , m_economySystem(m_registry, *m_entitySpawner)
+        , m_economySystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_inputSystem(m_registry)
         , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue)
         , m_bulletLifetimeSystem(m_registry)
         , m_damageSystem(m_registry, m_physicsSystem, m_eventQueue)
-        , m_landingStateSystem(m_registry, m_physicsSystem)
-        , m_conquestSystem(m_registry, *m_entitySpawner, m_eventQueue)
+        , m_factionSystem(m_registry, *m_entitySpawner, m_eventQueue)
+        , m_landingStateSystem(m_registry, m_physicsSystem, m_factionSystem)
+        , m_conquestSystem(m_registry, *m_entitySpawner, m_eventQueue, m_factionSystem)
         , m_deathSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_trajectoryPredictor(m_registry, m_physicsSystem)
         , m_aiPilotSystem(m_registry, m_physicsSystem, m_trajectoryPredictor)
@@ -117,6 +118,9 @@ void Game::Update()
         m_conquestSystem.Update();
         m_economySystem.Update();
         m_deathSystem.Update(m_step);
+        // After DeathSystem: defeat/win checks should see this tick's freshest
+        // colony/freighter/planet-ownership state, not last tick's.
+        m_factionSystem.Update();
         // Detect a player death from DeathSystem before any system reads m_player.
         HandlePlayerRespawn();
         m_aiPilotSystem.Update(m_step, m_player);
@@ -135,8 +139,22 @@ void Game::HandlePlayerRespawn()
         m_playerRespawnTimer = RESPAWN_DELAY_TICKS;
     }
 
-    if (m_playerRespawnTimer > 0 && --m_playerRespawnTimer == 0) {
-        m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, m_playerSpawnPos);
+    if (m_playerRespawnTimer < 0) return;
+    if (m_playerRespawnTimer > 0) {
+        --m_playerRespawnTimer;
+        return;
+    }
+
+    // Timer expired: single-player is always Blue (SpawnPlayer's own
+    // default team, never overridden here). Keep retrying every tick from
+    // here (m_playerRespawnTimer stays 0) until TryRespawn succeeds -- a
+    // site exists but nothing can fund the fighter yet is a transient
+    // wait, not a failure -- or permanently doesn't (no friendly
+    // planet/High Port left at all -- docs/gravity-well-mode-plan.md
+    // Phase 4's "for the player: game over", not otherwise surfaced yet).
+    if (const std::optional<Vector2d> pos = m_factionSystem.TryRespawn(TeamId::Blue)) {
+        m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, *pos);
+        m_playerRespawnTimer = -1;
     }
 }
 

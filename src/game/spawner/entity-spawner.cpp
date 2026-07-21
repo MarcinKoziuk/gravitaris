@@ -215,6 +215,7 @@ flecs::entity EntitySpawner::SpawnFreighter(id_t modelId, Vector2d position, Tea
     entity.emplace<RigidBodyDesc>("main"_id, body);
     entity.emplace<Team>(team);
     entity.emplace<Damageable>();
+    entity.emplace<Controls>();
     entity.emplace<Freighter>(Freighter{targetPlanet.get<NetId>().value, buildOrder, false});
     AssignNetId(entity);
     AddRenderable(entity, modelId);

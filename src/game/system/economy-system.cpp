@@ -11,6 +11,7 @@
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/transform.hpp>
+#include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/economy-system.hpp>
 
@@ -21,6 +22,12 @@ namespace {
 struct PlanetEconomy {
     flecs::entity colony, base, highPort, lab, spaceDock;
 };
+
+// Matches BuildStartingComplex's own layout (starting-complex.cpp) so a
+// self-developed complex looks identical to a hand-assembled one.
+const Vector2d LAB_OFFSET{-15., 15.};
+const Vector2d COMM_CENTER_OFFSET{15., 15.};
+constexpr double SELF_DEV_ORBIT_PHASE_OFFSET = 0.4;
 
 // True if `planetNetId` already has a live structure of `type` -- same
 // check FreighterSystem uses at build time, duplicated rather than shared
@@ -41,9 +48,10 @@ bool HasStructure(flecs::world& registry, std::uint32_t planetNetId, StructureTy
 
 } // namespace
 
-EconomySystem::EconomySystem(flecs::world& registry, EntitySpawner& entitySpawner)
+EconomySystem::EconomySystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue)
         : m_registry(registry)
         , m_entitySpawner(entitySpawner)
+        , m_eventQueue(eventQueue)
 {}
 
 void EconomySystem::Update()
@@ -95,6 +103,78 @@ void EconomySystem::Update()
             const float converted = std::min(s.rawMaterials, CONVERSION_RATE);
             s.rawMaterials -= converted;
             s.finishedMaterials = std::min(s.finishedMaterials + converted, FINISHED_CAP);
+        }
+    }
+
+    // Self-development (docs/gravity-well-mode-plan.md Phase 4): a Base
+    // grows its own Lab then Comm Center, a High Port its own Space Dock
+    // then Sensor Array, spending ITS OWN finished materials -- same-planet
+    // and instant, unlike freighter-built Base/Colony/High Port which need
+    // a trip to a (possibly different) planet. One at a time, new-unit
+    // rule applies, same as everywhere else structures get built.
+    for (auto& [netId, pe] : byPlanet) {
+        if (pe.base.is_alive()) {
+            Structure& base = pe.base.get_mut<Structure>();
+            if (base.finishedMaterials >= SELF_DEVELOPMENT_COST) {
+                if (!pe.lab.is_alive()) {
+                    base.finishedMaterials -= SELF_DEVELOPMENT_COST;
+                    const Team& team = pe.base.get<Team>();
+                    flecs::entity planet = m_entitySpawner.EntityForNetId(netId);
+                    flecs::entity built = m_entitySpawner.SpawnStructure(StructureType::Lab, "models/structures/lab"_id,
+                                                                         planet, team.id, LAB_OFFSET);
+                    const Transform& builtTransf = built.get<Transform>();
+                    m_eventQueue.Emit(GameEventType::StructureBuilt, built,
+                                      Magnum::Vector2{static_cast<float>(builtTransf.pos.x()),
+                                                      static_cast<float>(builtTransf.pos.y())},
+                                      static_cast<std::uint32_t>(StructureType::Lab));
+                }
+                else if (!HasStructure(m_registry, netId, StructureType::CommCenter)) {
+                    base.finishedMaterials -= SELF_DEVELOPMENT_COST;
+                    const Team& team = pe.base.get<Team>();
+                    flecs::entity planet = m_entitySpawner.EntityForNetId(netId);
+                    flecs::entity built = m_entitySpawner.SpawnStructure(
+                            StructureType::CommCenter, "models/structures/comm-center"_id, planet, team.id,
+                            COMM_CENTER_OFFSET);
+                    const Transform& builtTransf = built.get<Transform>();
+                    m_eventQueue.Emit(GameEventType::StructureBuilt, built,
+                                      Magnum::Vector2{static_cast<float>(builtTransf.pos.x()),
+                                                      static_cast<float>(builtTransf.pos.y())},
+                                      static_cast<std::uint32_t>(StructureType::CommCenter));
+                }
+            }
+        }
+
+        if (pe.highPort.is_alive()) {
+            Structure& highPort = pe.highPort.get_mut<Structure>();
+            if (highPort.finishedMaterials >= SELF_DEVELOPMENT_COST) {
+                const PlanetOrbitAttachment& hpAttach = pe.highPort.get<PlanetOrbitAttachment>();
+                if (!pe.spaceDock.is_alive()) {
+                    highPort.finishedMaterials -= SELF_DEVELOPMENT_COST;
+                    const Team& team = pe.highPort.get<Team>();
+                    flecs::entity planet = m_entitySpawner.EntityForNetId(netId);
+                    flecs::entity built = m_entitySpawner.SpawnOrbitingStructure(
+                            StructureType::SpaceDock, "models/structures/space-dock"_id, planet, team.id,
+                            hpAttach.radius, hpAttach.direction, hpAttach.theta + SELF_DEV_ORBIT_PHASE_OFFSET);
+                    const Transform& builtTransf = built.get<Transform>();
+                    m_eventQueue.Emit(GameEventType::StructureBuilt, built,
+                                      Magnum::Vector2{static_cast<float>(builtTransf.pos.x()),
+                                                      static_cast<float>(builtTransf.pos.y())},
+                                      static_cast<std::uint32_t>(StructureType::SpaceDock));
+                }
+                else if (!HasStructure(m_registry, netId, StructureType::SensorArray)) {
+                    highPort.finishedMaterials -= SELF_DEVELOPMENT_COST;
+                    const Team& team = pe.highPort.get<Team>();
+                    flecs::entity planet = m_entitySpawner.EntityForNetId(netId);
+                    flecs::entity built = m_entitySpawner.SpawnOrbitingStructure(
+                            StructureType::SensorArray, "models/structures/sensor-array"_id, planet, team.id,
+                            hpAttach.radius, hpAttach.direction, hpAttach.theta - SELF_DEV_ORBIT_PHASE_OFFSET);
+                    const Transform& builtTransf = built.get<Transform>();
+                    m_eventQueue.Emit(GameEventType::StructureBuilt, built,
+                                      Magnum::Vector2{static_cast<float>(builtTransf.pos.x()),
+                                                      static_cast<float>(builtTransf.pos.y())},
+                                      static_cast<std::uint32_t>(StructureType::SensorArray));
+                }
+            }
         }
     }
 

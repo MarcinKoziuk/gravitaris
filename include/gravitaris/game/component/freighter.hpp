@@ -28,8 +28,18 @@ struct Freighter {
     BuildOrder buildOrder = BuildOrder::Base;
     // false: FreighterSystem drives its transit toward the target planet.
     // true: it has arrived and orbits via a real PlanetOrbitAttachment
-    // (the same mechanism High Port uses) while its build is resolved.
+    // (the same mechanism High Port uses) while its cargo is unloaded.
     bool arrived = false;
+    // Two cargo pods (matches the model -- freighter-0.svg's hull carries
+    // two visible pods), unloaded one at a time after arrival: the first
+    // tops up the target planet's existing Base (if any) with raw
+    // materials; the second resolves the freighter's build order (or is
+    // simply consumed if someone else already built it). Counts down
+    // 2 -> 1 -> 0; the freighter is destructed once it reaches 0.
+    std::uint8_t cargoRemaining = 2;
+    // Ticks since arrival (or since the last cargo unload) -- gates the
+    // next unload so the two events read as sequential, not simultaneous.
+    std::uint32_t ticksSinceUnload = 0;
 };
 
 } // namespace Gravitaris

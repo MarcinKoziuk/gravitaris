@@ -174,7 +174,6 @@ void CGame::TickNetClient(const ControlFlags& flags)
     if (const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot()) {
         m_clientPrediction.Step(tick, flags, snapshot->entities, snapshot->tick);
         m_bulletLifetimeSystem.Update(PHYSICS_DELTA);
-        CheckLocalBulletHits();
     }
 }
 
@@ -198,16 +197,33 @@ void CGame::TickNetClient(const ControlFlags& flags)
 // query -- this checks distance from each hostile ship's rendered position
 // to the bullet's swept segment (prevPos -> pos, so a fast bullet can't
 // tunnel past a check done only at its instantaneous position) against a
-// fixed radius approximating ship size, rather than exact geometry.
+// fixed radius approximating ship size, rather than exact geometry. Ships
+// don't expose a simple bounding radius (their collision Body is an
+// authored polygon, not a circle, unlike planets); the largest ship body
+// (freighter-0, 30x10 world units) has a ~15.8 unit half-diagonal. Biased a
+// bit above that on purpose -- an occasional visible overshoot reads better
+// than a bullet stopping short of the ship it was aimed at.
+//
+// No ownerNetId filter needed (fixed 2026-07-21 -- an earlier version had
+// one, and it silently never matched, so this whole check was dead code on
+// a real client). The bug: ClientPrediction::Step stamps
+// Bullet::ownerNetId from `m_ownShip.get<NetId>().value` -- but m_ownShip
+// is spawned locally via EntitySpawner::SpawnPlayer, which assigns NetId
+// from *this client's own* AssignNetId counter, a value with no relation
+// to NetClient::GetYourShipNetId() (the *server's* NetId for this ship,
+// received in ServerWelcome). Comparing one against the other can never
+// match. The actual fix doesn't need either value: m_registry is this
+// client's own local prediction registry, and in net-client mode it only
+// ever holds this client's own ship, its own cosmetic bullets, and Phase
+// 7's planet proxies (see ClientPrediction's own class doc comment) --
+// nothing else is ever spawned into it. So every Bullet found here is
+// definitionally this client's own; there is nothing to filter.
 void CGame::CheckLocalBulletHits()
 {
-    static constexpr double LOCAL_HIT_RADIUS = 18.0;
-    const std::uint32_t yourShipNetId = m_netClient->GetYourShipNetId();
+    static constexpr double LOCAL_HIT_RADIUS = 22.0;
 
     std::vector<flecs::entity> hitBullets;
     m_registry.each([&](flecs::entity bulletEnt, const Bullet& bullet, const Transform& bulletTransf) {
-        if (bullet.ownerNetId != yourShipNetId) return;
-
         const Vector2d& a = bulletTransf.prevPos;
         const Vector2d& b = bulletTransf.pos;
         const Vector2d ab = b - a;
@@ -295,19 +311,22 @@ void CGame::ApplyRemoteEvents()
             // sent back to this peer) bullet was destroyed the instant it
             // registered the hit. No wire field ties an Impact event back
             // to the bullet that caused it, so this matches by position
-            // instead: any of this client's own still-alive bullets
-            // (Bullet::ownerNetId == yourShipNetId) near where the hit was
-            // just registered. The radius is generous -- by the time this
-            // event has propagated through the snapshot/event pipeline, the
-            // real bullet already overshot the impact point along the same
+            // instead: any of this client's own still-alive bullets near
+            // where the hit was just registered. No ownerNetId filter
+            // needed -- m_registry only ever holds this client's own ship,
+            // bullets, and planet proxies (see CheckLocalBulletHits's own
+            // comment on why a filter here can never actually match: the
+            // two sides compare NetIds from unrelated numbering sequences).
+            // The radius is generous -- by the time this event has
+            // propagated through the snapshot/event pipeline, the real
+            // bullet already overshot the impact point along the same
             // straight line the cosmetic copy is still flying, so an exact
             // position match would almost never hit.
             if (event.type == GameEventType::Impact) {
                 static constexpr double BULLET_IMPACT_MATCH_RADIUS = 100.0;
                 const Vector2d impactPos{static_cast<double>(event.pos.x()), static_cast<double>(event.pos.y())};
                 std::vector<flecs::entity> matchedBullets;
-                m_registry.each([&](flecs::entity bulletEnt, const Bullet& bullet, const Transform& transf) {
-                    if (bullet.ownerNetId != yourShipNetId) return;
+                m_registry.each([&](flecs::entity bulletEnt, const Bullet&, const Transform& transf) {
                     if ((transf.pos - impactPos).length() > BULLET_IMPACT_MATCH_RADIUS) return;
                     matchedBullets.push_back(bulletEnt);
                 });
@@ -363,6 +382,18 @@ void CGame::RenderNetClient(float dtSeconds)
                                               planetTick)) {
         m_snapshotApplier.Apply(*interpolated, dtSeconds);
     }
+
+    // Right after the mirror world's ship positions were just refreshed,
+    // not from TickNetClient's fixed-step loop (moved here 2026-07-21):
+    // that loop can run several ticks back-to-back after a stall (catch-up,
+    // MAX_STEPS_PER_FRAME in gravitaris.cpp), but the mirror world only
+    // updates once per render frame -- checking mid-catch-up compared the
+    // bullet's *already-advanced* position against an up-to-several-ticks
+    // -stale enemy position, silently under-triggering hits exactly when
+    // real network jitter (this client's actual bug report) made the
+    // catch-up happen in the first place. Both are now as fresh as they
+    // ever get, at the same instant.
+    CheckLocalBulletHits();
 
     // Blend out any reconciliation snap over ~100ms by decaying the offset
     // *before* camera framing runs, then feeding it in as an already

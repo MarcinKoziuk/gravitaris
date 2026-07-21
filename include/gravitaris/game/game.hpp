@@ -22,6 +22,7 @@
 #include <gravitaris/game/system/ship-controls-system.hpp>
 #include <gravitaris/game/system/bullet-lifetime-system.hpp>
 #include <gravitaris/game/system/damage-system.hpp>
+#include <gravitaris/game/system/faction-system.hpp>
 #include <gravitaris/game/system/landing-state-system.hpp>
 #include <gravitaris/game/system/conquest-system.hpp>
 #include <gravitaris/game/system/death-system.hpp>
@@ -64,6 +65,10 @@ protected:
     BulletLifetimeSystem m_bulletLifetimeSystem;
 
     DamageSystem m_damageSystem;
+
+    // Declared before LandingStateSystem/ConquestSystem: both take a
+    // reference to it in their constructors (member init order).
+    FactionSystem m_factionSystem;
 
     LandingStateSystem m_landingStateSystem;
 
@@ -141,6 +146,9 @@ public:
 
     EntitySpawner& GetEntitySpawner()
     { return *m_entitySpawner; }
+
+    FactionSystem& GetFactionSystem()
+    { return m_factionSystem; }
 
     // The sim's one-shot event stream (docs/networking-plan.md Phase 1).
     // Consumers keep their own cursor and read via ConsumeSince.

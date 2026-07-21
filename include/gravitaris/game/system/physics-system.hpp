@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <vector>
 #include <unordered_map>
 
@@ -114,10 +115,15 @@ public:
     // PhysicsRefs on still-live entities become no-ops via the generation.
     void UnloadSpace(id_t spaceId);
 
-    // Drives a kinematic body directly (position + velocity), for externally
-    // scripted motion like OrbitSystem's pre-calculated orbits. No effect on
-    // dynamic bodies' integration -- meant for CP_BODY_TYPE_KINEMATIC only.
-    void SetKinematicMotion(const PhysicsRef& ref, Magnum::Vector2d pos, Magnum::Vector2d vel);
+    // Drives a kinematic body directly (position + velocity + optional
+    // angle), for externally scripted motion like OrbitSystem's
+    // pre-calculated orbits. No effect on dynamic bodies' integration --
+    // meant for CP_BODY_TYPE_KINEMATIC only. `angle` is left untouched when
+    // omitted -- PhysicsSystem::Update() reads the body's angle back into
+    // Transform::rot every tick regardless, so a caller that doesn't care
+    // about facing needs no extra call.
+    void SetKinematicMotion(const PhysicsRef& ref, Magnum::Vector2d pos, Magnum::Vector2d vel,
+                            std::optional<double> angle = std::nullopt);
 
     void Simulate(double dt);
 

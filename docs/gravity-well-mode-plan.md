@@ -257,11 +257,13 @@ hands-off — in a complex growing there. The heart of the mode.
 **Known gap, explicitly deferred**: resupplying an already-complete but
 materials-starved planet (the original's *other* freighter role, for a
 planet with no Colony of its own) isn't modeled — only the construction
-case (missing structures) triggers a dispatch. Also: Lab/Space Dock's own
-`Structure::rawMaterials`/`finishedMaterials` fields are simply never
-written to (by design, per the manual's "the Base/High Port it accompanies"
-wording) — worth remembering if a future phase reads them expecting
-non-zero values.
+case (missing structures) triggers a dispatch, and only a planet that's
+also the freighter's *build target* gets any resupply benefit (see the
+2026-07-21 update below) — a needy planet with everything already built
+still gets nothing. Also: Lab/Space Dock's own `Structure::rawMaterials`/
+`finishedMaterials` fields are simply never written to (by design, per the
+manual's "the Base/High Port it accompanies" wording) — worth remembering
+if a future phase reads them expecting non-zero values.
 
 **Verification status** (2026-07-20): all four targets build clean; a
 native single-player smoke run (starting complex + economy actually ticking
@@ -272,6 +274,23 @@ sane — a real game would take a while at the tuned production rates before
 the first freighter launches; that pacing itself hasn't been eyeballed for
 feel).
 
+**Update (2026-07-21) — staged two-cargo unload**: per playtesting feedback,
+a freighter no longer builds instantly on arrival. It now unloads its two
+cargo pods one at a time, `FreighterSystem::CARGO_UNLOAD_INTERVAL_TICKS`
+(60 ticks / 1s) apart: cargo 1 tops up the target planet's *existing* Base
+with `FreighterSystem::CARGO_ONE_RAW_MATERIALS` (25) raw materials if it has
+one (a no-op if this freighter's own build order is to construct that Base
+— nothing to top up yet); cargo 2 then resolves the build order exactly as
+before and consumes the freighter. This is a partial step toward the
+original's resupply role (above), scoped to "while already visiting to
+build something" rather than a dedicated resupply dispatch. What happens to
+a freighter once both cargo pods are gone (today: destructed, same as the
+old instant-build behavior) is intentionally not revisited yet — pending
+Marcin re-checking the original's behavior. Native + wasm build clean;
+`TestFreighterEconomy`'s 3000-tick window comfortably absorbs the added
+~2-tick-interval (120-tick) delay per freighter with no assertion changes
+needed. Not yet manually playtested.
+
 Done when: claim a fresh planet in a real playthrough and watch the complex
 grow unattended; sim-test proof passes.
 
@@ -279,18 +298,19 @@ grow unattended; sim-test proof passes.
 
 Goal: complexes rebuild your fighter; a round can be won and lost.
 
-- [ ] Base self-development: a Base constructs Lab then Comm Center from its
+- [x] Base self-development: a Base constructs Lab then Comm Center from its
   finished materials; a High Port constructs Space Dock then Sensor Array
   (one at a time, new-unit rule applies).
-- [ ] Fighter production + respawn: Labs and Space Docks rebuild a faction's
+- [x] Fighter production + respawn: Labs and Space Docks rebuild a faction's
   fighter after death (delay: reuse `RESPAWN_DELAY_TICKS` in `game.hpp`),
   consuming host finished materials. Respawn site = the ship's **last
   friendly landing site** (Phase 1's field) if still alive and friendly;
   else any remaining friendly planet/high port; **none left → that faction
   is out** (for the player: game over).
-- [ ] Per-faction state (`FactionState`, replicated; one entity per team or
-  a singleton array): last-landing-site NetId, defeated flag.
-- [ ] Defeat rule: a faction with zero colonies AND zero freighters is
+- [x] Per-faction state (`FactionState`; one entity per team, created
+  lazily): last-landing-site NetId, defeated flag. **Server-only for now,
+  not yet replicated** (see verification note below).
+- [x] Defeat rule: a faction with zero colonies AND zero freighters is
   defeated (nothing regrows; remaining structures stay). Win check: all
   planets claimed by one team. Emit `GameEventType::FactionDefeated` /
   `RoundOver`.
@@ -300,6 +320,100 @@ Goal: complexes rebuild your fighter; a round can be won and lost.
 
 Done when: a full round is winnable and losable against a do-nothing
 opponent faction, verified by hand; sim-test proofs pass.
+
+**Verification status — Base/High Port self-development** (2026-07-21):
+`EconomySystem::SELF_DEVELOPMENT_COST` (40 finished materials, placeholder
+pending tuning) funds a Base's own Lab then Comm Center, and a High Port's
+own Space Dock then Sensor Array, spent from that structure's own
+`finishedMaterials` (not delegated to an accompanying structure, unlike
+freighter dispatch) — one at a time, new-unit rule re-checked live, same as
+freighter construction. Same-planet and instant: no freighter trip, since
+`EntitySpawner::SpawnStructure`/`SpawnOrbitingStructure` can place it
+directly (Space Dock/Sensor Array reuse the High Port's own current orbit
+radius/direction/theta, phase-offset ±0.4 rad, matching
+`BuildStartingComplex`'s hand-placed layout). Also fixed a pre-existing bug
+found while touching this code: `GameEventType::StructureBuilt`'s doc
+comment says `param = StructureType`, but `FreighterSystem`'s emit was
+actually passing the `BuildOrder` enum, whose values don't line up with
+`StructureType` past index 1 (`BuildOrder::HighPort` = 2 vs.
+`StructureType::HighPort` = 4) — harmless today since nothing reads the
+param yet, but would have bitten whoever adds the first reader. New
+sim-test `TestSelfDevelopment` (bare Base + High Port, no Lab/Comm
+Center/Space Dock/Sensor Array, gifted funds) asserts both build-order
+sequences. Native, wasm, and sim-test all build/run clean; determinism
+checksum unchanged (the default scenario's own starting complex already has
+all seven structures, so self-development never triggers there — expected,
+not a sign the new code is dead). Not yet manually playtested in a live
+game.
+
+**Verification status — FactionState / defeat / win** (2026-07-21):
+`FactionSystem` (new, `src/game/system/faction-system.cpp`) owns
+`FactionState` entities, one per team, created lazily the first time
+`GetOrCreate(team)` is called (from `LandingStateSystem`/`ConquestSystem`
+when a ship of that team lands somewhere friendly, updating
+`lastLandingSiteNetId`) — not pre-seeded for every `TeamId` value. Runs each
+tick right after `DeathSystem`, so its counts reflect this tick's freshest
+destructions. Defeat check iterates existing `FactionState` entities (not a
+live Structure query) specifically so it still fires even after a team's
+last structure of any kind is destroyed — deriving the team set fresh from
+Structure ownership each tick would miss that final tick, since there'd be
+nothing left to iterate. Win check compares every `Planet`-tagged entity's
+`Team`; fires once when they're all the same non-`None` team (sticky, global
+`m_roundOver` flag on `FactionSystem`, separate from the per-team `defeated`
+flag). New sim-test `TestFactionDefeatAndWin`: two Blue-claimed planets ⇒
+`RoundOver(Blue)` fires within 10 ticks; destroying every Blue Colony (with
+no Blue freighters in flight either) ⇒ `FactionDefeated(Blue)` fires within
+another 10 ticks. Native, wasm, sim-test all build/run clean, determinism
+holds.
+
+**Known gap, still deferred**: `FactionState` is server-only — not in
+`EntityState`/`SNAPSHOT_VERSION`, so no client can see a faction's defeated
+status yet (needed once UI phase U2's "opponent status" swatches are built).
+
+**Verification status — fighter production + respawn** (2026-07-21):
+`FactionSystem::TryRespawn(team)` (new) replaces the old unconditional
+placeholder-position respawn in both `Game::HandlePlayerRespawn`
+(single-player, always `TeamId::Blue`) and `NetServer::HandleRespawns`
+(multiplayer, per-peer team). Site selection: the team's
+`FactionState::lastLandingSiteNetId` planet if it's still alive and
+friendly; else any remaining friendly `Planet`; else any remaining friendly
+High Port. Funding: a Base with a co-located Lab, or a High Port with a
+co-located Space Dock, belonging to the team, with `>=
+FactionSystem::FIGHTER_COST` (30, placeholder pending tuning) finished
+materials — spent on success. No site at all → `std::nullopt` permanently
+(that faction is out; for the player, this reads as the ship simply never
+coming back — no dedicated game-over screen yet, that's UI phase U4's job).
+A site but no affordable funder yet → `std::nullopt` transiently; both
+`HandlePlayerRespawn` and `HandleRespawns` just keep retrying every
+subsequent tick past the original `RESPAWN_DELAY_TICKS` timer, rather than
+resetting or giving up.
+
+**A real bug found and fixed while wiring this in**: `FactionSystem::
+GetOrCreate` can create a flecs entity (a fresh team's first `FactionState`)
+— a structural change that isn't safe from inside an active
+`m_registry.each()` iterator. It was being called nested like that from
+three places (`FactionSystem::Update`'s own team-discovery loop,
+`LandingStateSystem::Update`, `ConquestSystem::Update`), and reliably
+segfaulted `gravitaris-sim-test` — but only in the long-running, many
+-archetype shared `Game` instance `TestPeerRespawn`/`TestTeamAssignment`/etc.
+use (1800+ ticks of accumulated state before these tests run), not in any of
+the short-lived single-purpose `Game` instances other tests construct fresh
+— which is why it didn't show up until this specific combination. Fixed with
+a collect-then-create pattern in all three: gather the set of teams needing
+a `FactionState` (or, for landing/claiming, the `(team, landedOnNetId)`
+pairs to apply) during the read-only `.each()`, then call `GetOrCreate` in a
+plain loop afterward, once no iterator is active. Also had to fix a
+pre-existing sim-test, `TestTeamAssignment`: it reassigns a peer to
+`TeamId::Cyan` (a team that owns nothing) and expected an unconditional
+respawn — under the new site+funding rule Cyan legitimately has nowhere to
+respawn (same as any other faction with no complex), so the test now gifts
+Cyan a minimal Base+Lab first, preserving its original intent (a respawn
+keeps the reassigned team, not the original request). Native, wasm, and
+sim-test all build/run clean; determinism holds; the crash does not
+reproduce after the fix.
+
+Phase 4 is now fully implemented server-side; only the client-visibility gap
+above remains.
 
 ## Phase 5 — AI opponents (strategy layer)
 

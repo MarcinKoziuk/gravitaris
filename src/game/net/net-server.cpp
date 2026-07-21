@@ -1,3 +1,5 @@
+#include <optional>
+
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/component/net-id.hpp>
@@ -6,15 +8,17 @@
 #include <gravitaris/game/net/protocol.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
+#include <gravitaris/game/system/faction-system.hpp>
 #include <gravitaris/game/net/net-server.hpp>
 
 namespace Gravitaris {
 
 NetServer::NetServer(flecs::world& registry, EntitySpawner& entitySpawner, const GameEventQueue& eventQueue,
-                     INetTransport& transport)
+                     FactionSystem& factionSystem, INetTransport& transport)
         : m_registry(registry)
         , m_entitySpawner(entitySpawner)
         , m_eventQueue(eventQueue)
+        , m_factionSystem(factionSystem)
         , m_transport(transport)
 {}
 
@@ -68,12 +72,18 @@ void NetServer::HandleRespawns()
         }
         if (--state.respawnTimer > 0) continue;
 
-        // Placeholder spawn point, same as the initial join (Phase 3 will
-        // grow real player-slot/respawn-site selection -- see
-        // docs/gravity-well-mode-plan.md's respawn-at-last-friendly-site
-        // rule, once landing sites exist).
+        // Timer expired: keep retrying every subsequent tick (respawnTimer
+        // just keeps decrementing below zero, so this branch runs again
+        // next tick too) until FactionSystem::TryRespawn succeeds -- a site
+        // exists but nothing can fund the fighter yet is a transient wait,
+        // not a failure -- or permanently doesn't (no friendly planet/High
+        // Port left at all -- that faction is out; this peer just stays a
+        // ghost, no ship, no fresh ServerWelcome, until the round ends).
+        const std::optional<Vector2d> pos = m_factionSystem.TryRespawn(state.team);
+        if (!pos) continue;
+
         const id_t playerModel = "models/ships/fighter-1"_id;
-        state.ship = m_entitySpawner.SpawnPlayer(playerModel, Vector2d{0., 0.}, state.team);
+        state.ship = m_entitySpawner.SpawnPlayer(playerModel, *pos, state.team);
 
         ServerWelcomePacket welcome;
         welcome.clientId = peer;

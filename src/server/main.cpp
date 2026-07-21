@@ -186,7 +186,8 @@ int main(int argc, char** argv)
     BuildStartingComplex(game.GetEntitySpawner(), homePlanet, TeamId::Blue);
 
     WebRtcServerTransport transport(port);
-    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), transport);
+    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
+                     transport);
 
     LOG(info) << "gravitaris-server: listening on ws://0.0.0.0:" << port;
     std::printf("commands: spawn [count] [preset]|list|team <peer-id> <color>|quit\n");

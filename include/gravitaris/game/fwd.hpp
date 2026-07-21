@@ -60,6 +60,7 @@ class ShipControlsSystem;
 class AIPilotSystem;
 class DamageSystem;
 class DeathSystem;
+class FactionSystem;
 
 // spawner
 class EntitySpawner;

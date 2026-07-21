@@ -105,7 +105,10 @@ public:
     // A freighter dispatched to build `buildOrder` at `targetPlanet` --
     // kinematic (FreighterSystem drives its transit, then a real
     // PlanetOrbitAttachment once arrived), Team+Damageable like a ship
-    // (interceptable), but no Controls/InputQueue -- nothing pilots it.
+    // (interceptable). Carries Controls but no InputQueue -- nothing pilots
+    // it; FreighterSystem sets thrustForward during transit purely so the
+    // existing _thrust visual/audio/replication pipeline lights up (forces
+    // from ShipControlsSystem are ignored on a kinematic body).
     flecs::entity SpawnFreighter(id_t modelId, Vector2d position, TeamId team, flecs::entity targetPlanet,
                                  BuildOrder buildOrder);
 

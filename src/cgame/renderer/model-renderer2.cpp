@@ -382,6 +382,11 @@ void ModelRenderer2::Render(double)
         return controls && controls->actionFlags.thrustForward;
     });
 
+    // Freighter-0's cargo pods -- always drawn for now (no
+    // cargoRemaining replication yet, docs/freighter-model-todo.md #4b/#4c).
+    RenderTag("_cargo_l"_id, {});
+    RenderTag("_cargo_r"_id, {});
+
     // Submissions are per-frame: whoever wants an overlay next frame re-submits.
     for (auto& [modelId, overlays] : m_overlayScratch) overlays.clear();
 }

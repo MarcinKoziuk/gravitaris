@@ -152,11 +152,13 @@ void PhysicsSystem::SetMassMultiplier(const PhysicsRef& ref, float multiplier)
     cpBodySetMass(slot.cp.body.get(), slot.baseMass * multiplier);
 }
 
-void PhysicsSystem::SetKinematicMotion(const PhysicsRef& ref, Magnum::Vector2d pos, Magnum::Vector2d vel)
+void PhysicsSystem::SetKinematicMotion(const PhysicsRef& ref, Magnum::Vector2d pos, Magnum::Vector2d vel,
+                                       std::optional<double> angle)
 {
     cpBody* body = GetBody(ref).cp.body.get();
     cpBodySetPosition(body, cpv(pos.x(), pos.y()));
     cpBodySetVelocity(body, cpv(vel.x(), vel.y()));
+    if (angle) cpBodySetAngle(body, cpFloat(*angle));
 }
 
 void PhysicsSystem::InitBody(PhysicsBody& slot, const Transform& transf)

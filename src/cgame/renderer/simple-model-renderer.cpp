@@ -112,6 +112,15 @@ void SimpleModelRenderer::Render(double)
         if (it == m_meshes.end()) return;
         RenderGroup("_thrust"_id, it->second, transf);
     });
+
+    // Freighter-0's cargo pods -- always drawn for now (no cargoRemaining
+    // replication yet, docs/freighter-model-todo.md #4b/#4c).
+    m_registry.each([&](flecs::entity, Transform& transf, Renderable& rend) {
+        auto it = m_meshes.find(rend.model.Id());
+        if (it == m_meshes.end()) return;
+        RenderGroup("_cargo_l"_id, it->second, transf);
+        RenderGroup("_cargo_r"_id, it->second, transf);
+    });
 }
 
 } // Gravitaris

@@ -23,9 +23,11 @@ private:
     EntitySpawner& m_entitySpawner;
 
     GameEventQueue& m_eventQueue;
+    FactionSystem& m_factionSystem;
 
 public:
-    ConquestSystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue);
+    ConquestSystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue,
+                   FactionSystem& factionSystem);
 
     void Update();
 };
