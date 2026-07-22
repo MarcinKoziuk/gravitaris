@@ -1803,8 +1803,22 @@ short test session won't exhibit regardless of whether the fix is correct).
 - Ship-ship contact prediction (kinematic proxies for remote ships), or the
   cheaper camera-shake mitigation, for the reconciliation-thrash case Phase 7
   explicitly left unfixed.
-
----
+- **Server logging + rotation, for once `gravitaris-server` is actually
+  hosted somewhere long-running** (2026-07-22, noted only, no action taken
+  yet -- Marcin still reviewing the server CLI TODOs first). `Gravitaris::
+  Log` (`src/game/logging.cpp`) is currently just a severity tag + timestamp
+  + stdout/stderr split, no file output, no rotation at all -- fine for a
+  dev box, not for something meant to run unattended. Two candidate
+  directions, not yet decided between:
+  - Pull in `spdlog` via `FetchContent` (matches the project's existing
+    dependency pattern) specifically for its `rotating_file_sink`
+    (size-based) / `daily_file_sink` (time-based) -- avoids hand-rolling the
+    fiddly bits (atomic rename, reopening handles, concurrent-write safety).
+  - Or just add file output + size/date-rotation directly to the existing
+    homegrown logger -- rotation itself is maybe 60-80 lines, and this
+    project generally prefers bespoke-and-simple (see `id.hpp`) over a new
+    dependency when the need is this narrow (no filtering/async/multi-sink
+    requirement today).
 
 ## Invariants checklist (apply to EVERY gameplay PR from now on)
 
