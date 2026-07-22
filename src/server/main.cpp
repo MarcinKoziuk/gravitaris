@@ -3,6 +3,8 @@
 // Links game/ only -- no cgame/GL/Audio -- the same ADR 0001 constraint
 // gravitaris-sim-test enforces, so this binary can run on a headless box.
 
+// Claude: call this file gravitaris-server.cpp
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -36,6 +38,7 @@ namespace {
 
 // M_PI is a POSIX/GNU <cmath> extension, not standard C++ -- MSVC doesn't
 // define it without _USE_MATH_DEFINES set before every <cmath> include.
+// Claude: we have hundreds of these, can you add it to gravitaris.hpp?
 constexpr double PI = 3.14159265358979323846;
 
 // Background stdin reader: std::cin has no non-blocking read, so the main
@@ -45,6 +48,7 @@ constexpr double PI = 3.14159265358979323846;
 // NetServer::IngestInput. *Very* minimal by design (docs/networking-plan N5)
 // -- no history/line-editing (replxx/isocline would add that later if ever
 // wanted; skipped for now).
+    // Claude: lets use isocline. Also make sure that server and client have separate deps (so client and server each don't need deps they don't need)
 class StdinCommandQueue {
 public:
     StdinCommandQueue()
@@ -77,6 +81,7 @@ private:
     std::deque<std::string> m_lines;
 };
 
+    // Claude: can we use https://github.com/Neargye/magic_enum for this stuffie?
 std::optional<AIPersonalityPreset> ParsePreset(const std::string& name)
 {
     if (name == "balanced") return AIPersonalityPreset::Balanced;
@@ -87,6 +92,7 @@ std::optional<AIPersonalityPreset> ParsePreset(const std::string& name)
     return std::nullopt;
 }
 
+    // Claude: can we use https://github.com/Neargye/magic_enum for this stuffie?
 std::optional<TeamId> ParseTeam(const std::string& name)
 {
     if (name == "blue") return TeamId::Blue;
@@ -107,6 +113,7 @@ void HandleCommand(const std::string& line, Game& game, NetServer& server, bool&
     std::string verb;
     iss >> verb;
 
+    // Claude: you are forgetting use stroustrup if/else style (CLAUDE.md)
     if (verb.empty()) {
         return;
     } else if (verb == "spawn") {
@@ -122,6 +129,7 @@ void HandleCommand(const std::string& line, Game& game, NetServer& server, bool&
         }
         count = std::clamp(count, 1, 100);
         const id_t shipModel = "models/ships/fighter-1"_id;
+        // Claude: It's ugly that it's here, make a debug utility in game/ or something to spawn shit
         for (int i = 0; i < count; ++i) {
             const double angle = (2. * PI * static_cast<double>(i)) / static_cast<double>(count);
             const Vector2d pos{600. * std::cos(angle), 600. * std::sin(angle)};
@@ -166,7 +174,7 @@ int main(int argc, char** argv)
 {
     HasEnteredMain = true;
 
-    std::uint16_t port = 17890;
+    std::uint16_t port = 17890; // make configurable
     if (argc > 1) port = static_cast<std::uint16_t>(std::atoi(argv[1]));
 
     FilesystemPhysFS fs;
@@ -189,6 +197,8 @@ int main(int argc, char** argv)
     NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
                      transport);
 
+    // Claude: this binding must be configurable
+    // let's also replace YAML while were're doing it. WHat are good altenratives for YAML?
     LOG(info) << "gravitaris-server: listening on ws://0.0.0.0:" << port;
     std::printf("commands: spawn [count] [preset]|list|team <peer-id> <color>|quit\n");
 

@@ -4,6 +4,7 @@
 
 #include <gravitaris/game/logging.hpp>
 
+// Claude: concatenate namespaces for me (not just here)
 namespace Gravitaris {
 namespace Log {
 

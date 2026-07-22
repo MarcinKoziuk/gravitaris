@@ -95,6 +95,7 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
     });
 }
 
+    // Claude: this seems ugly, hard to maintain. I wonder if we can use capt'n proto or similar?
 void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
 {
     out.WriteU8(SNAPSHOT_VERSION);
@@ -219,6 +220,8 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
     return in.Ok();
 }
 
+// Claude: redundant casts and namespaces
+// also
 void EvaluateOrbit(const EntityState& planet, std::uint64_t baseTick, std::uint64_t atTick,
                    Magnum::Vector2d& outPos, Magnum::Vector2d& outVel)
 {
