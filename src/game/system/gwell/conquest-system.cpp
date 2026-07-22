@@ -8,8 +8,8 @@
 #include <gravitaris/game/component/faction-state.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
-#include <gravitaris/game/system/faction-system.hpp>
-#include <gravitaris/game/system/conquest-system.hpp>
+#include <gravitaris/game/system/gwell/faction-system.hpp>
+#include <gravitaris/game/system/gwell/conquest-system.hpp>
 
 namespace Gravitaris {
 

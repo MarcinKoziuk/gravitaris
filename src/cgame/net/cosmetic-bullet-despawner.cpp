@@ -5,17 +5,16 @@
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/team.hpp>
 
-#include <gravitaris/cgame/net/cosmetic-bullet-reaper.hpp>
+#include <gravitaris/cgame/net/cosmetic-bullet-despawner.hpp>
 
 namespace Gravitaris {
 
-    //Claude: reaper a bit weird name, suggestions?
-CosmeticBulletReaper::CosmeticBulletReaper(flecs::world& registry, flecs::world& mirrorWorld)
+CosmeticBulletDespawner::CosmeticBulletDespawner(flecs::world& registry, flecs::world& mirrorWorld)
         : m_registry(registry)
         , m_mirrorWorld(mirrorWorld)
 {}
 
-void CosmeticBulletReaper::CheckLocalHits()
+void CosmeticBulletDespawner::CheckLocalHits()
 {
     std::vector<flecs::entity> hitBullets;
     m_registry.each([&](flecs::entity bulletEnt, const Bullet& bullet, const Transform& bulletTransf) {
@@ -58,7 +57,7 @@ void CosmeticBulletReaper::CheckLocalHits()
 // cosmetic bullets, and Phase 7's planet proxies -- nothing else is ever
 // spawned into it. So every Bullet found here is definitionally this
 // client's own; there is nothing to filter.
-void CosmeticBulletReaper::MatchImpact(const Vector2d& impactPos)
+void CosmeticBulletDespawner::MatchImpact(const Vector2d& impactPos)
 {
     std::vector<flecs::entity> matchedBullets;
     m_registry.each([&](flecs::entity bulletEnt, const Bullet&, const Transform& transf) {

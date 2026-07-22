@@ -2,12 +2,11 @@
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
-#include <gravitaris/game/system/physics-system.hpp>
-#include <gravitaris/game/system/ship-controls-system.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
+#include <gravitaris/game/system/ship/ship-controls-system.hpp>
 
-#include <gravitaris/cgame/autopilot.hpp>
+#include <gravitaris/game/gnc/autopilot.hpp>
 
-// Claude: can we move this to game gnc/ ? It might be useful for AIs
 namespace Gravitaris {
 
 Autopilot::Autopilot(flecs::world& registry, PhysicsSystem& physicsSystem)

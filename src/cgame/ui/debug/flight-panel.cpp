@@ -6,8 +6,8 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/gnc/control/flight-controller.hpp>
 #include <gravitaris/game/gnc/guidance/behaviors.hpp>
-#include <gravitaris/game/system/landing-state-system.hpp>
-#include <gravitaris/game/system/conquest-system.hpp>
+#include <gravitaris/game/system/ship/landing-state-system.hpp>
+#include <gravitaris/game/system/gwell/conquest-system.hpp>
 
 #include <gravitaris/cgame/cgame.hpp>
 

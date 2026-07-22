@@ -12,18 +12,18 @@
 #include <gravitaris/game/net/byte-stream.hpp>
 #include <gravitaris/game/net/client-prediction.hpp>
 #include <gravitaris/game/net/net-client.hpp>
-#include <gravitaris/game/net/own-ship-sync.hpp>
+#include <gravitaris/cgame/net/own-ship-sync.hpp>
 #include <gravitaris/game/net/predicted-tick-clock.hpp>
 #include <gravitaris/game/net/webrtc-transport.hpp>
 
 #include <gravitaris/cgame/camera.hpp>
-#include <gravitaris/cgame/net/cosmetic-bullet-reaper.hpp>
+#include <gravitaris/cgame/net/cosmetic-bullet-despawner.hpp>
 #include <gravitaris/cgame/net/net-diagnostics.hpp>
 #include <gravitaris/cgame/net/remote-event-applier.hpp>
 #include <gravitaris/cgame/net/snapshot-applier.hpp>
 #include <gravitaris/cgame/net/snapshot-interpolator.hpp>
 #include <gravitaris/cgame/camera-director.hpp>
-#include <gravitaris/cgame/autopilot.hpp>
+#include <gravitaris/game/gnc/autopilot.hpp>
 #include <gravitaris/cgame/renderer/simple-model-renderer.hpp>
 #include <gravitaris/cgame/renderer/model-renderer2.hpp>
 #include <gravitaris/cgame/renderer/starfield-renderer.hpp>
@@ -95,7 +95,7 @@ protected:
     // called once m_netClient is set (see Render()/IsNetClient()).
     std::optional<OwnShipSync> m_ownShipSync;
 
-    CosmeticBulletReaper m_cosmeticBulletReaper;
+    CosmeticBulletDespawner m_cosmeticBulletDespawner;
 
     NetDiagnostics m_netDiagnostics;
 

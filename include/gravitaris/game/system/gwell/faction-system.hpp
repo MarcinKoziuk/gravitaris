@@ -27,21 +27,34 @@ public:
     // magnitude pending playtesting.
     static constexpr float FIGHTER_COST = 30.f;
 
+    // Offset a respawned/spawned fighter lands at from its site's center --
+    // clear of a planet's own body (the largest, "simple", has a ~60-unit
+    // true radius per landing-state-system.cpp's own convention) and any
+    // orbiting structures (High Port orbits run 90-180 units).
+    static constexpr double RESPAWN_OFFSET_RADIUS = 200.0;
+
     FactionSystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue);
 
     // Finds this team's FactionState entity, creating one (defeated=false,
     // lastLandingSiteNetId=0) the first time it's asked for.
     flecs::entity GetOrCreate(TeamId team);
 
+    // Where this team's next fighter would appear: the ship's last friendly
+    // landing site if it's still alive and friendly, else any remaining
+    // friendly planet or High Port, offset by RESPAWN_OFFSET_RADIUS.
+    // std::nullopt if there's no site at all (that faction is out -- for the
+    // player, game over). Does no funding check and spends nothing; used both
+    // for the free initial spawn (Game::Start) and as TryRespawn's first
+    // step, so the two share one site-selection rule.
+    std::optional<Magnum::Vector2d> SpawnPosition(TeamId team);
+
     // Respawn-site + funding rule (docs/gravity-well-mode-plan.md Phase 4):
-    // picks the ship's last friendly landing site if it's still alive and
-    // friendly, else any remaining friendly planet or High Port; then
-    // requires an affordable funder (a Base with a Lab, or a High Port with
-    // a Space Dock, belonging to this team, with >= FIGHTER_COST finished
-    // materials) and spends it. Returns the spawn position on success;
-    // std::nullopt if there's no site at all (that faction is out -- for
-    // the player, game over) OR a site exists but nothing can afford to
-    // fund the fighter yet (caller should keep retrying next tick).
+    // the SpawnPosition site, but additionally requiring an affordable funder
+    // (a Base with a Lab, or a High Port with a Space Dock, belonging to this
+    // team, with >= FIGHTER_COST finished materials) which it spends. Returns
+    // the spawn position on success; std::nullopt if there's no site
+    // (SpawnPosition's own out case) OR a site exists but nothing can afford
+    // to fund the fighter yet (caller should keep retrying next tick).
     std::optional<Magnum::Vector2d> TryRespawn(TeamId team);
 
     void Update();

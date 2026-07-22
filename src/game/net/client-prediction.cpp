@@ -15,8 +15,8 @@
 #include <gravitaris/game/resource/body.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
-#include <gravitaris/game/system/physics-system.hpp>
-#include <gravitaris/game/system/ship-controls-system.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
+#include <gravitaris/game/system/ship/ship-controls-system.hpp>
 #include <gravitaris/game/net/client-prediction.hpp>
 
 namespace Gravitaris {

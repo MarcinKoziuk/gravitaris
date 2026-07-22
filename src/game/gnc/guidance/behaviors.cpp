@@ -1,7 +1,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include <gravitaris/game/system/physics-system.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
 #include <gravitaris/game/gnc/guidance/behaviors.hpp>
 
 namespace Gravitaris {

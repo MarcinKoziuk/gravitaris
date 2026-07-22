@@ -51,29 +51,25 @@ ResourcePtr<const Body> Body::Create(id_t id, LoadingContext& context)
     std::unique_ptr<ShapeFiles> shapeFiles = GetShapeFiles(context.filesystem, path);
     Matrix4d transform = GetTransformMatrix(*shapeFiles);
 
-    const YAML::Node& cfg = shapeFiles->cfg;
-    if (cfg["physics"]) {
-        const YAML::Node& physicsCfg = cfg["physics"];
-
-        if (physicsCfg["mass"]) {
-            body->m_mass = physicsCfg["mass"].as<float>();
+    const toml::table& cfg = shapeFiles->cfg;
+    if (const toml::table* physicsCfg = cfg["physics"].as_table()) {
+        if (const auto mass = (*physicsCfg)["mass"].value<float>()) {
+            body->m_mass = *mass;
         }
-        if (physicsCfg["friction"]) {
-            body->m_friction = physicsCfg["friction"].as<float>();
+        if (const auto friction = (*physicsCfg)["friction"].value<float>()) {
+            body->m_friction = *friction;
         }
-        if (physicsCfg["kinematic"]) {
-            body->m_kinematic = physicsCfg["kinematic"].as<bool>();
+        if (const auto kinematic = (*physicsCfg)["kinematic"].value<bool>()) {
+            body->m_kinematic = *kinematic;
         }
     }
 
-    if (cfg["gravity"]) {
-        const YAML::Node& gravityCfg = cfg["gravity"];
-
-        if (gravityCfg["is_source"]) {
-            body->m_gravitySource = gravityCfg["is_source"].as<bool>();
+    if (const toml::table* gravityCfg = cfg["gravity"].as_table()) {
+        if (const auto isSource = (*gravityCfg)["is_source"].value<bool>()) {
+            body->m_gravitySource = *isSource;
         }
-        if (gravityCfg["multiplier"]) {
-            body->m_gravityMultiplier = gravityCfg["multiplier"].as<double>();
+        if (const auto multiplier = (*gravityCfg)["multiplier"].value<double>()) {
+            body->m_gravityMultiplier = *multiplier;
         }
     }
 

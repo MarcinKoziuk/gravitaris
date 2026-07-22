@@ -2,7 +2,7 @@
 
 #include <memory>
 
-#include <yaml-cpp/yaml.h>
+#include <toml++/toml.h>
 #include <nanosvg/nanosvg.h>
 
 #include <Magnum/Magnum.h>
@@ -27,11 +27,11 @@ struct NSVGimage_deleter {
 typedef std::unique_ptr<NSVGimage, NSVGimage_deleter> NSVGImageUniquePtr;
 
 struct ShapeFiles {
-    YAML::Node cfg;
+    toml::table cfg;
     NSVGImageUniquePtr svg;
 
-    ShapeFiles(const YAML::Node& cfg, NSVGImageUniquePtr svg)
-            : cfg(cfg), svg(std::move(svg))
+    ShapeFiles(toml::table cfg, NSVGImageUniquePtr svg)
+            : cfg(std::move(cfg)), svg(std::move(svg))
     {}
 };
 

@@ -1,12 +1,13 @@
-scale: 0.2
-physics:
-    mass: 25000
-    kinematic: true
-    density: 10
-    restitution: 0.5
-    friction: 0.0
-gravity:
-    is_source: true
-    is_target: false
-    multiplier: 1
+scale = 0.2
 
+[physics]
+mass = 25000
+kinematic = true
+density = 10
+restitution = 0.5
+friction = 0.0
+
+[gravity]
+is_source = true
+is_target = false
+multiplier = 1

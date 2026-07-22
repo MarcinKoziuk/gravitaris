@@ -40,7 +40,7 @@
 
 #include <cgame/ui/debug/debug-ui.hpp>
 
-#include "replay-controller.hpp"
+#include "cgame/input/replay-controller.hpp"
 
 namespace Gravitaris {
 

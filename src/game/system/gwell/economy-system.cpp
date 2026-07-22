@@ -13,7 +13,7 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
-#include <gravitaris/game/system/economy-system.hpp>
+#include <gravitaris/game/system/gwell/economy-system.hpp>
 
 namespace Gravitaris {
 

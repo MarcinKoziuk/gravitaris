@@ -45,10 +45,10 @@ public:
     // transiting and start orbiting it.
     static constexpr double ARRIVAL_RADIUS = 90.0;
 
-    // Ticks between cargo unloads (60 == 1s at Game::PHYSICS_DELTA) -- makes
+    // Ticks between cargo unloads (300 == 5s at Game::PHYSICS_DELTA) -- makes
     // the two-cargo unload read as sequential events rather than an instant
     // double-drop the moment the freighter arrives.
-    static constexpr std::uint32_t CARGO_UNLOAD_INTERVAL_TICKS = 60;
+    static constexpr std::uint32_t CARGO_UNLOAD_INTERVAL_TICKS = 300;
 
     // Raw materials the first cargo pod hands to the target planet's
     // existing Base, if it has one (gravity-well-1997.md's "freighters...

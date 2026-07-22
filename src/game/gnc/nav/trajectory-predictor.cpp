@@ -2,7 +2,7 @@
 
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
-#include <gravitaris/game/system/physics-system.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
 
 namespace Gravitaris {

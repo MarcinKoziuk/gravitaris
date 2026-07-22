@@ -14,10 +14,10 @@
 #include <gravitaris/game/gnc/guidance/behaviors.hpp>
 #include <gravitaris/game/gnc/control/flight-controller.hpp>
 #include <gravitaris/game/util/splitmix.hpp>
-#include <gravitaris/game/system/physics-system.hpp>
-#include <gravitaris/game/system/ship-controls-system.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
+#include <gravitaris/game/system/ship/ship-controls-system.hpp>
 #include <gravitaris/game/game.hpp>
-#include <gravitaris/game/system/ai-pilot-system.hpp>
+#include <gravitaris/game/system/ship/ai-pilot-system.hpp>
 
 namespace Gravitaris {
 

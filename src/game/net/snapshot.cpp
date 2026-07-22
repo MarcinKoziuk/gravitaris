@@ -95,7 +95,6 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
     });
 }
 
-    // Claude: this seems ugly, hard to maintain. I wonder if we can use capt'n proto or similar?
 void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
 {
     out.WriteU8(SNAPSHOT_VERSION);
@@ -220,25 +219,23 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
     return in.Ok();
 }
 
-// Claude: redundant casts and namespaces
-// also
 void EvaluateOrbit(const EntityState& planet, std::uint64_t baseTick, std::uint64_t atTick,
                    Magnum::Vector2d& outPos, Magnum::Vector2d& outVel)
 {
     // Signed tick delta (atTick can be behind baseTick briefly -- e.g. a
     // reconciliation replaying ticks not-yet-newer than the snapshot that
     // just arrived) -- same math either direction, just run the clock
-    // backward.
+    // backward. atTick/baseTick are uint64_t: casting to double before
+    // subtracting is load-bearing, not redundant -- subtracting first would
+    // wrap around unsigned and teleport the planet.
     const double elapsedSeconds = (static_cast<double>(atTick) - static_cast<double>(baseTick)) * Game::PHYSICS_DELTA;
-    const double theta = static_cast<double>(planet.orbitTheta)
-                        + static_cast<double>(planet.orbitAngularSpeed) * elapsedSeconds;
+    const double theta = planet.orbitTheta + planet.orbitAngularSpeed * elapsedSeconds;
 
     const double c = std::cos(theta);
     const double s = std::sin(theta);
-    const Magnum::Vector2d center{static_cast<double>(planet.orbitCenter.x()),
-                                  static_cast<double>(planet.orbitCenter.y())};
-    const double radius = static_cast<double>(planet.orbitRadius);
-    const double angularSpeed = static_cast<double>(planet.orbitAngularSpeed);
+    const Magnum::Vector2d center{planet.orbitCenter.x(), planet.orbitCenter.y()};
+    const double radius = planet.orbitRadius;
+    const double angularSpeed = planet.orbitAngularSpeed;
 
     outPos = center + Magnum::Vector2d{c, s} * radius;
     outVel = Magnum::Vector2d{-s, c} * (angularSpeed * radius);

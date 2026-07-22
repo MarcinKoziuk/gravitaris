@@ -8,7 +8,7 @@
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/net/net-client.hpp>
 
-#include <gravitaris/cgame/net/cosmetic-bullet-reaper.hpp>
+#include <gravitaris/cgame/net/cosmetic-bullet-despawner.hpp>
 
 namespace Gravitaris {
 
@@ -16,7 +16,7 @@ namespace Gravitaris {
 // caller" gap): walks `netClient`'s buffered snapshot history for events
 // past the last-applied seq, re-emits each into `eventQueue` (audio only
 // needs event.pos, already world-space -- no NetId resolution needed for
-// that), routes the CosmeticBulletReaper's Impact-position match, and for
+// that), routes the CosmeticBulletDespawner's Impact-position match, and for
 // Impact/LandingCrash sets HitFlash on whichever entity `resolveHitTarget`
 // resolves `event.sourceNetId` to.
 //
@@ -32,14 +32,14 @@ namespace Gravitaris {
 // CGame's own GetPlayer()/SnapshotApplier lookups, which don't belong here.
 class RemoteEventApplier {
 public:
-    RemoteEventApplier(NetClient& netClient, GameEventQueue& eventQueue, CosmeticBulletReaper& bulletReaper);
+    RemoteEventApplier(NetClient& netClient, GameEventQueue& eventQueue, CosmeticBulletDespawner& bulletDespawner);
 
     void Apply(const std::function<flecs::entity(std::uint32_t sourceNetId)>& resolveHitTarget);
 
 private:
     NetClient& m_netClient;
     GameEventQueue& m_eventQueue;
-    CosmeticBulletReaper& m_bulletReaper;
+    CosmeticBulletDespawner& m_bulletDespawner;
     std::uint32_t m_lastAppliedSeq = 0;
 };
 

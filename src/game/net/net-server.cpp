@@ -8,7 +8,7 @@
 #include <gravitaris/game/net/protocol.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
-#include <gravitaris/game/system/faction-system.hpp>
+#include <gravitaris/game/system/gwell/faction-system.hpp>
 #include <gravitaris/game/net/net-server.hpp>
 
 namespace Gravitaris {

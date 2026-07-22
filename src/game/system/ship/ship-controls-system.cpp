@@ -12,8 +12,8 @@
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
-#include <gravitaris/game/system/physics-system.hpp>
-#include <gravitaris/game/system/ship-controls-system.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
+#include <gravitaris/game/system/ship/ship-controls-system.hpp>
 
 namespace Gravitaris {
 
@@ -34,7 +34,6 @@ ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& en
 static inline void
 cpBodyApplyTorque(cpBody *body, cpFloat torque)
 {
-    cpVect g = cpBodyGetPosition(body); // Claude: unused?
     cpVect c = cpBodyGetCenterOfGravity(body);
     cpBodyApplyImpulseAtLocalPoint(body, cpv(0.0, torque), cpv(1.0 + c.x, c.y));
     cpBodyApplyImpulseAtLocalPoint(body, cpv(0.0, -torque), cpv(-1.0 + c.x, c.y));

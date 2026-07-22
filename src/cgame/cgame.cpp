@@ -51,7 +51,7 @@ CGame::CGame(IFilesystem &filesystem)
     , m_cameraDirector(m_registry, Defaults::cameraZoom)
     , m_indicatorRenderer(m_registry, m_resourceLoader, m_modelRenderer2)
     , m_clientPrediction(m_registry, m_physicsSystem, *m_entitySpawner, m_eventQueue, m_resourceLoader)
-    , m_cosmeticBulletReaper(m_registry, m_mirrorWorld)
+    , m_cosmeticBulletDespawner(m_registry, m_mirrorWorld)
     , m_autopilot(m_registry, m_physicsSystem)
 {
     m_modelRenderer2.SetReferenceZoom(Defaults::cameraZoom);
@@ -106,7 +106,7 @@ void CGame::ConnectToServer(const std::string& wsUrl)
     m_netTransport = std::make_unique<WebRtcTransport>(WebRtcTransport::Role::Offerer);
     m_netClient = std::make_unique<NetClient>(*m_netTransport, "gravitaris-client");
     m_ownShipSync.emplace(m_clientPrediction, *m_netClient, m_predictedTickClock);
-    m_remoteEventApplier.emplace(*m_netClient, m_eventQueue, m_cosmeticBulletReaper);
+    m_remoteEventApplier.emplace(*m_netClient, m_eventQueue, m_cosmeticBulletDespawner);
     m_netTransport->ConnectSignaling(wsUrl);
 }
 
@@ -225,7 +225,7 @@ void CGame::RenderNetClient(float dtSeconds)
     // real network jitter (this client's actual bug report) made the
     // catch-up happen in the first place. Both are now as fresh as they
     // ever get, at the same instant.
-    m_cosmeticBulletReaper.CheckLocalHits();
+    m_cosmeticBulletDespawner.CheckLocalHits();
 
     // Blend out any reconciliation snap over ~100ms by decaying the offset
     // *before* camera framing runs, then feeding it in as an already

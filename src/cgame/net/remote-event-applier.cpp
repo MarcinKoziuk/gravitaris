@@ -7,10 +7,10 @@
 namespace Gravitaris {
 
 RemoteEventApplier::RemoteEventApplier(NetClient& netClient, GameEventQueue& eventQueue,
-                                       CosmeticBulletReaper& bulletReaper)
+                                       CosmeticBulletDespawner& bulletDespawner)
         : m_netClient(netClient)
         , m_eventQueue(eventQueue)
-        , m_bulletReaper(bulletReaper)
+        , m_bulletDespawner(bulletDespawner)
 {}
 
 void RemoteEventApplier::Apply(const std::function<flecs::entity(std::uint32_t)>& resolveHitTarget)
@@ -30,11 +30,11 @@ void RemoteEventApplier::Apply(const std::function<flecs::entity(std::uint32_t)>
             // copy (ClientPrediction::Step) -- without this it would keep
             // flying through whatever it actually hit, even though the
             // server's real bullet was destroyed the instant it registered
-            // the hit. See CosmeticBulletReaper's own class doc comment for
+            // the hit. See CosmeticBulletDespawner's own class doc comment for
             // why matching by position (not owner id).
             if (event.type == GameEventType::Impact) {
                 const Vector2d impactPos{static_cast<double>(event.pos.x()), static_cast<double>(event.pos.y())};
-                m_bulletReaper.MatchImpact(impactPos);
+                m_bulletDespawner.MatchImpact(impactPos);
             }
 
             if (event.type != GameEventType::Impact && event.type != GameEventType::LandingCrash) continue;

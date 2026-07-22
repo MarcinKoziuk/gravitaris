@@ -12,21 +12,21 @@
 #include <gravitaris/game/perf-monitor.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
-#include <gravitaris/game/system/physics-system.hpp>
-#include <gravitaris/game/system/orbit-system.hpp>
-#include <gravitaris/game/system/structure-attachment-system.hpp>
-#include <gravitaris/game/system/structure-defense-system.hpp>
-#include <gravitaris/game/system/freighter-system.hpp>
-#include <gravitaris/game/system/economy-system.hpp>
-#include <gravitaris/game/system/input-system.hpp>
-#include <gravitaris/game/system/ship-controls-system.hpp>
-#include <gravitaris/game/system/bullet-lifetime-system.hpp>
-#include <gravitaris/game/system/damage-system.hpp>
-#include <gravitaris/game/system/faction-system.hpp>
-#include <gravitaris/game/system/landing-state-system.hpp>
-#include <gravitaris/game/system/conquest-system.hpp>
-#include <gravitaris/game/system/death-system.hpp>
-#include <gravitaris/game/system/ai-pilot-system.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
+#include <gravitaris/game/system/core/orbit-system.hpp>
+#include <gravitaris/game/system/core/structure-attachment-system.hpp>
+#include <gravitaris/game/system/combat/structure-defense-system.hpp>
+#include <gravitaris/game/system/gwell/freighter-system.hpp>
+#include <gravitaris/game/system/gwell/economy-system.hpp>
+#include <gravitaris/game/system/ship/input-system.hpp>
+#include <gravitaris/game/system/ship/ship-controls-system.hpp>
+#include <gravitaris/game/system/combat/bullet-lifetime-system.hpp>
+#include <gravitaris/game/system/combat/damage-system.hpp>
+#include <gravitaris/game/system/gwell/faction-system.hpp>
+#include <gravitaris/game/system/ship/landing-state-system.hpp>
+#include <gravitaris/game/system/gwell/conquest-system.hpp>
+#include <gravitaris/game/system/combat/death-system.hpp>
+#include <gravitaris/game/system/ship/ai-pilot-system.hpp>
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
@@ -88,9 +88,9 @@ protected:
 
     std::optional<flecs::entity> m_player;
 
-    // Where to (re)spawn the player, and the countdown after a death. -1 means
-    // no respawn pending (alive, or permanently gone).
-    Magnum::Vector2d m_playerSpawnPos{1., 1.};
+    // Countdown after the player's death before HandlePlayerRespawn starts
+    // retrying TryRespawn. -1 means no respawn pending (alive, or
+    // permanently gone).
     int m_playerRespawnTimer = -1;
     static constexpr int RESPAWN_DELAY_TICKS = 90; // 1.5 s at the fixed tick
 

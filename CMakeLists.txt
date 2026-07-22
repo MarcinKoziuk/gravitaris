@@ -39,7 +39,7 @@ set(GT_SDL2_TAG       "release-2.28.5")
 set(GT_CHIPMUNK_TAG   "Chipmunk-7.0.3")
 set(GT_PHYSFS_TAG     "release-3.2.0")
 set(GT_FLECS_TAG      "v4.1.6")
-set(GT_YAMLCPP_TAG    "0.8.0")
+set(GT_TOMLPLUSPLUS_TAG "v3.4.0")
 set(GT_FREETYPE_TAG   "VER-2-13-2")
 set(GT_RMLUI_TAG      "6.0")
 set(GT_POLY2TRI_TAG   "bf2be13216445181452bf3937410973a6dbb122f") # master @ 2026-07-19
@@ -284,19 +284,15 @@ FetchContent_Declare(flecs
 FetchContent_MakeAvailable(flecs)
 
 # ---------------------------------------------------------------------------
-# yaml-cpp
+# toml++ -- header-only, so no build options to suppress
 # ---------------------------------------------------------------------------
-set(YAML_CPP_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
-set(YAML_CPP_BUILD_TOOLS    OFF CACHE BOOL "" FORCE)
-set(YAML_CPP_BUILD_CONTRIB  OFF CACHE BOOL "" FORCE)
-
-FetchContent_Declare(yaml-cpp
-    GIT_REPOSITORY  https://github.com/jbeder/yaml-cpp.git
-    GIT_TAG         ${GT_YAMLCPP_TAG}
+FetchContent_Declare(tomlplusplus
+    GIT_REPOSITORY  https://github.com/marzer/tomlplusplus.git
+    GIT_TAG         ${GT_TOMLPLUSPLUS_TAG}
     GIT_SHALLOW     TRUE
     OVERRIDE_FIND_PACKAGE
 )
-FetchContent_MakeAvailable(yaml-cpp)
+FetchContent_MakeAvailable(tomlplusplus)
 
 # ---------------------------------------------------------------------------
 # RmlUi
@@ -455,8 +451,8 @@ endif()
 # ---------------------------------------------------------------------------
 add_executable(GravitarisNG
     src/client/gravitaris.cpp
-    src/client/replay-controller.hpp
-    src/client/replay-controller.cpp
+    src/cgame/input/replay-controller.hpp
+    src/cgame/input/replay-controller.cpp
     src/game/resource/body.cpp
     extlibs/nanosvg/nanosvg.c
     include/gravitaris/game/resource/common/iresource.hpp
@@ -514,16 +510,16 @@ add_executable(GravitarisNG
     include/gravitaris/game/net/client-prediction.hpp
     src/game/net/client-prediction.cpp
     include/gravitaris/game/net/predicted-tick-clock.hpp
-    include/gravitaris/game/net/own-ship-sync.hpp
-    src/game/net/own-ship-sync.cpp
+    include/gravitaris/cgame/net/own-ship-sync.hpp
+    src/cgame/net/own-ship-sync.cpp
     include/gravitaris/game/net/webrtc-signaling.hpp
     src/game/net/webrtc-signaling.cpp
     include/gravitaris/game/net/webrtc-transport.hpp
     src/game/net/webrtc-transport.cpp
     include/gravitaris/cgame/net/rolling-history.hpp
     include/gravitaris/cgame/net/net-diagnostics.hpp
-    include/gravitaris/cgame/net/cosmetic-bullet-reaper.hpp
-    src/cgame/net/cosmetic-bullet-reaper.cpp
+    include/gravitaris/cgame/net/cosmetic-bullet-despawner.hpp
+    src/cgame/net/cosmetic-bullet-despawner.cpp
     include/gravitaris/cgame/net/remote-event-applier.hpp
     src/cgame/net/remote-event-applier.cpp
     include/gravitaris/cgame/net/snapshot-applier.hpp
@@ -534,11 +530,11 @@ add_executable(GravitarisNG
     include/gravitaris/game/input/input-command.hpp
     include/gravitaris/game/input/input-log.hpp
     src/game/input/input-log.cpp
-    include/gravitaris/game/system/input-system.hpp
-    src/game/system/input-system.cpp
+    include/gravitaris/game/system/ship/input-system.hpp
+    src/game/system/ship/input-system.cpp
     include/gravitaris/game/component/ai-pilot.hpp
-    include/gravitaris/game/system/ai-pilot-system.hpp
-    src/game/system/ai-pilot-system.cpp
+    include/gravitaris/game/system/ship/ai-pilot-system.hpp
+    src/game/system/ship/ai-pilot-system.cpp
     include/gravitaris/game/gnc/nav/trajectory-predictor.hpp
     src/game/gnc/nav/trajectory-predictor.cpp
     include/gravitaris/game/gnc/control/flight-controller.hpp
@@ -547,34 +543,34 @@ add_executable(GravitarisNG
     src/game/gnc/guidance/behaviors.cpp
     include/gravitaris/game/gnc/ai-personality-presets.hpp
     src/game/gnc/ai-personality-presets.cpp
-    include/gravitaris/game/system/bullet-lifetime-system.hpp
-    src/game/system/bullet-lifetime-system.cpp
-    include/gravitaris/game/system/damage-system.hpp
-    src/game/system/damage-system.cpp
-    include/gravitaris/game/system/faction-system.hpp
-    src/game/system/faction-system.cpp
+    include/gravitaris/game/system/combat/bullet-lifetime-system.hpp
+    src/game/system/combat/bullet-lifetime-system.cpp
+    include/gravitaris/game/system/combat/damage-system.hpp
+    src/game/system/combat/damage-system.cpp
+    include/gravitaris/game/system/gwell/faction-system.hpp
+    src/game/system/gwell/faction-system.cpp
     include/gravitaris/game/component/faction-state.hpp
-    include/gravitaris/game/system/landing-state-system.hpp
-    src/game/system/landing-state-system.cpp
-    include/gravitaris/game/system/conquest-system.hpp
-    src/game/system/conquest-system.cpp
-    include/gravitaris/game/system/structure-attachment-system.hpp
-    src/game/system/structure-attachment-system.cpp
-    include/gravitaris/game/system/structure-defense-system.hpp
-    src/game/system/structure-defense-system.cpp
-    include/gravitaris/game/system/freighter-system.hpp
-    src/game/system/freighter-system.cpp
-    include/gravitaris/game/system/economy-system.hpp
-    src/game/system/economy-system.cpp
+    include/gravitaris/game/system/ship/landing-state-system.hpp
+    src/game/system/ship/landing-state-system.cpp
+    include/gravitaris/game/system/gwell/conquest-system.hpp
+    src/game/system/gwell/conquest-system.cpp
+    include/gravitaris/game/system/core/structure-attachment-system.hpp
+    src/game/system/core/structure-attachment-system.cpp
+    include/gravitaris/game/system/combat/structure-defense-system.hpp
+    src/game/system/combat/structure-defense-system.cpp
+    include/gravitaris/game/system/gwell/freighter-system.hpp
+    src/game/system/gwell/freighter-system.cpp
+    include/gravitaris/game/system/gwell/economy-system.hpp
+    src/game/system/gwell/economy-system.cpp
     include/gravitaris/game/component/structure.hpp
     include/gravitaris/game/component/planet-attachment.hpp
     include/gravitaris/game/component/freighter.hpp
-    include/gravitaris/game/system/death-system.hpp
-    src/game/system/death-system.cpp
-    include/gravitaris/game/system/physics-system.hpp
-    src/game/system/physics-system.cpp
-    include/gravitaris/game/system/orbit-system.hpp
-    src/game/system/orbit-system.cpp
+    include/gravitaris/game/system/combat/death-system.hpp
+    src/game/system/combat/death-system.cpp
+    include/gravitaris/game/system/core/physics-system.hpp
+    src/game/system/core/physics-system.cpp
+    include/gravitaris/game/system/core/orbit-system.hpp
+    src/game/system/core/orbit-system.cpp
     include/gravitaris/game/perf-monitor.hpp
     src/game/perf-monitor.cpp
     src/game/game.cpp
@@ -599,7 +595,7 @@ add_executable(GravitarisNG
     include/gravitaris/cgame/component/remote-smoothing.hpp
     src/cgame/renderer/simple-model-renderer.cpp
     include/gravitaris/game/resource/common/detail/resource-wrapper.hpp
-    include/gravitaris/game/system/ship-controls-system.hpp
+    include/gravitaris/game/system/ship/ship-controls-system.hpp
     include/gravitaris/game/spawner/entity-spawner.hpp
     src/game/spawner/entity-spawner.cpp
     include/gravitaris/game/scenario/classic-scenario.hpp
@@ -609,7 +605,7 @@ add_executable(GravitarisNG
     include/gravitaris/cgame/spawner/centity-spawner.hpp
     src/cgame/spawner/centity-spawner.cpp
     include/gravitaris/cgame/fwd.hpp
-    src/game/system/ship-controls-system.cpp
+    src/game/system/ship/ship-controls-system.cpp
     include/gravitaris/cgame/renderer/shader/simple-line-shader.hpp
     src/cgame/renderer/shader/basic-lines-shader.cpp
     include/gravitaris/cgame/renderer/shader/line2-shader.hpp
@@ -626,8 +622,8 @@ add_executable(GravitarisNG
     include/gravitaris/cgame/camera.hpp
     include/gravitaris/cgame/camera-director.hpp
     src/cgame/camera-director.cpp
-    include/gravitaris/cgame/autopilot.hpp
-    src/cgame/autopilot.cpp
+    include/gravitaris/game/gnc/autopilot.hpp
+    src/game/gnc/autopilot.cpp
     include/gravitaris/cgame/hud/indicator-renderer.hpp
     src/cgame/hud/indicator-renderer.cpp
     include/gravitaris/cgame/renderer/shader/glow-threshold-shader.hpp
@@ -722,7 +718,7 @@ target_link_libraries(GravitarisNG PRIVATE
     # Chipmunk2D — BUILD_SHARED OFF so only chipmunk_static is built
     chipmunk_static
 
-    yaml-cpp::yaml-cpp
+    tomlplusplus::tomlplusplus
 
     Magnum::Magnum
     Magnum::GL
@@ -815,21 +811,21 @@ add_executable(gravitaris-sim-test
     src/game/resource/detail/shape-common.cpp
     src/game/resource/detail/casteljau.cpp
     src/game/input/input-log.cpp
-    src/game/system/input-system.cpp
-    src/game/system/ai-pilot-system.cpp
-    src/game/system/ship-controls-system.cpp
-    src/game/system/bullet-lifetime-system.cpp
-    src/game/system/damage-system.cpp
-    src/game/system/faction-system.cpp
-    src/game/system/landing-state-system.cpp
-    src/game/system/conquest-system.cpp
-    src/game/system/structure-attachment-system.cpp
-    src/game/system/structure-defense-system.cpp
-    src/game/system/freighter-system.cpp
-    src/game/system/economy-system.cpp
-    src/game/system/death-system.cpp
-    src/game/system/physics-system.cpp
-    src/game/system/orbit-system.cpp
+    src/game/system/ship/input-system.cpp
+    src/game/system/ship/ai-pilot-system.cpp
+    src/game/system/ship/ship-controls-system.cpp
+    src/game/system/combat/bullet-lifetime-system.cpp
+    src/game/system/combat/damage-system.cpp
+    src/game/system/gwell/faction-system.cpp
+    src/game/system/ship/landing-state-system.cpp
+    src/game/system/gwell/conquest-system.cpp
+    src/game/system/core/structure-attachment-system.cpp
+    src/game/system/combat/structure-defense-system.cpp
+    src/game/system/gwell/freighter-system.cpp
+    src/game/system/gwell/economy-system.cpp
+    src/game/system/combat/death-system.cpp
+    src/game/system/core/physics-system.cpp
+    src/game/system/core/orbit-system.cpp
     src/game/gnc/nav/trajectory-predictor.cpp
     src/game/gnc/control/flight-controller.cpp
     src/game/gnc/guidance/behaviors.cpp
@@ -880,7 +876,7 @@ target_compile_features(gravitaris-sim-test PRIVATE cxx_std_20)
 target_link_libraries(gravitaris-sim-test PRIVATE
     flecs::flecs_static
     chipmunk_static
-    yaml-cpp::yaml-cpp
+    tomlplusplus::tomlplusplus
     Magnum::Magnum
     Gravitaris::WebRTC
     "${CMAKE_DL_LIBS}"
@@ -901,7 +897,7 @@ endif()
 # ---------------------------------------------------------------------------
 if(NOT EMSCRIPTEN)
     add_executable(gravitaris-server
-        src/server/main.cpp
+        src/server/gravitaris-server.cpp
         src/game/resource/body.cpp
         extlibs/nanosvg/nanosvg.c
         extlibs/clipper/clipper.cpp
@@ -913,21 +909,21 @@ if(NOT EMSCRIPTEN)
         src/game/resource/detail/shape-common.cpp
         src/game/resource/detail/casteljau.cpp
         src/game/input/input-log.cpp
-        src/game/system/input-system.cpp
-        src/game/system/ai-pilot-system.cpp
-        src/game/system/ship-controls-system.cpp
-        src/game/system/bullet-lifetime-system.cpp
-        src/game/system/damage-system.cpp
-        src/game/system/faction-system.cpp
-        src/game/system/landing-state-system.cpp
-        src/game/system/conquest-system.cpp
-        src/game/system/structure-attachment-system.cpp
-        src/game/system/structure-defense-system.cpp
-        src/game/system/freighter-system.cpp
-        src/game/system/economy-system.cpp
-        src/game/system/death-system.cpp
-        src/game/system/physics-system.cpp
-        src/game/system/orbit-system.cpp
+        src/game/system/ship/input-system.cpp
+        src/game/system/ship/ai-pilot-system.cpp
+        src/game/system/ship/ship-controls-system.cpp
+        src/game/system/combat/bullet-lifetime-system.cpp
+        src/game/system/combat/damage-system.cpp
+        src/game/system/gwell/faction-system.cpp
+        src/game/system/ship/landing-state-system.cpp
+        src/game/system/gwell/conquest-system.cpp
+        src/game/system/core/structure-attachment-system.cpp
+        src/game/system/combat/structure-defense-system.cpp
+        src/game/system/gwell/freighter-system.cpp
+        src/game/system/gwell/economy-system.cpp
+        src/game/system/combat/death-system.cpp
+        src/game/system/core/physics-system.cpp
+        src/game/system/core/orbit-system.cpp
         src/game/gnc/nav/trajectory-predictor.cpp
         src/game/gnc/control/flight-controller.cpp
         src/game/gnc/guidance/behaviors.cpp
@@ -960,7 +956,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(gravitaris-server PRIVATE
         flecs::flecs_static
         chipmunk_static
-        yaml-cpp::yaml-cpp
+        tomlplusplus::tomlplusplus
         Magnum::Magnum
         Gravitaris::WebRTC
         "${CMAKE_DL_LIBS}"

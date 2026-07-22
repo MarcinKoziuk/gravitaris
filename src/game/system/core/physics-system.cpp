@@ -6,7 +6,7 @@
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
-#include <gravitaris/game/system/physics-system.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
 
 namespace Gravitaris {
 

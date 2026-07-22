@@ -32,7 +32,7 @@ static std::string SplitFilename(const std::string& path)
 static std::string GetModelConfigPath(const std::string& path)
 {
     std::string dirname = SplitFilename(path);
-    return path + "/" + dirname + ".yml";
+    return path + "/" + dirname + ".toml";
 }
 
 static std::string GetModelDefaultSvgPath(const std::string& path)
@@ -49,11 +49,11 @@ std::unique_ptr<ShapeFiles> GetShapeFiles(IFilesystem& fs, const std::string& pa
     std::unique_ptr<std::istream> istream = fs.OpenAsStream(cfgPath);
     if (istream != nullptr) {
         try {
-            YAML::Node cfg = YAML::Load(*istream);
+            toml::table cfg = toml::parse(*istream, cfgPath);
             std::string svgPath;
 
-            if (cfg["model"]) {
-                svgPath = path + "/" + cfg["model"].as<std::string>();
+            if (const auto model = cfg["model"].value<std::string>()) {
+                svgPath = path + "/" + *model;
             }
             else {
                 svgPath = GetModelDefaultSvgPath(path);
@@ -75,7 +75,7 @@ std::unique_ptr<ShapeFiles> GetShapeFiles(IFilesystem& fs, const std::string& pa
             }
         }
         catch (...) {
-            LOG(error) << "Parsing yml file " << cfgPath << " failed";
+            LOG(error) << "Parsing toml file " << cfgPath << " failed";
         }
     }
     else {
@@ -116,20 +116,19 @@ bool IsCircleGeometry(const NSVGpath* path, CircleInfo* outInfo)
 
 Matrix4d GetTransformMatrix(const ShapeFiles& mf)
 {
-    const YAML::Node& cfg = mf.cfg;
+    const toml::table& cfg = mf.cfg;
     const NSVGimage& svg = *mf.svg;
 
     double scale = 1.;
     Magnum::Radd rotation;
     Vector2d origin;
 
-    if (cfg["scale"]) {
-        scale = cfg["scale"].as<float>();
+    if (const auto scaleValue = cfg["scale"].value<double>()) {
+        scale = *scaleValue;
     }
 
-    if (cfg["rotation"]) {
-        const auto rotationDeg = cfg["rotation"].as<double>();
-        rotation = Magnum::Degd(rotationDeg);
+    if (const auto rotationDeg = cfg["rotation"].value<double>()) {
+        rotation = Magnum::Degd(*rotationDeg);
     }
 
     for (const NSVGshape* shape = svg.shapes; shape != nullptr; shape = shape->next) {

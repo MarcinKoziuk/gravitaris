@@ -1,6 +1,6 @@
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
-#include <gravitaris/game/system/input-system.hpp>
+#include <gravitaris/game/system/ship/input-system.hpp>
 
 namespace Gravitaris {
 

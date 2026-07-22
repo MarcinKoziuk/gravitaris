@@ -3,8 +3,6 @@
 // Links game/ only -- no cgame/GL/Audio -- the same ADR 0001 constraint
 // gravitaris-sim-test enforces, so this binary can run on a headless box.
 
-// Claude: call this file gravitaris-server.cpp
-
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -48,7 +46,7 @@ constexpr double PI = 3.14159265358979323846;
 // NetServer::IngestInput. *Very* minimal by design (docs/networking-plan N5)
 // -- no history/line-editing (replxx/isocline would add that later if ever
 // wanted; skipped for now).
-    // Claude: lets use isocline. Also make sure that server and client have separate deps (so client and server each don't need deps they don't need)
+    // Claude: lets use isocline
 class StdinCommandQueue {
 public:
     StdinCommandQueue()
@@ -198,7 +196,6 @@ int main(int argc, char** argv)
                      transport);
 
     // Claude: this binding must be configurable
-    // let's also replace YAML while were're doing it. WHat are good altenratives for YAML?
     LOG(info) << "gravitaris-server: listening on ws://0.0.0.0:" << port;
     std::printf("commands: spawn [count] [preset]|list|team <peer-id> <color>|quit\n");
 

@@ -11,9 +11,9 @@
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
 #include <gravitaris/game/component/faction-state.hpp>
-#include <gravitaris/game/system/faction-system.hpp>
-#include <gravitaris/game/system/physics-system.hpp>
-#include <gravitaris/game/system/landing-state-system.hpp>
+#include <gravitaris/game/system/gwell/faction-system.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
+#include <gravitaris/game/system/ship/landing-state-system.hpp>
 
 namespace Gravitaris {
 

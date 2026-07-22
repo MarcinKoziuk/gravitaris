@@ -1,9 +1,11 @@
+#include <algorithm>
 #include <cmath>
 
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/net-id.hpp>
+#include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/component/structure.hpp>
@@ -11,9 +13,9 @@
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
-#include <gravitaris/game/system/economy-system.hpp>
-#include <gravitaris/game/system/physics-system.hpp>
-#include <gravitaris/game/system/freighter-system.hpp>
+#include <gravitaris/game/system/gwell/economy-system.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
+#include <gravitaris/game/system/gwell/freighter-system.hpp>
 
 namespace Gravitaris {
 
@@ -101,6 +103,33 @@ void FreighterSystem::Update()
             return;
         }
 
+        // Lead the planet's orbital motion: aim at where it'll be at ETA, not
+        // where it is now, otherwise the freighter chases a moving target and
+        // flies a curved pursuit path instead of a straight line. A planet's
+        // future position is a known closed form (Orbit's theta/angularSpeed,
+        // same as EvaluateOrbit), so solve for the intercept exactly via
+        // fixed-point iteration on the ETA rather than a one-shot linear
+        // extrapolation of the planet's current velocity -- linear
+        // extrapolation runs tangent to the orbit's curve, so it badly
+        // overshoots for a distant/slow-closing freighter and only drags
+        // itself back in line as ETA shrinks near arrival. A handful of
+        // iterations converges well within a tick's positional tolerance.
+        Vector2d aimPos = planetTransf.pos;
+        if (const Orbit* orbit = planet.try_get<Orbit>(); orbit && orbit->radius > 0.0) {
+            double eta = distance / TRANSIT_SPEED;
+            for (int i = 0; i < 4; ++i) {
+                const double theta = orbit->theta + orbit->angularSpeed * eta;
+                aimPos = orbit->center + Vector2d{std::cos(theta), std::sin(theta)} * orbit->radius;
+                eta = (aimPos - transf.pos).length() / TRANSIT_SPEED;
+            }
+        }
+        else {
+            const double eta = distance / TRANSIT_SPEED;
+            aimPos = planetTransf.pos + planetTransf.vel * eta;
+        }
+        const Vector2d toAim = aimPos - transf.pos;
+        const double aimDistance = std::max(toAim.length(), 1e-6);
+
         // Ramps toward TRANSIT_SPEED rather than snapping to it, so there's
         // an actual accelerating phase for the _thrust visual/audio below to
         // key off of; once at cruise speed it coasts thrustless (currentSpeed
@@ -108,7 +137,7 @@ void FreighterSystem::Update()
         // it persists across ticks without a separate stored field).
         const double currentSpeed = transf.vel.length();
         const double speed = std::min(currentSpeed + TRANSIT_ACCELERATION * Game::PHYSICS_DELTA, TRANSIT_SPEED);
-        const Vector2d vel = (toPlanet / distance) * speed;
+        const Vector2d vel = (toAim / aimDistance) * speed;
         const Vector2d pos = transf.pos + vel * Game::PHYSICS_DELTA;
         // Nose is local -Y (see ShipControlsSystem::ApplyMovement's thrust
         // direction), so facing along vel means rot = atan2(vel.x, -vel.y).

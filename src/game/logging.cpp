@@ -4,9 +4,7 @@
 
 #include <gravitaris/game/logging.hpp>
 
-// Claude: concatenate namespaces for me (not just here)
-namespace Gravitaris {
-namespace Log {
+namespace Gravitaris::Log {
 
 static std::string formatFileString(std::string file)
 {
@@ -71,5 +69,4 @@ std::ostream& SimpleLogStream::PhysicalStream() const
     return IsWarningOrHigher() ? std::cerr : std::cout;
 }
 
-} // namespace Log
-} // namespace Gravitaris
+} // namespace Gravitaris::Log

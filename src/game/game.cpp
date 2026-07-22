@@ -17,7 +17,6 @@
 namespace Gravitaris {
 
 Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner)
-    // Claude: what is good practice for flecs for wiring up systems?
         : m_filesystem(filesystem)
         , m_resourceLoader(filesystem)
         , m_entitySpawner(std::move(entitySpawner))
@@ -53,12 +52,18 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
 
 void Game::Start()
 {
-    m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, m_playerSpawnPos);
     const flecs::entity homePlanet = BuildClassicScenario(*m_entitySpawner);
     // Single, shared starting complex for now (docs/gravity-well-mode-plan.md
     // Phase 2) -- per-faction starting planets are Phase 6's job (sector
     // generation).
     BuildStartingComplex(*m_entitySpawner, homePlanet, TeamId::Blue);
+
+    // Same site selection a respawn uses (just no funding -- the first
+    // fighter is free), so the initial spawn lands exactly where a respawn
+    // would rather than at an arbitrary world origin.
+    const Vector2d spawnPos =
+            m_factionSystem.SpawnPosition(TeamId::Blue).value_or(Vector2d{0., 0.});
+    m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, spawnPos);
 }
 
 Game::Game(IFilesystem& filesystem)
@@ -88,8 +93,6 @@ void Game::Update()
 
     {
         ScopedPerfTimer timer(m_perfMonitor, "Physics");
-        // Claude: is calling Update() manually the right usage when using flecs
-        // would there be advantage using their System API for us?
 
         // Place orbiting bodies on their rails before the step reads positions
         // for gravity and resolves collisions against them.
@@ -114,9 +117,6 @@ void Game::Update()
         m_physicsSystem.Update();
     }
 
-    // Claude: is calling Update() manually the right usage when using flecs
-    // would there be advantage using their System API for us?
-    // (is not a big problem but wondering if there are advantages)
     {
         ScopedPerfTimer timer(m_perfMonitor, "Game Logic");
         // DamageSystem applies this step's bullet hits and landing impacts, so

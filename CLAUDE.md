@@ -24,7 +24,7 @@ work.
 - nanosvg (svg parsing)
 - ankerl::unordered_dense (open-addressing hash map/set, vendored in `extlibs/ankerl/`)
 - TODO: Dear ImGui for dev/debug UI
-- Config parsing: yaml-cpp, but we need to switch to something better
+- Config parsing: toml++
 
 ## Architecture
 Eventually the game should be multiplayer, so the game is split into separate modules for client and server (like quake3).
@@ -43,7 +43,7 @@ Eventually the game should be multiplayer, so the game is split into separate mo
   per-entity state**.
 
 ## Game assets
-- Ships/bodies are authored as SVG + YAML, parsed via nanosvg and converted
+- Ships/bodies are authored as SVG + TOML, parsed via nanosvg and converted
   to Chipmunk shapes (see `src/game/resource/`).
 
 ## Known gotchas

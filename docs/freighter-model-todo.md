@@ -32,8 +32,8 @@ rediscover them):
   local **-Y**; world nose direction at rotation `rot` is
   `(sin rot, -cos rot)`. So "face the direction of travel" for velocity `v`
   means `rot = atan2(v.x(), -v.y())`.
-- Chipmunk **kinematic** bodies (the freighter is one, `freighter-0.yml
-  physics.kinematic: true`) ignore applied forces/torques, so freighters
+- Chipmunk **kinematic** bodies (the freighter is one, `freighter-0.toml`'s
+  `physics.kinematic = true`) ignore applied forces/torques, so freighters
   passing through `ShipControlsSystem::ApplyMovement` is harmless —
   `FreighterSystem::SetKinematicMotion` stays the sole motion authority.
 

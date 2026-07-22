@@ -3,8 +3,8 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/orbit.hpp>
-#include <gravitaris/game/system/physics-system.hpp>
-#include <gravitaris/game/system/orbit-system.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
+#include <gravitaris/game/system/core/orbit-system.hpp>
 #include <gravitaris/game/game.hpp>
 
 namespace Gravitaris {

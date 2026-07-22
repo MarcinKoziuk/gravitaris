@@ -29,7 +29,7 @@ namespace Gravitaris {
 // cosmetic bullets, and Phase 7's planet proxies -- nothing else); mirror
 // world is presentation-only (ADR 0001), so hostile ships there have no real
 // collision shape to query.
-class CosmeticBulletReaper {
+class CosmeticBulletDespawner {
 public:
     // Ships don't expose a simple bounding radius (their collision Body is
     // an authored polygon, not a circle, unlike planets); the largest ship
@@ -44,7 +44,7 @@ public:
     // still flying, so an exact position match would almost never hit.
     static constexpr double BULLET_IMPACT_MATCH_RADIUS = 100.0;
 
-    CosmeticBulletReaper(flecs::world& registry, flecs::world& mirrorWorld);
+    CosmeticBulletDespawner(flecs::world& registry, flecs::world& mirrorWorld);
 
     // Approximate on purpose: checks distance from each hostile ship's
     // rendered position to the bullet's swept segment (prevPos -> pos, so a

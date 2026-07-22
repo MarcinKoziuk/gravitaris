@@ -1,3 +1,4 @@
-scale: 0.04
-physics:
-    mass: 2
+scale = 0.04
+
+[physics]
+mass = 2

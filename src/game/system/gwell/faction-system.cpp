@@ -11,7 +11,7 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
-#include <gravitaris/game/system/faction-system.hpp>
+#include <gravitaris/game/system/gwell/faction-system.hpp>
 
 namespace Gravitaris {
 
@@ -54,13 +54,8 @@ flecs::entity FactionSystem::GetOrCreate(TeamId team)
     return created;
 }
 
-std::optional<Magnum::Vector2d> FactionSystem::TryRespawn(TeamId team)
+std::optional<Magnum::Vector2d> FactionSystem::SpawnPosition(TeamId team)
 {
-    // Clear of a planet's own body (the largest, "simple", has a ~60-unit
-    // true radius per landing-state-system.cpp's own convention) and any
-    // orbiting structures (High Port orbits run 90-180 units).
-    static constexpr double RESPAWN_OFFSET_RADIUS = 200.0;
-
     flecs::entity factionEntity = GetOrCreate(team);
     const FactionState& state = factionEntity.get<FactionState>();
 
@@ -89,6 +84,15 @@ std::optional<Magnum::Vector2d> FactionSystem::TryRespawn(TeamId team)
     }
     if (!site.is_alive()) return std::nullopt; // nothing left -- that faction is out
 
+    const Transform& siteTransf = site.get<Transform>();
+    return siteTransf.pos + Magnum::Vector2d{0., -RESPAWN_OFFSET_RADIUS};
+}
+
+std::optional<Magnum::Vector2d> FactionSystem::TryRespawn(TeamId team)
+{
+    const std::optional<Magnum::Vector2d> pos = SpawnPosition(team);
+    if (!pos) return std::nullopt;
+
     // Funding: a Base with an accompanying Lab, or a High Port with an
     // accompanying Space Dock, belonging to this team, affording
     // FIGHTER_COST -- same funder rule EconomySystem's freighter dispatch
@@ -115,8 +119,7 @@ std::optional<Magnum::Vector2d> FactionSystem::TryRespawn(TeamId team)
 
     funder.get_mut<Structure>().finishedMaterials -= FIGHTER_COST;
 
-    const Transform& siteTransf = site.get<Transform>();
-    return siteTransf.pos + Magnum::Vector2d{0., -RESPAWN_OFFSET_RADIUS};
+    return pos;
 }
 
 void FactionSystem::Update()

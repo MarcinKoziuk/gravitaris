@@ -6,9 +6,9 @@
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
-#include <gravitaris/game/system/physics-system.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
 #include <gravitaris/game/game.hpp>
-#include <gravitaris/game/system/structure-attachment-system.hpp>
+#include <gravitaris/game/system/core/structure-attachment-system.hpp>
 
 namespace Gravitaris {
 
@@ -50,15 +50,21 @@ void StructureAttachmentSystem::Update()
         const double c = std::cos(attach.theta);
         const double s = std::sin(attach.theta);
 
+        const Vector2d localVel = Vector2d{-s, c} * (angularSpeed * attach.radius);
         const Vector2d pos = planetTransf.pos + Vector2d{c, s} * attach.radius;
-        const Vector2d vel = planetTransf.vel + Vector2d{-s, c} * (angularSpeed * attach.radius);
+        const Vector2d vel = planetTransf.vel + localVel;
 
         // Only a Freighter faces prograde (nose is local -Y, see
         // ShipControlsSystem::ApplyMovement's thrust direction, so that's
         // rot = atan2(vel.x, -vel.y)) -- High Port/Space Dock/Sensor Array
         // keep whatever fixed orientation they were placed at, unchanged.
+        // Faces the *local* orbital velocity, not the combined `vel` used
+        // for motion -- the planet's own drift around its star can dwarf the
+        // freighter's tight local orbit, and facing the combined vector then
+        // reads as flying at a constant offset angle rather than tangent to
+        // the visible circle around the planet.
         const std::optional<double> rot =
-                entity.has<Freighter>() ? std::optional<double>(std::atan2(vel.x(), -vel.y())) : std::nullopt;
+                entity.has<Freighter>() ? std::optional<double>(std::atan2(localVel.x(), -localVel.y())) : std::nullopt;
 
         m_physicsSystem.SetKinematicMotion(ref, pos, vel, rot);
         transf.pos = pos;

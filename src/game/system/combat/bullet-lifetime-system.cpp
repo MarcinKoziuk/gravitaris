@@ -1,7 +1,7 @@
 #include <vector>
 
 #include <gravitaris/game/component/bullet.hpp>
-#include <gravitaris/game/system/bullet-lifetime-system.hpp>
+#include <gravitaris/game/system/combat/bullet-lifetime-system.hpp>
 
 namespace Gravitaris {
 

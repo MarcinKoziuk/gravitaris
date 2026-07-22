@@ -9,8 +9,8 @@
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/event/game-event.hpp>
-#include <gravitaris/game/system/physics-system.hpp>
-#include <gravitaris/game/system/damage-system.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
+#include <gravitaris/game/system/combat/damage-system.hpp>
 
 namespace Gravitaris {
 

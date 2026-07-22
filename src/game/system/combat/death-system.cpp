@@ -11,7 +11,7 @@
 #include <gravitaris/game/util/splitmix.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
-#include <gravitaris/game/system/death-system.hpp>
+#include <gravitaris/game/system/combat/death-system.hpp>
 
 namespace Gravitaris {
 

@@ -1,6 +1,7 @@
-model: interceptor-0.svg
-scale: 0.1
-physics:
-    density: 1
-    restitution: 0.5
-    friction: 0.0
+model = "interceptor-0.svg"
+scale = 0.1
+
+[physics]
+density = 1
+restitution = 0.5
+friction = 0.0
