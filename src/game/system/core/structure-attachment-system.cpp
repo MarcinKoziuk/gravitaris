@@ -45,6 +45,7 @@ void StructureAttachmentSystem::Update()
         const double angularSpeed = attach.direction * std::sqrt(
                 PhysicsSystem::GRAVITY_CONSTANT * gravityMultiplier * attach.centerMass
                 / (attach.radius * attach.radius * attach.radius));
+        attach.angularSpeed = angularSpeed; // cached for GatherSnapshot; see the field's own doc comment
         attach.theta += angularSpeed * Game::PHYSICS_DELTA;
 
         const double c = std::cos(attach.theta);

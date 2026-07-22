@@ -81,6 +81,22 @@ struct EntityState {
     StructureType structureType = StructureType::Base;
     float rawMaterials = 0.f;
     float finishedMaterials = 0.f;
+
+    // Non-zero when this entity rides a fixed-radius offset off a (possibly
+    // moving) parent planet -- PlanetSurfaceAttachment (attachAngularSpeed
+    // stays 0: a fixed offset is just a zero-angular-speed "orbit") or
+    // PlanetOrbitAttachment (High Port/Space Dock/Sensor Array, or an
+    // arrived Freighter). Lets a client re-derive this entity's exact
+    // position the same closed-form way it already does for planets (see
+    // EvaluateAttachment below) instead of lerping/extrapolating the raw
+    // Transform-derived pos/vel like an ordinary free-flying entity --
+    // SnapshotInterpolator::Compute's own comment has the two concrete bugs
+    // that fixes. 0 means not attached (free-flying ship/bullet, or a
+    // Freighter still in transit -- see FreighterSystem).
+    std::uint32_t attachParentNetId = 0;
+    float attachRadius = 0.f;
+    float attachTheta = 0.f;
+    float attachAngularSpeed = 0.f;
 };
 
 // One decoded snapshot: entities in ascending-NetId order (flecs iteration
@@ -134,5 +150,18 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out);
 // themselves (a star has no orbit data to evaluate, and isn't moving anyway).
 void EvaluateOrbit(const EntityState& planet, std::uint64_t baseTick, std::uint64_t atTick,
                    Magnum::Vector2d& outPos, Magnum::Vector2d& outVel);
+
+// Same idea as EvaluateOrbit, but composed on top of a parent's own live
+// (already-evaluated) position/velocity instead of a fixed world-space
+// center -- for an entity's attachTheta/attachRadius/attachAngularSpeed
+// (EntityState's own fields, whichever tick they were captured at as
+// `baseTick`). `outLocalVel` is the attachment-local velocity alone (no
+// `parentVel` folded in) -- callers that face an attached Freighter prograde
+// want this, not the composed `outVel`, since the parent planet's own drift
+// around its star can dwarf the attachment's tight local orbit (see
+// StructureAttachmentSystem's identical distinction server-side).
+void EvaluateAttachment(const Magnum::Vector2d& parentPos, const Magnum::Vector2d& parentVel,
+                        const EntityState& attached, std::uint64_t baseTick, std::uint64_t atTick,
+                        Magnum::Vector2d& outPos, Magnum::Vector2d& outVel, Magnum::Vector2d& outLocalVel);
 
 } // namespace Gravitaris

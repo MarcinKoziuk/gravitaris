@@ -13,6 +13,7 @@
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
+#include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/input/input-command.hpp>
 #include <gravitaris/game/net/byte-stream.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
@@ -21,7 +22,7 @@ namespace Gravitaris {
 
 // Bump on any wire-layout change; ReadSnapshot rejects mismatches outright
 // (no cross-version compatibility until there's a reason to have it).
-static constexpr std::uint8_t SNAPSHOT_VERSION = 5; // v5: +orbitCenter/orbitRadius/orbitTheta/orbitAngularSpeed
+static constexpr std::uint8_t SNAPSHOT_VERSION = 6; // v6: +attachParentNetId/attachRadius/attachTheta/attachAngularSpeed
 
 // Sanity caps so a garbage buffer can't make ReadSnapshot allocate wildly.
 static constexpr std::uint32_t MAX_ENTITIES = 4096;
@@ -84,6 +85,18 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             state.rawMaterials = structure->rawMaterials;
             state.finishedMaterials = structure->finishedMaterials;
         }
+        if (const PlanetSurfaceAttachment* attach = entity.try_get<PlanetSurfaceAttachment>()) {
+            state.attachParentNetId = attach->planetNetId;
+            state.attachRadius = static_cast<float>(attach->localOffset.length());
+            state.attachTheta = static_cast<float>(std::atan2(attach->localOffset.y(), attach->localOffset.x()));
+            state.attachAngularSpeed = 0.f; // fixed offset -- a zero-angular-speed "orbit"
+        }
+        else if (const PlanetOrbitAttachment* attach = entity.try_get<PlanetOrbitAttachment>()) {
+            state.attachParentNetId = attach->planetNetId;
+            state.attachRadius = static_cast<float>(attach->radius);
+            state.attachTheta = static_cast<float>(attach->theta);
+            state.attachAngularSpeed = static_cast<float>(attach->angularSpeed);
+        }
         out.entities.push_back(state);
     });
 
@@ -127,6 +140,10 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteU8(static_cast<std::uint8_t>(e.structureType));
         out.WriteF32(e.rawMaterials);
         out.WriteF32(e.finishedMaterials);
+        out.WriteU32(e.attachParentNetId);
+        out.WriteF32(e.attachRadius);
+        out.WriteF32(e.attachTheta);
+        out.WriteF32(e.attachAngularSpeed);
     }
 
     out.WriteU32(static_cast<std::uint32_t>(snapshot.events.size()));
@@ -197,6 +214,10 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.structureType = static_cast<StructureType>(in.ReadU8());
         e.rawMaterials = in.ReadF32();
         e.finishedMaterials = in.ReadF32();
+        e.attachParentNetId = in.ReadU32();
+        e.attachRadius = in.ReadF32();
+        e.attachTheta = in.ReadF32();
+        e.attachAngularSpeed = in.ReadF32();
         out.entities.push_back(e);
     }
 
@@ -239,6 +260,23 @@ void EvaluateOrbit(const EntityState& planet, std::uint64_t baseTick, std::uint6
 
     outPos = center + Magnum::Vector2d{c, s} * radius;
     outVel = Magnum::Vector2d{-s, c} * (angularSpeed * radius);
+}
+
+void EvaluateAttachment(const Magnum::Vector2d& parentPos, const Magnum::Vector2d& parentVel,
+                        const EntityState& attached, std::uint64_t baseTick, std::uint64_t atTick,
+                        Magnum::Vector2d& outPos, Magnum::Vector2d& outVel, Magnum::Vector2d& outLocalVel)
+{
+    const double elapsedSeconds = (static_cast<double>(atTick) - static_cast<double>(baseTick)) * Game::PHYSICS_DELTA;
+    const double theta = attached.attachTheta + attached.attachAngularSpeed * elapsedSeconds;
+
+    const double c = std::cos(theta);
+    const double s = std::sin(theta);
+    const double radius = attached.attachRadius;
+    const double angularSpeed = attached.attachAngularSpeed;
+
+    outLocalVel = Magnum::Vector2d{-s, c} * (angularSpeed * radius);
+    outPos = parentPos + Magnum::Vector2d{c, s} * radius;
+    outVel = parentVel + outLocalVel;
 }
 
 } // namespace Gravitaris

@@ -39,6 +39,12 @@ struct PlanetOrbitAttachment {
     double radius = 0.0;
     double theta = 0.0;
     double direction = 1.0;
+    // Cached copy of the angular speed StructureAttachmentSystem computes
+    // fresh each tick (from centerMass/radius/direction and the live gravity
+    // multiplier) -- stored back here for the same reason Orbit::angularSpeed
+    // is: so GatherSnapshot can replicate it directly without also needing a
+    // PhysicsSystem reference.
+    double angularSpeed = 0.0;
 };
 
 } // namespace Gravitaris

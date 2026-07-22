@@ -165,6 +165,45 @@ std::optional<SnapshotData> SnapshotInterpolator::Compute(const std::deque<Snaps
         }
     }
 
+    // Attached entities (planetside/orbital structures, and an arrived
+    // Freighter): re-derived the same analytic way planets are just above,
+    // composed on top of the parent planet's *already-evaluated* pos/vel
+    // (out.entities' own entry, already at evalPlanetsAt), instead of
+    // lerping/extrapolating the raw Transform-derived pos/vel like an
+    // ordinary free-flying entity. Two real bugs this fixes: (1) lerping
+    // chords a straight line across what's actually a circular arc (or the
+    // parent's own translation), so it wobbles at snapshot rate even though
+    // the true motion is perfectly smooth; (2) an attached entity would
+    // otherwise render at `renderTick` while the planet it's drawn relative
+    // to renders at `evalPlanetsAt` (usually ahead of it, see this class's
+    // own `planetTick` doc comment) -- a visible frame-of-reference mismatch
+    // between the two that no amount of tuning the lerp fixes. Must run
+    // after the planet loop above (needs the parent's fresh entry in `out`)
+    // and skips an entity whose parent isn't present this snapshot (a
+    // structure/freighter briefly outliving its destroyed planet, if that's
+    // even reachable -- left at its last raw position rather than guessing).
+    for (EntityState& e : out.entities) {
+        if (e.attachParentNetId == 0) continue;
+        const EntityState* parent = FindByNetId(out, e.attachParentNetId);
+        if (!parent) continue;
+
+        const Magnum::Vector2d parentPos{parent->pos.x(), parent->pos.y()};
+        const Magnum::Vector2d parentVel{parent->vel.x(), parent->vel.y()};
+        Magnum::Vector2d pos, vel, localVel;
+        EvaluateAttachment(parentPos, parentVel, e, history.back().tick, evalPlanetsAt, pos, vel, localVel);
+        e.pos = Magnum::Vector2{static_cast<float>(pos.x()), static_cast<float>(pos.y())};
+        e.vel = Magnum::Vector2{static_cast<float>(vel.x()), static_cast<float>(vel.y())};
+
+        // Only a Ship-typed attached entity is a Freighter (High Port/Space
+        // Dock/Sensor Array are Structure-typed and keep whatever fixed
+        // orientation they were placed at) -- faces the *local* attachment
+        // velocity alone, matching StructureAttachmentSystem's identical
+        // server-side distinction (see EvaluateAttachment's own comment).
+        if (e.type == NetEntityType::Ship) {
+            e.rot = static_cast<float>(std::atan2(localVel.x(), -localVel.y()));
+        }
+    }
+
     // Own ship: Phase 5's ClientPrediction renders it via a real, locally
     // -simulated entity instead, so it's omitted here entirely rather than
     // included at some snapshot-derived position (interpolated, latest, or
