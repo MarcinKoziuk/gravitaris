@@ -24,6 +24,7 @@ static constexpr double BULLET_MUZZLE_SPEED = 200.0;
 static constexpr double BULLET_LIFETIME_SECONDS = 3.0;
 static constexpr float BULLET_DAMAGE = 10.f;
 
+    // Claude: we have so many duplicates, please create a math utils: include/gravitaris/game/math-utils.hpp (move PI there too)
 static double WrapToPi(double angle)
 {
     angle = std::fmod(angle + PI, 2.0 * PI);
@@ -31,6 +32,8 @@ static double WrapToPi(double angle)
     return angle - PI;
 }
 
+    // Claude: how can we best share code? I think small generic math units can go into math-fns
+    // maybe intercept there too (but in a related .cpp unit)
 // Smallest positive time at which a projectile of `projectileSpeed`
 // (relative to the shooter) meets a target at relPos moving at relVel. Same
 // formula as AIPilotSystem's own (ai-pilot-system.cpp) -- not shared since

@@ -2,6 +2,7 @@
 
 #include "replay-controller.hpp"
 
+//Claude: put this into cgame, client is only
 namespace Gravitaris {
 
 void ReplayController::ToggleRecording(std::uint64_t currentTick)

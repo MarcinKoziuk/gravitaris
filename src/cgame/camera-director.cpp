@@ -11,6 +11,8 @@
 
 namespace Gravitaris {
 
+    // Claude: move to a new camera/ folder
+    // Claude: i've told you/documented I prefer static over anon. namespace
 namespace {
 
 // 0..1 envelope for the planet zoom-out: fades in as the surface distance

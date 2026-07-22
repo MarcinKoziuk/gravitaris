@@ -7,6 +7,7 @@
 
 #include <gravitaris/cgame/autopilot.hpp>
 
+// Claude: can we move this to game gnc/ ? It might be useful for AIs
 namespace Gravitaris {
 
 Autopilot::Autopilot(flecs::world& registry, PhysicsSystem& physicsSystem)

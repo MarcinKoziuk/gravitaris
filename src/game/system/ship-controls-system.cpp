@@ -34,7 +34,7 @@ ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& en
 static inline void
 cpBodyApplyTorque(cpBody *body, cpFloat torque)
 {
-    cpVect g = cpBodyGetPosition(body);
+    cpVect g = cpBodyGetPosition(body); // Claude: unused?
     cpVect c = cpBodyGetCenterOfGravity(body);
     cpBodyApplyImpulseAtLocalPoint(body, cpv(0.0, torque), cpv(1.0 + c.x, c.y));
     cpBodyApplyImpulseAtLocalPoint(body, cpv(0.0, -torque), cpv(-1.0 + c.x, c.y));

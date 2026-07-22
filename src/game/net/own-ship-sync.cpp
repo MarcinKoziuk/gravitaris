@@ -22,6 +22,7 @@ const EntityState* FindOwnShipState(const SnapshotData& snapshot, std::uint32_t 
 
 } // namespace
 
+    // Claude: isn't this for cgame??? maybe I am wrong
 OwnShipSync::OwnShipSync(ClientPrediction& clientPrediction, NetClient& netClient, PredictedTickClock& tickClock)
         : m_clientPrediction(clientPrediction)
         , m_netClient(netClient)

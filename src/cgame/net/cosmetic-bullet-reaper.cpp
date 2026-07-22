@@ -9,6 +9,7 @@
 
 namespace Gravitaris {
 
+    //Claude: reaper a bit weird name, suggestions?
 CosmeticBulletReaper::CosmeticBulletReaper(flecs::world& registry, flecs::world& mirrorWorld)
         : m_registry(registry)
         , m_mirrorWorld(mirrorWorld)

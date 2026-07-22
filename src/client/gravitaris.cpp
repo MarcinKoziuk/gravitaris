@@ -159,6 +159,7 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
                                           Magnum::Vector2{windowSize()}, windowSize(), framebufferSize());
 }
 
+    // Claude: there is stuff here that would belong to cgame. client/ is only for wiring everything up and maybe later platform- specific startup  logic
 void GravitarisApplication::tickEvent()
 {
     const double curTime = GetTime();

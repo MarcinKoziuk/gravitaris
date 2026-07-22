@@ -4,6 +4,7 @@
 
 namespace Gravitaris {
 
+// Claude: any suggestions other name than "Net" ID ? Since it's also relevant for single player?
 // Server-assigned, replication-stable identity for an entity (ADR 0001
 // constraint 3: never serialize raw flecs ids -- they're process-local).
 // Replicated components that reference another entity (projectile owner,
