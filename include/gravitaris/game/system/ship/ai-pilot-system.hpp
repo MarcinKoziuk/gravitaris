@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <optional>
 
 #include <flecs.h>
 
@@ -27,7 +26,12 @@ public:
 
     ~AIPilotSystem() = default;
 
-    void Update(std::uint64_t step, std::optional<flecs::entity> player);
+    // Target acquisition is registry-driven (nearest live enemy ship), not a
+    // caller-supplied entity -- there's no single "the player" to hand it on
+    // a dedicated server with any number of connected peers (Game::m_player
+    // is single-player-only bookkeeping, always nullopt there). See Update's
+    // own doc comment.
+    void Update(std::uint64_t step);
 };
 
 } // namespace Gravitaris

@@ -132,7 +132,7 @@ void Game::Update()
         m_factionSystem.Update();
         // Detect a player death from DeathSystem before any system reads m_player.
         HandlePlayerRespawn();
-        m_aiPilotSystem.Update(m_step, m_player);
+        m_aiPilotSystem.Update(m_step);
         m_inputSystem.Update(m_step);
         m_shipControlsSystem.Update(m_step);
         m_bulletLifetimeSystem.Update(Game::PHYSICS_DELTA);

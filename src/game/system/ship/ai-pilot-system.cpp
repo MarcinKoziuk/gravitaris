@@ -8,7 +8,11 @@
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
+#include <gravitaris/game/component/structure.hpp>
+#include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/ai-pilot.hpp>
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
 #include <gravitaris/game/gnc/guidance/behaviors.hpp>
@@ -38,7 +42,7 @@ AIPilotSystem::AIPilotSystem(flecs::world& registry, PhysicsSystem& physicsSyste
         , m_predictor(predictor)
 {}
 
-void AIPilotSystem::Update(std::uint64_t step, std::optional<flecs::entity> player)
+void AIPilotSystem::Update(std::uint64_t step)
 {
     // Celestial attractors, for picking each pilot's dominant gravity source.
     struct Source {
@@ -51,8 +55,28 @@ void AIPilotSystem::Update(std::uint64_t step, std::optional<flecs::entity> play
         sources.push_back({ent, transf.pos, gs.mass * gs.multiplier});
     });
 
+    // Every potential combat target -- a piloted ship (player or AI), not a
+    // Freighter (background economy actor, never fought) or a Structure
+    // (Base/Colony/etc. are also Team+Damageable, but StructureDefenseSystem
+    // handles those separately). There's no single "the player" to fall back
+    // on here the way single-player's Game::m_player used to be: a dedicated
+    // server never calls Game::Start(), so that field is always nullopt
+    // there regardless of how many peers are actually connected -- nearest
+    // live enemy works identically in single-player (only one candidate
+    // exists) and multiplayer (any number of peers/AI on either side).
+    struct Candidate {
+        flecs::entity entity;
+        Vector2d pos;
+        TeamId team;
+    };
+    std::vector<Candidate> candidates;
+    m_registry.each([&](flecs::entity ent, const Transform& transf, const Team& team, const Damageable&) {
+        if (ent.has<Freighter>() || ent.has<Structure>()) return;
+        candidates.push_back({ent, transf.pos, team.id});
+    });
+
     m_registry.each([&](flecs::entity ent, Transform& transf, PhysicsRef& ref,
-                        AIPilot& pilot, InputQueue& queue) {
+                        AIPilot& pilot, InputQueue& queue, const Team& myTeam) {
         const AIPersonality& personality = pilot.personality;
 
         // Deterministic per-(tick, entity) seed for this pilot's jitter/
@@ -65,8 +89,18 @@ void AIPilotSystem::Update(std::uint64_t step, std::optional<flecs::entity> play
             if (!well || src.mass > well->mass) well = &src;
         }
 
-        if (!pilot.target.is_alive() && player) {
-            pilot.target = *player;
+        if (!pilot.target.is_alive()) {
+            flecs::entity nearest;
+            double nearestDistSq = std::numeric_limits<double>::max();
+            for (const Candidate& c : candidates) {
+                if (c.entity == ent || c.team == myTeam.id) continue;
+                const double distSq = (c.pos - transf.pos).dot();
+                if (distSq < nearestDistSq) {
+                    nearestDistSq = distSq;
+                    nearest = c.entity;
+                }
+            }
+            pilot.target = nearest;
         }
         const Transform* targetTransf =
                 pilot.target.is_alive() ? pilot.target.try_get<Transform>() : nullptr;
