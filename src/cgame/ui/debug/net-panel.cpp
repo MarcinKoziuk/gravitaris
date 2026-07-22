@@ -12,15 +12,15 @@ namespace Gravitaris {
 namespace {
 
 // Same ring-buffer plotting idiom as perf-panel.cpp's DrawSectionRow, over
-// CGame::RollingHistory instead of PerfMonitor::Section -- kept local rather
-// than shared since the two aren't the same type.
-void PlotHistory(const CGame::RollingHistory& history, const char* imguiId, const char* unit)
+// RollingHistory instead of PerfMonitor::Section -- kept local rather than
+// shared since the two aren't the same type.
+void PlotHistory(const RollingHistory& history, const char* imguiId, const char* unit)
 {
     if (history.sampleCount == 0) {
         ImGui::TextDisabled("no data yet");
         return;
     }
-    const float last = history.samples[(history.writeIndex + CGame::RollingHistory::SIZE - 1) % CGame::RollingHistory::SIZE];
+    const float last = history.samples[(history.writeIndex + RollingHistory::SIZE - 1) % RollingHistory::SIZE];
     float maxVal = 0.f;
     for (std::size_t i = 0; i < history.sampleCount; ++i) maxVal = std::max(maxVal, history.samples[i]);
     ImGui::Text("last %.1f %s (max %.1f %s over last %zu events)", last, unit, maxVal, unit, history.sampleCount);
@@ -78,17 +78,19 @@ void DrawNetPanel(CGame& game)
             "Drift/resync firing with snapshot interval flat = this client's own tab/thread "
             "stalled (GC, compositor hitch, OS power/thermal throttling) -- not the network.");
 
+    const NetDiagnostics& diag = game.GetNetDiagnostics();
+
     ImGui::Text("Snapshots: %zu accepted, %zu dropped (out-of-order/resend)",
                 game.GetAcceptedSnapshotCount(), game.GetDroppedSnapshotCount());
     ImGui::Text("Snapshot interval (ms)");
-    PlotHistory(game.GetSnapshotIntervalHistory(), "##snapshot-interval", "ms");
+    PlotHistory(diag.snapshotIntervalHistory, "##snapshot-interval", "ms");
 
     ImGui::Text("Predicted-tick drift/resync: %u events, last %llu ticks",
-                game.GetResyncEventCount(), static_cast<unsigned long long>(game.GetLastResyncDriftTicks()));
-    PlotHistory(game.GetDriftHistory(), "##drift", "ticks");
+                diag.resyncEventCount, static_cast<unsigned long long>(diag.lastResyncDriftTicks));
+    PlotHistory(diag.driftHistory, "##drift", "ticks");
 
     ImGui::Text("Reconciliation correction magnitude");
-    PlotHistory(game.GetCorrectionHistory(), "##correction", "units");
+    PlotHistory(diag.correctionHistory, "##correction", "units");
 }
 
 } // namespace Gravitaris

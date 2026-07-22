@@ -2,22 +2,17 @@
 #include <cmath>
 #include <memory>
 #include <optional>
-#include <vector>
 
 #include <gravitaris/game/logging.hpp>
 
 #include <Magnum/Math/Matrix3.h>
 
 #include <gravitaris/game/resource/common/resource-loader.hpp>
-#include <gravitaris/game/component/bullet.hpp>
-#include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/team.hpp>
-#include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 
-#include <gravitaris/cgame/component/hit-flash.hpp>
 #include <gravitaris/cgame/fx/hit-flash-system.hpp>
 #include <gravitaris/cgame/team-color.hpp>
 
@@ -25,6 +20,23 @@
 #include <gravitaris/cgame/cgame.hpp>
 
 namespace Gravitaris {
+
+namespace {
+
+std::uint64_t SaturatingSub(std::uint64_t a, std::uint64_t b)
+{
+    return a > b ? a - b : 0;
+}
+
+// How far behind the estimated server tick remote entities render (see
+// CGame::m_interpDelaySeconds) -- smooths jitter at the cost of latency.
+std::uint64_t ComputeRenderTick(std::uint64_t estimatedServerTick, float interpDelaySeconds, std::uint32_t tickRate)
+{
+    const auto interpDelayTicks = static_cast<std::uint64_t>(interpDelaySeconds * static_cast<float>(tickRate));
+    return SaturatingSub(estimatedServerTick, interpDelayTicks);
+}
+
+} // namespace
 
 CGame::CGame(IFilesystem &filesystem)
     : Game(filesystem, CreateEntitySpawner())
@@ -39,6 +51,7 @@ CGame::CGame(IFilesystem &filesystem)
     , m_cameraDirector(m_registry, Defaults::cameraZoom)
     , m_indicatorRenderer(m_registry, m_resourceLoader, m_modelRenderer2)
     , m_clientPrediction(m_registry, m_physicsSystem, *m_entitySpawner, m_eventQueue, m_resourceLoader)
+    , m_cosmeticBulletReaper(m_registry, m_mirrorWorld)
     , m_autopilot(m_registry, m_physicsSystem)
 {
     m_modelRenderer2.SetReferenceZoom(Defaults::cameraZoom);
@@ -92,6 +105,8 @@ void CGame::ConnectToServer(const std::string& wsUrl)
 {
     m_netTransport = std::make_unique<WebRtcTransport>(WebRtcTransport::Role::Offerer);
     m_netClient = std::make_unique<NetClient>(*m_netTransport, "gravitaris-client");
+    m_ownShipSync.emplace(m_clientPrediction, *m_netClient, m_predictedTickClock);
+    m_remoteEventApplier.emplace(*m_netClient, m_eventQueue, m_cosmeticBulletReaper);
     m_netTransport->ConnectSignaling(wsUrl);
 }
 
@@ -99,76 +114,33 @@ void CGame::TickNetClient(const ControlFlags& flags)
 {
     if (!m_netClient->IsWelcomed()) return;
 
-    if (m_clientPrediction.HasOwnShip()) {
-        // The ship this client is predicting must still be the one the
-        // server has for it. It won't be if it died (crashed into a sun --
-        // ClientPrediction has no collision damage of its own, so this is
-        // the only way the local ship finds out) or was just replaced by a
-        // respawn under a new NetId (GetYourShipNetId() changes the instant
-        // the re-welcome packet arrives, ahead of any snapshot reflecting
-        // the new ship). Either way, an authoritative snapshot no longer
-        // containing this NetId means the local prediction is stale and
-        // must be dropped -- the spawn gate below then waits for a fresh
-        // snapshot with the (possibly new) NetId, same as the very first
-        // spawn.
-        const std::optional<SnapshotData>& current = m_netClient->GetLatestSnapshot();
-        const bool stillPresent = current && std::any_of(current->entities.begin(), current->entities.end(),
-                [&](const EntityState& e) { return e.netId == m_netClient->GetYourShipNetId(); });
-        if (!stillPresent) {
-            m_clientPrediction.DestroyOwnShip();
-            m_player.reset();
-            m_visualCorrectionOffset = {};
-        }
+    if (m_ownShipSync->DropIfStale()) {
+        m_player.reset();
+    }
+    if (const std::optional<flecs::entity> spawned = m_ownShipSync->SpawnIfConfirmed()) {
+        m_player = *spawned;
+    }
+    if (!m_clientPrediction.HasOwnShip()) return;
+
+    const std::uint64_t target = m_netClient->EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS;
+    const PredictedTickClock::AdvanceResult advance = m_predictedTickClock.Advance(target);
+    if (advance.resyncDrift) {
+        // A lost tick is permanent backward drift vs. the server's
+        // wall-clock-paced step (see PredictedTickClock's own doc comment),
+        // and once it exceeds the input-lead window, every input this
+        // client sends is stamped in the server's past -- InputSystem drops
+        // it as stale, repeat-last-command latches the last consumed flags,
+        // and the ship spins/freezes server-side forever while local
+        // prediction (and silently-failing reconciliation) keep this client
+        // feeling fine.
+        LOG(info) << "net: predicted-tick drift of " << *advance.resyncDrift << " ticks (throttled tab?), resyncing "
+                  << " -> " << target;
+        ++m_netDiagnostics.resyncEventCount;
+        m_netDiagnostics.lastResyncDriftTicks = *advance.resyncDrift;
+        m_netDiagnostics.driftHistory.Record(static_cast<float>(*advance.resyncDrift));
     }
 
-    if (!m_clientPrediction.HasOwnShip()) {
-        // Wait for a snapshot that actually confirms this NetId and where
-        // it is, so the predicted ship spawns at the real position instead
-        // of popping in from the origin once the first reconciliation runs.
-        const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot();
-        if (!snapshot) return;
-        const auto it = std::find_if(snapshot->entities.begin(), snapshot->entities.end(),
-                                     [&](const EntityState& e) { return e.netId == m_netClient->GetYourShipNetId(); });
-        if (it == snapshot->entities.end()) return;
-
-        m_clientPrediction.SpawnOwnShip(
-                it->modelId, Vector2d{static_cast<double>(it->pos.x()), static_cast<double>(it->pos.y())},
-                m_netClient->GetYourTeam());
-        m_player = m_clientPrediction.GetOwnShip();
-        m_nextPredictedTick = m_netClient->EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS;
-    }
-
-    // Drift guard on the free-running tick counter. It advances once per
-    // *executed* tick, but the browser doesn't guarantee ticks execute: rAF
-    // throttling on a backgrounded tab, GC hitches, and tickEvent's own
-    // step cap (which discards the excess backlog rather than replaying it)
-    // all lose wall-clock time that this counter never sees. Every lost
-    // tick is permanent backward drift vs. the server's wall-clock-paced
-    // step, and once the drift exceeds INPUT_LEAD_TICKS, every input this
-    // client sends is stamped in the server's past -- InputSystem drops it
-    // as stale, repeat-last-command latches the last consumed flags, and
-    // the ship spins/freezes server-side forever while local prediction
-    // (and silently-failing reconciliation) keep this client feeling fine.
-    // Re-seed from the wall-clock estimate when the drift grows past the
-    // estimate's own jitter; small drift is left alone so consecutive
-    // predicted ticks normally stay exactly one PHYSICS_DELTA apart (see
-    // m_nextPredictedTick's field comment for why that matters).
-    {
-        const std::uint64_t target = m_netClient->EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS;
-        static constexpr std::uint64_t RESYNC_THRESHOLD_TICKS = 5; // ~83ms; > estimate jitter, < perceptible lag
-        const std::uint64_t drift = target > m_nextPredictedTick ? target - m_nextPredictedTick
-                                                                 : m_nextPredictedTick - target;
-        if (drift > RESYNC_THRESHOLD_TICKS) {
-            LOG(info) << "net: predicted-tick drift of " << drift << " ticks (throttled tab?), resyncing "
-                      << m_nextPredictedTick << " -> " << target;
-            ++m_resyncEventCount;
-            m_lastResyncDriftTicks = drift;
-            m_driftHistory.Record(static_cast<float>(drift));
-            m_nextPredictedTick = target;
-        }
-    }
-
-    const std::uint64_t tick = m_nextPredictedTick++;
+    const std::uint64_t tick = advance.tick;
     m_netClient->SendInput(tick, flags);
 
     if (const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot()) {
@@ -177,100 +149,10 @@ void CGame::TickNetClient(const ControlFlags& flags)
     }
 }
 
-// Cosmetic-only stop for the shooter's own locally-predicted bullet
-// (ClientPrediction::Step; zero damage, DamageSystem never runs against it
-// -- see the Bullet component's own doc comment). This is deliberately
-// independent of the server's replicated Impact event (also handled, in
-// ApplyRemoteEvents): playtesting found the shooter's bullet sometimes
-// never stopped despite a real, server-confirmed hit, traced to
-// GameEventQueue's actual delivery contract -- its own doc comment
-// describes a "loss-tolerance model" of re-sending everything since the
-// client's last acked seq, but NetServer::BroadcastSnapshot deliberately
-// does NOT use client acks for this (see PeerState::lastSentEventSeq's own
-// comment: a peer that never acks correctly must not wedge its own event
-// stream), so in practice a single dropped packet permanently loses that
-// event for that peer -- no resend ever happens. Checking locally instead
-// means this doesn't depend on any network message arriving at all.
-//
-// Approximate on purpose: the mirror world is presentation-only (no
-// physics runs against it, ADR 0001), so there's no real collision shape to
-// query -- this checks distance from each hostile ship's rendered position
-// to the bullet's swept segment (prevPos -> pos, so a fast bullet can't
-// tunnel past a check done only at its instantaneous position) against a
-// fixed radius approximating ship size, rather than exact geometry. Ships
-// don't expose a simple bounding radius (their collision Body is an
-// authored polygon, not a circle, unlike planets); the largest ship body
-// (freighter-0, 30x10 world units) has a ~15.8 unit half-diagonal. Biased a
-// bit above that on purpose -- an occasional visible overshoot reads better
-// than a bullet stopping short of the ship it was aimed at.
-//
-// No ownerNetId filter needed (fixed 2026-07-21 -- an earlier version had
-// one, and it silently never matched, so this whole check was dead code on
-// a real client). The bug: ClientPrediction::Step stamps
-// Bullet::ownerNetId from `m_ownShip.get<NetId>().value` -- but m_ownShip
-// is spawned locally via EntitySpawner::SpawnPlayer, which assigns NetId
-// from *this client's own* AssignNetId counter, a value with no relation
-// to NetClient::GetYourShipNetId() (the *server's* NetId for this ship,
-// received in ServerWelcome). Comparing one against the other can never
-// match. The actual fix doesn't need either value: m_registry is this
-// client's own local prediction registry, and in net-client mode it only
-// ever holds this client's own ship, its own cosmetic bullets, and Phase
-// 7's planet proxies (see ClientPrediction's own class doc comment) --
-// nothing else is ever spawned into it. So every Bullet found here is
-// definitionally this client's own; there is nothing to filter.
-void CGame::CheckLocalBulletHits()
-{
-    static constexpr double LOCAL_HIT_RADIUS = 22.0;
-
-    std::vector<flecs::entity> hitBullets;
-    m_registry.each([&](flecs::entity bulletEnt, const Bullet& bullet, const Transform& bulletTransf) {
-        const Vector2d& a = bulletTransf.prevPos;
-        const Vector2d& b = bulletTransf.pos;
-        const Vector2d ab = b - a;
-        const double abLengthSq = ab.dot();
-
-        bool hit = false;
-        m_mirrorWorld.each([&](flecs::entity, const Team& shipTeam, const Controls&, const Transform& shipTransf) {
-            if (hit) return;
-            if (shipTeam.id == bullet.team) return; // no friendly fire
-
-            double distSq;
-            if (abLengthSq < 1e-9) {
-                distSq = (shipTransf.pos - a).dot();
-            } else {
-                const double t = std::clamp(Magnum::Math::dot(shipTransf.pos - a, ab) / abLengthSq, 0.0, 1.0);
-                distSq = (shipTransf.pos - (a + ab * t)).dot();
-            }
-            if (distSq <= LOCAL_HIT_RADIUS * LOCAL_HIT_RADIUS) hit = true;
-        });
-        if (hit) hitBullets.push_back(bulletEnt);
-    });
-
-    for (flecs::entity bulletEnt : hitBullets) bulletEnt.destruct();
-}
-
 void CGame::ReconcileOwnShipIfNeeded()
 {
-    if (!m_clientPrediction.HasOwnShip()) return;
-
-    const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot();
-    if (!snapshot || snapshot->tick <= m_lastReconciledTick) return;
-    m_lastReconciledTick = snapshot->tick;
-
-    const auto it = std::find_if(snapshot->entities.begin(), snapshot->entities.end(),
-                                 [&](const EntityState& e) { return e.netId == m_netClient->GetYourShipNetId(); });
-    if (it == snapshot->entities.end()) return;
-
-    const std::optional<Vector2d> preCorrection = m_clientPrediction.Reconcile(snapshot->tick, *it, snapshot->entities);
-    if (!preCorrection) return;
-
-    // The ship's real Transform now holds the corrected position; blend the
-    // visual gap out via the camera (see m_visualCorrectionOffset's doc)
-    // instead of touching it.
-    const Transform& t = m_clientPrediction.GetOwnShip().get<Transform>();
-    const Magnum::Vector2 correctedPos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
-    const Magnum::Vector2 preCorrectionPos{static_cast<float>(preCorrection->x()), static_cast<float>(preCorrection->y())};
-    m_visualCorrectionOffset += preCorrectionPos - correctedPos;
+    const std::optional<OwnShipSync::ReconcileResult> result = m_ownShipSync->ReconcileIfNeeded();
+    if (!result) return;
 
     // Diagnostic (2026-07-19): correlate correction magnitude/frequency
     // against NetServer's "peer N input timed out"/stale-input logs to
@@ -278,73 +160,23 @@ void CGame::ReconcileOwnShipIfNeeded()
     // past its stamped tick (INPUT_LEAD_TICKS too tight for real RTT/
     // jitter -- dropped server-side, repeat-last-command diverges from
     // what was predicted) rather than ordinary f32/quantization noise.
-    const float correctionMagnitude = (preCorrectionPos - correctedPos).length();
-    LOG(trace) << "net: reconciled tick " << snapshot->tick << ", correction magnitude "
-              << correctionMagnitude << " world units";
-    m_correctionHistory.Record(correctionMagnitude);
+    LOG(trace) << "net: reconciled tick " << result->tick << ", correction magnitude "
+              << result->correctionMagnitude << " world units";
+    m_netDiagnostics.correctionHistory.Record(result->correctionMagnitude);
     // Recorded on the same "genuinely new snapshot" gate as the correction
     // above, so this lines up 1:1 with it in the Net debug tab's graphs --
     // a real network gap shows up here; a local main-thread stall shows up
     // as a drift/resync event above with this staying flat instead.
-    m_snapshotIntervalHistory.Record(m_netClient->GetLastSnapshotIntervalMs());
+    m_netDiagnostics.snapshotIntervalHistory.Record(m_netClient->GetLastSnapshotIntervalMs());
 }
 
 void CGame::ApplyRemoteEvents()
 {
     const std::uint32_t yourShipNetId = m_netClient->GetYourShipNetId();
-
-    for (const SnapshotData& snapshot : m_netClient->GetSnapshotHistory()) {
-        for (const GameEvent& event : snapshot.events) {
-            if (event.seq <= m_lastAppliedRemoteEventSeq) continue;
-            m_lastAppliedRemoteEventSeq = event.seq;
-
-            if (event.type == GameEventType::BulletFired && event.sourceNetId == yourShipNetId) continue;
-
-            m_eventQueue.Emit(event.type, flecs::entity{}, event.pos, event.param);
-
-            // Playtesting fix (2026-07-21): the shooter's own bullet is a
-            // purely cosmetic client-predicted copy (ClientPrediction::Step)
-            // -- zero damage, DamageSystem never runs against it -- so
-            // without this it would keep flying straight through whatever
-            // it actually hit for the rest of its lifetime instead of
-            // stopping, even though the server's real (suppressed, never
-            // sent back to this peer) bullet was destroyed the instant it
-            // registered the hit. No wire field ties an Impact event back
-            // to the bullet that caused it, so this matches by position
-            // instead: any of this client's own still-alive bullets near
-            // where the hit was just registered. No ownerNetId filter
-            // needed -- m_registry only ever holds this client's own ship,
-            // bullets, and planet proxies (see CheckLocalBulletHits's own
-            // comment on why a filter here can never actually match: the
-            // two sides compare NetIds from unrelated numbering sequences).
-            // The radius is generous -- by the time this event has
-            // propagated through the snapshot/event pipeline, the real
-            // bullet already overshot the impact point along the same
-            // straight line the cosmetic copy is still flying, so an exact
-            // position match would almost never hit.
-            if (event.type == GameEventType::Impact) {
-                static constexpr double BULLET_IMPACT_MATCH_RADIUS = 100.0;
-                const Vector2d impactPos{static_cast<double>(event.pos.x()), static_cast<double>(event.pos.y())};
-                std::vector<flecs::entity> matchedBullets;
-                m_registry.each([&](flecs::entity bulletEnt, const Bullet&, const Transform& transf) {
-                    if ((transf.pos - impactPos).length() > BULLET_IMPACT_MATCH_RADIUS) return;
-                    matchedBullets.push_back(bulletEnt);
-                });
-                for (flecs::entity bulletEnt : matchedBullets) bulletEnt.destruct();
-            }
-
-            if (event.type != GameEventType::Impact && event.type != GameEventType::LandingCrash) continue;
-
-            const flecs::entity target = (event.sourceNetId == yourShipNetId)
-                    ? GetPlayer().value_or(flecs::entity{})
-                    : m_snapshotApplier.EntityForNetId(event.sourceNetId);
-            if (!target.is_alive()) continue; // e.g. the hit killed it this tick
-
-            if (HitFlash* flash = target.try_get_mut<HitFlash>()) {
-                flash->amount = 1.f;
-            }
-        }
-    }
+    m_remoteEventApplier->Apply([&](std::uint32_t sourceNetId) -> flecs::entity {
+        return sourceNetId == yourShipNetId ? GetPlayer().value_or(flecs::entity{})
+                                            : m_snapshotApplier.EntityForNetId(sourceNetId);
+    });
 }
 
 void CGame::RenderNetClient(float dtSeconds)
@@ -353,10 +185,8 @@ void CGame::RenderNetClient(float dtSeconds)
     ApplyRemoteEvents();
 
     const std::uint64_t estimatedServerTick = m_netClient->EstimateCurrentServerTick();
-    const auto interpDelayTicks =
-            static_cast<std::uint64_t>(m_interpDelaySeconds * static_cast<float>(m_netClient->GetTickRate()));
     const std::uint64_t renderTick =
-            estimatedServerTick > interpDelayTicks ? estimatedServerTick - interpDelayTicks : 0;
+            ComputeRenderTick(estimatedServerTick, m_interpDelaySeconds, m_netClient->GetTickRate());
     m_lastEstimatedServerTick = estimatedServerTick;
     m_lastRenderTick = renderTick;
 
@@ -364,14 +194,16 @@ void CGame::RenderNetClient(float dtSeconds)
 
     // Planets must be rendered at the exact same tick ClientPrediction's
     // gravity/collision proxies last used (TickNetClient's `tick`, i.e.
-    // `m_nextPredictedTick - 1` -- the most recent tick actually stepped),
-    // not `renderTick` (delayed behind the estimated server tick by the
-    // interpolation-delay setting) -- see SnapshotInterpolator::Compute's
-    // `planetTick` doc comment. Falls back to `renderTick` (nullopt) before
-    // the own ship exists yet, when nothing has stepped/synced a proxy to
-    // desync from in the first place.
+    // `m_predictedTickClock.Current() - 1` -- the most recent tick actually
+    // stepped), not `renderTick` (delayed behind the estimated server tick
+    // by the interpolation-delay setting) -- see SnapshotInterpolator::
+    // Compute's `planetTick` doc comment. Falls back to `renderTick`
+    // (nullopt) before the own ship exists yet, when nothing has
+    // stepped/synced a proxy to desync from in the first place.
     const std::optional<std::uint64_t> planetTick =
-            m_clientPrediction.HasOwnShip() ? std::optional<std::uint64_t>(m_nextPredictedTick - 1) : std::nullopt;
+            m_clientPrediction.HasOwnShip()
+                    ? std::optional<std::uint64_t>(m_predictedTickClock.Current() - 1)
+                    : std::nullopt;
 
     // Remote entities only (the own ship is real m_registry state now,
     // Phase 5) via Phase 4 interpolation into the mirror world.
@@ -393,7 +225,7 @@ void CGame::RenderNetClient(float dtSeconds)
     // real network jitter (this client's actual bug report) made the
     // catch-up happen in the first place. Both are now as fresh as they
     // ever get, at the same instant.
-    CheckLocalBulletHits();
+    m_cosmeticBulletReaper.CheckLocalHits();
 
     // Blend out any reconciliation snap over ~100ms by decaying the offset
     // *before* camera framing runs, then feeding it in as an already
@@ -407,14 +239,13 @@ void CGame::RenderNetClient(float dtSeconds)
     // enemy/planet data (that's smooth by design; see SnapshotInterpolator).
     // The real simulated Transform itself is never touched here -- it must
     // stay exactly correct for the next predicted tick to build on.
-    static constexpr float CORRECTION_SMOOTH_SECONDS = 0.1f;
-    m_visualCorrectionOffset *= std::exp(-dtSeconds / CORRECTION_SMOOTH_SECONDS);
+    m_ownShipSync->DecayCorrection(dtSeconds);
 
     Magnum::Vector2 smoothedPlayerPos;
     if (const std::optional<flecs::entity> player = GetPlayer()) {
         const Transform& t = player->get<Transform>();
         smoothedPlayerPos = Magnum::Vector2{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())}
-                + m_visualCorrectionOffset;
+                + m_ownShipSync->GetCorrectionOffset();
     }
 
     // Real single-player camera logic against m_registry -- works for the

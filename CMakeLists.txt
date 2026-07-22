@@ -513,10 +513,19 @@ add_executable(GravitarisNG
     src/game/net/net-client.cpp
     include/gravitaris/game/net/client-prediction.hpp
     src/game/net/client-prediction.cpp
+    include/gravitaris/game/net/predicted-tick-clock.hpp
+    include/gravitaris/game/net/own-ship-sync.hpp
+    src/game/net/own-ship-sync.cpp
     include/gravitaris/game/net/webrtc-signaling.hpp
     src/game/net/webrtc-signaling.cpp
     include/gravitaris/game/net/webrtc-transport.hpp
     src/game/net/webrtc-transport.cpp
+    include/gravitaris/cgame/net/rolling-history.hpp
+    include/gravitaris/cgame/net/net-diagnostics.hpp
+    include/gravitaris/cgame/net/cosmetic-bullet-reaper.hpp
+    src/cgame/net/cosmetic-bullet-reaper.cpp
+    include/gravitaris/cgame/net/remote-event-applier.hpp
+    src/cgame/net/remote-event-applier.cpp
     include/gravitaris/cgame/net/snapshot-applier.hpp
     src/cgame/net/snapshot-applier.cpp
     include/gravitaris/cgame/net/snapshot-interpolator.hpp

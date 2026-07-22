@@ -1,7 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <optional>
 #include <string>
@@ -13,9 +12,14 @@
 #include <gravitaris/game/net/byte-stream.hpp>
 #include <gravitaris/game/net/client-prediction.hpp>
 #include <gravitaris/game/net/net-client.hpp>
+#include <gravitaris/game/net/own-ship-sync.hpp>
+#include <gravitaris/game/net/predicted-tick-clock.hpp>
 #include <gravitaris/game/net/webrtc-transport.hpp>
 
 #include <gravitaris/cgame/camera.hpp>
+#include <gravitaris/cgame/net/cosmetic-bullet-reaper.hpp>
+#include <gravitaris/cgame/net/net-diagnostics.hpp>
+#include <gravitaris/cgame/net/remote-event-applier.hpp>
 #include <gravitaris/cgame/net/snapshot-applier.hpp>
 #include <gravitaris/cgame/net/snapshot-interpolator.hpp>
 #include <gravitaris/cgame/camera-director.hpp>
@@ -39,27 +43,6 @@ enum class RendererKind {
 };
 
 class CGame : public Game {
-public:
-    // Fixed-size rolling sample buffer for the Net debug tab's graphs --
-    // same ring-buffer shape as PerfMonitor::Section, kept separate rather
-    // than shoehorned into that (frame-timing-specific, ms-labeled) class
-    // for data that's ticks or world units, not milliseconds. Public so the
-    // debug UI (a separate translation unit) can spell the type; declared
-    // up here, ahead of the protected members below that use it.
-    struct RollingHistory {
-        static constexpr std::size_t SIZE = 120;
-        std::array<float, SIZE> samples{};
-        std::size_t writeIndex = 0;
-        std::size_t sampleCount = 0;
-
-        void Record(float value)
-        {
-            samples[writeIndex] = value;
-            writeIndex = (writeIndex + 1) % SIZE;
-            if (sampleCount < SIZE) ++sampleCount;
-        }
-    };
-
 protected:
     SimpleModelRenderer m_simpleModelRenderer;
     ModelRenderer2 m_modelRenderer2;
@@ -102,40 +85,19 @@ protected:
     std::unique_ptr<WebRtcTransport> m_netTransport;
     std::unique_ptr<NetClient> m_netClient;
     ClientPrediction m_clientPrediction;
-    // Own local monotonic tick counter for prediction, seeded from
-    // NetClient::EstimateCurrentServerTick() once the own ship is spawned
-    // (see TickNetClient) -- kept independent of that (wall-clock, jittery)
-    // estimate afterward so consecutive predicted ticks are always exactly
-    // one PHYSICS_DELTA apart, matching what's actually being simulated.
-    std::uint64_t m_nextPredictedTick = 0;
-    // Newest snapshot tick already reconciled against, so a snapshot
-    // arriving before the next rendered frame (or one with nothing new)
-    // isn't reprocessed.
-    std::uint64_t m_lastReconciledTick = 0;
-    // Visual-only nudge (applied to the camera, never the real simulated
-    // Transform) that blends a reconciliation snap in over ~100ms instead
-    // of popping -- see ReconcileOwnShipIfNeeded.
-    Magnum::Vector2 m_visualCorrectionOffset{0.f, 0.f};
+    // Reset in OwnShipSync::SpawnIfConfirmed; see its own class doc comment
+    // for why it's kept independent of NetClient's wall-clock tick estimate
+    // between resyncs.
+    PredictedTickClock m_predictedTickClock;
+    // Constructed in ConnectToServer once m_netClient exists (OwnShipSync
+    // needs a live NetClient&) -- always populated by the time TickNetClient/
+    // ReconcileOwnShipIfNeeded/RenderNetClient run, since those are only ever
+    // called once m_netClient is set (see Render()/IsNetClient()).
+    std::optional<OwnShipSync> m_ownShipSync;
 
-    // Cosmetic-only: stops the shooter's own locally-predicted bullet
-    // (Bullet::ownerNetId == this client's own ship) as soon as it visually
-    // reaches a hostile ship in the mirror world, independent of any
-    // network message. See its own doc comment (cgame.cpp) for why this
-    // exists alongside (not instead of) the Impact-event-based destroy in
-    // ApplyRemoteEvents.
-    void CheckLocalBulletHits();
+    CosmeticBulletReaper m_cosmeticBulletReaper;
 
-    // Net debug tab diagnostics: how often/how far the predicted-tick drift
-    // guard (see TickNetClient) has had to resync, and the magnitude of each
-    // reconciliation correction/snapshot-arrival gap -- recorded only when
-    // they actually happen (an irregular-event history, like PerfMonitor's
-    // own sections for code paths that don't run every frame). These stay
-    // behind getters like everything else here.
-    std::uint32_t m_resyncEventCount = 0;
-    std::uint64_t m_lastResyncDriftTicks = 0;
-    RollingHistory m_driftHistory;
-    RollingHistory m_correctionHistory;
-    RollingHistory m_snapshotIntervalHistory;
+    NetDiagnostics m_netDiagnostics;
 
     void ReconcileOwnShipIfNeeded();
 
@@ -148,19 +110,11 @@ protected:
     ResourcePtr<const Model> m_teamMarkerModel;
     void SubmitPlanetOwnershipMarkers(flecs::world& world, ModelRenderer2& renderer);
 
-    // Replicated GameEvents (docs/networking-plan.md's "events left to the
-    // caller" gap): walks the snapshot history for events past
-    // m_lastAppliedRemoteEventSeq, re-emits each into m_eventQueue (audio
-    // only needs event.pos, already world-space -- no NetId resolution) and,
-    // for Impact/LandingCrash, sets HitFlash directly on the right entity --
-    // the own predicted ship (matched by yourShipNetId) or, for anyone else,
-    // the mirror-world entity via m_snapshotApplier's NetId map. Skips
-    // BulletFired events sourced from the own ship: ClientPrediction already
-    // emitted the instant, locally-predicted version of that same shot into
-    // m_eventQueue directly, so replaying the server's (delayed, replicated)
-    // copy too would double the laser sound. Every other event type is never
-    // locally predicted for anyone, own ship included, so those always play.
-    std::uint32_t m_lastAppliedRemoteEventSeq = 0;
+    // Constructed in ConnectToServer once m_netClient exists (RemoteEventApplier
+    // needs a live NetClient&) -- always populated by the time ApplyRemoteEvents
+    // runs, since that's only ever called from RenderNetClient, itself gated
+    // on m_netClient being set (see Render()).
+    std::optional<RemoteEventApplier> m_remoteEventApplier;
     void ApplyRemoteEvents();
 
     // Phase 4 tunables (Net debug tab): how far behind the estimated server
@@ -371,11 +325,7 @@ public:
     // Net debug tab: connection-health diagnostics, for telling a real
     // network gap (snapshot interval spikes) apart from a local main-thread
     // stall (drift/resync fires with snapshot interval unaffected).
-    [[nodiscard]] std::uint32_t GetResyncEventCount() const { return m_resyncEventCount; }
-    [[nodiscard]] std::uint64_t GetLastResyncDriftTicks() const { return m_lastResyncDriftTicks; }
-    [[nodiscard]] const RollingHistory& GetDriftHistory() const { return m_driftHistory; }
-    [[nodiscard]] const RollingHistory& GetCorrectionHistory() const { return m_correctionHistory; }
-    [[nodiscard]] const RollingHistory& GetSnapshotIntervalHistory() const { return m_snapshotIntervalHistory; }
+    [[nodiscard]] const NetDiagnostics& GetNetDiagnostics() const { return m_netDiagnostics; }
     [[nodiscard]] float GetLastSnapshotIntervalMs() const
     {
         return m_netClient ? m_netClient->GetLastSnapshotIntervalMs() : 0.f;

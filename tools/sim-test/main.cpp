@@ -42,6 +42,7 @@
 #include <gravitaris/game/net/net-server.hpp>
 #include <gravitaris/game/net/net-client.hpp>
 #include <gravitaris/game/net/client-prediction.hpp>
+#include <gravitaris/game/net/predicted-tick-clock.hpp>
 #include <gravitaris/game/net/webrtc-server-transport.hpp>
 #include <gravitaris/game/net/webrtc-transport.hpp>
 #include <gravitaris/cgame/net/snapshot-interpolator.hpp>
@@ -94,6 +95,36 @@ void TestByteStream()
     ByteReader truncated(w.Data(), 3);
     (void)truncated.ReadU32();
     Require(!truncated.Ok(), "overrun latches !Ok()");
+}
+
+// PredictedTickClock is pure integer math (no NetClient/transport needed) --
+// exercised directly against hand-picked targets.
+void TestPredictedTickClock()
+{
+    PredictedTickClock clock;
+    clock.Reset(100);
+    Require(clock.Current() == 100, "reset sets Current() exactly");
+
+    // Small drift (<= threshold): no resync, ticks stay consecutive.
+    for (std::uint64_t i = 0; i < 5; ++i) {
+        const auto result = clock.Advance(105); // 5 ticks ahead, at the threshold
+        Require(!result.resyncDrift, "drift at the threshold does not resync");
+        Require(result.tick == 100 + i, "ticks stay consecutive under threshold drift");
+    }
+    Require(clock.Current() == 105, "five consecutive advances land on the expected tick");
+
+    // Drift past the threshold (either direction) resyncs to target exactly.
+    {
+        const auto result = clock.Advance(200);
+        Require(result.resyncDrift.has_value() && *result.resyncDrift == 95, "large forward drift resyncs, reports magnitude");
+        Require(result.tick == 200, "resync returns the target tick itself");
+        Require(clock.Current() == 201, "resync still advances by one after resyncing");
+    }
+    {
+        const auto result = clock.Advance(50); // 151 ticks behind now
+        Require(result.resyncDrift.has_value() && *result.resyncDrift == 151, "large backward drift resyncs, reports magnitude");
+        Require(result.tick == 50, "backward resync returns the target tick itself");
+    }
 }
 
 // docs/networking-plan.md Phase 4: SnapshotInterpolator's math, exercised
@@ -1443,6 +1474,7 @@ int main()
     HasEnteredMain = true;
 
     TestByteStream();
+    TestPredictedTickClock();
     TestSnapshotInterpolation();
     TestOrbitReplication();
     TestClientPrediction();
