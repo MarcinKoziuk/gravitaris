@@ -83,6 +83,19 @@ protected:
     // alongside m_registry for this (CameraDirector::Update/
     // MinimapRenderer::Render's remoteWorld parameter), since every entity
     // but the own ship lives there, not in m_registry, in this mode.
+    // When false (this branch's default), the own ship is NOT locally
+    // predicted: it flows through the same Phase 4 interpolation path as every
+    // other entity (rendered in m_mirrorWorld, ~m_interpDelaySeconds behind the
+    // server), so all entities share one timeline. Trades input latency
+    // (Quake1-style -- you feel RTT + interp delay on your own movement and
+    // firing) for zero prediction artifacts and correct-by-construction
+    // ship-ship contact, since nothing is on a separate predicted timeline.
+    // When true, the Phase 5 ClientPrediction path runs (own ship predicted +
+    // reconciled, own bullets cosmetically predicted). The prediction members
+    // below stay constructed either way; the no-predict path simply doesn't
+    // drive them.
+    bool m_predictOwnShip = false;
+
     std::unique_ptr<WebRtcTransport> m_netTransport;
     // Sits between m_netTransport and m_netClient (constructed with a
     // reference to *this*, not directly to m_netTransport -- see

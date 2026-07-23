@@ -230,11 +230,15 @@ void NetServer::BroadcastSnapshot(std::uint64_t currentTick)
     for (auto& [peer, state] : m_peers) {
         if (!state.welcomed) continue;
 
-        // This peer predicts and draws its own shots locally, so it must not
-        // also receive the authoritative copies (see GatherSnapshot's
-        // suppressBulletsOwnedBy). Every other peer still gets them.
-        const std::uint32_t ownShipNetId =
-                state.ship.is_alive() ? state.ship.get<NetId>().value : 0u;
+        // Normally a peer predicts and draws its own shots locally, so it
+        // must not also receive the authoritative copies (see GatherSnapshot's
+        // suppressBulletsOwnedBy). On the no-client-prediction branch the
+        // client draws NO cosmetic own-bullets (it predicts nothing), so it
+        // must receive its own authoritative bullets like everyone else's or
+        // its shots would be invisible -- suppress nothing.
+        // TODO: once prediction is a per-client runtime choice rather than a
+        // build-wide one, key this off what the client actually does.
+        const std::uint32_t ownShipNetId = 0u;
 
         SnapshotData snapshot;
         GatherSnapshot(m_registry, m_eventQueue, currentTick, state.lastSentEventSeq, snapshot, ownShipNetId);

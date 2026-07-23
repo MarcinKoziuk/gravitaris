@@ -115,6 +115,20 @@ void CGame::TickNetClient(const ControlFlags& flags)
 {
     if (!m_netClient->IsWelcomed()) return;
 
+    if (!m_predictOwnShip) {
+        // No local prediction: just forward input to the server. The own
+        // ship's motion comes back entirely through interpolation (see
+        // RenderNetClient) -- nothing is spawned, stepped, or reconciled
+        // here. Input still needs a monotonic, lead-stamped tick so the
+        // server applies it in order and in time; PredictedTickClock's
+        // prediction-stability role is moot without prediction, but its
+        // monotonic advance (self-resyncing to the wall-clock estimate on
+        // the first call, m_nextTick starting at 0) is exactly what's needed.
+        const std::uint64_t target = m_netClient->EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS;
+        m_netClient->SendInput(m_predictedTickClock.Advance(target).tick, flags);
+        return;
+    }
+
     if (m_ownShipSync->DropIfStale()) {
         m_player.reset();
     }
@@ -191,26 +205,26 @@ void CGame::RenderNetClient(float dtSeconds)
     m_lastEstimatedServerTick = estimatedServerTick;
     m_lastRenderTick = renderTick;
 
-    ReconcileOwnShipIfNeeded();
+    if (m_predictOwnShip) {
+        ReconcileOwnShipIfNeeded();
+    }
 
-    // Planets must be rendered at the exact same tick ClientPrediction's
-    // gravity/collision proxies last used (TickNetClient's `tick`, i.e.
-    // `m_predictedTickClock.Current() - 1` -- the most recent tick actually
-    // stepped), not `renderTick` (delayed behind the estimated server tick
-    // by the interpolation-delay setting) -- see SnapshotInterpolator::
-    // Compute's `planetTick` doc comment. Falls back to `renderTick`
-    // (nullopt) before the own ship exists yet, when nothing has
-    // stepped/synced a proxy to desync from in the first place.
+    // exemptNetId: in predict mode the own ship is a real m_registry entity
+    // drawn separately, so it's removed from the interpolated set; in
+    // no-predict mode it's just another interpolated entity in the mirror
+    // world, so nothing is exempt. planetTick likewise only matters when
+    // prediction's gravity/collision proxies exist to stay aligned with --
+    // without them, planets interpolate at renderTick like everything else
+    // (the pre-Phase-7 behavior). See SnapshotInterpolator::Compute's
+    // `planetTick` doc comment.
+    const std::uint32_t exemptNetId = m_predictOwnShip ? m_netClient->GetYourShipNetId() : 0u;
     const std::optional<std::uint64_t> planetTick =
-            m_clientPrediction.HasOwnShip()
+            (m_predictOwnShip && m_clientPrediction.HasOwnShip())
                     ? std::optional<std::uint64_t>(m_predictedTickClock.Current() - 1)
                     : std::nullopt;
 
-    // Remote entities only (the own ship is real m_registry state now,
-    // Phase 5) via Phase 4 interpolation into the mirror world.
     if (const std::optional<SnapshotData> interpolated =
-                SnapshotInterpolator::Compute(m_netClient->GetSnapshotHistory(), renderTick,
-                                              m_netClient->GetYourShipNetId(),
+                SnapshotInterpolator::Compute(m_netClient->GetSnapshotHistory(), renderTick, exemptNetId,
                                               static_cast<float>(m_netClient->GetTickRate()), m_interpParams,
                                               planetTick)) {
         m_snapshotApplier.Apply(*interpolated, dtSeconds);
@@ -228,32 +242,31 @@ void CGame::RenderNetClient(float dtSeconds)
     // ever get, at the same instant.
     m_cosmeticBulletDespawner.CheckLocalHits();
 
-    // Blend out any reconciliation snap over ~100ms by decaying the offset
-    // *before* camera framing runs, then feeding it in as an already
-    // -smoothed position override -- not by nudging the camera's own output
-    // position afterward (the previous approach). That ordering mattered:
-    // dead-zone follow/enemy-framing/planet-framing all read "where is the
-    // player" once, at the top of CameraDirector::Update, so a correction
-    // applied only after the fact left every one of them reacting to the
-    // raw, still-discontinuous snap this frame -- a fast, repeating jitter
-    // in position framing that had nothing to do with network lag in synced
-    // enemy/planet data (that's smooth by design; see SnapshotInterpolator).
-    // The real simulated Transform itself is never touched here -- it must
-    // stay exactly correct for the next predicted tick to build on.
-    m_ownShipSync->DecayCorrection(dtSeconds);
-
-    Magnum::Vector2 smoothedPlayerPos;
-    if (const std::optional<flecs::entity> player = GetPlayer()) {
-        const Transform& t = player->get<Transform>();
-        smoothedPlayerPos = Magnum::Vector2{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())}
-                + m_ownShipSync->GetCorrectionOffset();
+    // Camera follow target + framing position differ by mode. In predict
+    // mode the follow target is the real m_registry own ship, framed at an
+    // already-smoothed position (reconciliation snaps blended out over ~100ms
+    // *before* framing runs, so dead-zone follow / enemy / planet framing all
+    // read one coherent position rather than reacting to the raw snap). In
+    // no-predict mode the own ship is just the interpolated mirror-world
+    // entity; follow it directly, no correction offset (nothing is predicted
+    // to correct). The real Transform is never mutated here either way.
+    std::optional<Magnum::Vector2> framingOverride;
+    if (m_predictOwnShip) {
+        m_ownShipSync->DecayCorrection(dtSeconds);
+        if (const std::optional<flecs::entity> player = GetPlayer()) {
+            const Transform& t = player->get<Transform>();
+            framingOverride = Magnum::Vector2{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())}
+                    + m_ownShipSync->GetCorrectionOffset();
+        }
+    }
+    else {
+        const flecs::entity own = m_snapshotApplier.EntityForNetId(m_netClient->GetYourShipNetId());
+        m_player = own.is_alive() ? std::optional<flecs::entity>(own) : std::nullopt;
     }
 
-    // Real single-player camera logic against m_registry -- works for the
-    // own ship (dead-zone follow, dynamic zoom); m_mirrorWorld is swept
-    // alongside it for enemy/planet framing, since every entity but the own
-    // ship lives there in this mode (see m_netClient's field comment).
-    m_cameraDirector.Update(GetPlayer(), m_viewportSize, dtSeconds, &m_mirrorWorld, smoothedPlayerPos);
+    // m_mirrorWorld is swept for enemy/planet framing (and, in no-predict
+    // mode, holds the own ship too).
+    m_cameraDirector.Update(GetPlayer(), m_viewportSize, dtSeconds, &m_mirrorWorld, framingOverride);
     Camera& camera = m_cameraDirector.GetCamera();
 
     // Decays HitFlash on both worlds; ApplyRemoteEvents above is what sets
@@ -282,30 +295,36 @@ void CGame::RenderNetClient(float dtSeconds)
     m_mirrorRenderer2.SetZoomWidthFactor(m_zoomWidthFactor);
     m_mirrorRenderer2.Render(0.0);
 
-    // Own ship: real local sim, drawn through the same renderer/world
-    // single-player uses -- m_registry holds nothing else in this mode.
-    // ModelRenderer2::Render draws Transform::pos directly with no
-    // interpolation of its own (its `delta` parameter is unused -- unlike a
-    // typical fixed-tick renderer, there's no prevPos/pos blend here at
-    // all), so a reconciliation snap would make the ship itself visibly
-    // teleport even though the camera above already glides past it via
-    // `smoothedPlayerPos`. Draw at that same smoothed position instead: save
-    // the real Transform::pos, overwrite it just for this one render call,
-    // then restore it immediately after -- the actual simulated state (what
-    // the next predicted tick builds on) is never touched, only one frame's
-    // worth of what gets drawn.
-    m_modelRenderer2.SetZoom(camera.GetZoom());
-    m_modelRenderer2.SetCameraPosition(camera.GetPosition());
-    m_modelRenderer2.SetLineWidth(m_lineWidthPixels);
-    m_modelRenderer2.SetZoomWidthFactor(m_zoomWidthFactor);
-    if (const std::optional<flecs::entity> player = GetPlayer()) {
-        Transform& t = player->get_mut<Transform>();
-        const Vector2d realPos = t.pos;
-        t.pos = Vector2d{smoothedPlayerPos};
-        m_modelRenderer2.Render(0.0);
-        t.pos = realPos;
-    } else {
-        m_modelRenderer2.Render(0.0);
+    // Own ship: only in predict mode is it a separate m_registry entity that
+    // needs its own draw. In no-predict mode it's already in m_mirrorWorld,
+    // drawn by m_mirrorRenderer2 above like every other entity.
+    //
+    // Real local sim, drawn through the same renderer/world single-player
+    // uses -- m_registry holds nothing else in this mode. ModelRenderer2::
+    // Render draws Transform::pos directly with no interpolation of its own
+    // (its `delta` parameter is unused -- unlike a typical fixed-tick
+    // renderer, there's no prevPos/pos blend here at all), so a
+    // reconciliation snap would make the ship itself visibly teleport even
+    // though the camera above already glides past it via `framingOverride`.
+    // Draw at that same framed position instead: save the real Transform::
+    // pos, overwrite it just for this one render call, then restore it
+    // immediately after -- the actual simulated state (what the next
+    // predicted tick builds on) is never touched, only one frame's worth of
+    // what gets drawn.
+    if (m_predictOwnShip) {
+        m_modelRenderer2.SetZoom(camera.GetZoom());
+        m_modelRenderer2.SetCameraPosition(camera.GetPosition());
+        m_modelRenderer2.SetLineWidth(m_lineWidthPixels);
+        m_modelRenderer2.SetZoomWidthFactor(m_zoomWidthFactor);
+        if (const std::optional<flecs::entity> player = GetPlayer(); player && framingOverride) {
+            Transform& t = player->get_mut<Transform>();
+            const Vector2d realPos = t.pos;
+            t.pos = Vector2d{*framingOverride};
+            m_modelRenderer2.Render(0.0);
+            t.pos = realPos;
+        } else {
+            m_modelRenderer2.Render(0.0);
+        }
     }
 }
 
