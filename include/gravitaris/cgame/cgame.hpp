@@ -14,6 +14,7 @@
 #include <gravitaris/game/net/net-client.hpp>
 #include <gravitaris/cgame/net/own-ship-sync.hpp>
 #include <gravitaris/game/net/predicted-tick-clock.hpp>
+#include <gravitaris/game/net/simulated-net-transport.hpp>
 #include <gravitaris/game/net/webrtc-transport.hpp>
 
 #include <gravitaris/cgame/camera.hpp>
@@ -83,6 +84,13 @@ protected:
     // MinimapRenderer::Render's remoteWorld parameter), since every entity
     // but the own ship lives there, not in m_registry, in this mode.
     std::unique_ptr<WebRtcTransport> m_netTransport;
+    // Sits between m_netTransport and m_netClient (constructed with a
+    // reference to *this*, not directly to m_netTransport -- see
+    // ConnectToServer) so lag/jitter/loss can be dialed in live from the Net
+    // debug tab. Params default to SimulatedNetTransport::Params{}'s own
+    // defaults (all zero = exact passthrough, negligible overhead), so this
+    // is a no-op until the tab's sliders are touched.
+    std::unique_ptr<SimulatedNetTransport> m_simulatedTransport;
     std::unique_ptr<NetClient> m_netClient;
     ClientPrediction m_clientPrediction;
     // Reset in OwnShipSync::SpawnIfConfirmed; see its own class doc comment
@@ -337,6 +345,15 @@ public:
     [[nodiscard]] std::size_t GetDroppedSnapshotCount() const
     {
         return m_netClient ? m_netClient->GetDroppedSnapshotCount() : 0;
+    }
+
+    // Net debug tab: live artificial delay/jitter/loss (SimulatedNetTransport,
+    // sits below NetClient -- see m_simulatedTransport's own field comment).
+    // nullptr before ConnectToServer runs; caller must check IsNetClient()
+    // first, same convention as every other net accessor here.
+    [[nodiscard]] SimulatedNetTransport::Params* GetSimulatedNetParams()
+    {
+        return m_simulatedTransport ? &m_simulatedTransport->GetParams() : nullptr;
     }
 };
 

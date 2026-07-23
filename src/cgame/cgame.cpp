@@ -104,7 +104,8 @@ void CGame::RenderMinimap()
 void CGame::ConnectToServer(const std::string& wsUrl)
 {
     m_netTransport = std::make_unique<WebRtcTransport>(WebRtcTransport::Role::Offerer);
-    m_netClient = std::make_unique<NetClient>(*m_netTransport, "gravitaris-client");
+    m_simulatedTransport = std::make_unique<SimulatedNetTransport>(*m_netTransport);
+    m_netClient = std::make_unique<NetClient>(*m_simulatedTransport, "gravitaris-client");
     m_ownShipSync.emplace(m_clientPrediction, *m_netClient, m_predictedTickClock);
     m_remoteEventApplier.emplace(*m_netClient, m_eventQueue, m_cosmeticBulletDespawner);
     m_netTransport->ConnectSignaling(wsUrl);

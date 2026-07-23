@@ -37,6 +37,26 @@ void DrawNetPanel(CGame& game)
         return;
     }
 
+    if (SimulatedNetTransport::Params* sim = game.GetSimulatedNetParams()) {
+        ImGui::SeparatorText("Simulated network conditions");
+        ImGui::TextWrapped("Chrome DevTools' network throttling doesn't touch WebRTC data channels at "
+                           "all, so it's a no-op once in-game -- this dials artificial lag/loss in "
+                           "directly instead, live, no OS tool needed.");
+
+        ImGui::SetNextItemWidth(160.f);
+        ImGui::SliderFloat("Delay (ms, one-way)", &sim->delayMs, 0.f, 1000.f, "%.0f");
+        ImGui::SetItemTooltip("Added once per direction (Send and the reply's Poll each pay it), so a "
+                              "round trip feels roughly double this on top of the real network's own.");
+
+        ImGui::SetNextItemWidth(160.f);
+        ImGui::SliderFloat("Jitter (ms, +/-)", &sim->jitterMs, 0.f, 500.f, "%.0f");
+
+        ImGui::SetNextItemWidth(160.f);
+        ImGui::SliderFloat("Packet loss (%)", &sim->lossPercent, 0.f, 100.f, "%.0f");
+        ImGui::SetItemTooltip("Independent chance to silently drop each packet -- Send and incoming "
+                              "Poll events both roll separately, so this applies per direction too.");
+    }
+
     ImGui::SeparatorText("Interpolation (docs/networking-plan.md Phase 4)");
 
     float delayMs = game.GetInterpDelaySeconds() * 1000.f;

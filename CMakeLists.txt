@@ -516,6 +516,8 @@ add_executable(GravitarisNG
     src/game/net/webrtc-signaling.cpp
     include/gravitaris/game/net/webrtc-transport.hpp
     src/game/net/webrtc-transport.cpp
+    include/gravitaris/game/net/simulated-net-transport.hpp
+    src/game/net/simulated-net-transport.cpp
     include/gravitaris/cgame/net/rolling-history.hpp
     include/gravitaris/cgame/net/net-diagnostics.hpp
     include/gravitaris/cgame/net/cosmetic-bullet-despawner.hpp
