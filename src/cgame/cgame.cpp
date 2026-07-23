@@ -124,7 +124,7 @@ void CGame::TickNetClient(const ControlFlags& flags)
         // prediction-stability role is moot without prediction, but its
         // monotonic advance (self-resyncing to the wall-clock estimate on
         // the first call, m_nextTick starting at 0) is exactly what's needed.
-        const std::uint64_t target = m_netClient->EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS;
+        const std::uint64_t target = m_netClient->EstimateCurrentServerTick() + m_netClient->GetInputLeadTicks();
         m_netClient->SendInput(m_predictedTickClock.Advance(target).tick, flags);
         return;
     }
