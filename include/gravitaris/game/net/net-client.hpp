@@ -37,6 +37,11 @@ class NetClient {
     // anything else.
     TeamId m_requestedTeam = TeamId::None;
 
+    // See GetInputLeadTicks's own doc comment (declared further down, in the
+    // public section -- this initializer is fine referencing it: default
+    // member initializers are parsed in complete-class context).
+    std::uint64_t m_inputLeadTicks = INPUT_LEAD_TICKS;
+
     std::uint64_t m_lastAckedSnapshotTick = 0;
     std::uint32_t m_lastAckedEventSeq = 0;
     // Wall-clock time the above tick was received, for EstimateCurrentServerTick.
@@ -120,19 +125,25 @@ public:
 
     // Appends a command to the resend window and sends a ClientInput packet
     // stamped with `tick`. The caller supplies it explicitly (typically
-    // `EstimateCurrentServerTick() + INPUT_LEAD_TICKS`, but see
+    // `EstimateCurrentServerTick() + GetInputLeadTicks()`, but see
     // ClientPrediction: it needs the *exact* tick number it locally
     // predicted with -- re-deriving a fresh, possibly-jittery estimate here
-    // instead would desync the two). INPUT_LEAD_TICKS is slack for one-way
-    // trip + jitter on top of the estimate: queued commands with a future
-    // tick just wait in InputQueue until due, so leading further than
-    // strictly needed costs nothing but a slightly longer own-ship
-    // prediction/replay window and a marginally later apparent reaction
-    // time for *other* clients watching this one's ship via snapshots (the
-    // owning client itself is unaffected -- it always applies its own input
-    // immediately via ClientPrediction, regardless of this stamped tick).
-    // No-ops before the handshake completes (there's no ship to control
-    // yet).
+    // instead would desync the two). The lead is slack for one-way trip +
+    // jitter on top of the estimate: a queued command with a future tick
+    // just waits in InputQueue until the server's own tick counter reaches
+    // it -- InputSystem only ever applies an exact tick == step match (see
+    // its own Update()), never early. In predict mode that wait is
+    // invisible to the *owning* client (it always applies its own input
+    // immediately via ClientPrediction, regardless of this stamped tick) --
+    // only *other* clients watching this one's ship via snapshots see a
+    // marginally later reaction. Without prediction (the no-client-
+    // prediction branch) that assumption breaks: the wait becomes real,
+    // directly felt input lag for the owning client too, since nothing
+    // local shows the result any sooner. No-ops before the handshake
+    // completes (there's no ship to control yet).
+    void SendInput(std::uint64_t tick, const ControlFlags& flags);
+
+    // Default/fallback lead (see GetInputLeadTicks) -- 8 (133ms @ 60Hz).
     //
     // 2 (33ms) was confirmed too tight from a real two-peer LAN session's
     // server logs (2026-07-19): "input arrived N ticks late" fired
@@ -143,9 +154,20 @@ public:
     // diverges from what ClientPrediction predicted -> a reconciliation
     // snap next snapshot. That recurring-every-few-seconds cadence matches
     // "still jitters often" exactly. Raised past the observed max with
-    // headroom for jitter this short a sample didn't happen to catch.
+    // headroom for jitter this short a sample didn't happen to catch --
+    // tuned for *predicted* peers, where the cost of leading further than
+    // strictly needed is invisible (see SendInput's own doc comment).
     static constexpr std::uint64_t INPUT_LEAD_TICKS = 8;
-    void SendInput(std::uint64_t tick, const ControlFlags& flags);
+
+    // Runtime-adjustable version of the same knob (defaults to
+    // INPUT_LEAD_TICKS): predict-mode peers rarely need to touch this, but a
+    // no-predict peer feels every tick of it directly as input lag, so it's
+    // worth dialing down to the smallest value real measured RTT/jitter
+    // (GetLastPingMs/GetAveragePingMs) actually needs -- too low reintroduces
+    // the stale-drop/repeat-last-command jitter the 8-tick default was raised
+    // to fix.
+    [[nodiscard]] std::uint64_t GetInputLeadTicks() const { return m_inputLeadTicks; }
+    void SetInputLeadTicks(std::uint64_t ticks) { m_inputLeadTicks = ticks; }
 
     // Must be called before the handshake fires (i.e. before the first
     // Update() that observes a Connected event) to take effect -- ClientHello

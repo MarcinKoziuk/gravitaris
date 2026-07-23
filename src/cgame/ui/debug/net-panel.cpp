@@ -49,6 +49,18 @@ void DrawNetPanel(CGame& game)
                           "lag is real network/transport latency or comes from tuned budgets "
                           "(interpolation delay, INPUT_LEAD_TICKS) instead.");
 
+    int leadTicks = static_cast<int>(game.GetInputLeadTicks());
+    ImGui::SetNextItemWidth(160.f);
+    if (ImGui::SliderInt("Input lead (ticks)", &leadTicks, 0, 20)) {
+        game.SetInputLeadTicks(static_cast<std::uint64_t>(std::max(leadTicks, 0)));
+    }
+    ImGui::SetItemTooltip("How far ahead of the estimated server tick this client's own input is "
+                          "stamped -- a command waits in the server's queue until its stamped tick "
+                          "arrives, so this is a real floor on how soon it can possibly take effect. "
+                          "Set it just above the Ping above (in ticks: ms / 16.7 @ 60Hz) plus a little "
+                          "jitter headroom. Too low: input arrives 'late', gets dropped as stale, and "
+                          "repeats the last held command until the next one lands.");
+
     if (SimulatedNetTransport::Params* sim = game.GetSimulatedNetParams()) {
         ImGui::SeparatorText("Simulated network conditions");
         ImGui::TextWrapped("Chrome DevTools' network throttling doesn't touch WebRTC data channels at "

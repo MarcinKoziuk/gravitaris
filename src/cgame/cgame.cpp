@@ -123,7 +123,7 @@ void CGame::TickNetClient(const ControlFlags& flags)
     }
     if (!m_clientPrediction.HasOwnShip()) return;
 
-    const std::uint64_t target = m_netClient->EstimateCurrentServerTick() + NetClient::INPUT_LEAD_TICKS;
+    const std::uint64_t target = m_netClient->EstimateCurrentServerTick() + m_netClient->GetInputLeadTicks();
     const PredictedTickClock::AdvanceResult advance = m_predictedTickClock.Advance(target);
     if (advance.resyncDrift) {
         // A lost tick is permanent backward drift vs. the server's

@@ -330,6 +330,19 @@ public:
     [[nodiscard]] double GetPredictionEpsilon() const { return m_clientPrediction.GetPositionEpsilon(); }
     void SetPredictionEpsilon(double epsilon) { m_clientPrediction.SetPositionEpsilon(epsilon); }
 
+    // Net debug tab: how far ahead of the estimated server tick this
+    // client's own input is stamped (NetClient::GetInputLeadTicks's own doc
+    // comment). Matters most on the no-client-prediction branch, where every
+    // tick of it is felt directly as input lag.
+    [[nodiscard]] std::uint64_t GetInputLeadTicks() const
+    {
+        return m_netClient ? m_netClient->GetInputLeadTicks() : NetClient::INPUT_LEAD_TICKS;
+    }
+    void SetInputLeadTicks(std::uint64_t ticks)
+    {
+        if (m_netClient) m_netClient->SetInputLeadTicks(ticks);
+    }
+
     // Net debug tab: connection-health diagnostics, for telling a real
     // network gap (snapshot interval spikes) apart from a local main-thread
     // stall (drift/resync fires with snapshot interval unaffected).
