@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 
 #include <imgui.h>
 
@@ -49,20 +50,50 @@ void DrawNetPanel(CGame& game)
                           "lag is real network/transport latency or comes from tuned budgets "
                           "(interpolation delay, INPUT_LEAD_TICKS) instead.");
 
+    // 180 ticks (3s) rather than the old 20 (333ms): must comfortably cover
+    // the simulated-delay slider below, whose one-way max (1000ms) implies a
+    // round trip of ~2s once jitter/loss retries are folded in -- 20 ticks
+    // capped this well short of that, so cranking simulated delay past
+    // ~300ms made every command permanently arrive stale no matter how high
+    // this was dragged: the ship goes fully uncontrollable, not a bug in the
+    // simulated transport, just this slider's ceiling being too low to
+    // compensate for it (see PacketType::ClientInput's own doc comment on
+    // net-server.cpp -- a late command isn't merely delayed, it's silently
+    // discarded unapplied, forever, the instant InputSystem's next pass
+    // sees `tick < step`).
     int leadTicks = static_cast<int>(game.GetInputLeadTicks());
     ImGui::SetNextItemWidth(160.f);
-    if (ImGui::SliderInt("Input lead (ticks)", &leadTicks, 0, 20)) {
+    if (ImGui::SliderInt("Input lead (ticks)", &leadTicks, 0, 180)) {
         game.SetInputLeadTicks(static_cast<std::uint64_t>(std::max(leadTicks, 0)));
     }
     ImGui::SetItemTooltip("How far ahead of the estimated server tick this client's own input is "
                           "stamped -- a command waits in the server's queue until its stamped tick "
                           "arrives, so this is a real floor on how soon it can possibly take effect. "
-                          "Set it just above the Ping above (in ticks: ms / 16.7 @ 60Hz) plus a little "
-                          "jitter headroom. Too low: input arrives 'late', gets dropped as stale, and "
-                          "repeats the last held command until the next one lands.");
+                          "Too low: input arrives 'late' and is discarded unapplied, repeating the "
+                          "last held command until one finally lands in time -- at the extreme, full "
+                          "loss of control. Use the suggestion below (from real measured ping) rather "
+                          "than guessing.");
+
+    if (game.GetAveragePingMs() >= 0.f) {
+        constexpr float MS_PER_TICK = static_cast<float>(Game::PHYSICS_DELTA * 1000.0);
+        // +50% margin: the average smooths over jitter that a single unlucky
+        // packet can still exceed -- sizing the lead off the raw average
+        // alone would then intermittently under-cover it.
+        const auto suggested =
+                static_cast<int>(std::ceil(game.GetAveragePingMs() * 1.5f / MS_PER_TICK));
+        ImGui::Text("Suggested (1.5x avg ping): %d ticks", suggested);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Apply##lead")) {
+            game.SetInputLeadTicks(static_cast<std::uint64_t>(std::max(suggested, 0)));
+        }
+    }
 
     if (SimulatedNetTransport::Params* sim = game.GetSimulatedNetParams()) {
         ImGui::SeparatorText("Simulated network conditions");
+        ImGui::TextWrapped("Raising Delay here pushes real measured Ping up too (Ping travels the same "
+                           "simulated path) -- re-check the Input lead suggestion above after changing "
+                           "it, or every command starts arriving permanently late and the ship stops "
+                           "responding entirely.");
         ImGui::TextWrapped("Chrome DevTools' network throttling doesn't touch WebRTC data channels at "
                            "all, so it's a no-op once in-game -- this dials artificial lag/loss in "
                            "directly instead, live, no OS tool needed.");
