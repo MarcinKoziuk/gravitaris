@@ -426,7 +426,7 @@ void TestClientPrediction()
     ControlFlags noInput{};
     EntityState closeMatch{}; // captured at tick 5, below, for the no-correction case
     for (std::uint64_t tick = 0; tick < 10; ++tick) {
-        prediction.Step(tick, noInput, planets, tick);
+        prediction.Step(tick, noInput, planets, tick, /*ownShipNetId=*/0);
         if (tick == 5) {
             const Transform& t = prediction.GetOwnShip().get<Transform>();
             closeMatch.pos = Magnum::Vector2{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
@@ -441,7 +441,7 @@ void TestClientPrediction()
     // A close authoritative match at an already-predicted tick (exactly what
     // was predicted for tick 5, captured above) should not trigger a
     // correction.
-    const std::optional<Vector2d> noCorrection = prediction.Reconcile(5, closeMatch, planets);
+    const std::optional<Vector2d> noCorrection = prediction.Reconcile(5, closeMatch, planets, /*ownShipNetId=*/0);
     Require(!noCorrection.has_value(), "prediction: an authoritative state matching the prediction triggers no correction");
 
     // A divergent authoritative state should snap + replay.
@@ -450,7 +450,7 @@ void TestClientPrediction()
     divergent.rot = 0.f;
     divergent.vel = {0.f, 0.f};
     divergent.angVel = 0.f;
-    const std::optional<Vector2d> correction = prediction.Reconcile(5, divergent, planets);
+    const std::optional<Vector2d> correction = prediction.Reconcile(5, divergent, planets, /*ownShipNetId=*/0);
     Require(correction.has_value(), "prediction: a large divergence triggers a correction");
 
     const Transform& corrected = prediction.GetOwnShip().get<Transform>();
@@ -463,7 +463,7 @@ void TestClientPrediction()
 
     // Re-querying the same tick again finds nothing -- it was consumed by
     // the replay above (history now only holds ticks after it).
-    const std::optional<Vector2d> stale = prediction.Reconcile(5, divergent, planets);
+    const std::optional<Vector2d> stale = prediction.Reconcile(5, divergent, planets, /*ownShipNetId=*/0);
     Require(!stale.has_value(), "prediction: re-reconciling an already-replayed tick finds nothing");
 
     // Phase 6: local fire feedback (same ClientPrediction/Game, continuing
@@ -479,7 +479,7 @@ void TestClientPrediction()
 
     ControlFlags firing{};
     firing.firePrimary = true;
-    prediction.Step(10, firing, planets, 10);
+    prediction.Step(10, firing, planets, 10, /*ownShipNetId=*/0);
     Require(eventQueue.LatestSeq() == 1, "prediction: firing emits a local BulletFired event");
     Require(countBulletEntities() == 1, "prediction: firing spawns exactly one locally-predicted bullet");
 
@@ -494,12 +494,12 @@ void TestClientPrediction()
     // Cooldown gates the cadence: holding the trigger for FIRE_COOLDOWN_TICKS
     // - 1 more ticks must not emit another event yet.
     for (std::uint64_t tick = 11; tick < 10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS; ++tick) {
-        prediction.Step(tick, firing, planets, tick);
+        prediction.Step(tick, firing, planets, tick, /*ownShipNetId=*/0);
     }
     Require(eventQueue.LatestSeq() == 1, "prediction: fire cooldown gates cadence, no event mid-cooldown");
 
     prediction.Step(10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS, firing, planets,
-                    10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS);
+                    10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS, /*ownShipNetId=*/0);
     Require(eventQueue.LatestSeq() == 2, "prediction: cooldown expiring lets the next held shot fire");
 
     // Phase 7: planet collision proxies have real collision geometry, not
@@ -519,10 +519,68 @@ void TestClientPrediction()
     const std::vector<EntityState> collidingPlanets{collidingPlanet};
 
     const std::uint64_t collideTick = 10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS + 1;
-    prediction.Step(collideTick, ControlFlags{}, collidingPlanets, collideTick);
+    prediction.Step(collideTick, ControlFlags{}, collidingPlanets, collideTick, /*ownShipNetId=*/0);
     const Magnum::Vector2d afterCollision = prediction.GetOwnShip().get<Transform>().pos;
     Require((afterCollision - beforeCollision).length() > 0.1,
             "prediction: planet collision proxy has real shape, pushes the ship out of a deep overlap");
+
+    // Phase 7.1: a remote ship also gets a real collision proxy now (fixes
+    // pass-through-then-teleport on ship-ship contact during prediction --
+    // see ClientPrediction's own class doc comment). Same setup as the
+    // planet case just above: place a ship-typed EntityState's proxy exactly
+    // at the local ship's current position and confirm Chipmunk's contact
+    // resolution pushes it back out.
+    const Magnum::Vector2d beforeShipCollision = prediction.GetOwnShip().get<Transform>().pos;
+    EntityState collidingShip{};
+    collidingShip.netId = 200;
+    collidingShip.type = NetEntityType::Ship;
+    collidingShip.modelId = "models/ships/fighter-1"_id;
+    collidingShip.pos = Magnum::Vector2{static_cast<float>(beforeShipCollision.x()),
+                                        static_cast<float>(beforeShipCollision.y())};
+    const std::vector<EntityState> collidingShips{collidingShip};
+
+    const std::uint64_t shipCollideTick = collideTick + 1;
+    prediction.Step(shipCollideTick, ControlFlags{}, collidingShips, shipCollideTick, /*ownShipNetId=*/0);
+    const Magnum::Vector2d afterShipCollision = prediction.GetOwnShip().get<Transform>().pos;
+    Require((afterShipCollision - beforeShipCollision).length() > 0.1,
+            "prediction: a remote ship collision proxy has real shape, pushes the ship out of a deep overlap");
+
+    // The peer's own ship NetId must be excluded, or a client would collide
+    // with a proxy standing in for its own real, already-simulated ship.
+    // Force a known, motionless baseline first via Reconcile -- the ship
+    // exits the collision above carrying whatever residual velocity
+    // Chipmunk's contact resolution left it with, and a "no meaningful
+    // displacement" check below only means something from a ship truly at
+    // rest. `shipCollideTick` is still the latest captured entry (nothing
+    // history-side happened since), so there's nothing to replay -- the
+    // supplied authoritative state becomes the ship's exact new state, no
+    // approximation. One settle tick with an empty entity list follows:
+    // Chipmunk's own solver produces a one-time sub-unit position nudge on
+    // whatever tick immediately follows a large direct cpBodySetPosition
+    // teleport, regardless of what (if anything) is in the entity list --
+    // confirmed independently of this proxy-exclusion check -- so the actual
+    // measurement below starts from a position already past that artifact,
+    // not conflating it with what this check is for.
+    EntityState atRest{};
+    atRest.pos = Magnum::Vector2{2000.f, 2000.f}; // far from every proxy above
+    prediction.Reconcile(shipCollideTick, atRest, {}, /*ownShipNetId=*/0);
+    prediction.Step(shipCollideTick + 1, ControlFlags{}, {}, shipCollideTick + 1, /*ownShipNetId=*/0);
+
+    // Fresh NetId at that same motionless position, tagged as `ownShipNetId`
+    // this time: no proxy should be created, so no displacement, unlike the
+    // identical-in-every-other-way case just above.
+    const Magnum::Vector2d beforeOwnCheck = prediction.GetOwnShip().get<Transform>().pos;
+    EntityState ownShipState{};
+    ownShipState.netId = 201;
+    ownShipState.type = NetEntityType::Ship;
+    ownShipState.modelId = "models/ships/fighter-1"_id;
+    ownShipState.pos = Magnum::Vector2{static_cast<float>(beforeOwnCheck.x()), static_cast<float>(beforeOwnCheck.y())};
+    const std::vector<EntityState> ownShipOnly{ownShipState};
+
+    prediction.Step(shipCollideTick + 2, ControlFlags{}, ownShipOnly, shipCollideTick + 2, /*ownShipNetId=*/201);
+    const Magnum::Vector2d afterOwnCheck = prediction.GetOwnShip().get<Transform>().pos;
+    Require((afterOwnCheck - beforeOwnCheck).length() < 0.1,
+            "prediction: a ship EntityState tagged as ownShipNetId gets no collision proxy");
 
     // Bug fix found via real multiplayer playtesting (2026-07-19):
     // Reconcile() must return where prediction currently says the ship is
@@ -541,7 +599,7 @@ void TestClientPrediction()
     // sustained thrust, is far away and would fail this check under the old
     // buggy behavior).
     const std::vector<EntityState> noPlanets{};
-    const std::uint64_t straightStart = collideTick + 1;
+    const std::uint64_t straightStart = shipCollideTick + 3;
     ControlFlags thrustOnly{};
     thrustOnly.thrustForward = true;
 
@@ -551,7 +609,7 @@ void TestClientPrediction()
     double angVelAtReconcileTick = 0.;
     const std::uint64_t reconcileTick = straightStart + 5;
     for (std::uint64_t tick = straightStart; tick < straightStart + 60; ++tick) {
-        prediction.Step(tick, thrustOnly, noPlanets, tick);
+        prediction.Step(tick, thrustOnly, noPlanets, tick, /*ownShipNetId=*/0);
         if (tick == reconcileTick) {
             const Transform& rt = prediction.GetOwnShip().get<Transform>();
             posAtReconcileTick = rt.pos;
@@ -571,7 +629,8 @@ void TestClientPrediction()
     tinyDivergence.vel = Magnum::Vector2{static_cast<float>(velAtReconcileTick.x()),
                                         static_cast<float>(velAtReconcileTick.y())};
     tinyDivergence.angVel = static_cast<float>(angVelAtReconcileTick);
-    const std::optional<Vector2d> preCorrectionNow = prediction.Reconcile(reconcileTick, tinyDivergence, noPlanets);
+    const std::optional<Vector2d> preCorrectionNow =
+            prediction.Reconcile(reconcileTick, tinyDivergence, noPlanets, /*ownShipNetId=*/0);
     Require(preCorrectionNow.has_value(), "prediction: a just-past-epsilon divergence still triggers a correction");
     Require((*preCorrectionNow - posNow).length() < 5.0,
             "prediction: Reconcile's returned position reflects 'now', not the far-away reconciled tick");

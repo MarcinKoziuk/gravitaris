@@ -49,30 +49,45 @@ void ClientPrediction::SpawnOwnShip(id_t modelId, Magnum::Vector2d initialPos, T
     m_ownShip = m_entitySpawner.SpawnPlayer(modelId, initialPos, team);
 }
 
-void ClientPrediction::SyncPlanetProxies(const std::vector<EntityState>& planets, std::uint64_t baseTick,
-                                         std::uint64_t atTick)
-{
-    for (const EntityState& state : planets) {
-        if (state.type != NetEntityType::Planet) continue;
+namespace {
 
-        const auto it = m_planetProxies.find(state.netId);
-        flecs::entity proxy = (it != m_planetProxies.end()) ? it->second : flecs::entity{};
+// Which of `snapshotEntities` get a collision proxy at all: every planet,
+// and every ship other than this peer's own (already real and dynamic in
+// this same registry -- see the class doc comment on why never both).
+bool NeedsCollisionProxy(const EntityState& state, std::uint32_t ownShipNetId)
+{
+    if (state.type == NetEntityType::Planet) return true;
+    return state.type == NetEntityType::Ship && state.netId != ownShipNetId;
+}
+
+} // namespace
+
+void ClientPrediction::SyncCollisionProxies(const std::vector<EntityState>& snapshotEntities,
+                                            std::uint32_t ownShipNetId, std::uint64_t baseTick, std::uint64_t atTick)
+{
+    for (const EntityState& state : snapshotEntities) {
+        if (!NeedsCollisionProxy(state, ownShipNetId)) continue;
+
+        const auto it = m_collisionProxies.find(state.netId);
+        flecs::entity proxy = (it != m_collisionProxies.end()) ? it->second : flecs::entity{};
 
         if (!proxy.is_alive()) {
-            // Same Body resource the real sim loads for this planet (by the
+            // Same Body resource the real sim loads for this entity (by the
             // already-replicated modelId) -- its kinematic-ness and collision
             // shape come along for free, no separate wire field needed.
             const ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(state.modelId);
             proxy = m_registry.entity();
             proxy.emplace<Transform>(Magnum::Vector2d{state.pos});
             proxy.emplace<RigidBodyDesc>("main"_id, body);
-            m_planetProxies[state.netId] = proxy;
+            m_collisionProxies[state.netId] = proxy;
         }
 
         // (Re)apply GravitySource every sync, not just at creation: harmless
         // if unchanged, but keeps this correct if a planet's replicated
         // mass/multiplier ever changes (e.g. a future gravity-multiplier
         // debug tab affecting the server) without needing extra bookkeeping.
+        // Always 0 for a ship (no GravitySource server-side), so this is
+        // naturally a no-op for those without a separate type check.
         if (state.gravityMass > 0.f) {
             proxy.set<GravitySource>(GravitySource{state.gravityMass, state.gravityMultiplier});
         }
@@ -80,34 +95,46 @@ void ClientPrediction::SyncPlanetProxies(const std::vector<EntityState>& planets
         // orbitRadius > 0 (not isStar -- that's a camera/minimap color hint,
         // not an "orbit data present" signal, though the two coincide for
         // any real server-generated snapshot) is the same "does this entity
-        // actually orbit" guard OrbitSystem itself uses server-side: a star
-        // has no Orbit component so this stays at its default zero, and it
-        // simply sits at its replicated position. An orbiting planet's exact
-        // position/velocity at `atTick` is re-derived analytically instead
-        // of trusted from the snapshot's own (necessarily somewhat stale)
-        // raw pos/vel -- see EvaluateOrbit and this method's own doc comment.
+        // actually orbit" guard OrbitSystem itself uses server-side: only a
+        // Planet ever has this set (a Ship's is always 0, same reasoning as
+        // gravityMass above), so this naturally routes every planet through
+        // the exact analytic path and every ship through dead reckoning
+        // with no separate type check here either. An orbiting planet's
+        // exact position/velocity at `atTick` is re-derived analytically
+        // (EvaluateOrbit) instead of trusted from the snapshot's own
+        // (necessarily somewhat stale) raw pos/vel; anything else -- a star,
+        // sitting at a fixed position with zero velocity, or a remote ship,
+        // whose motion has no closed form -- is dead-reckoned by
+        // extrapolating its last-replicated velocity forward instead (see
+        // the class doc comment on why that's an accepted approximation for
+        // a ship specifically).
         if (state.orbitRadius > 0.f) {
             Magnum::Vector2d pos, vel;
             EvaluateOrbit(state, baseTick, atTick, pos, vel);
             m_physicsSystem.SetKinematicMotion(proxy.get<PhysicsRef>(), pos, vel);
         }
         else {
-            m_physicsSystem.SetKinematicMotion(proxy.get<PhysicsRef>(), Magnum::Vector2d{state.pos},
-                                               Magnum::Vector2d{state.vel});
+            const double elapsedSeconds =
+                    (static_cast<double>(atTick) - static_cast<double>(baseTick)) * Game::PHYSICS_DELTA;
+            const Magnum::Vector2d vel{state.vel};
+            const Magnum::Vector2d pos = Magnum::Vector2d{state.pos} + vel * elapsedSeconds;
+            m_physicsSystem.SetKinematicMotion(proxy.get<PhysicsRef>(), pos, vel);
         }
     }
 
-    // Prune proxies for planets no longer present. Doesn't normally happen
-    // (planets don't despawn), but keeps this correct if it ever does.
-    for (auto it = m_planetProxies.begin(); it != m_planetProxies.end();) {
-        const bool stillPresent = std::any_of(planets.begin(), planets.end(), [&](const EntityState& s) {
-            return s.type == NetEntityType::Planet && s.netId == it->first;
+    // Prune proxies no longer backed by a live entry (planet gone -- doesn't
+    // normally happen; remote ship destroyed, respawned under a new NetId,
+    // or -- this tick -- became this peer's own ship).
+    for (auto it = m_collisionProxies.begin(); it != m_collisionProxies.end();) {
+        const bool stillNeeded = std::any_of(snapshotEntities.begin(), snapshotEntities.end(),
+                                             [&](const EntityState& s) {
+            return s.netId == it->first && NeedsCollisionProxy(s, ownShipNetId);
         });
-        if (stillPresent) {
+        if (stillNeeded) {
             ++it;
         } else {
             if (it->second.is_alive()) it->second.destruct();
-            it = m_planetProxies.erase(it);
+            it = m_collisionProxies.erase(it);
         }
     }
 }
@@ -118,8 +145,9 @@ ClientPrediction::PredictedTick ClientPrediction::CaptureTick(std::uint64_t tick
     return PredictedTick{tick, flags, t.pos, t.rot, t.vel, t.angVel};
 }
 
-void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags, const std::vector<EntityState>& planets,
-                            std::uint64_t planetsBaseTick)
+void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
+                            const std::vector<EntityState>& snapshotEntities, std::uint64_t snapshotBaseTick,
+                            std::uint32_t ownShipNetId)
 {
     if (!HasOwnShip()) return;
 
@@ -128,14 +156,14 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags, const
     // tag group in ModelRenderer2, notably) ever reflects live input.
     m_ownShip.get_mut<Controls>().actionFlags = flags;
 
-    // Position/velocity the planet collision proxies (Phase 7) before this
+    // Position/velocity the collision proxies (Phase 7/7.1) before this
     // tick's step, so PhysicsSystem::Simulate's own per-space gravity pass
     // and Chipmunk's contact resolution both see them where they actually
     // are this tick -- gravity is no longer a manual force here at all, it
     // falls out of that existing machinery once these proxies exist. `tick`
-    // (this Step's target), not `planetsBaseTick` (the snapshot's own,
-    // always somewhat older tick) -- see SyncPlanetProxies/EvaluateOrbit.
-    SyncPlanetProxies(planets, planetsBaseTick, tick);
+    // (this Step's target), not `snapshotBaseTick` (the snapshot's own,
+    // always somewhat older tick) -- see SyncCollisionProxies/EvaluateOrbit.
+    SyncCollisionProxies(snapshotEntities, ownShipNetId, snapshotBaseTick, tick);
 
     cpBody* body = m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()).cp.body.get();
     ShipControlsSystem::ApplyMovement(body, flags);
@@ -180,7 +208,8 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags, const
 
 std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t authoritativeTick,
                                                             const EntityState& authoritative,
-                                                            const std::vector<EntityState>& planets)
+                                                            const std::vector<EntityState>& snapshotEntities,
+                                                            std::uint32_t ownShipNetId)
 {
     if (!HasOwnShip()) return std::nullopt;
 
@@ -220,12 +249,17 @@ std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t author
     std::vector<PredictedTick> toReplay(std::next(it), m_history.end());
     m_history.clear();
     for (const PredictedTick& pending : toReplay) {
-        // Planet proxies positioned fresh for each replayed tick (via
-        // EvaluateOrbit, cheap now that it's a closed form) rather than once
+        // Proxies positioned fresh for each replayed tick (via EvaluateOrbit
+        // for a planet, cheap now that it's a closed form) rather than once
         // for the whole replay against `authoritativeTick`'s positions --
         // this used to be an accepted approximation (see Step's own history
-        // on why that mattered) but there's no reason to keep it now.
-        SyncPlanetProxies(planets, authoritativeTick, pending.tick);
+        // on why that mattered) but there's no reason to keep it now. A
+        // remote ship proxy still only dead-reckons from `authoritativeTick`
+        // (there's no better data mid-replay), so it drifts from wherever
+        // the server actually put it further out a replay runs -- an
+        // additional, smaller approximation on top of the ship-proxy
+        // tradeoffs the class doc comment already accepts.
+        SyncCollisionProxies(snapshotEntities, ownShipNetId, authoritativeTick, pending.tick);
         m_ownShip.get_mut<Controls>().actionFlags = pending.flags;
         ShipControlsSystem::ApplyMovement(body, pending.flags);
         m_physicsSystem.Simulate(Game::PHYSICS_DELTA);

@@ -22,17 +22,20 @@ namespace Gravitaris {
 // Client-side prediction + reconciliation for the local player's own ship
 // only (docs/networking-plan.md Phase 5; every other entity stays on Phase
 // 4's interpolation path via SnapshotInterpolator/SnapshotApplier). Owns a
-// single locally-simulated entity, spawned via the same EntitySpawner::
-// SpawnPlayer real single-player uses -- real Chipmunk body, real
-// RigidBodyDesc("main"_id, ...). Nothing but this ship and the planet
-// -collision proxies below (Phase 7) is ever spawned into this registry, so
-// there is no *other ship* to collide with, satisfying ADR 0001 constraint
-// 6's "no ship-ship contacts during replay" by construction rather than by
-// filtering.
+// single locally-simulated dynamic entity, spawned via the same
+// EntitySpawner::SpawnPlayer real single-player uses -- real Chipmunk body,
+// real RigidBodyDesc("main"_id, ...). Everything else in this registry is a
+// client-only *kinematic* collision proxy (Phase 7/7.1, SyncCollisionProxies)
+// standing in for a replicated entity this ship needs to physically collide
+// with locally -- planets (always) and remote ships (Phase 7.1) -- so there
+// is exactly one real dynamic body simulated here, satisfying ADR 0001
+// constraint 6's "no ship-ship contacts during replay" (no dynamic-vs-dynamic
+// pair ever exists in this registry, by construction) while still letting
+// the predicted ship collide with something solid instead of phasing
+// through it.
 //
-// Planets are real kinematic collision proxies now (Phase 7,
-// SyncPlanetProxies), positioned each tick by re-deriving their exact
-// analytic orbit position at the tick actually being predicted (EvaluateOrbit,
+// A planet proxy is positioned each tick by re-deriving its exact analytic
+// orbit position at the tick actually being predicted (EvaluateOrbit,
 // game/net/snapshot.hpp) rather than by running a second, independently
 // -seeded OrbitSystem simulation locally: two orbit simulations starting from
 // different wall-clock moments (server boot vs. this client's join time)
@@ -48,10 +51,21 @@ namespace Gravitaris {
 // per-space ApplyGravity finds these proxies' GravitySource components and
 // just works, same as single-player. Landing on a planet during prediction
 // now behaves correctly (real contact response against the moving kinematic
-// surface); ship-ship contact is still not predicted (see the proxies' own
-// doc comment on why that one stays out of scope) -- any discrepancy there
-// is corrected on the next reconciliation once the server's real collision
-// response arrives in a snapshot.
+// surface).
+//
+// A remote ship proxy has no closed form to re-derive the way an orbit does
+// (a pilot's own motion isn't a function of the tick), so it's dead-reckoned
+// instead: last-replicated position extrapolated forward by last-replicated
+// velocity, the same approximation SnapshotInterpolator itself falls back to
+// past the newest snapshot. Kinematic means infinite mass from the local
+// ship's point of view -- it bounces off a remote ship like a wall, doesn't
+// visibly push the remote ship back (that recoil arrives via its own later
+// snapshots), and can over- or under-bounce slightly vs. the server's real
+// dynamic-vs-dynamic response. Both are accepted approximations: the
+// alternative (pass straight through until the server's snapshot catches up
+// and reconciliation teleports the ship to the post-bounce result) is a far
+// worse-looking discontinuity than an approximate local bounce corrected by
+// a small nudge next snapshot.
 //
 // Headless (game/-level, ADR constraint 1): built entirely from
 // PhysicsSystem/EntitySpawner/ResourceLoader (which a real Game already
@@ -109,59 +123,72 @@ public:
     // Advances the local prediction by exactly one Game::PHYSICS_DELTA tick:
     // applies `flags` (rotation/thrust, and now firePrimary -- Phase 6), the
     // same weapon cooldown ShipControlsSystem uses so cadence matches, gravity
-    // from `planets` (this snapshot's Planet-typed EntityStates), integrates,
-    // and records the result keyed by `tick`. On firing, spawns the
-    // cosmetic bullet this client actually sees (zero damage -- hits stay
-    // server-authoritative) and emits a local BulletFired event into
-    // `eventQueue` so AudioSystem's event-driven one-shot plays the fire
-    // sound instantly; neither is ever serialized/sent. The server omits
-    // this peer's own bullets from its snapshots (GatherSnapshot's
-    // suppressBulletsOwnedBy), so exactly one tracer is ever on screen per
-    // shot -- drawing both is what made an earlier attempt show two
-    // separate tracers, the own ship rendering ~INPUT_LEAD_TICKS ahead of
-    // where replicated entities render. The caller owns tick numbering
-    // (see NetClient::SendInput -- the same number must be sent on the wire
-    // for Reconcile() to later find this entry). No-op if SpawnOwnShip
-    // hasn't been called yet.
-    // `planetsBaseTick`: the snapshot tick `planets` came from (i.e. the
-    // orbit fields' own baseline -- see EvaluateOrbit), separate from `tick`
-    // (this Step's target predicted tick, always somewhat ahead of the
-    // latest snapshot) since planet proxies are positioned at the latter,
-    // not the former.
-    void Step(std::uint64_t tick, const ControlFlags& flags, const std::vector<EntityState>& planets,
-             std::uint64_t planetsBaseTick);
+    // from `snapshotEntities` (this snapshot's Planet-typed EntityStates --
+    // see SyncCollisionProxies for how remote ships in the same list are
+    // used instead), integrates, and records the result keyed by `tick`. On
+    // firing, spawns the cosmetic bullet this client actually sees (zero
+    // damage -- hits stay server-authoritative) and emits a local
+    // BulletFired event into `eventQueue` so AudioSystem's event-driven
+    // one-shot plays the fire sound instantly; neither is ever serialized/
+    // sent. The server omits this peer's own bullets from its snapshots
+    // (GatherSnapshot's suppressBulletsOwnedBy), so exactly one tracer is
+    // ever on screen per shot -- drawing both is what made an earlier
+    // attempt show two separate tracers, the own ship rendering ~INPUT_LEAD_
+    // TICKS ahead of where replicated entities render. The caller owns tick
+    // numbering (see NetClient::SendInput -- the same number must be sent on
+    // the wire for Reconcile() to later find this entry). No-op if
+    // SpawnOwnShip hasn't been called yet.
+    // `snapshotBaseTick`: the snapshot tick `snapshotEntities` came from
+    // (i.e. the orbit fields' own baseline -- see EvaluateOrbit), separate
+    // from `tick` (this Step's target predicted tick, always somewhat ahead
+    // of the latest snapshot) since proxies are positioned at the latter,
+    // not the former. `ownShipNetId` (NetClient::GetYourShipNetId()): the
+    // server's own snapshot includes this peer's own ship like any other,
+    // so SyncCollisionProxies needs it to skip building a proxy for a ship
+    // that's already real and dynamic right here.
+    void Step(std::uint64_t tick, const ControlFlags& flags, const std::vector<EntityState>& snapshotEntities,
+             std::uint64_t snapshotBaseTick, std::uint32_t ownShipNetId);
 
     // Compares the authoritative state for `authoritativeTick` (from a
     // newly arrived snapshot) against what was predicted for it; if they've
     // diverged past POSITION_EPSILON, snaps to the authoritative state and
-    // replays every predicted tick after it, positioning `planets` (that
-    // same snapshot's orbit-parameter EntityStates, based at
-    // `authoritativeTick`) freshly for each replayed tick via EvaluateOrbit
-    // rather than once for the whole replay. If a correction
-    // happened, returns where prediction currently says the ship is *right
-    // now* (i.e. the most recent predicted tick, before this correction --
-    // NOT the historical position at `authoritativeTick`, which can be many
-    // ticks in the past due to RTT + interp delay; using that instead was a
-    // real bug -- it conflated real correction error with pure travel
-    // distance covered since the reconciled tick, producing a systematic
-    // backward-then-forward-overshoot visual artifact on every correction).
-    // nullopt if the tick wasn't found (already evicted, or not predicted
-    // yet) or was within epsilon.
+    // replays every predicted tick after it, positioning `snapshotEntities`
+    // (that same snapshot's entities, based at `authoritativeTick`) freshly
+    // for each replayed tick via SyncCollisionProxies rather than once for
+    // the whole replay. If a correction happened, returns where prediction
+    // currently says the ship is *right now* (i.e. the most recent predicted
+    // tick, before this correction -- NOT the historical position at
+    // `authoritativeTick`, which can be many ticks in the past due to RTT +
+    // interp delay; using that instead was a real bug -- it conflated real
+    // correction error with pure travel distance covered since the
+    // reconciled tick, producing a systematic backward-then-forward
+    // -overshoot visual artifact on every correction). nullopt if the tick
+    // wasn't found (already evicted, or not predicted yet) or was within
+    // epsilon. `ownShipNetId`: see Step's own doc comment.
     std::optional<Magnum::Vector2d> Reconcile(std::uint64_t authoritativeTick, const EntityState& authoritative,
-                                              const std::vector<EntityState>& planets);
+                                              const std::vector<EntityState>& snapshotEntities,
+                                              std::uint32_t ownShipNetId);
 
 private:
     PredictedTick CaptureTick(std::uint64_t tick, const ControlFlags& flags);
 
     // Creates/updates/prunes the client-only kinematic collision proxies
-    // (Phase 7) for every Planet-typed EntityState in `planets` (all from
-    // the same snapshot, taken at `baseTick`), keyed by NetId, positioned at
-    // `atTick` -- not necessarily `baseTick` itself; see EvaluateOrbit --
-    // via each non-star planet's replicated orbit parameters. Idempotent --
-    // safe to call every Step()/Reconcile(). See the class doc comment for
-    // why these exist and what they deliberately don't do (no Renderable,
-    // no Planet component, no remote-ship equivalent).
-    void SyncPlanetProxies(const std::vector<EntityState>& planets, std::uint64_t baseTick, std::uint64_t atTick);
+    // (Phase 7/7.1) standing in for every Planet-typed EntityState, and every
+    // Ship-typed one other than `ownShipNetId`, in `snapshotEntities` (all
+    // from the same snapshot, taken at `baseTick`), keyed by NetId,
+    // positioned at `atTick` -- not necessarily `baseTick` itself. A planet
+    // is re-derived exactly via its replicated orbit parameters (state.
+    // orbitRadius > 0, same "does this actually orbit" guard OrbitSystem
+    // itself uses -- see EvaluateOrbit); anything else (a star, or a remote
+    // ship, neither of which has a closed-form position) is dead-reckoned
+    // from its last-replicated position/velocity instead -- see the class
+    // doc comment for why that's an accepted approximation for a ship
+    // specifically. Idempotent -- safe to call every Step()/Reconcile(). See
+    // the class doc comment for why these proxies exist and what they
+    // deliberately don't do (no Renderable, no Planet/Team/etc. component --
+    // just enough to physically occupy space).
+    void SyncCollisionProxies(const std::vector<EntityState>& snapshotEntities, std::uint32_t ownShipNetId,
+                              std::uint64_t baseTick, std::uint64_t atTick);
 
     flecs::world& m_registry;
     PhysicsSystem& m_physicsSystem;
@@ -173,8 +200,9 @@ private:
     std::deque<PredictedTick> m_history;
     std::uint32_t m_fireCooldown = 0;
 
-    // Planet NetId -> this client's local collision-proxy entity.
-    std::unordered_map<std::uint32_t, flecs::entity> m_planetProxies;
+    // NetId (a planet or a remote ship) -> this client's local
+    // collision-proxy entity for it.
+    std::unordered_map<std::uint32_t, flecs::entity> m_collisionProxies;
 };
 
 } // namespace Gravitaris

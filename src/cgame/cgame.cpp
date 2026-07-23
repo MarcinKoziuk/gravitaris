@@ -144,7 +144,7 @@ void CGame::TickNetClient(const ControlFlags& flags)
     m_netClient->SendInput(tick, flags);
 
     if (const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot()) {
-        m_clientPrediction.Step(tick, flags, snapshot->entities, snapshot->tick);
+        m_clientPrediction.Step(tick, flags, snapshot->entities, snapshot->tick, m_netClient->GetYourShipNetId());
         m_bulletLifetimeSystem.Update(PHYSICS_DELTA);
     }
 }

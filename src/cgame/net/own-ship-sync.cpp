@@ -69,7 +69,7 @@ std::optional<OwnShipSync::ReconcileResult> OwnShipSync::ReconcileIfNeeded()
     if (!ownShip) return std::nullopt;
 
     const std::optional<Vector2d> preCorrection =
-            m_clientPrediction.Reconcile(snapshot->tick, *ownShip, snapshot->entities);
+            m_clientPrediction.Reconcile(snapshot->tick, *ownShip, snapshot->entities, m_netClient.GetYourShipNetId());
     if (!preCorrection) return std::nullopt;
 
     // The ship's real Transform now holds the corrected position; blend the
