@@ -21,9 +21,11 @@ enum class PacketType : std::uint8_t {
     ServerWelcome = 2,
     ClientInput = 3,
     Snapshot = 4,
+    Ping = 5, // client -> server, diagnostic RTT probe (NetClient::GetLastPingMs)
+    Pong = 6, // server -> client, immediate echo of Ping's seq
 };
 
-inline constexpr std::uint32_t PROTOCOL_VERSION = 2; // v2: +requestedTeam/yourTeam (per-peer team assignment)
+inline constexpr std::uint32_t PROTOCOL_VERSION = 3; // v3: +Ping/Pong (RTT diagnostic)
 
 // How many trailing commands ClientInput carries per send -- redundancy
 // instead of reliability (quake3-style): as long as one of the last N sends
@@ -66,6 +68,22 @@ struct ClientInputPacket {
 // directly by SerializeSnapshot's own bytes (tick, entities, events); decode
 // with ReadSnapshot after consuming the type byte.
 
+// Round-trip time probe: the client stamps `seq` and records its own send
+// time locally (no clock sync needed -- the server never looks at wall-clock
+// time at all, just echoes `seq` straight back in a Pong the instant it
+// arrives). RTT = client's own (now - recorded send time) when the matching
+// Pong comes back. Deliberately its own packet pair rather than piggybacked
+// on ClientInput/Snapshot, so it measures actual wire latency on the same
+// unreliable channel those use, undistorted by snapshot-rate cadence or
+// InputQueue's tick-ahead scheduling.
+struct PingPacket {
+    std::uint32_t seq = 0;
+};
+
+struct PongPacket {
+    std::uint32_t seq = 0;
+};
+
 void WriteClientHello(const ClientHelloPacket& packet, ByteWriter& out);
 bool ReadClientHelloBody(ByteReader& in, ClientHelloPacket& out); // type byte already consumed
 
@@ -74,6 +92,12 @@ bool ReadServerWelcomeBody(ByteReader& in, ServerWelcomePacket& out);
 
 void WriteClientInput(const ClientInputPacket& packet, ByteWriter& out);
 bool ReadClientInputBody(ByteReader& in, ClientInputPacket& out);
+
+void WritePing(const PingPacket& packet, ByteWriter& out);
+bool ReadPingBody(ByteReader& in, PingPacket& out);
+
+void WritePong(const PongPacket& packet, ByteWriter& out);
+bool ReadPongBody(ByteReader& in, PongPacket& out);
 
 // Combined convenience: PacketType::Snapshot + SerializeSnapshot(snapshot).
 void WriteSnapshotPacket(const SnapshotData& snapshot, ByteWriter& out);

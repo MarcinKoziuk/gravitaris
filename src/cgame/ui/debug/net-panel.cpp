@@ -37,6 +37,18 @@ void DrawNetPanel(CGame& game)
         return;
     }
 
+    ImGui::SeparatorText("Connection");
+    if (game.GetAveragePingMs() < 0.f) {
+        ImGui::TextDisabled("Ping: measuring... (first Pong not received yet)");
+    }
+    else {
+        ImGui::Text("Ping (RTT): %.1f ms avg, %.1f ms last", game.GetAveragePingMs(), game.GetLastPingMs());
+    }
+    ImGui::SetItemTooltip("Real measured round-trip time (dedicated Ping/Pong probe, ~1/s), not "
+                          "derived from snapshot cadence. Use this to tell whether perceived input "
+                          "lag is real network/transport latency or comes from tuned budgets "
+                          "(interpolation delay, INPUT_LEAD_TICKS) instead.");
+
     if (SimulatedNetTransport::Params* sim = game.GetSimulatedNetParams()) {
         ImGui::SeparatorText("Simulated network conditions");
         ImGui::TextWrapped("Chrome DevTools' network throttling doesn't touch WebRTC data channels at "

@@ -72,14 +72,63 @@ void NetClient::Update()
                         m_latestSnapshot = std::move(snapshot);
                         break;
                     }
+                    case PacketType::Pong: {
+                        PongPacket pong;
+                        if (!ReadPongBody(reader, pong)) break;
+                        const auto pendingIt = m_pendingPings.find(pong.seq);
+                        if (pendingIt == m_pendingPings.end()) break; // already pruned as stale, or a resend/dup
+                        const auto now = std::chrono::steady_clock::now();
+                        m_lastPingMs =
+                                std::chrono::duration<float, std::milli>(now - pendingIt->second).count();
+                        m_avgPingMs = m_avgPingMs < 0.f
+                                ? m_lastPingMs
+                                : m_avgPingMs + PING_EMA_ALPHA * (m_lastPingMs - m_avgPingMs);
+                        m_pendingPings.erase(pendingIt);
+                        break;
+                    }
                     case PacketType::ClientHello:
                     case PacketType::ClientInput:
+                    case PacketType::Ping:
                         break; // client never receives these
                 }
                 break;
             }
         }
     }
+
+    SendPing();
+}
+
+void NetClient::SendPing()
+{
+    if (!m_connected) return;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (m_lastPingSentTime &&
+        std::chrono::duration<float>(now - *m_lastPingSentTime).count() < PING_INTERVAL_SECONDS) {
+        return;
+    }
+    m_lastPingSentTime = now;
+
+    // Prune stale entries first (a Pong that's never coming, e.g. the
+    // matching Ping was itself dropped) so this map can't grow unbounded
+    // over a long-lived connection.
+    for (auto it = m_pendingPings.begin(); it != m_pendingPings.end();) {
+        if (std::chrono::duration<float>(now - it->second).count() > PING_STALE_SECONDS) {
+            it = m_pendingPings.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    const std::uint32_t seq = m_nextPingSeq++;
+    m_pendingPings[seq] = now;
+
+    PingPacket ping;
+    ping.seq = seq;
+    ByteWriter writer;
+    WritePing(ping, writer);
+    m_transport.Send(SERVER_PEER, 0, writer.Data(), writer.Size(), false);
 }
 
 std::uint64_t NetClient::EstimateCurrentServerTick() const

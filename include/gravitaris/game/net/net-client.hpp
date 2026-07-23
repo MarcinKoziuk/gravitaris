@@ -5,6 +5,7 @@
 #include <deque>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/component/controls.hpp>
@@ -55,6 +56,23 @@ class NetClient {
     // transport shows up here, not as a gap in m_lastSnapshotIntervalMs.
     std::size_t m_droppedSnapshotCount = 0;
 
+    // RTT probe (see PingPacket's own doc comment): self-scheduled inside
+    // Update() rather than driven by the caller, so no cgame-side wiring is
+    // needed to get a real measured number instead of guessing from
+    // snapshot cadence. Send times keyed by seq, pruned on a stale timeout
+    // (a lost Ping/Pong on this unreliable channel must not leak forever).
+    static constexpr float PING_INTERVAL_SECONDS = 1.0f;
+    static constexpr float PING_STALE_SECONDS = 5.0f;
+    std::uint32_t m_nextPingSeq = 0;
+    std::optional<std::chrono::steady_clock::time_point> m_lastPingSentTime;
+    std::unordered_map<std::uint32_t, std::chrono::steady_clock::time_point> m_pendingPings;
+    float m_lastPingMs = -1.f; // -1 = no Pong observed yet
+    // Exponential moving average, same smoothing idea as elsewhere in this
+    // class -- one noisy sample shouldn't visibly jump the Net debug tab's
+    // number every second.
+    static constexpr float PING_EMA_ALPHA = 0.2f;
+    float m_avgPingMs = -1.f;
+
     // Rolling window sent with every ClientInput (CLIENT_INPUT_BACKUP deep);
     // matches InputQueue's own "resend, let the far end dedupe" model.
     std::deque<InputCommand> m_recentCommands;
@@ -86,10 +104,13 @@ public:
     void Update();
 
     // Estimates the server's current sim tick by extrapolating forward from
-    // the last acked snapshot using wall-clock elapsed time (snapshot arrival
-    // is the only clock reference this client has -- no ping/clock-sync
-    // packet exists yet). `lastAckedSnapshotTick` alone goes stale between
-    // snapshots (they arrive at the snapshot rate, not every frame), so a
+    // the last acked snapshot using wall-clock elapsed time. Deliberately
+    // doesn't use the Ping/Pong RTT measurement below -- that's real
+    // round-trip time, but this needs the server's *tick*, and snapshot
+    // arrival is what's actually stamped with one; mixing in a separately
+    // -measured RTT to "help" would just be re-deriving the same estimate
+    // through an extra noisy hop. `lastAckedSnapshotTick` alone goes stale
+    // between snapshots (they arrive at the snapshot rate, not every frame), so a
     // fixed offset from it (the old INPUT_LEAD_TICKS scheme) routinely
     // undershoots once more than one snapshot interval has elapsed since the
     // last ack -- this is why input used to feel "laggy" under real RTT/
@@ -149,6 +170,17 @@ public:
     [[nodiscard]] float GetLastSnapshotIntervalMs() const { return m_lastSnapshotIntervalMs; }
     [[nodiscard]] std::size_t GetAcceptedSnapshotCount() const { return m_acceptedSnapshotCount; }
     [[nodiscard]] std::size_t GetDroppedSnapshotCount() const { return m_droppedSnapshotCount; }
+
+    // Real measured round-trip time (PingPacket's own doc comment) -- not an
+    // estimate derived from snapshot/tick cadence. -1 until the first Pong
+    // arrives. GetLastPingMs is the single most recent sample (noisier);
+    // GetAveragePingMs is the smoothed EMA (what the Net debug tab should
+    // show by default).
+    [[nodiscard]] float GetLastPingMs() const { return m_lastPingMs; }
+    [[nodiscard]] float GetAveragePingMs() const { return m_avgPingMs; }
+
+private:
+    void SendPing();
 };
 
 } // namespace Gravitaris

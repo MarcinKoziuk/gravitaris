@@ -96,6 +96,30 @@ bool ReadClientInputBody(ByteReader& in, ClientInputPacket& out)
     return in.Ok();
 }
 
+void WritePing(const PingPacket& packet, ByteWriter& out)
+{
+    out.WriteU8(static_cast<std::uint8_t>(PacketType::Ping));
+    out.WriteU32(packet.seq);
+}
+
+bool ReadPingBody(ByteReader& in, PingPacket& out)
+{
+    out.seq = in.ReadU32();
+    return in.Ok();
+}
+
+void WritePong(const PongPacket& packet, ByteWriter& out)
+{
+    out.WriteU8(static_cast<std::uint8_t>(PacketType::Pong));
+    out.WriteU32(packet.seq);
+}
+
+bool ReadPongBody(ByteReader& in, PongPacket& out)
+{
+    out.seq = in.ReadU32();
+    return in.Ok();
+}
+
 void WriteSnapshotPacket(const SnapshotData& snapshot, ByteWriter& out)
 {
     out.WriteU8(static_cast<std::uint8_t>(PacketType::Snapshot));

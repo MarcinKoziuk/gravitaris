@@ -182,8 +182,25 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             }
             break;
         }
+        case PacketType::Ping: {
+            // Stateless echo, no game-state lookup needed -- works even
+            // before Welcome (measuring RTT doesn't need a ship yet) and
+            // unreliable (0, matching ClientInput/Snapshot) so it reflects
+            // the same channel's real loss/latency characteristics rather
+            // than the reliable channel's.
+            PingPacket ping;
+            if (!ReadPingBody(reader, ping)) return;
+
+            PongPacket pong;
+            pong.seq = ping.seq;
+            ByteWriter writer;
+            WritePong(pong, writer);
+            m_transport.Send(peer, 0, writer.Data(), writer.Size(), false);
+            break;
+        }
         case PacketType::ServerWelcome:
         case PacketType::Snapshot:
+        case PacketType::Pong:
             break; // server never receives these
     }
 }

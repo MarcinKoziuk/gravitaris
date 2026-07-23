@@ -347,6 +347,11 @@ public:
         return m_netClient ? m_netClient->GetDroppedSnapshotCount() : 0;
     }
 
+    // Real measured RTT (NetClient's Ping/Pong probe), not an estimate. -1
+    // before the first Pong arrives.
+    [[nodiscard]] float GetLastPingMs() const { return m_netClient ? m_netClient->GetLastPingMs() : -1.f; }
+    [[nodiscard]] float GetAveragePingMs() const { return m_netClient ? m_netClient->GetAveragePingMs() : -1.f; }
+
     // Net debug tab: live artificial delay/jitter/loss (SimulatedNetTransport,
     // sits below NetClient -- see m_simulatedTransport's own field comment).
     // nullptr before ConnectToServer runs; caller must check IsNetClient()
