@@ -106,4 +106,4 @@ cp "$SCRIPT_DIR/index.html" "$OUT_DIR/index.html"
 echo
 echo "Build type:   $BUILD_TYPE"
 echo "Build output: $OUT_DIR/ (GravitarisNG.js/.wasm/.data, index.html)"
-echo "Serve it with, e.g.: (cd $OUT_DIR && python3 -m http.server 8080)"
+echo "Serve it with, e.g.: (cd $OUT_DIR && python3 -m http.server 8123)"
