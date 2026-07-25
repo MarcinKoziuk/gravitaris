@@ -48,6 +48,22 @@ struct ImpactEvent {
     Magnum::Vector2d contact; // world-space contact point (for the LandingCrash event)
 };
 
+// A ship-against-ship contact fast enough to count as a ram rather than a
+// harmless overlap (networking-plan Phase 9). Recorded during the step and
+// drained by DamageSystem, which owns the destroy rule -- unlike ImpactEvent
+// this names *both* parties, since that rule compares them (and has to check
+// their teams) rather than damaging one in isolation. Masses are captured
+// here because the bodies are already at hand; `closingSpeed` is their
+// approach speed along the contact normal, sampled pre-solve.
+struct ShipRamEvent {
+    flecs::entity_t a;
+    flecs::entity_t b;
+    double closingSpeed;
+    double massA;
+    double massB;
+    Magnum::Vector2d contact;
+};
+
 class PhysicsSystem {
 public:
     // Newtonian F = G*m1*m2/d^2. ApplyGravity attracts every dynamic body
@@ -58,6 +74,31 @@ public:
     // Shared filter group for bullet (sensor) shapes so a bullet's swept
     // segment query skips other bullets rather than being blocked by them.
     static constexpr cpGroup BULLET_GROUP = 1;
+
+    // Chipmunk collision type for CollisionClass::Ship shapes. 0 (every other
+    // body) is Chipmunk's own default, so only the ship<->ship pair gets a
+    // specific handler and every other combination keeps falling through to
+    // the wildcard one.
+    static constexpr cpCollisionType SHIP_COLLISION_TYPE = 1;
+
+    // Runtime-tunable ship-against-ship rule (networking-plan Phase 9). Real
+    // values want playtesting, hence the debug panel rather than constants.
+    struct ShipContactParams {
+        // Approach speed along the contact normal at or above which a
+        // contact is a ram instead of an overlap.
+        double ramClosingSpeed = 55.0;
+        // Acceleration each overlapping ship gets along the contact normal,
+        // easing the pair apart. 0 = pure pass-through. Deliberately applied
+        // as a force before the next step rather than inside the solver: an
+        // impulse in the contact solve is exactly the thing prediction can't
+        // reconcile, which is what Phase 9 exists to remove.
+        double separationAccel = 90.0;
+        // Ram momentum (lighter ship's mass x closing speed) past which both
+        // ships die outright, however tough either is.
+        double bothDieMomentum = 900.0;
+        // Survivor damage per unit of the loser's mass x closing speed.
+        double survivorDamageScale = 0.02;
+    };
 
 private:
     flecs::world& m_registry;
@@ -74,6 +115,20 @@ private:
     // PostSolveImpact), drained by DamageSystem the same tick.
     std::vector<ImpactEvent> m_impacts;
 
+    ShipContactParams m_shipContact;
+
+    // Ship pairs found overlapping during the last step, and the separating
+    // direction for each. Consumed by Simulate itself (the nudge is applied
+    // as a force just before the next cpSpaceStep), not drained by anyone.
+    struct ShipOverlap {
+        flecs::entity_t a;
+        flecs::entity_t b;
+        Magnum::Vector2d normal; // world, points from a's body toward b's
+    };
+    std::vector<ShipOverlap> m_shipOverlaps;
+
+    std::vector<ShipRamEvent> m_shipRams;
+
     flecs::observer m_bodyAddedObserver;
     flecs::observer m_bodyRemovedObserver;
 
@@ -86,6 +141,16 @@ private:
     static void PostSolveImpact(cpArbiter* arb, cpSpace* space, cpDataPointer userData);
 
     void RecordImpact(cpShape* shape, cpBody* body, cpFloat impulse, cpVect contact);
+
+    // Chipmunk preSolve callback for the ship<->ship pair specifically.
+    // Always returns cpFalse -- two ships never push each other -- after
+    // recording the overlap (for the separating nudge) and, once per contact
+    // episode, a ram event if they met fast enough.
+    static cpBool PreSolveShipPair(cpArbiter* arb, cpSpace* space, cpDataPointer userData);
+
+    // Applies m_shipOverlaps as forces and clears it. Called at the top of
+    // Simulate, i.e. against the overlaps the previous step observed.
+    void ApplyShipSeparation();
 
     void InitBody(PhysicsBody& slot, const Transform& transf);
 
@@ -132,6 +197,15 @@ public:
     // Moves out the impacts recorded during the last Simulate; caller applies
     // damage from them. Leaves the buffer empty for the next step.
     [[nodiscard]] std::vector<ImpactEvent> DrainImpacts();
+
+    // Same contract as DrainImpacts, for ship-against-ship rams. Note these
+    // never appear in DrainImpacts: a ship pair is handled by its own
+    // collision handler, which suppresses the contact before postSolve (and
+    // so before any ImpactEvent) can run.
+    [[nodiscard]] std::vector<ShipRamEvent> DrainShipRams();
+
+    [[nodiscard]] ShipContactParams& GetShipContactParams() { return m_shipContact; }
+    [[nodiscard]] const ShipContactParams& GetShipContactParams() const { return m_shipContact; }
 
     // Calls `fn` for each entity whose shape is currently touching `ref`'s
     // body (live contact arbiters only -- Chipmunk keeps separated arbiters

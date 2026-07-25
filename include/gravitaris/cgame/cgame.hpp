@@ -259,6 +259,10 @@ public:
 
     [[nodiscard]] float GetGravityMultiplier() const { return m_physicsSystem.GetGravityMultiplier(); }
     void SetGravityMultiplier(float multiplier) { m_physicsSystem.SetGravityMultiplier(multiplier); }
+    [[nodiscard]] PhysicsSystem::ShipContactParams& GetShipContactParams()
+    {
+        return m_physicsSystem.GetShipContactParams();
+    }
 
     [[nodiscard]] float GetZoomWidthFactor() const { return m_zoomWidthFactor; }
 

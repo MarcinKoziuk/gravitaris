@@ -806,6 +806,121 @@ void TestLandingAndClaiming()
     fs.Shutdown();
 }
 
+// docs/networking-plan.md Phase 9: ship-against-ship contact resolves as
+// gameplay, not physics -- a slow pair passes through each other, a fast pair
+// destroys. Ship-against-*planet* is deliberately untouched, which
+// TestLandingAndClaiming above still covers (landing, and the crash damage
+// that shares the wildcard handler this phase routes ships around).
+void TestShipCollision()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    struct Outcome {
+        bool aAlive = false;
+        bool bAlive = false;
+        float hpA = 0.f;
+        float hpB = 0.f;
+        bool crossed = false; // the two centres passed through each other
+    };
+
+    // One head-on pass. Thresholds are set from the pair's *actual* momentum
+    // rather than absolute numbers, so no case here depends on what the
+    // fighter asset happens to weigh.
+    const auto headOn = [&fs](double speed, TeamId teamA, TeamId teamB, float hpA, float hpB,
+                              double bothDieFactor, double separationAccel) {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+
+        flecs::entity a = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{-60., 0.}, teamA);
+        flecs::entity b = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{60., 0.}, teamB);
+        a.get_mut<Damageable>().hp = hpA;
+        b.get_mut<Damageable>().hp = hpB;
+
+        PhysicsSystem& physics = game.GetPhysicsSystem();
+        cpBody* bodyA = physics.GetBody(a.get<PhysicsRef>()).cp.body.get();
+        cpBody* bodyB = physics.GetBody(b.get<PhysicsRef>()).cp.body.get();
+        cpBodySetVelocity(bodyA, cpv(speed, 0.));
+        cpBodySetVelocity(bodyB, cpv(-speed, 0.));
+
+        const double momentum = cpBodyGetMass(bodyA) * 2.0 * speed; // mass x closing speed
+        PhysicsSystem::ShipContactParams& params = physics.GetShipContactParams();
+        params.separationAccel = separationAccel;
+        params.bothDieMomentum = momentum * bothDieFactor;
+        // Exactly 20 points on the survivor, whatever the asset weighs.
+        params.survivorDamageScale = 20.0 / momentum;
+
+        Outcome out;
+        for (int tick = 0; tick < 400; ++tick) {
+            game.Update();
+            if (!a.is_alive() || !b.is_alive()) break;
+            if (a.get<Transform>().pos.x() > b.get<Transform>().pos.x()) out.crossed = true;
+        }
+        out.aAlive = a.is_alive();
+        out.bAlive = b.is_alive();
+        if (out.aAlive) out.hpA = a.get<Damageable>().hp;
+        if (out.bAlive) out.hpB = b.get<Damageable>().hp;
+        return out;
+    };
+
+    // Slow enough to be an overlap (closing 40 against the 55 default), with
+    // the separating nudge off so "passed through" is unambiguous -- under
+    // the old hard contact these two could never have swapped sides.
+    {
+        const Outcome slow = headOn(20., TeamId::Blue, TeamId::Red, 100.f, 100.f, 1.5, 0.);
+        Require(slow.aAlive && slow.bAlive, "ram: a slow enemy pair both survive");
+        Require(slow.crossed, "ram: a slow enemy pair passes through instead of bouncing");
+        Require(slow.hpA == 100.f && slow.hpB == 100.f, "ram: a slow overlap does no damage at all");
+    }
+    {
+        const Outcome slow = headOn(20., TeamId::Blue, TeamId::Blue, 100.f, 100.f, 1.5, 0.);
+        Require(slow.aAlive && slow.bAlive && slow.crossed, "ram: a slow friendly pair overlaps too");
+        Require(slow.hpA == 100.f && slow.hpB == 100.f, "ram: a slow friendly overlap does no damage");
+    }
+
+    // Fast, unequal toughness (mass x *current* hp), below the both-die
+    // threshold: the weaker dies, the survivor is damaged but lives.
+    {
+        const Outcome ram = headOn(60., TeamId::Blue, TeamId::Red, 100.f, 40.f, 1.5, 0.);
+        Require(ram.aAlive, "ram: the tougher ship survives");
+        Require(!ram.bAlive, "ram: the weaker ship is destroyed");
+        Require(ram.hpA < 100.f && ram.hpA > 0.f, "ram: the survivor takes damage but lives");
+    }
+
+    // Evenly matched: no weaker party to pick, and choosing by entity id
+    // would decide a head-on ram on spawn order. Both die.
+    {
+        const Outcome ram = headOn(60., TeamId::Blue, TeamId::Red, 100.f, 100.f, 1.5, 0.);
+        Require(!ram.aAlive && !ram.bAlive, "ram: an evenly matched pair destroys both");
+    }
+
+    // Past the both-die momentum threshold, toughness stops mattering.
+    {
+        const Outcome ram = headOn(60., TeamId::Blue, TeamId::Red, 100.f, 40.f, 0.5, 0.);
+        Require(!ram.aAlive && !ram.bAlive, "ram: a hard enough hit destroys both regardless of toughness");
+    }
+
+    // Friendlies never ram-kill, at any speed.
+    {
+        const Outcome ram = headOn(60., TeamId::Blue, TeamId::Blue, 100.f, 40.f, 0.5, 0.);
+        Require(ram.aAlive && ram.bAlive, "ram: friendlies survive a hit that would destroy both enemies");
+        Require(ram.hpA == 100.f && ram.hpB == 40.f, "ram: friendlies take no ram damage either");
+    }
+
+    // With the nudge on, an overlapping pair is eased apart rather than
+    // passing clean through.
+    {
+        const Outcome nudged = headOn(20., TeamId::Blue, TeamId::Red, 100.f, 100.f, 1.5, 400.);
+        Require(nudged.aAlive && nudged.bAlive, "ram: the separating nudge harms nobody");
+        Require(!nudged.crossed, "ram: a strong enough separating nudge keeps the pair from swapping sides");
+    }
+
+    fs.Shutdown();
+}
+
 // docs/gravity-well-mode-plan.md Phase 2: structures. Spawns a full starting
 // complex on a real orbiting planet, and checks planetside/orbital
 // structures track the planet's own motion over many ticks (rather than
@@ -1631,6 +1746,7 @@ int main()
     TestOrbitReplication();
     TestClientPrediction();
     TestLandingAndClaiming();
+    TestShipCollision();
     TestStructures();
     TestFreighterEconomy();
     TestSelfDevelopment();

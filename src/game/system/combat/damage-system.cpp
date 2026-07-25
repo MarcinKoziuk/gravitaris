@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include <chipmunk/chipmunk.h>
@@ -36,6 +37,8 @@ DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem,
 
 void DamageSystem::Update()
 {
+    ResolveShipRams();
+
     // Landing / ram damage from this step's hard contacts.
     for (const ImpactEvent& ev : m_physicsSystem.DrainImpacts()) {
         flecs::entity hitEntity(m_registry, ev.entity);
@@ -98,6 +101,77 @@ void DamageSystem::Update()
 
     for (flecs::entity bulletEnt : spent) {
         bulletEnt.destruct();
+    }
+}
+
+// networking-plan Phase 9's destroy rule. Nothing here destroys an entity
+// itself -- it drives hp to zero and lets DeathSystem (next in the tick
+// order) explode it through the one existing death path.
+void DamageSystem::ResolveShipRams()
+{
+    const PhysicsSystem::ShipContactParams& params = m_physicsSystem.GetShipContactParams();
+
+    for (const ShipRamEvent& ev : m_physicsSystem.DrainShipRams()) {
+        flecs::entity a(m_registry, ev.a);
+        flecs::entity b(m_registry, ev.b);
+        if (!a.is_alive() || !b.is_alive()) continue;
+
+        Damageable* dmgA = a.try_get_mut<Damageable>();
+        Damageable* dmgB = b.try_get_mut<Damageable>();
+        if (!dmgA || !dmgB) continue;
+        // Already dead from something earlier this tick -- a ram shouldn't
+        // resurrect it as the "survivor".
+        if (dmgA->hp <= 0.f || dmgB->hp <= 0.f) continue;
+
+        const Team* teamA = a.try_get<Team>();
+        const Team* teamB = b.try_get<Team>();
+        if (teamA && teamB && teamA->id == teamB->id) continue; // friendlies only ever overlap
+
+        if (!std::isfinite(ev.massA) || !std::isfinite(ev.massB)) continue;
+
+        const Magnum::Vector2 contact{static_cast<float>(ev.contact.x()), static_cast<float>(ev.contact.y())};
+        const auto kill = [&](flecs::entity ship, Damageable& dmg) {
+            dmg.hp = 0.f;
+            m_eventQueue.Emit(GameEventType::Impact, ship, contact, 0);
+        };
+
+        // The lighter ship's momentum bounds what the pair can exchange, so
+        // that -- not the heavier one's -- is what decides a mutual kill.
+        const double momentum = std::min(ev.massA, ev.massB) * ev.closingSpeed;
+        if (momentum >= params.bothDieMomentum) {
+            kill(a, *dmgA);
+            kill(b, *dmgB);
+            continue;
+        }
+
+        // Toughness uses *current* hp, so a damaged ship loses a ram it
+        // would have won at full health.
+        const double toughA = ev.massA * static_cast<double>(dmgA->hp);
+        const double toughB = ev.massB * static_cast<double>(dmgB->hp);
+
+        // Evenly matched (two identical ships at equal health is the common
+        // case, not a corner one) has no weaker party to pick, and picking
+        // by entity id would decide a head-on ram on spawn order. Both die.
+        static constexpr double TOUGHNESS_EPSILON = 1e-6;
+        if (std::fabs(toughA - toughB) <= TOUGHNESS_EPSILON * std::max(toughA, toughB)) {
+            kill(a, *dmgA);
+            kill(b, *dmgB);
+            continue;
+        }
+
+        const bool aWins = toughA > toughB;
+        flecs::entity survivor = aWins ? a : b;
+        Damageable& survivorDmg = aWins ? *dmgA : *dmgB;
+        const double loserMass = aWins ? ev.massB : ev.massA;
+
+        kill(aWins ? b : a, aWins ? *dmgB : *dmgA);
+
+        const auto damage =
+                static_cast<float>(loserMass * ev.closingSpeed * params.survivorDamageScale);
+        survivorDmg.hp -= damage;
+        // May itself be lethal -- DeathSystem's hp <= 0 scan handles that for
+        // free, so a hard enough ram kills both without a special case here.
+        m_eventQueue.Emit(GameEventType::Impact, survivor, contact, static_cast<std::uint32_t>(damage * 10.f));
     }
 }
 

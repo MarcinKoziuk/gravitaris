@@ -72,6 +72,15 @@ void PhysicsSystem::InitSpace(id_t spaceId)
     handler->postSolveFunc = &PhysicsSystem::PostSolveImpact;
     handler->userData = this;
 
+    // Ship<->ship is the one pair that doesn't resolve as physics
+    // (networking-plan Phase 9). A specific handler replaces the wildcard
+    // one for this pair only -- ship<->planet and ship<->structure still
+    // fall through to the default above, so landing and crash damage are
+    // untouched.
+    cpCollisionHandler* ships = cpSpaceAddCollisionHandler(space.get(), SHIP_COLLISION_TYPE, SHIP_COLLISION_TYPE);
+    ships->preSolveFunc = &PhysicsSystem::PreSolveShipPair;
+    ships->userData = this;
+
     m_spaces.insert(std::make_pair(spaceId, std::move(space)));
 }
 
@@ -116,6 +125,80 @@ std::vector<ImpactEvent> PhysicsSystem::DrainImpacts()
 {
     std::vector<ImpactEvent> out = std::move(m_impacts);
     m_impacts.clear();
+    return out;
+}
+
+cpBool PhysicsSystem::PreSolveShipPair(cpArbiter* arb, cpSpace*, cpDataPointer userData)
+{
+    auto* self = static_cast<PhysicsSystem*>(userData);
+
+    cpShape *shapeA, *shapeB;
+    cpArbiterGetShapes(arb, &shapeA, &shapeB);
+    cpBody *bodyA, *bodyB;
+    cpArbiterGetBodies(arb, &bodyA, &bodyB);
+
+    const auto entityFor = [](cpShape* shape) {
+        return static_cast<flecs::entity_t>(reinterpret_cast<std::uintptr_t>(cpShapeGetUserData(shape)));
+    };
+    const flecs::entity_t entA = entityFor(shapeA);
+    const flecs::entity_t entB = entityFor(shapeB);
+
+    // Normal points from A toward B, so A separates along -n and B along +n.
+    const cpVect normal = cpArbiterGetNormal(arb);
+    self->m_shipOverlaps.push_back(
+            ShipOverlap{entA, entB, Magnum::Vector2d{normal.x, normal.y}});
+
+    // Velocities here are pre-solve, i.e. the speed they actually met at.
+    // Positive = approaching.
+    const cpFloat closing = cpvdot(cpvsub(cpBodyGetVelocity(bodyA), cpBodyGetVelocity(bodyB)), normal);
+
+    // Once per contact episode, tracked on the arbiter itself (Chipmunk keeps
+    // it alive and its user data intact for as long as the pair stays in
+    // contact). Without this a ram would re-fire every step the two ships
+    // spent passing through each other -- and since nothing pushes them
+    // apart any more, that's several.
+    const bool alreadyRammed = cpArbiterGetUserData(arb) != nullptr;
+    if (!alreadyRammed && closing >= self->m_shipContact.ramClosingSpeed && cpArbiterGetCount(arb) > 0) {
+        cpArbiterSetUserData(arb, reinterpret_cast<cpDataPointer>(std::uintptr_t{1}));
+        const cpVect contact = cpArbiterGetPointA(arb, 0);
+        self->m_shipRams.push_back(ShipRamEvent{entA, entB, closing, cpBodyGetMass(bodyA), cpBodyGetMass(bodyB),
+                                                Magnum::Vector2d{contact.x, contact.y}});
+    }
+
+    // Never resolve the contact: no impulse, no bounce, nothing for client
+    // prediction to disagree with the server about.
+    return cpFalse;
+}
+
+void PhysicsSystem::ApplyShipSeparation()
+{
+    if (m_shipContact.separationAccel > 0.0) {
+        for (const ShipOverlap& overlap : m_shipOverlaps) {
+            const cpVect dir = cpv(overlap.normal.x(), overlap.normal.y());
+            const auto push = [&](flecs::entity_t raw, cpFloat sign) {
+                flecs::entity entity(m_registry, raw);
+                if (!entity.is_alive()) return;
+                const PhysicsRef* ref = entity.try_get<PhysicsRef>();
+                if (!ref) return;
+                cpBody* body = GetBody(*ref).cp.body.get();
+                const cpFloat mass = cpBodyGetMass(body);
+                if (!std::isfinite(mass) || mass <= 0.0) return; // kinematic proxy: nothing to push
+                // At the centre of gravity, so separating never also spins
+                // the ship.
+                cpBodyApplyForceAtLocalPoint(
+                        body, cpvmult(dir, sign * m_shipContact.separationAccel * mass), cpvzero);
+            };
+            push(overlap.a, -1.0);
+            push(overlap.b, 1.0);
+        }
+    }
+    m_shipOverlaps.clear();
+}
+
+std::vector<ShipRamEvent> PhysicsSystem::DrainShipRams()
+{
+    std::vector<ShipRamEvent> out = std::move(m_shipRams);
+    m_shipRams.clear();
     return out;
 }
 
@@ -253,6 +336,9 @@ void PhysicsSystem::HandleBodyAdded(flecs::entity ent, const RigidBodyDesc& desc
     for (auto& shapePtr : slot.cp.shapes) {
         cpShape* shape = shapePtr.get();
         cpShapeSetUserData(shape, reinterpret_cast<void*>(static_cast<std::uintptr_t>(ent.id())));
+        if (desc.collisionClass == CollisionClass::Ship) {
+            cpShapeSetCollisionType(shape, SHIP_COLLISION_TYPE);
+        }
         if (desc.sensor) {
             cpShapeSetSensor(shape, cpTrue);
             cpShapeSetFilter(shape, cpShapeFilterNew(BULLET_GROUP, CP_ALL_CATEGORIES, CP_ALL_CATEGORIES));
@@ -360,6 +446,11 @@ void PhysicsSystem::ApplyGravity(id_t spaceId)
 
 void PhysicsSystem::Simulate(double dt)
 {
+    // Against the overlaps the *previous* step observed -- forces have to be
+    // applied before cpSpaceStep integrates them, and the overlaps aren't
+    // known until it has run.
+    ApplyShipSeparation();
+
     for (const auto& p : m_spaces) {
         cpSpace* space = p.second.get();
         cpSpaceStep(space, dt);

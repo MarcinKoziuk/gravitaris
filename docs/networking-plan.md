@@ -2084,47 +2084,49 @@ same behavior — intended).
 
 ### Tasks
 
-- [ ] **9.1 Distinguish ships in Chipmunk.** Assign ship shapes a dedicated
+- [x] **9.1 Distinguish ships in Chipmunk.** Assign ship shapes a dedicated
   `collision_type` in `PhysicsSystem::HandleBodyAdded`
   (`src/game/system/core/physics-system.cpp`, near the existing sensor/filter
   block, ~`:250`). Planets, high ports, and docks keep the default type. Add a
   ship↔ship-specific handler in `InitSpace` (`~:65`) alongside the existing
   default `postSolve` wildcard (which stays, for ship↔planet ram/landing).
-- [ ] **9.2 Overlap gate (`preSolveFunc` for ship↔ship).** Compute closing
+- [x] **9.2 Overlap gate (`preSolveFunc` for ship↔ship).** Compute closing
   speed (relative velocity along the contact normal). Below the destroy
   threshold, suppress the physical bounce and instead apply a tunable soft
   separating nudge in the sim update (not Chipmunk's solver — keep it out of
   the solver so it's tunable and doesn't reintroduce a reconcilable impulse),
   with a toggle for full pass-through (nudge off). Same-`Team` pairs always
   take this path.
-- [ ] **9.3 Ram event.** Above the threshold on first contact, record a
+- [x] **9.3 Ram event.** Above the threshold on first contact, record a
   `ShipRamEvent{a, b, closingSpeed, massA, massB}` onto a new drain queue
   mirroring `m_impacts`/`DrainImpacts()` (`physics-system.hpp` ~`:44`). Never
   mutate ECS/space inside the Chipmunk callback. Note: today's `ImpactEvent`
   records only the victim + deltaV — the ram event must carry *both* parties
   and closing speed, since the destroy rule and team check need both.
-- [ ] **9.4 Resolution step.** In `DamageSystem::Update` (or a small new
+- [x] **9.4 Resolution step.** In `DamageSystem::Update` (or a small new
   combat system, run before `DeathSystem` in `game.cpp`'s tick order): drain
   ram events, apply the destroy rule from Scope above (weaker dies + survivor
   damage; both die past the energy threshold). Drive the loser's `hp` to ≤ 0
   (or call `DeathSystem::Explode` directly) — do not add a second death path.
-- [ ] **9.5 Client prediction mirror.** `ClientPrediction::SyncCollisionProxies`
+- [x] **9.5 Client prediction mirror.** `ClientPrediction::SyncCollisionProxies`
   (`src/game/net/client-prediction.cpp` ~`:63`) currently lets the predicted
   own ship hard-bump remote-ship proxies. Apply the same overlap/soft-nudge
   rule to ship-proxy contacts there (planet/structure proxies keep hard
   collision), so prediction matches the server's overlap and stops thrashing.
   Own-ship ram-destruction still comes from the server's `Explosion` event →
   existing death/respawn flow (not predicted locally).
-- [ ] **9.6 Tunables in the physics debug panel**
+- [x] **9.6 Tunables in the physics debug panel**
   (`src/cgame/ui/debug/physics-panel.cpp`): overlap/destroy closing-speed
   threshold, the "both die" energy threshold, soft-nudge strength + on/off
   toggle, survivor-damage scale. Runtime-tunable rather than hard-coded
   constants (real values need playtesting).
-- [ ] **9.7 Optional client FX.** Only if the shared `Explosion` FX reads
-  wrong for a ram: add a ram-specific `GameEventType`
+- [ ] **9.7 Optional client FX** — not done, and deliberately: the shared
+  `Explosion` FX plus an `Impact` at the contact point has not been judged
+  wrong for a ram yet, and this is the one task that bumps
+  `SNAPSHOT_VERSION`. Only if the shared `Explosion` FX reads
   (`include/gravitaris/game/event/game-event.hpp`) + `remote-event-applier`
   handling. Bumps `SNAPSHOT_VERSION` (ADR constraint 8) — skip unless needed.
-- [ ] **9.8 sim-test coverage** (`gravitaris-sim-test`, headless — ADR
+- [x] **9.8 sim-test coverage** (`gravitaris-sim-test`, headless — ADR
   constraint 1): slow enemy pair *and* slow same-team pair overlap with no
   destruction and no reconcilable impulse; fast enemy pair → exactly one ram
   event, weaker destroyed + survivor damaged; very-high-energy pair → both
@@ -2136,6 +2138,68 @@ apart (no camera shake, no reconciliation thrash on either client); ramming an
 enemy at speed destroys the weaker one (both if hard enough) with the explosion
 appearing on all clients via the existing event path; ship↔planet landing is
 unchanged; friendly ships never destroy each other.
+
+### Implementation notes (2026-07-25)
+
+Decisions the plan left open, made while implementing:
+
+- **`CollisionClass` is declared at spawn** (a field on `RigidBodyDesc`),
+  not inferred from components in `HandleBodyAdded`. The observer that
+  consumes `RigidBodyDesc` fires the instant it's emplaced, before the
+  spawner has added `Controls`/`InputQueue`/`Team`, so at that point there is
+  nothing to infer from. Only `SpawnPlayer` and `SpawnAIShip` pass
+  `CollisionClass::Ship`.
+- **Freighters keep hard physics** (`CollisionClass::Default`), matching
+  "not stuff with fixed ai path like things orbiting planet" — an arrived
+  freighter is attached to a planet's orbit and is exactly that. One line in
+  `SpawnFreighter` if that turns out to be the wrong call.
+  - Consequence, and the one place client and server knowingly disagree: a
+    freighter is `NetEntityType::Ship` on the wire with no field
+    distinguishing it, so `SyncCollisionProxies` ship-classes its proxy and a
+    client passes through a freighter the server bounces off. Wrong in the
+    rare direction — the alternative (Default-classing every remote ship
+    proxy) is wrong on every ship-ship contact, which is the case this phase
+    exists for. A wire flag would fix it properly.
+- **Evenly matched pairs both die.** `mass x hp` ties are the *common* case
+  (two identical ships at full health, head-on), not a corner one, and there
+  is no weaker party to destroy; breaking the tie by entity id would decide a
+  head-on ram on spawn order. Compared with a relative epsilon.
+- **Both-die momentum uses the lighter ship's mass**, since the lighter
+  body's momentum bounds what the pair can exchange. The plan just said
+  "mass x closingSpeed" without saying whose.
+- **Ram dedupe rides on the Chipmunk arbiter's user data**, not
+  `cpArbiterIsFirstContact`. Nothing pushes the ships apart any more, so a
+  pair spends several steps passing through each other, and first-contact
+  alone would let a ram re-fire (or, conversely, miss a ship that accelerates
+  into an already-overlapping neighbour).
+- **The separating nudge is applied at the top of `Simulate`**, against the
+  overlaps the previous step recorded — forces must land before
+  `cpSpaceStep` integrates them, and the overlaps aren't known until it has
+  run.
+- Resolution lives in `DamageSystem::ResolveShipRams` rather than a new
+  system: it already runs immediately before `DeathSystem`, already owns the
+  other two damage sources, and needs nothing a new system would add.
+
+**Verification status**: native client, server and sim-test build clean. New
+`TestShipCollision` covers all six cases the plan asked for — slow enemy and
+slow friendly pairs pass clean through each other with no damage, a fast
+unequal pair destroys the weaker and damages the survivor, an evenly matched
+pair destroys both, past the momentum threshold both die regardless of
+toughness, friendlies survive a hit that would destroy enemies, and the
+separating nudge keeps an overlapping pair from swapping sides. Thresholds in
+those cases are derived from the pair's actual momentum, so none of them
+depend on what the fighter asset weighs. Ship↔planet landing/crash damage is
+covered by the existing `TestLandingAndClaiming`, unchanged. Two-run
+determinism checksum identical to before this phase
+(`0x96e4b51cfc04d4c8`) — which also means the 1800-tick determinism scenario
+contains no ship-ship contact, so it is `TestShipCollision` and not the
+checksum that guards this behaviour.
+
+**Not yet manually verified**: any of it in an actual session — whether the
+thresholds feel right (that's what the physics panel's sliders are for),
+whether the shared explosion FX reads correctly for a ram (see 9.7), and
+whether the reconciliation thrash on ship contact is actually gone on two
+live clients.
 
 ## Invariants checklist (apply to EVERY gameplay PR from now on)
 

@@ -78,7 +78,21 @@ void ClientPrediction::SyncCollisionProxies(const std::vector<EntityState>& snap
             const ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(state.modelId);
             proxy = m_registry.entity();
             proxy.emplace<Transform>(Magnum::Vector2d{state.pos});
-            proxy.emplace<RigidBodyDesc>("main"_id, body);
+            // A remote ship's proxy plays by the same ship<->ship rule the
+            // server does (networking-plan Phase 9), so the predicted own
+            // ship passes through it instead of bouncing off a proxy the
+            // server never bounced off -- the reconciliation thrash Phase 7
+            // left unfixed. Planet proxies keep hard contact.
+            //
+            // Caveat: a freighter is NetEntityType::Ship on the wire but
+            // CollisionClass::Default server-side, so its proxy is
+            // ship-classed here and the two disagree -- a snap if a player
+            // rams one. Wrong in the rare direction; classing every remote
+            // ship as Default instead would be wrong on every ship-ship
+            // contact, which is the case this exists for.
+            const CollisionClass collisionClass =
+                    state.type == NetEntityType::Ship ? CollisionClass::Ship : CollisionClass::Default;
+            proxy.emplace<RigidBodyDesc>("main"_id, body, /*sensor=*/false, collisionClass);
             m_collisionProxies[state.netId] = proxy;
         }
 

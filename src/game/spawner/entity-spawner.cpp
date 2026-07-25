@@ -70,7 +70,7 @@ flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position, TeamId
 
     auto entity = m_registry.entity();
     entity.emplace<Transform>(position);
-    entity.emplace<RigidBodyDesc>("main"_id, body);
+    entity.emplace<RigidBodyDesc>("main"_id, body, /*sensor=*/false, CollisionClass::Ship);
     entity.emplace<Controls>();
     entity.emplace<InputQueue>();
     entity.emplace<Team>(team);
@@ -88,7 +88,7 @@ flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, AIPers
 
     auto entity = m_registry.entity();
     entity.emplace<Transform>(position);
-    entity.emplace<RigidBodyDesc>("main"_id, body);
+    entity.emplace<RigidBodyDesc>("main"_id, body, /*sensor=*/false, CollisionClass::Ship);
     entity.emplace<Controls>();
     entity.emplace<InputQueue>();
     entity.emplace<AIPilot>();
