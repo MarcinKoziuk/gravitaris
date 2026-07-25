@@ -1791,6 +1791,208 @@ offset needs eyes-on with the interpolation delay slider raised; the wobble
 fix specifically targets *long-running-server* precision loss, which a fresh
 short test session won't exhibit regardless of whether the fix is correct).
 
+## Fractional render clock (2026-07-25): interpolation was never actually interpolating
+
+Playtesting report: following an enemy ship (AI or player) it jitters back
+and forward, multiplayer only, worse the faster you're going. Distinct from
+the freeze-then-snap issue the `RemoteSmoothing` section above fixed — this
+one is present at *any* latency, including a clean local session.
+
+Root cause: the render clock was whole-tick. `NetClient::
+EstimateCurrentServerTick()` returns `lastAckedSnapshotTick + floor(elapsed
+* tickRate)`, `ComputeRenderTick` subtracted a whole-tick interpolation
+delay from it, and `SnapshotInterpolator::Compute` took a `std::uint64_t`.
+The server snapshots *every* tick, so buffered snapshot ticks are
+consecutive and an integer render tick always lands exactly on one — `t` in
+the straddle branch was always exactly 0. Phase 4's lerp had literally never
+run outside the packet-loss case. Remote entities moved a full tick of
+travel (`relative speed / tickRate` world units) per step, which is why the
+amplitude scales with speed.
+
+Worse, that staircase steps at *packet arrival* instants, not on a clock:
+`m_lastAckedSnapshotRecvTime` is re-based on every accepted snapshot, so
+between arrivals the estimate is constant and each arrival advances it. Raw
+network arrival jitter therefore reached the screen completely unfiltered,
+and a snapshot arriving more than one tick late made the estimate step
+*backwards* (the free-running `floor` had already passed the tick that
+snapshot carries) — the literal "back and forward". Raising the
+interpolation delay could never help: it shifts the staircase without
+smoothing it.
+
+The own ship is immune because prediction refuses to use this estimate —
+`PredictedTickClock` free-runs its own counter and only resyncs past 5 ticks
+of drift, which is exactly the filtering the render path lacked.
+
+Fix: `NetClient::EstimateCurrentServerTickF()` — a continuous, monotonic,
+fractional-tick clock recovered from the same arrival data (free-run at real
+time, closed back onto an unfloored arrival estimate by warping the rate
+within ±25%, never by jumping; snap only past `CLOCK_SNAP_TICKS`, counted
+and surfaced in the Net debug tab). `SnapshotInterpolator::Compute` and
+`ComputeRenderTick` are `double` throughout, so `t` is a real sub-tick
+fraction. The integer `EstimateCurrentServerTick()` is untouched and still
+what the input/prediction path uses — it needs the exact tick numbers it
+stamps commands with.
+
+**Verification status**: native client, server and sim-test build clean;
+sim-test deterministic, checksum unchanged. New regression case in
+`TestSnapshotInterpolation`: two consecutive snapshots (ticks 100/101) at
+render tick 100.25 must land a quarter of the way, not snapped to the older
+one — the exact case the old signature couldn't express. **Not yet manually
+verified**: the by-feel judgment in a live two-peer session. Worth checking
+`RemoteSmoothing`'s `JUMP_TOLERANCE` (3.0 world units) afterwards — it
+compares against a *frame*-dt extrapolation, so with the old tick-quantized
+data it would trip every frame above ~180 units/s with alternating sign,
+amplifying this same jitter; continuous motion should stop that, but it's
+unproven.
+
+### Second half, same session: the own ship was the louder offender
+
+The fix above was verified from a two-human-player recording by tracking both
+ships' on-screen centroids frame by frame (1038 frames). Remote ship:
+0.37px high-frequency residual — smooth, the clock fix works. Own predicted
+ship: **2.35px mean, 5.5px p90**, scaling cleanly with its screen speed
+(~1px at 2px/frame, ~4px at 7px/frame). The jitter being reported was mostly
+this, not the remote entity.
+
+Root cause, and it's the same shape as the clock bug: the own ship is drawn
+at its raw whole-tick predicted position. `CGame::Render` takes the
+fixed-step accumulator's leftover as `delta`, but the net-client branch
+discarded it — `RenderNetClient(dtSeconds)` never saw it, and
+`ModelRenderer2::Render` ignores its own `delta` parameter (no prevPos/pos
+blend anywhere). So the ship's position advanced in 60Hz steps while
+everything it's judged against on screen moved on real time: the camera
+eases with wall-clock dt, and remote entities now run on a continuous clock.
+A frame that happened to run no tick stalls the ship; the next, running two,
+lurches it — up to a tick of travel each way, hence the speed scaling.
+
+This is why it reads as *multiplayer-only* despite the mechanism existing in
+single-player too: in SP every entity shares the one tick staircase, so
+relative positions are exact and only the whole world shifts against the
+camera. In MP the own ship is the only thing left on that staircase, so it
+jitters against everything else — and the eye attributes the relative motion
+to whatever it's tracking, i.e. the enemy ship.
+
+Fix: `RenderNetClient(dtSeconds, tickFraction)` renders the own ship (and
+feeds camera framing) at `lerp(prevPos, pos, tickFraction)`. `prevPos` is
+already exactly one predicted tick behind (`PhysicsSystem::Update` sets it
+every step, including during reconciliation replay). Costs up to one tick
+(~17ms) of render latency on the own ship — the standard fixed-step
+interpolation trade.
+
+**On reading numbers off a screen capture**: the recording (Windows
+Snipping Tool) samples unevenly — implied timing error 1.1 frames rms, and
+7.6% of its frames are duplicates from padding to constant frame rate.
+Neither says anything about the game's own frame rate, and uneven sampling
+alone gives every object a residual proportional to *its* screen speed, so a
+raw residual comparison between a fast object and a slow one proves nothing.
+The check that does hold: a sampling error hits both ships at the same
+instant, so estimate it from the remote ship and subtract its predicted
+effect on the own ship. Doing that leaves 2.21px of the own ship's 2.47px
+residual unexplained, and 2.8x more residual per unit of screen travel than
+the remote ship carries. That excess is the judder this fix targets.
+
+**Still whole-tick after this fix** (same class, unmeasured): the own ship's
+*rotation* (`Transform` has no `prevRot` to blend against), and the
+predicted cosmetic bullets in `m_registry`, which are fast enough for it to
+show.
+
+**Follow-up worth considering**: the prediction path's `PredictedTickClock`
+could take this smoothed clock as its resync target instead of the raw
+integer estimate — same jitter, currently absorbed by a 5-tick threshold
+rather than filtered. Deliberately left alone here to keep input timing out
+of a rendering fix.
+
+## Phase 10 — Shrinking the own-vs-remote time skew (2026-07-25)
+
+Playtesting report, after the render-clock fixes above: while chasing another
+ship, the two clients disagree about where the ships are, and **the
+disagreement does not converge once both stop accelerating**. The
+expectation was that it's prediction error that should settle; it isn't, and
+it doesn't.
+
+It's a rendering time-base skew, and it was working as designed. Two things
+on the same screen are drawn at two different times:
+
+- the own ship is simulated at `estimatedServerTick + inputLead` (**+8**
+  ticks, 133ms, the old fixed default)
+- every remote entity renders at `smoothedServerTick - interpDelay` (**-6**
+  ticks, 100ms)
+
+so they sit **14 ticks (233ms) apart in time**. One-way latency cancels (both
+are anchored to the same estimate), leaving the skew as exactly
+`inputLead + interpDelay`, independent of ping. With both ships at constant
+velocity (τ = one tick):
+
+- your screen shows separation `Δ + τ(8·v_you + 6·v_them)`
+- their screen shows `Δ - τ(6·v_you + 8·v_them)`
+- disagreement: `14τ·(v_you + v_them)` ≈ **233ms × combined speed**
+
+Velocity-proportional, not acceleration-proportional — so it is constant
+while both ships move and only reaches zero when both are *stationary*.
+Nothing converges because there is no error to decay.
+
+The floor is real (`owd + interpDelay`; predicting own + delaying others buys
+responsiveness with exactly this) but 233ms was mostly slack, not floor:
+
+- [x] **Adaptive input lead** (`NetClient::ComputeInputLeadTicks`, auto by
+  default). Sized from measured `rtt + 2*jitter + one tick`, clamped to
+  `[MIN_INPUT_LEAD_TICKS=2, 180]`, raised immediately when the measurement
+  calls for more and lowered one tick per `LEAD_RELAX_SECONDS`. On a LAN
+  that's 2 ticks against the old fixed 8. The sizing rule is a pure static
+  function so it's testable with no live connection, and it takes the
+  **full** round trip rather than half: this client stamps commands ahead of
+  a server-tick estimate that is *itself* one one-way trip stale, so a
+  command must cover both legs (`lead >= 2*owd = rtt`) or land in the
+  server's past. That also fixes the own ship at one one-way trip ahead of
+  true server state — the irreducible part.
+- [x] **`PredictedTickClock` can now be walked backwards safely**, which is
+  what makes the lead reducible at runtime at all. The old clock free-ran and
+  snapped past 5 ticks of drift *in either direction*; a backward snap
+  re-issues tick numbers already predicted, stamped and buffered for
+  reconciliation, every one of which the server discards as stale. It now
+  gives ticks back by telling the caller to **skip a step** (at most one per
+  `MIN_TICKS_BETWEEN_SKIPS = 30`, ~0.5s; unlimited past the resync
+  threshold) — the counter stands still for a frame while wall clock closes
+  the gap. Forward drift still snaps, which is safe since tick numbers only
+  increase. Target is now the fractional smoothed clock, so sub-tick
+  disagreement no longer reads as a permanent ±1 to correct against.
+- [x] **Interpolation delay default 100ms → 50ms** (3 snapshots at 60Hz). The
+  100ms was sized to hide raw packet-arrival jitter back when the render
+  clock passed it straight through; the smoothed clock absorbs that now,
+  leaving this to cover only genuine loss/reordering.
+
+Net effect on a LAN: **233ms → ~67ms of skew**, a 3.5x cut in the
+cross-client disagreement, without touching the architecture.
+
+**Done when:** two clients chasing each other at constant velocity disagree
+about the separation by noticeably less, and the Net tab's "Ticks given
+back" counter shows a small burst after connecting and then stops.
+
+**Verification status**: native client, server and sim-test build clean;
+sim-test deterministic, checksum unchanged (`0x96e4b51cfc04d4c8`). New
+`TestInputLeadSizing` covers the sizing rule (full-rtt basis, jitter term,
+both clamps, and that a LAN-quality link asks for less than the
+unknown-wire default). `TestPredictedTickClock` extended: being ahead skips
+rather than moving the counter backwards, skips are rate-limited, and a
+sub-tick fractional target never triggers the skip machinery. **Not yet
+manually verified**: the live two-client feel.
+
+**Known risk, and the obvious next phase**: the lead is now sized from a
+*client-side* estimate of what the wire needs (ping EMA at 1 sample/s, plus
+a jitter EMA that is a weak estimator of tail latency). Under-covering costs
+a stale-dropped command — `InputSystem` repeats the last flags, prediction
+diverges, and the client eats a reconciliation snap. The server already
+counts exactly this per peer ("N stale so far" in its logs) and that number
+is the correct closed-loop signal: replicate it to the client and let the
+lead be driven by observed drops rather than inferred latency. That's a
+protocol change, hence a phase of its own. Until then, the Net tab's
+reconciliation-correction plot is the manual proxy — if it starts spiking
+after this change, the lead is too tight for the link.
+
+Interp delay is still a fixed number rather than being sized from observed
+snapshot-arrival jitter the way the lead now is from ping. Same closed-loop
+argument applies; left for the same phase.
+
 ## Phase 8 — Deferred (needs its own design pass when reached)
 
 - Delta-compressed snapshots (per-entity change masks vs last acked).

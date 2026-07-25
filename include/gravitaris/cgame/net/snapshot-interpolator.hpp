@@ -37,6 +37,15 @@ public:
     // tick deltas to seconds for the extrapolation cap. Returns nullopt only
     // if history is empty (nothing received yet).
     //
+    // `renderTick` is fractional and must come from a continuous clock
+    // (NetClient::EstimateCurrentServerTickF, not the integer
+    // EstimateCurrentServerTick): the server snapshots every tick, so a
+    // whole-tick value always lands exactly on a buffered snapshot and the
+    // lerp below degenerates to a no-op -- remote entities then step a full
+    // tick of travel at a time, at whatever ragged cadence packets happen to
+    // arrive, which reads as speed-proportional jitter and (when a late
+    // snapshot re-bases the estimate backwards) visible rewinding.
+    //
     // `planetTick` (defaults to `renderTick` if omitted -- fine for a caller
     // that doesn't also run ClientPrediction, e.g. a test): the tick planets
     // are analytically evaluated at (EvaluateOrbit), separate from
@@ -49,7 +58,7 @@ public:
     // the higher the interpolation delay is set). See this class's own doc
     // comment on why planets are otherwise exempt from `renderTick`-based
     // interpolation/extrapolation.
-    static std::optional<SnapshotData> Compute(const std::deque<SnapshotData>& history, std::uint64_t renderTick,
+    static std::optional<SnapshotData> Compute(const std::deque<SnapshotData>& history, double renderTick,
                                                 std::uint32_t exemptNetId, float tickRate, const Params& params,
                                                 std::optional<std::uint64_t> planetTick = std::nullopt);
 };

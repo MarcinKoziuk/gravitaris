@@ -23,17 +23,13 @@ namespace Gravitaris {
 
 namespace {
 
-std::uint64_t SaturatingSub(std::uint64_t a, std::uint64_t b)
-{
-    return a > b ? a - b : 0;
-}
-
 // How far behind the estimated server tick remote entities render (see
 // CGame::m_interpDelaySeconds) -- smooths jitter at the cost of latency.
-std::uint64_t ComputeRenderTick(std::uint64_t estimatedServerTick, float interpDelaySeconds, std::uint32_t tickRate)
+// Fractional throughout, and fed by the smoothed clock rather than the
+// integer one: see SnapshotInterpolator::Compute's `renderTick` doc comment.
+double ComputeRenderTick(double estimatedServerTick, float interpDelaySeconds, std::uint32_t tickRate)
 {
-    const auto interpDelayTicks = static_cast<std::uint64_t>(interpDelaySeconds * static_cast<float>(tickRate));
-    return SaturatingSub(estimatedServerTick, interpDelayTicks);
+    return std::max(estimatedServerTick - static_cast<double>(interpDelaySeconds) * tickRate, 0.0);
 }
 
 } // namespace
@@ -123,8 +119,21 @@ void CGame::TickNetClient(const ControlFlags& flags)
     }
     if (!m_clientPrediction.HasOwnShip()) return;
 
-    const std::uint64_t target = m_netClient->EstimateCurrentServerTick() + m_netClient->GetInputLeadTicks();
+    // Smoothed clock, not the integer estimate: the target is compared
+    // against a free-running counter a fraction of a tick at a time now (see
+    // PredictedTickClock::Advance), so feeding it the raw staircase would
+    // read its steps as drift.
+    const double target =
+            m_netClient->EstimateCurrentServerTickF() + static_cast<double>(m_netClient->GetInputLeadTicks());
     const PredictedTickClock::AdvanceResult advance = m_predictedTickClock.Advance(target);
+    if (advance.skip) {
+        // Running ahead of the target -- usually because the input lead was
+        // just lowered under us. Give the tick back by simply not existing
+        // this call: no step, no input stamped, one frame of the own ship
+        // holding still while wall clock closes the gap.
+        ++m_netDiagnostics.tickSkipCount;
+        return;
+    }
     if (advance.resyncDrift) {
         // A lost tick is permanent backward drift vs. the server's
         // wall-clock-paced step (see PredictedTickClock's own doc comment),
@@ -180,14 +189,14 @@ void CGame::ApplyRemoteEvents()
     });
 }
 
-void CGame::RenderNetClient(float dtSeconds)
+void CGame::RenderNetClient(float dtSeconds, double tickFraction)
 {
     m_netClient->Update();
     ApplyRemoteEvents();
 
     const std::uint64_t estimatedServerTick = m_netClient->EstimateCurrentServerTick();
-    const std::uint64_t renderTick =
-            ComputeRenderTick(estimatedServerTick, m_interpDelaySeconds, m_netClient->GetTickRate());
+    const double renderTick = ComputeRenderTick(m_netClient->EstimateCurrentServerTickF(), m_interpDelaySeconds,
+                                                m_netClient->GetTickRate());
     m_lastEstimatedServerTick = estimatedServerTick;
     m_lastRenderTick = renderTick;
 
@@ -242,10 +251,21 @@ void CGame::RenderNetClient(float dtSeconds)
     // stay exactly correct for the next predicted tick to build on.
     m_ownShipSync->DecayCorrection(dtSeconds);
 
+    // Own ship: rendered `tickFraction` of the way from the previous
+    // predicted tick to the current one, not at the raw current one. Its
+    // simulated position only advances on whole fixed-step ticks, while
+    // everything it's judged against on screen moves on real time -- the
+    // camera eases with wall-clock dt, and remote entities now run on a
+    // continuous clock (SnapshotInterpolator). Drawing whole ticks against
+    // those makes the ship stall on a frame that ran no tick and lurch on
+    // one that ran two, by up to a tick of travel each way, which is why it
+    // scales with speed. Costs up to one tick (~17ms) of render latency on
+    // the own ship, the standard fixed-step interpolation trade.
     Magnum::Vector2 smoothedPlayerPos;
     if (const std::optional<flecs::entity> player = GetPlayer()) {
         const Transform& t = player->get<Transform>();
-        smoothedPlayerPos = Magnum::Vector2{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())}
+        const Vector2d rendered = t.prevPos + (t.pos - t.prevPos) * std::clamp(tickFraction, 0.0, 1.0);
+        smoothedPlayerPos = Magnum::Vector2{static_cast<float>(rendered.x()), static_cast<float>(rendered.y())}
                 + m_ownShipSync->GetCorrectionOffset();
     }
 
@@ -325,7 +345,7 @@ void CGame::Render(double delta)
     m_cameraTimeValid = true;
 
     if (m_netClient) {
-        RenderNetClient(dtSeconds);
+        RenderNetClient(dtSeconds, delta);
         return;
     }
 

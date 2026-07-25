@@ -14,6 +14,10 @@ namespace Gravitaris {
 struct NetDiagnostics {
     std::uint32_t resyncEventCount = 0;
     std::uint64_t lastResyncDriftTicks = 0;
+    // Ticks voluntarily given back to walk the clock down onto a lowered
+    // input lead (PredictedTickClock::AdvanceResult::skip). Expect a burst
+    // while the lead converges after connecting, then nothing.
+    std::uint32_t tickSkipCount = 0;
     RollingHistory driftHistory;
     RollingHistory correctionHistory;
     RollingHistory snapshotIntervalHistory;

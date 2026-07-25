@@ -113,18 +113,86 @@ void TestPredictedTickClock()
     }
     Require(clock.Current() == 105, "five consecutive advances land on the expected tick");
 
-    // Drift past the threshold (either direction) resyncs to target exactly.
+    // Large *forward* drift resyncs to target exactly: tick numbers only
+    // increase, so nothing downstream is disturbed by the jump.
     {
         const auto result = clock.Advance(200);
         Require(result.resyncDrift.has_value() && *result.resyncDrift == 95, "large forward drift resyncs, reports magnitude");
         Require(result.tick == 200, "resync returns the target tick itself");
+        Require(!result.skip, "a forward resync still steps");
         Require(clock.Current() == 201, "resync still advances by one after resyncing");
     }
+
+    // Running *ahead* of the target must never move the counter backwards
+    // (already-predicted ticks would be re-issued and the server would drop
+    // every one as stale) -- the clock gives ticks back by skipping steps.
     {
-        const auto result = clock.Advance(50); // 151 ticks behind now
-        Require(result.resyncDrift.has_value() && *result.resyncDrift == 151, "large backward drift resyncs, reports magnitude");
-        Require(result.tick == 50, "backward resync returns the target tick itself");
+        PredictedTickClock ahead;
+        ahead.Reset(1000);
+        // The target advances a tick per call, as wall clock does -- holding
+        // it still instead would have the clock fall further behind it every
+        // step, which is not the situation being modelled here.
+        double target = 995.0; // 5 ticks ahead: within the resync threshold
+        const auto first = ahead.Advance(target);
+        Require(first.skip, "being a tick or more ahead skips a step");
+        Require(ahead.Current() == 1000, "a skipped step does not advance the counter");
+        Require(!first.resyncDrift, "a skip is not reported as a resync");
+
+        // ...and not again until the rate limit has elapsed.
+        std::uint64_t skips = 0;
+        for (std::uint64_t i = 0; i < PredictedTickClock::MIN_TICKS_BETWEEN_SKIPS; ++i) {
+            target += 1.0;
+            if (ahead.Advance(target).skip) ++skips;
+        }
+        Require(skips == 0, "skips are rate-limited, not taken every call");
+        target += 1.0;
+        Require(ahead.Advance(target).skip, "a further skip is allowed once the interval has passed");
     }
+
+    // Sub-tick disagreement is tolerated outright: a fractional target within
+    // one tick must never trigger the skip machinery.
+    {
+        PredictedTickClock frac;
+        frac.Reset(500);
+        for (std::uint64_t i = 0; i < 200; ++i) {
+            const auto r = frac.Advance(static_cast<double>(500 + i) + 0.4);
+            Require(!r.skip, "a sub-tick lead/lag never skips");
+        }
+        Require(frac.Current() == 700, "sub-tick drift leaves the counter free-running");
+    }
+}
+
+// docs/networking-plan.md Phase 10: the input lead has to cover the *full*
+// round trip (the client's own server-tick estimate already lags by one
+// one-way trip), plus jitter -- see ComputeInputLeadTicks' own derivation.
+void TestInputLeadSizing()
+{
+    constexpr std::uint32_t TICK_RATE = 60; // 16.67ms per tick
+
+    Require(NetClient::ComputeInputLeadTicks(0.f, 0.f, TICK_RATE) == NetClient::MIN_INPUT_LEAD_TICKS,
+            "lead: a zero-latency loopback still keeps the minimum slack");
+
+    // 100ms rtt + 2*10ms jitter + one tick (16.67) = 136.67ms -> 9 ticks.
+    Require(NetClient::ComputeInputLeadTicks(100.f, 10.f, TICK_RATE) == 9,
+            "lead: sized off full rtt plus two jitter deviations plus a tick");
+
+    // 90ms rtt + no jitter + one tick = 106.67ms -> 7 ticks.
+    Require(NetClient::ComputeInputLeadTicks(90.f, 0.f, TICK_RATE) == 7, "lead: jitter-free sizing");
+    // Jitter alone moves it: same rtt, calmer line, fewer ticks.
+    Require(NetClient::ComputeInputLeadTicks(100.f, 0.f, TICK_RATE) <
+                    NetClient::ComputeInputLeadTicks(100.f, 10.f, TICK_RATE),
+            "lead: a jitter-free line of the same rtt needs less");
+
+    Require(NetClient::ComputeInputLeadTicks(100.f, 10.f, TICK_RATE) >
+                    NetClient::ComputeInputLeadTicks(50.f, 10.f, TICK_RATE),
+            "lead: grows with rtt");
+    Require(NetClient::ComputeInputLeadTicks(1e6f, 1e6f, TICK_RATE) == NetClient::MAX_INPUT_LEAD_TICKS,
+            "lead: clamped at the top rather than running away");
+
+    // The LAN case this phase exists for: a fast link must not sit on the
+    // fixed 8-tick default, since every unnecessary tick is skew.
+    Require(NetClient::ComputeInputLeadTicks(3.f, 1.f, TICK_RATE) < NetClient::INPUT_LEAD_TICKS,
+            "lead: a LAN-quality link asks for less than the unknown-wire default");
 }
 
 // docs/networking-plan.md Phase 4: SnapshotInterpolator's math, exercised
@@ -188,6 +256,30 @@ void TestSnapshotInterpolation()
                 "interp: rotation takes the shortest arc through the wrap, not the long way round");
 
         Require(find(2) == nullptr, "interp: exempt (own) entity is omitted, not given a snapshot-derived position");
+    }
+    {
+        // Sub-tick lerp between *consecutive* snapshots -- the real shape of
+        // the data (the server snapshots every tick), and the case a
+        // whole-tick render clock can't express at all: every integer tick
+        // lands exactly on a snapshot, so the lerp fraction is always 0 and
+        // remote entities step a full tick of travel at a time.
+        SnapshotData first;
+        first.tick = 100;
+        remote.pos = {0.f, 0.f};
+        remote.rot = 0.f;
+        first.entities = {remote};
+
+        SnapshotData second;
+        second.tick = 101;
+        remote.pos = {60.f, 0.f};
+        second.entities = {remote};
+
+        const std::deque<SnapshotData> consecutive{first, second};
+        const std::optional<SnapshotData> quarter = SnapshotInterpolator::Compute(
+                consecutive, 100.25, /*exemptNetId*/ 0, TICK_RATE, SnapshotInterpolator::Params{});
+        Require(quarter.has_value(), "interp: fractional render tick produces a result");
+        Require(std::fabs(quarter->entities[0].pos.x() - 15.f) < 0.01f,
+                "interp: consecutive snapshots lerp at the sub-tick fraction, not snapped to the older one");
     }
     {
         // Extrapolation past the newest snapshot, capped: remote entity has
@@ -1534,6 +1626,7 @@ int main()
 
     TestByteStream();
     TestPredictedTickClock();
+    TestInputLeadSizing();
     TestSnapshotInterpolation();
     TestOrbitReplication();
     TestClientPrediction();

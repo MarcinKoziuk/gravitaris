@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 
 #include <gravitaris/game/net/byte-stream.hpp>
 #include <gravitaris/game/net/protocol.hpp>
@@ -28,6 +29,7 @@ void NetClient::Update()
             case NetEventType::Disconnected:
                 m_connected = false;
                 m_welcomed = false;
+                m_serverClockStarted = false;
                 break;
             case NetEventType::Packet: {
                 ByteReader reader(event.data.data(), event.data.size());
@@ -80,6 +82,14 @@ void NetClient::Update()
                         const auto now = std::chrono::steady_clock::now();
                         m_lastPingMs =
                                 std::chrono::duration<float, std::milli>(now - pendingIt->second).count();
+                        // Deviation against the average as it stood *before*
+                        // this sample folds in, or the average would already
+                        // have moved toward the sample and understate it.
+                        const float deviation =
+                                m_avgPingMs < 0.f ? 0.f : std::fabs(m_lastPingMs - m_avgPingMs);
+                        m_pingJitterMs = m_pingJitterMs < 0.f
+                                ? deviation
+                                : m_pingJitterMs + PING_EMA_ALPHA * (deviation - m_pingJitterMs);
                         m_avgPingMs = m_avgPingMs < 0.f
                                 ? m_lastPingMs
                                 : m_avgPingMs + PING_EMA_ALPHA * (m_lastPingMs - m_avgPingMs);
@@ -96,7 +106,85 @@ void NetClient::Update()
         }
     }
 
+    UpdateServerClock();
+    UpdateInputLead();
     SendPing();
+}
+
+std::uint64_t NetClient::ComputeInputLeadTicks(float rttMs, float jitterMs, std::uint32_t tickRate)
+{
+    // Two jitter deviations, so an ordinary bad packet is covered rather
+    // than only the typical one.
+    static constexpr float JITTER_ALLOWANCE = 2.f;
+    // A tick's own width of slack on top: the command is stamped against an
+    // estimate that is itself quantized by the client's frame cadence.
+    const float msPerTick = 1000.f / static_cast<float>(std::max(tickRate, 1u));
+    const float needMs = std::max(rttMs, 0.f) + JITTER_ALLOWANCE * std::max(jitterMs, 0.f) + msPerTick;
+
+    const auto ticks = static_cast<std::uint64_t>(std::ceil(needMs / msPerTick));
+    return std::clamp(ticks, MIN_INPUT_LEAD_TICKS, MAX_INPUT_LEAD_TICKS);
+}
+
+std::uint64_t NetClient::GetSuggestedInputLeadTicks() const
+{
+    if (m_avgPingMs < 0.f) return INPUT_LEAD_TICKS;
+    return ComputeInputLeadTicks(m_avgPingMs, std::max(m_pingJitterMs, 0.f), m_tickRate);
+}
+
+void NetClient::UpdateInputLead()
+{
+    if (!m_inputLeadAuto || m_avgPingMs < 0.f) return;
+
+    const std::uint64_t suggested = GetSuggestedInputLeadTicks();
+    if (suggested >= m_inputLeadTicks) {
+        m_inputLeadTicks = suggested;
+        m_leadRelaxSince.reset();
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (!m_leadRelaxSince) {
+        m_leadRelaxSince = now;
+        return;
+    }
+    if (std::chrono::duration<double>(now - *m_leadRelaxSince).count() >= LEAD_RELAX_SECONDS) {
+        --m_inputLeadTicks;
+        m_leadRelaxSince = now;
+    }
+}
+
+void NetClient::UpdateServerClock()
+{
+    if (!m_lastAckedSnapshotRecvTime) return;
+
+    const auto now = std::chrono::steady_clock::now();
+    const double elapsedSeconds = std::chrono::duration<double>(now - *m_lastAckedSnapshotRecvTime).count();
+    // Deliberately not floored, unlike EstimateCurrentServerTick: this is the
+    // signal the smoothing below tracks, and quantizing it to whole ticks
+    // would just be a second staircase for the filter to chase.
+    const double arrivalEstimate =
+            static_cast<double>(m_lastAckedSnapshotTick) + std::max(elapsedSeconds, 0.0) * m_tickRate;
+
+    if (!m_serverClockStarted) {
+        m_smoothedServerTick = arrivalEstimate;
+        m_serverClockStarted = true;
+        m_lastServerClockUpdate = now;
+        return;
+    }
+
+    const double dtSeconds = std::chrono::duration<double>(now - *m_lastServerClockUpdate).count();
+    m_lastServerClockUpdate = now;
+
+    const double error = arrivalEstimate - m_smoothedServerTick;
+    if (std::fabs(error) > CLOCK_SNAP_TICKS) {
+        m_smoothedServerTick = arrivalEstimate;
+        ++m_clockSnapCount;
+        return;
+    }
+
+    const double rateAdjust =
+            std::clamp(error * CLOCK_SMOOTHING_GAIN, -CLOCK_MAX_RATE_ADJUST, CLOCK_MAX_RATE_ADJUST);
+    m_smoothedServerTick += dtSeconds * m_tickRate * (1.0 + rateAdjust);
 }
 
 void NetClient::SendPing()

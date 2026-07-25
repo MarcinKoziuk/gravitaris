@@ -53,7 +53,8 @@ std::optional<flecs::entity> OwnShipSync::SpawnIfConfirmed()
     m_clientPrediction.SpawnOwnShip(
             ownShip->modelId, Vector2d{static_cast<double>(ownShip->pos.x()), static_cast<double>(ownShip->pos.y())},
             m_netClient.GetYourTeam());
-    m_tickClock.Reset(m_netClient.EstimateCurrentServerTick() + m_netClient.GetInputLeadTicks());
+    m_tickClock.Reset(static_cast<std::uint64_t>(m_netClient.EstimateCurrentServerTickF()) +
+                      m_netClient.GetInputLeadTicks());
     return m_clientPrediction.GetOwnShip();
 }
 

@@ -67,26 +67,28 @@ const EntityState* FindByNetId(const SnapshotData& snapshot, std::uint32_t netId
 
 } // namespace
 
-std::optional<SnapshotData> SnapshotInterpolator::Compute(const std::deque<SnapshotData>& history,
-                                                          std::uint64_t renderTick, std::uint32_t exemptNetId,
-                                                          float tickRate, const Params& params,
+std::optional<SnapshotData> SnapshotInterpolator::Compute(const std::deque<SnapshotData>& history, double renderTick,
+                                                          std::uint32_t exemptNetId, float tickRate,
+                                                          const Params& params,
                                                           std::optional<std::uint64_t> planetTick)
 {
     if (history.empty()) return std::nullopt;
-    const std::uint64_t evalPlanetsAt = planetTick.value_or(renderTick);
+    const auto renderTickWhole = static_cast<std::uint64_t>(std::max(renderTick, 0.0));
+    const std::uint64_t evalPlanetsAt = planetTick.value_or(renderTickWhole);
 
     SnapshotData out;
-    out.tick = renderTick;
+    out.tick = renderTickWhole;
 
-    if (renderTick <= history.front().tick) {
+    if (renderTick <= static_cast<double>(history.front().tick)) {
         // Nothing older buffered to interpolate from -- clamp to the
         // earliest known state (also covers "just connected").
         out.entities = history.front().entities;
         out.events = history.front().events;
     }
-    else if (renderTick >= history.back().tick) {
+    else if (renderTick >= static_cast<double>(history.back().tick)) {
         const SnapshotData& latest = history.back();
-        const float rawSeconds = static_cast<float>(renderTick - latest.tick) / std::max(tickRate, 1.f);
+        const auto rawSeconds =
+                static_cast<float>((renderTick - static_cast<double>(latest.tick)) / std::max(tickRate, 1.f));
         const float extrapolateSeconds = std::min(rawSeconds, params.extrapolationCapSeconds);
         out.entities.reserve(latest.entities.size());
         for (const EntityState& e : latest.entities) {
@@ -99,11 +101,12 @@ std::optional<SnapshotData> SnapshotInterpolator::Compute(const std::deque<Snaps
         // <= renderTick < history[i + 1].tick.
         const auto upper = std::upper_bound(
                 history.begin(), history.end(), renderTick,
-                [](std::uint64_t tick, const SnapshotData& s) { return tick < s.tick; });
+                [](double tick, const SnapshotData& s) { return tick < static_cast<double>(s.tick); });
         const SnapshotData& newer = *upper;
         const SnapshotData& older = *(upper - 1);
 
-        const float t = static_cast<float>(renderTick - older.tick) / static_cast<float>(newer.tick - older.tick);
+        const auto t = static_cast<float>((renderTick - static_cast<double>(older.tick)) /
+                                          static_cast<double>(newer.tick - older.tick));
 
         out.entities.reserve(newer.entities.size());
         for (const EntityState& newState : newer.entities) {

@@ -77,6 +77,45 @@ class NetClient {
     // number every second.
     static constexpr float PING_EMA_ALPHA = 0.2f;
     float m_avgPingMs = -1.f;
+    // EMA of |sample - average|, i.e. how much a single round trip typically
+    // deviates from the smoothed one. The lead has to cover the unlucky
+    // packet, not the average one, so this is sized in explicitly rather than
+    // hidden inside a blanket multiplier on the average.
+    float m_pingJitterMs = -1.f;
+
+    // Auto-sizing of the input lead from those two measurements (see
+    // ComputeInputLeadTicks). On by default: the fixed INPUT_LEAD_TICKS
+    // fallback is sized for an unknown wire, and every tick of it that real
+    // latency doesn't need is a tick of skew between where this client draws
+    // its own ship and where every other client draws it.
+    bool m_inputLeadAuto = true;
+    // Raising the lead is urgent (under-covered = commands dropped as
+    // stale); lowering it is not, and doing it eagerly would chase jitter.
+    // So: up immediately, down one tick per this many seconds of the
+    // suggestion staying below the current value.
+    static constexpr double LEAD_RELAX_SECONDS = 3.0;
+    std::optional<std::chrono::steady_clock::time_point> m_leadRelaxSince;
+
+    // Smoothed, fractional, monotonic server-clock estimate for *rendering*
+    // (EstimateCurrentServerTickF). The raw arrival-based estimate is a
+    // staircase that only steps when a packet lands, so feeding it to
+    // SnapshotInterpolator hands raw network arrival jitter straight to the
+    // screen: a late snapshot re-bases the estimate backwards and remote
+    // entities visibly rewind a whole tick of travel, worse the faster
+    // they're moving. This recovers a continuous clock from it instead --
+    // free-run at real time, closed back onto the raw estimate by warping
+    // the rate within +/-CLOCK_MAX_RATE_ADJUST (never by jumping, which is
+    // what keeps it monotonic).
+    static constexpr double CLOCK_SMOOTHING_GAIN = 0.1;   // rate warp per tick of error
+    static constexpr double CLOCK_MAX_RATE_ADJUST = 0.25; // < 1, or the clock could run backwards
+    // Past this the error is a real desync (a stall, a long gap in
+    // snapshots), not jitter to be smoothed out -- warping the rate would
+    // take seconds to close it, so snap and accept the one-time jump.
+    static constexpr double CLOCK_SNAP_TICKS = 10.0;
+    double m_smoothedServerTick = 0.0;
+    bool m_serverClockStarted = false;
+    std::optional<std::chrono::steady_clock::time_point> m_lastServerClockUpdate;
+    std::size_t m_clockSnapCount = 0;
 
     // Rolling window sent with every ClientInput (CLIENT_INPUT_BACKUP deep);
     // matches InputQueue's own "resend, let the far end dedupe" model.
@@ -123,6 +162,21 @@ public:
     // and InputSystem silently dropped it as stale.
     [[nodiscard]] std::uint64_t EstimateCurrentServerTick() const;
 
+    // The same estimate, but continuous and monotonic: fractional ticks, no
+    // backward steps, advancing every frame rather than only when a packet
+    // lands (see m_smoothedServerTick). This is what the *render* path must
+    // use -- SnapshotInterpolator can only lerp between two snapshots if the
+    // tick it's asked for actually falls between them, and consecutive
+    // snapshots are one tick apart, so a whole-tick render clock always
+    // lands exactly on one and its lerp fraction is always 0.
+    //
+    // Prediction deliberately keeps using the integer estimate above: it
+    // needs the exact tick numbers it stamps input with, and PredictedTickClock
+    // already does its own (different) filtering on top.
+    //
+    // Updated inside Update(), so it's only as fresh as the last call to it.
+    [[nodiscard]] double EstimateCurrentServerTickF() const { return m_smoothedServerTick; }
+
     // Appends a command to the resend window and sends a ClientInput packet
     // stamped with `tick`. The caller supplies it explicitly (typically
     // `EstimateCurrentServerTick() + GetInputLeadTicks()`, but see
@@ -167,7 +221,49 @@ public:
     // the stale-drop/repeat-last-command jitter the 8-tick default was raised
     // to fix.
     [[nodiscard]] std::uint64_t GetInputLeadTicks() const { return m_inputLeadTicks; }
-    void SetInputLeadTicks(std::uint64_t ticks) { m_inputLeadTicks = ticks; }
+    // Manual override: also turns auto-sizing off, or the next Update()
+    // would immediately undo whatever was just set.
+    void SetInputLeadTicks(std::uint64_t ticks)
+    {
+        m_inputLeadTicks = ticks;
+        m_inputLeadAuto = false;
+    }
+
+    // Never below this even on a zero-latency loopback: one tick of slack for
+    // the send/receive landing either side of a tick boundary, and the
+    // interval between the client's own frames is itself ~a tick.
+    static constexpr std::uint64_t MIN_INPUT_LEAD_TICKS = 2;
+    static constexpr std::uint64_t MAX_INPUT_LEAD_TICKS = 180;
+
+    // The lead a given measurement calls for, in ticks. Pure and static so
+    // the sizing rule is testable without a live connection.
+    //
+    // Sized off the *full* round trip, not half of it, and that's not
+    // conservatism -- it's what the arithmetic requires. This client stamps
+    // commands `lead` ahead of its own server-tick estimate, and that
+    // estimate is itself derived from snapshot arrivals, so it already lags
+    // the server's true tick by one one-way trip. A command sent now reaches
+    // the server one further one-way trip later. Cover both or it lands in
+    // the server's past:
+    //
+    //     stamp = (true - owd) + lead   must be >=   true + owd
+    //     =>  lead >= 2 * owd  =  rtt
+    //
+    // Which also means the own ship necessarily runs one one-way trip ahead
+    // of the server's true state, and no tuning removes that -- it's the
+    // floor this whole scheme sits on.
+    static std::uint64_t ComputeInputLeadTicks(float rttMs, float jitterMs, std::uint32_t tickRate);
+
+    // What ComputeInputLeadTicks makes of the current measurements, or the
+    // INPUT_LEAD_TICKS fallback while no Pong has arrived yet.
+    [[nodiscard]] std::uint64_t GetSuggestedInputLeadTicks() const;
+
+    [[nodiscard]] bool IsInputLeadAuto() const { return m_inputLeadAuto; }
+    void SetInputLeadAuto(bool on)
+    {
+        m_inputLeadAuto = on;
+        m_leadRelaxSince.reset();
+    }
 
     // Must be called before the handshake fires (i.e. before the first
     // Update() that observes a Connected event) to take effect -- ClientHello
@@ -192,6 +288,10 @@ public:
     [[nodiscard]] float GetLastSnapshotIntervalMs() const { return m_lastSnapshotIntervalMs; }
     [[nodiscard]] std::size_t GetAcceptedSnapshotCount() const { return m_acceptedSnapshotCount; }
     [[nodiscard]] std::size_t GetDroppedSnapshotCount() const { return m_droppedSnapshotCount; }
+    // Times the render clock had to snap rather than warp (see
+    // CLOCK_SNAP_TICKS) -- each one is a visible one-time jump in every
+    // remote entity's position.
+    [[nodiscard]] std::size_t GetClockSnapCount() const { return m_clockSnapCount; }
 
     // Real measured round-trip time (PingPacket's own doc comment) -- not an
     // estimate derived from snapshot/tick cadence. -1 until the first Pong
@@ -200,9 +300,12 @@ public:
     // show by default).
     [[nodiscard]] float GetLastPingMs() const { return m_lastPingMs; }
     [[nodiscard]] float GetAveragePingMs() const { return m_avgPingMs; }
+    [[nodiscard]] float GetPingJitterMs() const { return m_pingJitterMs; }
 
 private:
     void SendPing();
+    void UpdateServerClock();
+    void UpdateInputLead();
 };
 
 } // namespace Gravitaris

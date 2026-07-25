@@ -129,15 +129,24 @@ protected:
     // tick remote entities render (smooths jitter, at the cost of latency)
     // and how far past the newest received snapshot extrapolation is
     // allowed to guess before snapping to it instead.
-    float m_interpDelaySeconds = 0.1f;
+    // 50ms = 3 snapshots at 60Hz. Was 100ms, which was sized to hide raw
+    // packet-arrival jitter back when the render clock passed it straight
+    // through; the smoothed clock absorbs that now, leaving this to cover
+    // only real loss/reordering. Every tick of it is also a tick of skew
+    // between the own ship and everyone else's (see Phase 10).
+    float m_interpDelaySeconds = 0.05f;
     SnapshotInterpolator::Params m_interpParams;
     // Diagnostics from the most recent RenderNetClient call, for the Net
     // debug tab (estimating/rendering happens every frame; the tab just
     // reads the last computed values rather than recomputing them itself).
     std::uint64_t m_lastEstimatedServerTick = 0;
-    std::uint64_t m_lastRenderTick = 0;
+    double m_lastRenderTick = 0.0;
 
-    void RenderNetClient(float dtSeconds);
+    // `tickFraction` is the fixed-step accumulator's leftover, 0..1 (the
+    // same `delta` Render takes) -- how far past the last predicted tick
+    // this frame actually is. The own ship is rendered that far between its
+    // last two predicted positions; see RenderNetClient's own comment.
+    void RenderNetClient(float dtSeconds, double tickFraction);
 
     Magnum::Vector2 m_viewportSize{1280.f, 720.f};
 
@@ -324,7 +333,21 @@ public:
         return m_netClient ? m_netClient->GetSnapshotHistory().size() : 0;
     }
     [[nodiscard]] std::uint64_t GetLastEstimatedServerTick() const { return m_lastEstimatedServerTick; }
-    [[nodiscard]] std::uint64_t GetLastRenderTick() const { return m_lastRenderTick; }
+    [[nodiscard]] double GetLastRenderTick() const { return m_lastRenderTick; }
+    [[nodiscard]] std::size_t GetClockSnapCount() const
+    {
+        return m_netClient ? m_netClient->GetClockSnapCount() : 0;
+    }
+    [[nodiscard]] float GetPingJitterMs() const { return m_netClient ? m_netClient->GetPingJitterMs() : -1.f; }
+    [[nodiscard]] std::uint64_t GetSuggestedInputLeadTicks() const
+    {
+        return m_netClient ? m_netClient->GetSuggestedInputLeadTicks() : 0;
+    }
+    [[nodiscard]] bool IsInputLeadAuto() const { return m_netClient && m_netClient->IsInputLeadAuto(); }
+    void SetInputLeadAuto(bool on)
+    {
+        if (m_netClient) m_netClient->SetInputLeadAuto(on);
+    }
 
     // Net debug tab (Phase 5 prediction/reconciliation tunable).
     [[nodiscard]] double GetPredictionEpsilon() const { return m_clientPrediction.GetPositionEpsilon(); }

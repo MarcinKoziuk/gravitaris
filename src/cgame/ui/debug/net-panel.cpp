@@ -43,7 +43,8 @@ void DrawNetPanel(CGame& game)
         ImGui::TextDisabled("Ping: measuring... (first Pong not received yet)");
     }
     else {
-        ImGui::Text("Ping (RTT): %.1f ms avg, %.1f ms last", game.GetAveragePingMs(), game.GetLastPingMs());
+        ImGui::Text("Ping (RTT): %.1f ms avg, %.1f ms last, %.1f ms jitter", game.GetAveragePingMs(),
+                    game.GetLastPingMs(), game.GetPingJitterMs());
     }
     ImGui::SetItemTooltip("Real measured round-trip time (dedicated Ping/Pong probe, ~1/s), not "
                           "derived from snapshot cadence. Use this to tell whether perceived input "
@@ -61,11 +62,23 @@ void DrawNetPanel(CGame& game)
     // net-server.cpp -- a late command isn't merely delayed, it's silently
     // discarded unapplied, forever, the instant InputSystem's next pass
     // sees `tick < step`).
+    bool leadAuto = game.IsInputLeadAuto();
+    if (ImGui::Checkbox("Auto input lead (from measured ping/jitter)", &leadAuto)) {
+        game.SetInputLeadAuto(leadAuto);
+    }
+    ImGui::SetItemTooltip("Sizes the lead to the connection instead of a fixed worst-case guess. "
+                          "Every tick of lead beyond what latency needs is a tick of skew between "
+                          "where you draw your own ship and where everyone else draws it. Raises "
+                          "immediately, lowers a tick at a time. Moving the slider takes over "
+                          "manually.");
+
     int leadTicks = static_cast<int>(game.GetInputLeadTicks());
+    ImGui::BeginDisabled(leadAuto);
     ImGui::SetNextItemWidth(160.f);
     if (ImGui::SliderInt("Input lead (ticks)", &leadTicks, 0, 180)) {
         game.SetInputLeadTicks(static_cast<std::uint64_t>(std::max(leadTicks, 0)));
     }
+    ImGui::EndDisabled();
     ImGui::SetItemTooltip("How far ahead of the estimated server tick this client's own input is "
                           "stamped -- a command waits in the server's queue until its stamped tick "
                           "arrives, so this is a real floor on how soon it can possibly take effect. "
@@ -75,16 +88,13 @@ void DrawNetPanel(CGame& game)
                           "than guessing.");
 
     if (game.GetAveragePingMs() >= 0.f) {
-        constexpr float MS_PER_TICK = static_cast<float>(Game::PHYSICS_DELTA * 1000.0);
-        // +50% margin: the average smooths over jitter that a single unlucky
-        // packet can still exceed -- sizing the lead off the raw average
-        // alone would then intermittently under-cover it.
-        const auto suggested =
-                static_cast<int>(std::ceil(game.GetAveragePingMs() * 1.5f / MS_PER_TICK));
-        ImGui::Text("Suggested (1.5x avg ping): %d ticks", suggested);
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Apply##lead")) {
-            game.SetInputLeadTicks(static_cast<std::uint64_t>(std::max(suggested, 0)));
+        const auto suggested = static_cast<int>(game.GetSuggestedInputLeadTicks());
+        ImGui::Text("Measurement calls for: %d ticks (rtt + 2x jitter + 1 tick)", suggested);
+        if (!leadAuto) {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Apply##lead")) {
+                game.SetInputLeadTicks(static_cast<std::uint64_t>(std::max(suggested, 0)));
+            }
         }
     }
 
@@ -144,8 +154,12 @@ void DrawNetPanel(CGame& game)
 
     ImGui::SeparatorText("Diagnostics");
     ImGui::Text("Snapshot history: %zu buffered", game.GetSnapshotHistorySize());
-    ImGui::Text("Estimated server tick: %llu", static_cast<unsigned long long>(game.GetLastEstimatedServerTick()));
-    ImGui::Text("Render tick (delayed): %llu", static_cast<unsigned long long>(game.GetLastRenderTick()));
+    ImGui::Text("Estimated server tick (input path): %llu",
+                static_cast<unsigned long long>(game.GetLastEstimatedServerTick()));
+    ImGui::Text("Render tick (smoothed, delayed): %.2f", game.GetLastRenderTick());
+    ImGui::Text("Render-clock snaps: %zu", game.GetClockSnapCount());
+    ImGui::SetItemTooltip("Times the smoothed render clock had to jump instead of easing back into sync. "
+                          "Climbing steadily = every remote entity is jumping with it.");
 
     ImGui::SeparatorText("Connection health");
     ImGui::TextWrapped(
@@ -162,6 +176,10 @@ void DrawNetPanel(CGame& game)
 
     ImGui::Text("Predicted-tick drift/resync: %u events, last %llu ticks",
                 diag.resyncEventCount, static_cast<unsigned long long>(diag.lastResyncDriftTicks));
+    ImGui::Text("Ticks given back (lead lowered): %u", diag.tickSkipCount);
+    ImGui::SetItemTooltip("One skipped own-ship tick each, spent walking the predicted clock down onto "
+                          "a reduced input lead. A burst after connecting is the lead converging; a "
+                          "steady trickle means it never settles.");
     PlotHistory(diag.driftHistory, "##drift", "ticks");
 
     ImGui::Text("Reconciliation correction magnitude");
