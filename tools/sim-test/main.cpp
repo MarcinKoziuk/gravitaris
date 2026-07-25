@@ -825,6 +825,7 @@ void TestShipCollision()
         float hpA = 0.f;
         float hpB = 0.f;
         bool crossed = false; // the two centres passed through each other
+        double mass = 0.;
     };
 
     // One head-on pass. Thresholds are set from the pair's *actual* momentum
@@ -854,6 +855,7 @@ void TestShipCollision()
         params.survivorDamageScale = 20.0 / momentum;
 
         Outcome out;
+        out.mass = cpBodyGetMass(bodyA);
         for (int tick = 0; tick < 400; ++tick) {
             game.Update();
             if (!a.is_alive() || !b.is_alive()) break;
@@ -866,17 +868,21 @@ void TestShipCollision()
         return out;
     };
 
-    // Slow enough to be an overlap (closing 40 against the 55 default), with
+    // Slow enough to be an overlap: closing 120 against the 250 default.
+    // A fighter masses 1 and thrusts at 140, so it gains 140 units/s per
+    // second of burn -- "slow" here still means a second of thrust each.
+    // The nudge is off so "passed through" is unambiguous; under the old
+    // hard contact these two could never have swapped sides.
     // the separating nudge off so "passed through" is unambiguous -- under
     // the old hard contact these two could never have swapped sides.
     {
-        const Outcome slow = headOn(20., TeamId::Blue, TeamId::Red, 100.f, 100.f, 1.5, 0.);
+        const Outcome slow = headOn(60., TeamId::Blue, TeamId::Red, 100.f, 100.f, 1.5, 0.);
         Require(slow.aAlive && slow.bAlive, "ram: a slow enemy pair both survive");
         Require(slow.crossed, "ram: a slow enemy pair passes through instead of bouncing");
         Require(slow.hpA == 100.f && slow.hpB == 100.f, "ram: a slow overlap does no damage at all");
     }
     {
-        const Outcome slow = headOn(20., TeamId::Blue, TeamId::Blue, 100.f, 100.f, 1.5, 0.);
+        const Outcome slow = headOn(60., TeamId::Blue, TeamId::Blue, 100.f, 100.f, 1.5, 0.);
         Require(slow.aAlive && slow.bAlive && slow.crossed, "ram: a slow friendly pair overlaps too");
         Require(slow.hpA == 100.f && slow.hpB == 100.f, "ram: a slow friendly overlap does no damage");
     }
@@ -884,28 +890,35 @@ void TestShipCollision()
     // Fast, unequal toughness (mass x *current* hp), below the both-die
     // threshold: the weaker dies, the survivor is damaged but lives.
     {
-        const Outcome ram = headOn(60., TeamId::Blue, TeamId::Red, 100.f, 40.f, 1.5, 0.);
+        const Outcome ram = headOn(200., TeamId::Blue, TeamId::Red, 100.f, 40.f, 1.5, 0.);
         Require(ram.aAlive, "ram: the tougher ship survives");
         Require(!ram.bAlive, "ram: the weaker ship is destroyed");
-        Require(ram.hpA < 100.f && ram.hpA > 0.f, "ram: the survivor takes damage but lives");
+        // Exactly one ram's worth of damage. The helper scales a *head-on*
+        // hit to 20 points; the hulls meet at an angle so the projected
+        // closing speed lands it nearer 17. What matters is the band: a
+        // ship is several Chipmunk shapes and one pair touching raises 3-4
+        // arbiters, so without per-pair dedupe this is 3-4 hits (hp <= 66)
+        // and the "survivor" does not survive.
+        Require(ram.hpA > 75.f && ram.hpA < 95.f,
+                "ram: the survivor is damaged exactly once, not once per overlapping shape pair");
     }
 
     // Evenly matched: no weaker party to pick, and choosing by entity id
     // would decide a head-on ram on spawn order. Both die.
     {
-        const Outcome ram = headOn(60., TeamId::Blue, TeamId::Red, 100.f, 100.f, 1.5, 0.);
+        const Outcome ram = headOn(200., TeamId::Blue, TeamId::Red, 100.f, 100.f, 1.5, 0.);
         Require(!ram.aAlive && !ram.bAlive, "ram: an evenly matched pair destroys both");
     }
 
     // Past the both-die momentum threshold, toughness stops mattering.
     {
-        const Outcome ram = headOn(60., TeamId::Blue, TeamId::Red, 100.f, 40.f, 0.5, 0.);
+        const Outcome ram = headOn(200., TeamId::Blue, TeamId::Red, 100.f, 40.f, 0.5, 0.);
         Require(!ram.aAlive && !ram.bAlive, "ram: a hard enough hit destroys both regardless of toughness");
     }
 
     // Friendlies never ram-kill, at any speed.
     {
-        const Outcome ram = headOn(60., TeamId::Blue, TeamId::Blue, 100.f, 40.f, 0.5, 0.);
+        const Outcome ram = headOn(200., TeamId::Blue, TeamId::Blue, 100.f, 40.f, 0.5, 0.);
         Require(ram.aAlive && ram.bAlive, "ram: friendlies survive a hit that would destroy both enemies");
         Require(ram.hpA == 100.f && ram.hpB == 40.f, "ram: friendlies take no ram damage either");
     }

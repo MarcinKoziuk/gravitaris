@@ -13,11 +13,13 @@ namespace Gravitaris {
 // spawner has finished adding the rest of the entity's components, so there
 // is nothing to infer from yet.
 enum class CollisionClass : std::uint8_t {
-    // Ordinary hard contact for every pair: planets, structures (High Ports,
-    // docks), freighters. Ram/landing damage via PhysicsSystem's wildcard
-    // postSolve handler.
+    // Ordinary hard contact for every pair: planets and structures (High
+    // Ports, docks), whose motion is predictable and which are meant to be
+    // solid. Ram/landing damage via PhysicsSystem's wildcard postSolve
+    // handler.
     Default = 0,
-    // Player- and AI-piloted ships. Identical to Default against everything
+    // Anything free-flying and piloted: player ships, AI ships, freighters.
+    // Identical to Default against everything
     // else -- landing on a planet is unchanged -- but ship-against-ship
     // resolves as gameplay instead of physics: they pass through each other,
     // and a fast enough contact destroys rather than bounces. See

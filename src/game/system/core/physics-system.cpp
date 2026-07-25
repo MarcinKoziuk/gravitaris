@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <cassert>
 #include <cstdint>
@@ -145,21 +146,25 @@ cpBool PhysicsSystem::PreSolveShipPair(cpArbiter* arb, cpSpace*, cpDataPointer u
 
     // Normal points from A toward B, so A separates along -n and B along +n.
     const cpVect normal = cpArbiterGetNormal(arb);
-    self->m_shipOverlaps.push_back(
-            ShipOverlap{entA, entB, Magnum::Vector2d{normal.x, normal.y}});
+
+    // One nudge per ship pair per step, not per overlapping shape pair.
+    const bool overlapRecorded =
+            std::any_of(self->m_shipOverlaps.begin(), self->m_shipOverlaps.end(),
+                        [&](const ShipOverlap& o) { return SamePair(o.a, o.b, entA, entB); });
+    if (!overlapRecorded) {
+        self->m_shipOverlaps.push_back(ShipOverlap{entA, entB, Magnum::Vector2d{normal.x, normal.y}});
+    }
 
     // Velocities here are pre-solve, i.e. the speed they actually met at.
     // Positive = approaching.
     const cpFloat closing = cpvdot(cpvsub(cpBodyGetVelocity(bodyA), cpBodyGetVelocity(bodyB)), normal);
+    if (closing < self->m_shipContact.ramClosingSpeed || cpArbiterGetCount(arb) == 0) return cpFalse;
 
-    // Once per contact episode, tracked on the arbiter itself (Chipmunk keeps
-    // it alive and its user data intact for as long as the pair stays in
-    // contact). Without this a ram would re-fire every step the two ships
-    // spent passing through each other -- and since nothing pushes them
-    // apart any more, that's several.
-    const bool alreadyRammed = cpArbiterGetUserData(arb) != nullptr;
-    if (!alreadyRammed && closing >= self->m_shipContact.ramClosingSpeed && cpArbiterGetCount(arb) > 0) {
-        cpArbiterSetUserData(arb, reinterpret_cast<cpDataPointer>(std::uintptr_t{1}));
+    const bool alreadyRammed =
+            std::any_of(self->m_recentRams.begin(), self->m_recentRams.end(),
+                        [&](const RecentRam& r) { return SamePair(r.a, r.b, entA, entB); });
+    if (!alreadyRammed) {
+        self->m_recentRams.push_back(RecentRam{entA, entB, self->m_stepIndex});
         const cpVect contact = cpArbiterGetPointA(arb, 0);
         self->m_shipRams.push_back(ShipRamEvent{entA, entB, closing, cpBodyGetMass(bodyA), cpBodyGetMass(bodyB),
                                                 Magnum::Vector2d{contact.x, contact.y}});
@@ -172,6 +177,13 @@ cpBool PhysicsSystem::PreSolveShipPair(cpArbiter* arb, cpSpace*, cpDataPointer u
 
 void PhysicsSystem::ApplyShipSeparation()
 {
+    ++m_stepIndex;
+    m_recentRams.erase(std::remove_if(m_recentRams.begin(), m_recentRams.end(),
+                                      [&](const RecentRam& r) {
+                                          return m_stepIndex - r.step > RAM_COOLDOWN_STEPS;
+                                      }),
+                       m_recentRams.end());
+
     if (m_shipContact.separationAccel > 0.0) {
         for (const ShipOverlap& overlap : m_shipOverlaps) {
             const cpVect dir = cpv(overlap.normal.x(), overlap.normal.y());

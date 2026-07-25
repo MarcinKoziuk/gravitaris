@@ -212,7 +212,7 @@ flecs::entity EntitySpawner::SpawnFreighter(id_t modelId, Vector2d position, Tea
 
     auto entity = m_registry.entity();
     entity.emplace<Transform>(position);
-    entity.emplace<RigidBodyDesc>("main"_id, body);
+    entity.emplace<RigidBodyDesc>("main"_id, body, /*sensor=*/false, CollisionClass::Ship);
     entity.emplace<Team>(team);
     entity.emplace<Damageable>();
     entity.emplace<Controls>();

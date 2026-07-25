@@ -83,21 +83,30 @@ public:
 
     // Runtime-tunable ship-against-ship rule (networking-plan Phase 9). Real
     // values want playtesting, hence the debug panel rather than constants.
+    // Defaults are calibrated against this game's actual speed scale, not
+    // guessed: a fighter masses 1.0 and thrusts at ShipControlsSystem::
+    // THRUST_FORCE, i.e. it gains 140 units/s for every second of burn, and
+    // DamageSystem already treats a 90-unit/s touchdown as a *safe* landing.
+    // A number that sounds fast in the abstract is reached here in a fraction
+    // of a second of thrust.
     struct ShipContactParams {
         // Approach speed along the contact normal at or above which a
-        // contact is a ram instead of an overlap.
-        double ramClosingSpeed = 55.0;
+        // contact is a ram instead of an overlap. 250 = both ships doing
+        // ~125, roughly a second of burn each, head-on.
+        double ramClosingSpeed = 250.0;
         // Acceleration each overlapping ship gets along the contact normal,
         // easing the pair apart. 0 = pure pass-through. Deliberately applied
         // as a force before the next step rather than inside the solver: an
         // impulse in the contact solve is exactly the thing prediction can't
-        // reconcile, which is what Phase 9 exists to remove.
-        double separationAccel = 90.0;
+        // reconcile, which is what Phase 9 exists to remove. Kept well under
+        // THRUST_FORCE so a ship can always fly against it.
+        double separationAccel = 60.0;
         // Ram momentum (lighter ship's mass x closing speed) past which both
         // ships die outright, however tough either is.
-        double bothDieMomentum = 900.0;
-        // Survivor damage per unit of the loser's mass x closing speed.
-        double survivorDamageScale = 0.02;
+        double bothDieMomentum = 600.0;
+        // Survivor damage per unit of the loser's mass x closing speed. 0.1
+        // puts a threshold-speed ram at ~25 points.
+        double survivorDamageScale = 0.1;
     };
 
 private:
@@ -128,6 +137,30 @@ private:
     std::vector<ShipOverlap> m_shipOverlaps;
 
     std::vector<ShipRamEvent> m_shipRams;
+
+    // A ship is several Chipmunk shapes, so one ship pair touching produces
+    // several arbiters -- each of which would otherwise record its own
+    // overlap (multiplying the separating force by the shape count) and its
+    // own ram (multiplying the damage). Both are deduplicated by entity pair
+    // instead: within a step for the overlap, and for RAM_COOLDOWN_STEPS for
+    // the ram, since the pair keeps overlapping for several steps afterward
+    // (nothing pushes them apart any more) and a per-arbiter flag can't see
+    // what the pair's *other* arbiters already did.
+    static constexpr std::uint64_t RAM_COOLDOWN_STEPS = 60;
+    struct RecentRam {
+        flecs::entity_t a;
+        flecs::entity_t b;
+        std::uint64_t step;
+    };
+    std::vector<RecentRam> m_recentRams;
+    std::uint64_t m_stepIndex = 0;
+
+    // Unordered pair equality, so (a,b) and (b,a) are the same contact
+    // however Chipmunk happened to order the shapes this step.
+    static bool SamePair(flecs::entity_t a1, flecs::entity_t b1, flecs::entity_t a2, flecs::entity_t b2)
+    {
+        return (a1 == a2 && b1 == b2) || (a1 == b2 && b1 == a2);
+    }
 
     flecs::observer m_bodyAddedObserver;
     flecs::observer m_bodyRemovedObserver;

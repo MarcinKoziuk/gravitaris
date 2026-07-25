@@ -2149,17 +2149,13 @@ Decisions the plan left open, made while implementing:
   spawner has added `Controls`/`InputQueue`/`Team`, so at that point there is
   nothing to infer from. Only `SpawnPlayer` and `SpawnAIShip` pass
   `CollisionClass::Ship`.
-- **Freighters keep hard physics** (`CollisionClass::Default`), matching
-  "not stuff with fixed ai path like things orbiting planet" — an arrived
-  freighter is attached to a planet's orbit and is exactly that. One line in
-  `SpawnFreighter` if that turns out to be the wrong call.
-  - Consequence, and the one place client and server knowingly disagree: a
-    freighter is `NetEntityType::Ship` on the wire with no field
-    distinguishing it, so `SyncCollisionProxies` ship-classes its proxy and a
-    client passes through a freighter the server bounces off. Wrong in the
-    rare direction — the alternative (Default-classing every remote ship
-    proxy) is wrong on every ship-ship contact, which is the case this phase
-    exists for. A wire flag would fix it properly.
+- **Freighters are ship-classed** (decided 2026-07-25, with Marcin, after
+  first shipping them as `Default`). `CollisionClass::Ship` therefore means
+  "free-flying and piloted" rather than "player or AI ship". This also
+  removes the one place client and server would have disagreed: a freighter
+  is `NetEntityType::Ship` on the wire with no field distinguishing it, so
+  `SyncCollisionProxies` ship-classes its proxy — which is now exactly what
+  the server does with it.
 - **Evenly matched pairs both die.** `mass x hp` ties are the *common* case
   (two identical ships at full health, head-on), not a corner one, and there
   is no weaker party to destroy; breaking the tie by entity id would decide a
@@ -2200,6 +2196,40 @@ thresholds feel right (that's what the physics panel's sliders are for),
 whether the shared explosion FX reads correctly for a ram (see 9.7), and
 whether the reconciliation thrash on ship contact is actually gone on two
 live clients.
+
+### Playtest fixes, same day
+
+First session found "slow collisions kill me too". Two causes, one of them
+the reason the original sim-test coverage missed it:
+
+1. **The default thresholds were guesses, and wrong by a factor of ~5.** A
+   fighter masses exactly 1.0 and `ShipControlsSystem::THRUST_FORCE` is 140,
+   so a ship gains **140 units/s for every second of burn** — the original
+   `ramClosingSpeed = 55` is four tenths of a second of thrust, i.e. two
+   ships drifting together at a crawl. For scale, `DamageSystem` already
+   treats a 90 unit/s touchdown as a *safe upright landing*. Defaults are now
+   derived from that scale rather than picked: ram at 250 closing (~a second
+   of burn each, head-on), both-die at 600 momentum, survivor damage 0.1
+   (~25 points at threshold speed), separation 60 (well under thrust, so a
+   ship can always fly against it).
+2. **A ship is several Chipmunk shapes, so one ship pair raises 3-4
+   arbiters** — and the dedupe was per *arbiter* (`cpArbiterSetUserData`),
+   which cannot see what the pair's other arbiters already did. Every
+   contact therefore recorded 3-4 overlaps (multiplying the separating force
+   by the shape count) and up to 3-4 rams (multiplying the damage, killing a
+   ship that should have survived). Both are now deduplicated by entity pair:
+   within the step for overlaps, and for `RAM_COOLDOWN_STEPS` (1s) for rams,
+   since a suppressed pair keeps overlapping for several steps afterward.
+
+The sim-test gap that let both through: every slow case ran with
+`separationAccel = 0` and at speeds picked before anyone had measured the
+game's speed scale. The suite now runs at realistic speeds and asserts the
+survivor takes *one* ram's worth of damage, in a band tight enough that a
+per-shape-pair multiplication fails it.
+
+Worth knowing for tuning, not fixed here: `CGame` applies a 0.667 weight
+multiplier to the *player* ship only, and toughness is `mass x hp` — so at
+equal health a player is ranked weaker than any AI ship and loses the ram.
 
 ## Invariants checklist (apply to EVERY gameplay PR from now on)
 
