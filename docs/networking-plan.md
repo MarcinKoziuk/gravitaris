@@ -1800,9 +1800,14 @@ short test session won't exhibit regardless of whether the fix is correct).
   a future targeted/homing weapon; today's ballistic bullets don't need this
   (see Phase 6's scope note).
 - Clock sync polish, connection quality HUD, host migration, encryption/auth.
-- Ship-ship contact prediction (kinematic proxies for remote ships), or the
+- ~~Ship-ship contact prediction (kinematic proxies for remote ships), or the
   cheaper camera-shake mitigation, for the reconciliation-thrash case Phase 7
-  explicitly left unfixed.
+  explicitly left unfixed.~~ **Superseded by Phase 9** (2026-07-24): rather than
+  predict/reconcile continuous ship-ship contact, change the *gameplay* so
+  ship-ship contact is never a continuous physical response in the first place
+  — slow contacts overlap (soft nudge, no reconcilable impulse), fast contacts
+  destroy via a discrete server event. This dissolves the thrash instead of
+  chasing it.
 - **Server logging + rotation, for once `gravitaris-server` is actually
   hosted somewhere long-running** (2026-07-22, noted only, no action taken
   yet -- Marcin still reviewing the server CLI TODOs first). `Gravitaris::
@@ -1819,6 +1824,116 @@ short test session won't exhibit regardless of whether the fix is correct).
     project generally prefers bespoke-and-simple (see `id.hpp`) over a new
     dependency when the need is this narrow (no filtering/async/multi-sink
     requirement today).
+
+## Phase 9 — Ship-ship collision as gameplay, not contact prediction
+
+Goal: make ship-ship collision behave well over the network by removing the
+thing that makes it hard to network — continuous contact resolution — instead
+of predicting it. This is the design pass for the ship-ship item Phase 8
+deferred (and the reconciliation-thrash case Phase 7 left unfixed:
+[Phase 7](#phase-7--client-side-collision-geometry-for-prediction)'s own note,
+"Two friendly ships colliding still produces a reconciliation-thrash camera
+shake").
+
+Two outcomes, chosen by closing speed, replace today's Chipmunk bounce +
+`ImpactEvent` ram damage for ship-ship pairs specifically:
+
+- **Slow contact → overlap.** Ships pass through / occupy the same space; a
+  tunable soft separating nudge eases them apart (toggle-able to full
+  pass-through). No collision impulse means nothing for prediction to
+  reconcile — and the client's own-ship prediction already runs with no hard
+  ship-ship response, so the two finally *agree* instead of fighting.
+- **Fast contact → destroy.** A discrete, server-authoritative kill routed
+  through the existing `Explosion` `GameEvent` + snapshot "absent = gone"
+  path (ADR 0001 constraint 2's replication model) — no new continuous state
+  to replicate, no per-tick contact to predict.
+
+### Why this fits the netcode (context for the executor)
+
+Ship-ship *hard contact* is the one case ADR 0001 constraint 6 explicitly
+approximates away ("no ship-ship contacts during replay") and Phase 7 left
+producing camera shake. Continuous contact resolution is expensive to predict
+and reconcile; overlap has *nothing* to reconcile, and destruction is a
+one-shot event, which is exactly the channel the whole netcode is built on
+(`GameEvent` stream + full-snapshot presence). So this is a smaller, more
+robust change than kinematic-proxy contact prediction, and it changes
+single-player identically (collision runs server-side, so AI ships get the
+same behavior — intended).
+
+### Scope (decided 2026-07-24, with Marcin)
+
+- **Ship↔ship only.** Ship↔planet keeps today's hard collision (landing/crash
+  damage via the existing `PostSolveImpact` → `ImpactEvent` → `DamageSystem`
+  path is unchanged). **High ports (partially implemented) and friendly docks
+  (not implemented yet) are structures, not ships** — their motion is
+  predictable and they should be simulated with real physics, so they keep
+  hard collision too and are excluded automatically by being a non-ship
+  collision type. **Do not extend this behavior to them.**
+- **Friendlies always overlap, never ram-kill.** Same-`Team` ships take the
+  overlap path regardless of speed. (May be revisited later — keep the
+  team check isolated so it's easy to change.)
+- **Destroy rule.** Toughness = `mass × Damageable::hp` (current hp, so a
+  damaged ship is weaker — not `maxHp`). On a fast enemy contact the **weaker
+  ship is destroyed and the survivor takes damage** scaled by the loser's
+  `mass × closingSpeed` (which can itself drop the survivor to hp ≤ 0 →
+  both die, handled for free by `DeathSystem`'s existing `hp <= 0` scan).
+  **If the collision energy (`mass × closingSpeed`) exceeds a separate high
+  threshold, both ships are destroyed outright** regardless of toughness.
+
+### Tasks
+
+- [ ] **9.1 Distinguish ships in Chipmunk.** Assign ship shapes a dedicated
+  `collision_type` in `PhysicsSystem::HandleBodyAdded`
+  (`src/game/system/core/physics-system.cpp`, near the existing sensor/filter
+  block, ~`:250`). Planets, high ports, and docks keep the default type. Add a
+  ship↔ship-specific handler in `InitSpace` (`~:65`) alongside the existing
+  default `postSolve` wildcard (which stays, for ship↔planet ram/landing).
+- [ ] **9.2 Overlap gate (`preSolveFunc` for ship↔ship).** Compute closing
+  speed (relative velocity along the contact normal). Below the destroy
+  threshold, suppress the physical bounce and instead apply a tunable soft
+  separating nudge in the sim update (not Chipmunk's solver — keep it out of
+  the solver so it's tunable and doesn't reintroduce a reconcilable impulse),
+  with a toggle for full pass-through (nudge off). Same-`Team` pairs always
+  take this path.
+- [ ] **9.3 Ram event.** Above the threshold on first contact, record a
+  `ShipRamEvent{a, b, closingSpeed, massA, massB}` onto a new drain queue
+  mirroring `m_impacts`/`DrainImpacts()` (`physics-system.hpp` ~`:44`). Never
+  mutate ECS/space inside the Chipmunk callback. Note: today's `ImpactEvent`
+  records only the victim + deltaV — the ram event must carry *both* parties
+  and closing speed, since the destroy rule and team check need both.
+- [ ] **9.4 Resolution step.** In `DamageSystem::Update` (or a small new
+  combat system, run before `DeathSystem` in `game.cpp`'s tick order): drain
+  ram events, apply the destroy rule from Scope above (weaker dies + survivor
+  damage; both die past the energy threshold). Drive the loser's `hp` to ≤ 0
+  (or call `DeathSystem::Explode` directly) — do not add a second death path.
+- [ ] **9.5 Client prediction mirror.** `ClientPrediction::SyncCollisionProxies`
+  (`src/game/net/client-prediction.cpp` ~`:63`) currently lets the predicted
+  own ship hard-bump remote-ship proxies. Apply the same overlap/soft-nudge
+  rule to ship-proxy contacts there (planet/structure proxies keep hard
+  collision), so prediction matches the server's overlap and stops thrashing.
+  Own-ship ram-destruction still comes from the server's `Explosion` event →
+  existing death/respawn flow (not predicted locally).
+- [ ] **9.6 Tunables in the physics debug panel**
+  (`src/cgame/ui/debug/physics-panel.cpp`): overlap/destroy closing-speed
+  threshold, the "both die" energy threshold, soft-nudge strength + on/off
+  toggle, survivor-damage scale. Runtime-tunable rather than hard-coded
+  constants (real values need playtesting).
+- [ ] **9.7 Optional client FX.** Only if the shared `Explosion` FX reads
+  wrong for a ram: add a ram-specific `GameEventType`
+  (`include/gravitaris/game/event/game-event.hpp`) + `remote-event-applier`
+  handling. Bumps `SNAPSHOT_VERSION` (ADR constraint 8) — skip unless needed.
+- [ ] **9.8 sim-test coverage** (`gravitaris-sim-test`, headless — ADR
+  constraint 1): slow enemy pair *and* slow same-team pair overlap with no
+  destruction and no reconcilable impulse; fast enemy pair → exactly one ram
+  event, weaker destroyed + survivor damaged; very-high-energy pair → both
+  destroyed; friendlies never ram-kill at any speed; ship↔planet landing
+  damage unchanged. Two-run determinism checksum stays stable.
+
+**Done when:** two ships drifting into each other slowly just overlap and slide
+apart (no camera shake, no reconciliation thrash on either client); ramming an
+enemy at speed destroys the weaker one (both if hard enough) with the explosion
+appearing on all clients via the existing event path; ship↔planet landing is
+unchanged; friendly ships never destroy each other.
 
 ## Invariants checklist (apply to EVERY gameplay PR from now on)
 
