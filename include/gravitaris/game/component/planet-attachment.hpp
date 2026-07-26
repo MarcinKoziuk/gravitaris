@@ -24,9 +24,9 @@ struct PlanetSurfaceAttachment {
     Vector2d localOffset;
 };
 
-// Same idea as PlanetSurfaceAttachment, but for structures that actually
-// orbit the planet (High Port, and Space Dock/Sensor Array attached to it)
-// rather than sitting fixed on its surface. Mirrors Orbit's own circular
+// Same idea as PlanetSurfaceAttachment, but for the High Port, which
+// actually orbits the planet rather than sitting fixed on its surface.
+// Mirrors Orbit's own circular
 // -orbit math (see its doc comment) but centered on a live parent position
 // instead of a fixed point, since OrbitSystem's Orbit::center can't track a
 // moving planet without complicating its simple, replicated, fixed-center

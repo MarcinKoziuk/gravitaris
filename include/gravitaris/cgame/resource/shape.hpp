@@ -61,6 +61,7 @@ public:
 
 private:
     std::vector<Path> m_paths;
+    int m_renderOrder = 0;
 
     static ResourcePtr<const Shape> placeholder;
 
@@ -71,6 +72,13 @@ public:
 
     [[nodiscard]] const std::vector<Path>& GetPaths() const
     { return m_paths; }
+
+    // Paint order across models, low first (`render_order` in the model's
+    // toml, 0 if absent). Only matters between models that overlap and fill:
+    // a planet's opaque interior has to go down before the structures nested
+    // inside its outline, or it paints over them.
+    [[nodiscard]] int GetRenderOrder() const
+    { return m_renderOrder; }
 
     [[nodiscard]] std::size_t CalculateSize() const override;
 

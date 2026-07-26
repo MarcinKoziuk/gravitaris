@@ -6,15 +6,18 @@
 
 namespace Gravitaris {
 
-flecs::entity BuildClassicScenario(EntitySpawner& entitySpawner)
+ClassicScenarioHomes BuildClassicScenario(EntitySpawner& entitySpawner)
 {
     // The suns are the dominant gravity wells; the orbiting planets attract
     // too, far less.
     const id_t sun = "models/stars/sun"_id;
     const id_t planet = "models/planets/simple"_id;
 
-    const Vector2d sunA{-5600., 0.};
-    const Vector2d sunB{5600., 0.};
+    // Everything here is twice what it was: the bodies themselves doubled in
+    // radius (data/models/planets, data/models/stars), so the gaps between
+    // them had to follow or the system reads as crowded.
+    const Vector2d sunA{-11200., 0.};
+    const Vector2d sunB{11200., 0.};
 
     // Orbit angular speed is derived from centerMass at the actual gravity
     // settings (see OrbitSystem), so this is the star's effective attracting
@@ -25,15 +28,15 @@ flecs::entity BuildClassicScenario(EntitySpawner& entitySpawner)
     };
 
     const double sunAMass = effectiveMass(entitySpawner.SpawnStar(sun, sunA));
-    const flecs::entity homePlanet = entitySpawner.SpawnOrbitingPlanet(planet, sunA, sunAMass, 2000., 1.0, 0.0);
-    entitySpawner.SpawnOrbitingPlanet(planet, sunA, sunAMass, 3400., -1.0, 2.1);
-    entitySpawner.SpawnOrbitingPlanet(planet, sunA, sunAMass, 4800., 1.0, 4.0);
+    const flecs::entity homePlanet = entitySpawner.SpawnOrbitingPlanet(planet, sunA, sunAMass, 4000., 1.0, 0.0);
+    entitySpawner.SpawnOrbitingPlanet(planet, sunA, sunAMass, 6800., -1.0, 2.1);
+    entitySpawner.SpawnOrbitingPlanet(planet, sunA, sunAMass, 9600., 1.0, 4.0);
 
     const double sunBMass = effectiveMass(entitySpawner.SpawnStar(sun, sunB));
-    entitySpawner.SpawnOrbitingPlanet(planet, sunB, sunBMass, 2200., -1.0, 1.0);
-    entitySpawner.SpawnOrbitingPlanet(planet, sunB, sunBMass, 4000., 1.0, 3.5);
+    const flecs::entity rivalPlanet = entitySpawner.SpawnOrbitingPlanet(planet, sunB, sunBMass, 4400., -1.0, 1.0);
+    entitySpawner.SpawnOrbitingPlanet(planet, sunB, sunBMass, 8000., 1.0, 3.5);
 
-    return homePlanet;
+    return ClassicScenarioHomes{homePlanet, rivalPlanet};
 }
 
 } // namespace Gravitaris

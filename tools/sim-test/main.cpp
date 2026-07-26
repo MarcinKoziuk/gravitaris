@@ -36,6 +36,7 @@
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/scenario/starting-complex.hpp>
+#include <gravitaris/game/scenario/structure-layout.hpp>
 #include <gravitaris/game/net/byte-stream.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 #include <gravitaris/game/net/loopback-transport.hpp>
@@ -758,9 +759,12 @@ void TestLandingAndClaiming()
     // the fighter's own shape into the planet -- Chipmunk resolves that as a
     // huge impulse that kills the ship instantly), rotated so the legs
     // (local +Y) point down at the center (rot = pi), descending well below
-    // the safe-landing speed.
+    // the safe-landing speed. The gap is small on purpose: the ship arrives
+    // at whatever the live gravity gives it over that fall, and it has to
+    // stay under DamageSystem's UPRIGHT_SAFE_DELTAV for this to be a landing
+    // rather than the crash case below.
     flecs::entity ship = spawner.SpawnPlayer("models/ships/fighter-1"_id,
-                                             Vector2d{800., planetRadius + 40.});
+                                             Vector2d{800., planetRadius + 15.});
     cpBody* shipBody = game.GetPhysicsSystem().GetBody(ship.get<PhysicsRef>()).cp.body.get();
     cpBodySetAngle(shipBody, CP_PI);
     cpBodySetVelocity(shipBody, cpv(0., -8.));
@@ -768,6 +772,7 @@ void TestLandingAndClaiming()
     bool sawLanded = false;
     for (int tick = 0; tick < 900 && ship.is_alive(); ++tick) {
         game.Update();
+        if (!ship.is_alive()) break; // died on impact -- the Require below reports it
         if (ship.get<LandingState>().landed) sawLanded = true;
         if (planet.get<Team>().id != TeamId::None) break;
     }
@@ -959,15 +964,14 @@ void TestStructures()
     std::size_t structureCount = 0;
     bool sawEachType = true;
     for (StructureType type : {StructureType::Base, StructureType::Colony, StructureType::Lab,
-                               StructureType::CommCenter, StructureType::HighPort, StructureType::SpaceDock,
-                               StructureType::SensorArray}) {
+                               StructureType::CommCenter, StructureType::HighPort}) {
         bool found = false;
         game.GetRegistry().each([&](const Structure& s) { if (s.type == type) found = true; });
         sawEachType = sawEachType && found;
     }
     game.GetRegistry().each([&](const Structure&) { ++structureCount; });
-    Require(sawEachType, "structures: all seven types were spawned");
-    Require(structureCount == 7, "structures: exactly one of each");
+    Require(sawEachType, "structures: all five types were spawned");
+    Require(structureCount == 5, "structures: exactly one of each");
 
     flecs::entity base;
     flecs::entity highPort;
@@ -1000,12 +1004,18 @@ void TestStructures()
             "structures: an orbital structure keeps its orbit radius as the planet orbits");
 
     // Defense fire: an enemy ship within Base's FIRE_RANGE (400) but well
-    // clear of every structure's own collision shape (all within ~105 units
-    // of planet center: HighPort's 90-radius orbit plus its own half-extent)
-    // so it doesn't spawn overlapping one and get destroyed by Chipmunk's
-    // overlap resolution before ever taking a scripted hit.
+    // clear of every structure's own collision shape (all within ~260 units
+    // of planet center: StructureLayout's 2x-radius orbit plus a High Port's
+    // own half-extent) so it doesn't spawn overlapping one and get destroyed
+    // by Chipmunk's overlap resolution before ever taking a scripted hit.
+    // Matched to the planet's own velocity: this planet is on a real orbit
+    // and a ship left at rest in world space is out of range within a few
+    // ticks, testing nothing.
     flecs::entity enemy = spawner.SpawnPlayer("models/ships/fighter-1"_id, planetPosNow + Vector2d{350., 0.});
     enemy.set<Team>(Team{TeamId::Red});
+    const Vector2d planetVelNow = planet.get<Transform>().vel;
+    cpBodySetVelocity(game.GetPhysicsSystem().GetBody(enemy.get<PhysicsRef>()).cp.body.get(),
+                      cpv(planetVelNow.x(), planetVelNow.y()));
     const float enemyHpBefore = enemy.get<Damageable>().hp;
 
     bool enemyDamaged = false;
@@ -1048,10 +1058,13 @@ void TestFreighterEconomy()
     BuildStartingComplex(spawner, homePlanet, TeamId::Blue);
 
     // Second planet, close by (so freighter transit -- 40 u/s -- doesn't
-    // dominate the test's runtime) and pre-claimed (bypassing Phase 1's
-    // landing/claiming system, which isn't what this test is about).
+    // dominate the test's runtime) yet still outside
+    // FreighterSystem::ARRIVAL_RADIUS of the home planet, or a freighter
+    // would count as arrived the moment it spawned. Pre-claimed (bypassing
+    // Phase 1's landing/claiming system, which isn't what this test is
+    // about).
     flecs::entity emptyPlanet =
-            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{300., 0.}, 1e-9, 2000., 1.0, 0.0);
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{900., 0.}, 1e-9, 2000., 1.0, 0.0);
     emptyPlanet.set<Team>(Team{TeamId::Blue});
 
     flecs::entity homeColony, homeBase, homeHighPort;
@@ -1077,7 +1090,7 @@ void TestFreighterEconomy()
     Require(baseAfter50.rawMaterials + baseAfter50.finishedMaterials > 0.f,
             "economy: a Colony's production reaches its Base as supplied raw and/or converted finished materials");
 
-    // (2) Gift funds so Lab/Space Dock can afford freighters immediately,
+    // (2) Gift funds so the Lab/High Port can afford freighters immediately,
     // isolating the build-sequence/consumption assertions from the slow
     // natural ramp (already proven above).
     homeBase.get_mut<Structure>().finishedMaterials = 1000.f;
@@ -1102,7 +1115,7 @@ void TestFreighterEconomy()
 
     bool sawAnyFreighter = false;
     bool baseBuilt = false, colonyBuilt = false, highPortBuilt = false;
-    for (int tick = 0; tick < 3000; ++tick) {
+    for (int tick = 0; tick < 6000; ++tick) {
         game.Update();
         if (countFreighters() > 0) sawAnyFreighter = true;
         if (!baseBuilt && hasStructure(StructureType::Base)) baseBuilt = true;
@@ -1125,11 +1138,11 @@ void TestFreighterEconomy()
     fs.Shutdown();
 }
 
-// Phase 4's "self-development": a Base grows its own Lab then Comm Center,
-// a High Port its own Space Dock then Sensor Array, from their own finished
-// materials, same-planet and instant (no freighter trip). BuildStartingComplex
-// isn't useful here -- it hands out all seven structures already -- so this
-// spawns only a bare Base + High Port and lets EconomySystem grow the rest.
+// Phase 4's "self-development": a Base grows its own Lab then Comm Center
+// from its own finished materials, same-planet and instant (no freighter
+// trip). BuildStartingComplex isn't useful here -- it hands out every
+// structure already -- so this spawns only a bare Base and lets
+// EconomySystem grow the rest.
 void TestSelfDevelopment()
 {
     FilesystemPhysFS fs;
@@ -1145,15 +1158,12 @@ void TestSelfDevelopment()
     planet.set<Team>(Team{TeamId::Blue});
 
     flecs::entity base = spawner.SpawnStructure(StructureType::Base, "models/structures/base"_id, planet,
-                                                TeamId::Blue, Vector2d{-15., -10.});
-    flecs::entity highPort = spawner.SpawnOrbitingStructure(StructureType::HighPort, "models/structures/high-port"_id,
-                                                             planet, TeamId::Blue, 180., 1.0, 0.0);
+                                                TeamId::Blue);
 
     // Gift funds directly -- isolating the build-sequence assertions from
     // the (already covered elsewhere, in TestFreighterEconomy) production
     // ramp.
     base.get_mut<Structure>().finishedMaterials = 1000.f;
-    highPort.get_mut<Structure>().finishedMaterials = 1000.f;
 
     const std::uint32_t planetNetId = planet.get<NetId>().value;
     const auto hasStructure = [&](StructureType type) {
@@ -1167,25 +1177,18 @@ void TestSelfDevelopment()
         return found;
     };
 
-    bool labBuilt = false, commCenterBuilt = false, spaceDockBuilt = false, sensorArrayBuilt = false;
+    bool labBuilt = false, commCenterBuilt = false;
     for (int tick = 0; tick < 500; ++tick) {
         game.Update();
         if (!labBuilt && hasStructure(StructureType::Lab)) labBuilt = true;
         if (!commCenterBuilt && hasStructure(StructureType::CommCenter)) {
             Require(labBuilt, "self-development: Comm Center never appears before Lab");
             commCenterBuilt = true;
+            break;
         }
-        if (!spaceDockBuilt && hasStructure(StructureType::SpaceDock)) spaceDockBuilt = true;
-        if (!sensorArrayBuilt && hasStructure(StructureType::SensorArray)) {
-            Require(spaceDockBuilt, "self-development: Sensor Array never appears before Space Dock");
-            sensorArrayBuilt = true;
-        }
-        if (commCenterBuilt && sensorArrayBuilt) break;
     }
     Require(labBuilt, "self-development: Base grew a Lab");
     Require(commCenterBuilt, "self-development: Base grew a Comm Center");
-    Require(spaceDockBuilt, "self-development: High Port grew a Space Dock");
-    Require(sensorArrayBuilt, "self-development: High Port grew a Sensor Array");
 
     fs.Shutdown();
 }
@@ -1210,7 +1213,7 @@ void TestFactionDefeatAndWin()
             spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 1e-9, 2000., 1.0, 0.0);
     BuildStartingComplex(spawner, planetA, TeamId::Blue);
     flecs::entity planetB =
-            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{500., 0.}, 1e-9, 2000., 1.0, 0.0);
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{1600., 0.}, 1e-9, 2000., 1.0, 0.0);
     BuildStartingComplex(spawner, planetB, TeamId::Blue);
 
     std::uint32_t cursor = 0;
@@ -1533,9 +1536,8 @@ void TestTeamAssignment(Game& game)
             "models/planets/simple"_id, Magnum::Vector2d{900., 900.}, 1e-9, 2000., 1.0, 0.0);
     cyanPlanet.set<Team>(Team{TeamId::Cyan});
     flecs::entity cyanBase = game.GetEntitySpawner().SpawnStructure(
-            StructureType::Base, "models/structures/base"_id, cyanPlanet, TeamId::Cyan, Magnum::Vector2d{-15., -10.});
-    game.GetEntitySpawner().SpawnStructure(StructureType::Lab, "models/structures/lab"_id, cyanPlanet, TeamId::Cyan,
-                                           Magnum::Vector2d{-15., 15.});
+            StructureType::Base, "models/structures/base"_id, cyanPlanet, TeamId::Cyan);
+    game.GetEntitySpawner().SpawnStructure(StructureType::Lab, "models/structures/lab"_id, cyanPlanet, TeamId::Cyan);
     cyanBase.get_mut<Structure>().finishedMaterials = 1000.f;
 
     // Kill A's ship and confirm the respawned one keeps the reassigned team

@@ -92,22 +92,34 @@ ResourcePtr<const Body> Body::Create(id_t id, LoadingContext& context)
 
 void Body::AddHardpoint(const NSVGshape* shape, const Matrix4d& transform)
 {
-    const char* name = shape->id;
+    const char* id = shape->id;
 
     const Vector2d center = GetShapeCenter(shape);
 
     Hardpoint hardpoint;
-    hardpoint.pos = (transform * Vector4d(center.x(), center.y(), 1., 1.)).xy();
+    // Swizzles of a temporary alias its storage -- take the result by value
+    // (see CLAUDE.md's Magnum gotcha).
+    const Vector4d transformed = transform * Vector4d(center.x(), center.y(), 1., 1.);
+    hardpoint.pos = transformed.xy();
     hardpoint.supports.weapons = true;
+    hardpoint.name = shape->label;
 
-    if (std::strcmp(name, "medium") != 0) {
+    if (std::strcmp(id, "medium") == 0) {
         hardpoint.size = Body::Hardpoint::MEDIUM;
     }
-    else if (std::strcmp(name, "small") != 0) {
+    else if (std::strcmp(id, "small") == 0) {
         hardpoint.size = Body::Hardpoint::SMALL;
     }
 
     m_hardpoints.push_back(hardpoint);
+}
+
+const Body::Hardpoint* Body::FindHardpoint(const char* name) const
+{
+    for (const Hardpoint& hardpoint : m_hardpoints) {
+        if (hardpoint.name == name) return &hardpoint;
+    }
+    return nullptr;
 }
 
 void Body::AddShape(const NSVGshape* shape, const Matrix4d& transform)

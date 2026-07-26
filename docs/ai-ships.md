@@ -180,8 +180,8 @@ decisions.
 `game/gnc/guidance/behaviors.{hpp,cpp}`: `GotoPoint` (arrive with flip-and-burn
 stopping distance solved from dist = v·flipTime + v²/2a), `OrbitBody`
 (circular-orbit speed √(GM/r) at current radius + clamped radial correction
-toward target radius), `InterceptEntity` (dead-reckoned lead pursuit +
-target velocity; untested until AI ships exist), `EvadeBody` (radial climb
+toward target radius), `InterceptEntity` (dead-reckoned lead pursuit + the
+target's lateral velocity, see phase 5), `EvadeBody` (radial climb
 preserving tangential motion). Gravity is otherwise handled reactively by
 the control layer. `ShipControlsSystem::THRUST_FORCE` made public so
 `CGame` sets `GuidanceParams.accel` from real ship mass on engage. Harness:
@@ -238,6 +238,18 @@ velocity vector, predicted path per AI ship.
 (don't fire through planets — segment-vs-circle check), evasive maneuvers
 under fire, difficulty knobs (reaction delay, aim error — quake3-style
 humanization).
+
+*Partly done 2026-07-26, fixing "AI runs away at full speed when chased":*
+`InterceptEntity`'s velocity feedforward now matches only the target's
+lateral motion, not its line-of-sight motion (mirroring a pursuer's charge
+made the AI accelerate away along the pursuer's own velocity vector, above
+its cruise cap since the sum was unclamped — it is clamped to `maxSpeed`
+now). Targets are also re-picked on the decision cadence rather than only on
+target death, with a hysteresis ratio, so a pilot no longer cruises past its
+attacker toward a stale distant lock. Deliberate, disadvantage-driven
+retreat (return to base to repair, fall back to defend home) is still
+unimplemented — there is no Flee behavior at all, which is the point: every
+retreat seen today is one of these two accidents.
 
 **Phase 6 — strategy layer.** `AIStrategy` per slice-components (build/attack
 decisions) issuing goals to pilots. Separate cadence (every ~1 s, not every

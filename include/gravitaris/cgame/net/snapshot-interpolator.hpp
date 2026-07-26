@@ -48,9 +48,10 @@ public:
     //
     // `planetTick` (defaults to `renderTick` if omitted -- fine for a caller
     // that doesn't also run ClientPrediction, e.g. a test): the tick planets
-    // are analytically evaluated at (EvaluateOrbit), separate from
-    // `renderTick` used for every other entity. This MUST match whatever
-    // tick ClientPrediction::SyncPlanetProxies most recently positioned its
+    // and everything attached to them are analytically evaluated at
+    // (EvaluateOrbit/EvaluateAttachment), separate from `renderTick` used
+    // for every other entity. This MUST follow whatever tick
+    // ClientPrediction::SyncCollisionProxies most recently positioned its
     // gravity/collision proxies at (the last ticked prediction, typically
     // `estimatedServerTick + NetClient::INPUT_LEAD_TICKS`) -- not the
     // delayed `renderTick`, or a landed ship visibly desyncs from the
@@ -58,9 +59,20 @@ public:
     // the higher the interpolation delay is set). See this class's own doc
     // comment on why planets are otherwise exempt from `renderTick`-based
     // interpolation/extrapolation.
+    //
+    // Fractional, and it must be: the proxies sit on whole ticks because the
+    // sim does, but the frame being drawn generally falls *between* two of
+    // them, and the own ship is drawn at exactly that fraction (CGame's
+    // `tickFraction`). Feeding a whole tick here leaves everything attached
+    // to a planet stepping at 60Hz while the ship and camera move
+    // continuously -- judder proportional to the body's speed, invisible on
+    // a slow planet and obvious on a station you are flying alongside.
+    // Passing `wholeTick + tickFraction` keeps the two in one frame of
+    // reference; the proxies stay on the whole tick, at most `tickFraction`
+    // of a tick away, which is the same offset the ship itself is drawn at.
     static std::optional<SnapshotData> Compute(const std::deque<SnapshotData>& history, double renderTick,
                                                 std::uint32_t exemptNetId, float tickRate, const Params& params,
-                                                std::optional<std::uint64_t> planetTick = std::nullopt);
+                                                std::optional<double> planetTick = std::nullopt);
 };
 
 } // namespace Gravitaris

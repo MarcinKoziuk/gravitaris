@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <flecs.h>
@@ -67,6 +68,14 @@ private:
 
     std::unordered_map<id_t, std::unordered_map<id_t, BakedGroup>> m_baked;
     std::unordered_map<id_t, std::vector<InstanceData>> m_instanceScratch;
+
+    // (Model::GetRenderOrder, model id), kept sorted as models come and go.
+    // Draws follow this order rather than m_baked's hash order: fills are
+    // opaque, so a planet interior drawn after the structures nested inside
+    // it simply erases them -- and hash order shifts whenever the loaded
+    // model set changes, which makes that an intermittent "where did my
+    // complex go" bug rather than a permanent one.
+    std::vector<std::pair<int, id_t>> m_drawOrder;
 
     // Per-frame, non-entity instances (HUD arrows etc.), keyed by model id.
     // Merged into the "model" group's pass alongside real entities and cleared

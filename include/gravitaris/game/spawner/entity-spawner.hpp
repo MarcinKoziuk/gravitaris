@@ -70,10 +70,16 @@ public:
     // one place.
     void Init();
 
-    flecs::entity SpawnPlayer(id_t modelId, Vector2d position, TeamId team = TeamId::Blue);
+    // `velocity`/`rot` are how the ship starts out, not just where: a
+    // fighter launched from a station or a planet inherits that body's
+    // motion, and one left at rest in world space is simply run over by the
+    // home it launched from (see FactionSystem::SpawnPoint).
+    flecs::entity SpawnPlayer(id_t modelId, Vector2d position, TeamId team = TeamId::Blue,
+                              Vector2d velocity = {}, double rot = 0.0);
 
     flecs::entity SpawnAIShip(id_t modelId, Vector2d position,
-                              AIPersonalityPreset preset = AIPersonalityPreset::Balanced);
+                              AIPersonalityPreset preset = AIPersonalityPreset::Balanced,
+                              Vector2d velocity = {}, double rot = 0.0);
 
     flecs::entity SpawnStar(id_t modelId, Vector2d position);
 
@@ -89,14 +95,14 @@ public:
     // segment query rather than Chipmunk collision response (see RigidBodyDesc).
     flecs::entity SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity, bool sensor = false);
 
-    // A structure fixed at `localOffset` from `planet`'s center (planetside:
-    // Base, Colony, Lab, Comm Center) -- StructureAttachmentSystem keeps it
-    // riding the planet's own motion every tick.
-    flecs::entity SpawnStructure(StructureType type, id_t modelId, flecs::entity planet, TeamId team,
-                                 Vector2d localOffset);
+    // A structure nested inside `planet`'s outline (planetside: Base,
+    // Colony, Lab, Comm Center) at the slot StructureLayout gives its type --
+    // StructureAttachmentSystem keeps it riding the planet's own motion every
+    // tick.
+    flecs::entity SpawnStructure(StructureType type, id_t modelId, flecs::entity planet, TeamId team);
 
-    // A structure on a circular orbit around `planet` (orbital: High Port,
-    // and Space Dock/Sensor Array attached to one) -- same StructureAttachmentSystem
+    // A structure on a circular orbit around `planet` (the High Port) --
+    // same StructureAttachmentSystem
     // upkeep as SpawnStructure, orbit math instead of a fixed offset.
     // `direction`/`phase` match SpawnOrbitingPlanet's own parameters.
     flecs::entity SpawnOrbitingStructure(StructureType type, id_t modelId, flecs::entity planet, TeamId team,

@@ -13,6 +13,7 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
+#include <gravitaris/game/scenario/structure-layout.hpp>
 #include <gravitaris/game/system/gwell/economy-system.hpp>
 
 namespace Gravitaris {
@@ -20,14 +21,8 @@ namespace Gravitaris {
 namespace {
 
 struct PlanetEconomy {
-    flecs::entity colony, base, highPort, lab, spaceDock;
+    flecs::entity colony, base, highPort, lab;
 };
-
-// Matches BuildStartingComplex's own layout (starting-complex.cpp) so a
-// self-developed complex looks identical to a hand-assembled one.
-const Vector2d LAB_OFFSET{-15., 15.};
-const Vector2d COMM_CENTER_OFFSET{15., 15.};
-constexpr double SELF_DEV_ORBIT_PHASE_OFFSET = 0.4;
 
 // True if `planetNetId` already has a live structure of `type` -- same
 // check FreighterSystem uses at build time, duplicated rather than shared
@@ -69,11 +64,7 @@ void EconomySystem::Update()
     });
     m_registry.each([&](flecs::entity e, const Structure& s, const PlanetOrbitAttachment& attach) {
         PlanetEconomy& pe = byPlanet[attach.planetNetId];
-        switch (s.type) {
-            case StructureType::HighPort:  pe.highPort = e; break;
-            case StructureType::SpaceDock: pe.spaceDock = e; break;
-            default: break;
-        }
+        if (s.type == StructureType::HighPort) pe.highPort = e;
     });
 
     // Production, local supply, conversion -- pure value mutation on
@@ -107,11 +98,11 @@ void EconomySystem::Update()
     }
 
     // Self-development (docs/gravity-well-mode-plan.md Phase 4): a Base
-    // grows its own Lab then Comm Center, a High Port its own Space Dock
-    // then Sensor Array, spending ITS OWN finished materials -- same-planet
-    // and instant, unlike freighter-built Base/Colony/High Port which need
-    // a trip to a (possibly different) planet. One at a time, new-unit
-    // rule applies, same as everywhere else structures get built.
+    // grows its own Lab then Comm Center, spending ITS OWN finished
+    // materials -- same-planet and instant, unlike freighter-built Base/
+    // Colony/High Port which need a trip to a (possibly different) planet.
+    // One at a time, new-unit rule applies, same as everywhere else
+    // structures get built.
     for (auto& [netId, pe] : byPlanet) {
         if (pe.base.is_alive()) {
             Structure& base = pe.base.get_mut<Structure>();
@@ -121,7 +112,7 @@ void EconomySystem::Update()
                     const Team& team = pe.base.get<Team>();
                     flecs::entity planet = m_entitySpawner.EntityForNetId(netId);
                     flecs::entity built = m_entitySpawner.SpawnStructure(StructureType::Lab, "models/structures/lab"_id,
-                                                                         planet, team.id, LAB_OFFSET);
+                                                                         planet, team.id);
                     const Transform& builtTransf = built.get<Transform>();
                     m_eventQueue.Emit(GameEventType::StructureBuilt, built,
                                       Magnum::Vector2{static_cast<float>(builtTransf.pos.x()),
@@ -133,46 +124,12 @@ void EconomySystem::Update()
                     const Team& team = pe.base.get<Team>();
                     flecs::entity planet = m_entitySpawner.EntityForNetId(netId);
                     flecs::entity built = m_entitySpawner.SpawnStructure(
-                            StructureType::CommCenter, "models/structures/comm-center"_id, planet, team.id,
-                            COMM_CENTER_OFFSET);
+                            StructureType::CommCenter, "models/structures/comm-center"_id, planet, team.id);
                     const Transform& builtTransf = built.get<Transform>();
                     m_eventQueue.Emit(GameEventType::StructureBuilt, built,
                                       Magnum::Vector2{static_cast<float>(builtTransf.pos.x()),
                                                       static_cast<float>(builtTransf.pos.y())},
                                       static_cast<std::uint32_t>(StructureType::CommCenter));
-                }
-            }
-        }
-
-        if (pe.highPort.is_alive()) {
-            Structure& highPort = pe.highPort.get_mut<Structure>();
-            if (highPort.finishedMaterials >= SELF_DEVELOPMENT_COST) {
-                const PlanetOrbitAttachment& hpAttach = pe.highPort.get<PlanetOrbitAttachment>();
-                if (!pe.spaceDock.is_alive()) {
-                    highPort.finishedMaterials -= SELF_DEVELOPMENT_COST;
-                    const Team& team = pe.highPort.get<Team>();
-                    flecs::entity planet = m_entitySpawner.EntityForNetId(netId);
-                    flecs::entity built = m_entitySpawner.SpawnOrbitingStructure(
-                            StructureType::SpaceDock, "models/structures/space-dock"_id, planet, team.id,
-                            hpAttach.radius, hpAttach.direction, hpAttach.theta + SELF_DEV_ORBIT_PHASE_OFFSET);
-                    const Transform& builtTransf = built.get<Transform>();
-                    m_eventQueue.Emit(GameEventType::StructureBuilt, built,
-                                      Magnum::Vector2{static_cast<float>(builtTransf.pos.x()),
-                                                      static_cast<float>(builtTransf.pos.y())},
-                                      static_cast<std::uint32_t>(StructureType::SpaceDock));
-                }
-                else if (!HasStructure(m_registry, netId, StructureType::SensorArray)) {
-                    highPort.finishedMaterials -= SELF_DEVELOPMENT_COST;
-                    const Team& team = pe.highPort.get<Team>();
-                    flecs::entity planet = m_entitySpawner.EntityForNetId(netId);
-                    flecs::entity built = m_entitySpawner.SpawnOrbitingStructure(
-                            StructureType::SensorArray, "models/structures/sensor-array"_id, planet, team.id,
-                            hpAttach.radius, hpAttach.direction, hpAttach.theta - SELF_DEV_ORBIT_PHASE_OFFSET);
-                    const Transform& builtTransf = built.get<Transform>();
-                    m_eventQueue.Emit(GameEventType::StructureBuilt, built,
-                                      Magnum::Vector2{static_cast<float>(builtTransf.pos.x()),
-                                                      static_cast<float>(builtTransf.pos.y())},
-                                      static_cast<std::uint32_t>(StructureType::SensorArray));
                 }
             }
         }
@@ -215,13 +172,14 @@ void EconomySystem::Update()
     std::sort(candidates.begin(), candidates.end(),
              [](const Candidate& a, const Candidate& b) { return a.netId < b.netId; });
 
-    // Lab/Space Dock build ships "from finished materials of the Base/High
-    // Port it accompanies" (gravity-well-1997.md) -- they hold no materials
-    // store of their own (their own Structure::finishedMaterials field is
-    // simply never written to), so production spends the ACCOMPANYING
-    // structure's funds, not the producer's.
+    // A Lab builds ships "from finished materials of the Base it
+    // accompanies" (gravity-well-1997.md) -- it holds no materials store of
+    // its own (its Structure::finishedMaterials field is simply never
+    // written to), so production spends the ACCOMPANYING structure's funds,
+    // not the producer's. The High Port, having absorbed its Space Dock, is
+    // both producer and funder.
     for (auto& [netId, pe] : byPlanet) {
-        for (auto [producer, funder] : {std::pair{pe.lab, pe.base}, std::pair{pe.spaceDock, pe.highPort}}) {
+        for (auto [producer, funder] : {std::pair{pe.lab, pe.base}, std::pair{pe.highPort, pe.highPort}}) {
             if (!producer.is_alive() || !funder.is_alive()) continue;
             Structure& funds = funder.get_mut<Structure>();
             if (funds.finishedMaterials < FREIGHTER_COST) continue;

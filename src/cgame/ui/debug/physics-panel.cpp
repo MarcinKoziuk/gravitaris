@@ -13,12 +13,12 @@ void DrawPhysicsPanel(CGame& game)
     ImGui::SeparatorText("Gravity");
     float gravity = game.GetGravityMultiplier();
     ImGui::SetNextItemWidth(220.f);
-    if (ImGui::SliderFloat("Gravity multiplier", &gravity, 0.f, 4.f, "%.2f")) {
+    if (ImGui::SliderFloat("Gravity multiplier", &gravity, 0.f, 8.f, "%.2f")) {
         game.SetGravityMultiplier(gravity);
     }
-    ImGui::SetItemTooltip("Scales every planet's pull on every body. Applied live, every tick. Default 1.667.");
+    ImGui::SetItemTooltip("Scales every planet's pull on every body. Applied live, every tick. Default 3.3.");
     if (ImGui::Button("Reset##gravity")) {
-        game.SetGravityMultiplier(1.667f);
+        game.SetGravityMultiplier(3.3f);
     }
 
     ImGui::SeparatorText("Ship weight");

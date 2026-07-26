@@ -52,18 +52,20 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
 
 void Game::Start()
 {
-    const flecs::entity homePlanet = BuildClassicScenario(*m_entitySpawner);
-    // Single, shared starting complex for now (docs/gravity-well-mode-plan.md
+    const ClassicScenarioHomes homes = BuildClassicScenario(*m_entitySpawner);
+    // One developed complex per side, a sun apart (docs/gravity-well-mode-plan.md
     // Phase 2) -- per-faction starting planets are Phase 6's job (sector
     // generation).
-    BuildStartingComplex(*m_entitySpawner, homePlanet, TeamId::Blue);
+    BuildStartingComplex(*m_entitySpawner, homes.blue, TeamId::Blue);
+    BuildStartingComplex(*m_entitySpawner, homes.red, TeamId::Red);
 
     // Same site selection a respawn uses (just no funding -- the first
     // fighter is free), so the initial spawn lands exactly where a respawn
     // would rather than at an arbitrary world origin.
-    const Vector2d spawnPos =
-            m_factionSystem.SpawnPosition(TeamId::Blue).value_or(Vector2d{0., 0.});
-    m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, spawnPos);
+    const FactionSystem::SpawnPoint spawn =
+            m_factionSystem.SpawnPosition(TeamId::Blue).value_or(FactionSystem::SpawnPoint{});
+    m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, spawn.pos, TeamId::Blue,
+                                            spawn.vel, spawn.rot);
 }
 
 Game::Game(IFilesystem& filesystem)
@@ -161,8 +163,9 @@ void Game::HandlePlayerRespawn()
     // wait, not a failure -- or permanently doesn't (no friendly
     // planet/High Port left at all -- docs/gravity-well-mode-plan.md
     // Phase 4's "for the player: game over", not otherwise surfaced yet).
-    if (const std::optional<Vector2d> pos = m_factionSystem.TryRespawn(TeamId::Blue)) {
-        m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, *pos);
+    if (const std::optional<FactionSystem::SpawnPoint> spawn = m_factionSystem.TryRespawn(TeamId::Blue)) {
+        m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, spawn->pos, TeamId::Blue,
+                                                spawn->vel, spawn->rot);
         m_playerRespawnTimer = -1;
     }
 }
@@ -174,15 +177,22 @@ void Game::SpawnRandomAIShip()
             AIPersonalityPreset::Sniper, AIPersonalityPreset::Reckless,
     };
 
-    Vector2d pos{300.0, 200.0};
-    const Transform* transform = m_player ? m_player->try_get<Transform>() : nullptr;
-    if (transform) {
-        pos = transform->pos + Vector2d{250.0, 150.0};
+    // AI ships are Red (see EntitySpawner::SpawnAIShip), so they launch from
+    // Red's own site under the same rule a respawn uses -- off its High Port
+    // if it still holds one. Only when that faction has nothing left does a
+    // spawn fall back to appearing next to the player.
+    FactionSystem::SpawnPoint spawn;
+    spawn.pos = Vector2d{300.0, 200.0};
+    if (const std::optional<FactionSystem::SpawnPoint> site = m_factionSystem.SpawnPosition(TeamId::Red)) {
+        spawn = *site;
+    }
+    else if (const Transform* transform = m_player ? m_player->try_get<Transform>() : nullptr) {
+        spawn.pos = transform->pos + Vector2d{250.0, 150.0};
     }
 
     std::uint64_t rng = SplitMix64Seed(m_step, m_randomAIShipSpawnCount++);
     const AIPersonalityPreset preset = PRESETS[SplitMix64Next(rng) % std::size(PRESETS)];
-    m_entitySpawner->SpawnAIShip("models/ships/fighter-1"_id, pos, preset);
+    m_entitySpawner->SpawnAIShip("models/ships/fighter-1"_id, spawn.pos, preset, spawn.vel, spawn.rot);
 }
 
 std::unique_ptr<EntitySpawner> Game::CreateEntitySpawner()

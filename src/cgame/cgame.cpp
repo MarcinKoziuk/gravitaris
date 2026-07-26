@@ -202,7 +202,7 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
 
     ReconcileOwnShipIfNeeded();
 
-    // Planets must be rendered at the exact same tick ClientPrediction's
+    // Planets must be rendered against the same tick ClientPrediction's
     // gravity/collision proxies last used (TickNetClient's `tick`, i.e.
     // `m_predictedTickClock.Current() - 1` -- the most recent tick actually
     // stepped), not `renderTick` (delayed behind the estimated server tick
@@ -210,9 +210,13 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
     // Compute's `planetTick` doc comment. Falls back to `renderTick`
     // (nullopt) before the own ship exists yet, when nothing has
     // stepped/synced a proxy to desync from in the first place.
-    const std::optional<std::uint64_t> planetTick =
+    // Plus `tickFraction`, so bodies re-derived from it move continuously
+    // instead of stepping once per simulated tick while the ship and camera
+    // move on real time -- see the `planetTick` doc comment.
+    const std::optional<double> planetTick =
             m_clientPrediction.HasOwnShip()
-                    ? std::optional<std::uint64_t>(m_predictedTickClock.Current() - 1)
+                    ? std::optional<double>(static_cast<double>(m_predictedTickClock.Current() - 1)
+                                            + std::clamp(tickFraction, 0.0, 1.0))
                     : std::nullopt;
 
     // Remote entities only (the own ship is real m_registry state now,

@@ -37,7 +37,7 @@ public:
 
     struct Params {
         bool enabled = true;
-        float worldRadius = 12000.f; // world units from the map center to the map edge
+        float worldRadius = 24000.f; // world units from the map center to the map edge
         float shipDotPx = 3.f;      // ship dot radius, minimap texture px
         float playerDotPx = 1.5f;   // player marker dot radius, minimap texture px
         float planetMinPx = 2.f;    // floor for a planet ring that'd map below this

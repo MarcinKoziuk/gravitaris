@@ -51,11 +51,28 @@ Vector2d OrbitBody(const Transform& ship, const Vector2d& center, double centerM
 
 Vector2d InterceptEntity(const Transform& ship, const Transform& target, const GuidanceParams& params)
 {
-    const double dist = (target.pos - ship.pos).length();
+    const Vector2d toTarget = target.pos - ship.pos;
+    const double dist = toTarget.length();
     const double eta = dist / std::max(params.maxSpeed, 1e-6);
     const Vector2d aim = target.pos + target.vel * eta;
 
-    return GotoPoint(ship, aim, params) + target.vel;
+    // Only the target's *lateral* motion is matched. Matching its
+    // line-of-sight motion too would mean a chased ship mirrors its pursuer's
+    // charge and runs at the pursuer's speed (and a fleeing target would drag
+    // its interceptor past the cruise cap); the closing speed along the line
+    // of sight is GotoPoint's job alone.
+    Vector2d matchVel;
+    if (dist > 1e-6) {
+        const Vector2d los = toTarget / dist;
+        matchVel = target.vel - los * Magnum::Math::dot(target.vel, los);
+    }
+
+    Vector2d desired = GotoPoint(ship, aim, params) + matchVel;
+    const double speed = desired.length();
+    if (speed > params.maxSpeed) {
+        desired *= params.maxSpeed / speed;
+    }
+    return desired;
 }
 
 Vector2d EvadeBody(const Transform& ship, const Vector2d& center, double safeRadius,

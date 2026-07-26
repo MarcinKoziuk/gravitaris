@@ -79,11 +79,11 @@ void NetServer::HandleRespawns()
         // not a failure -- or permanently doesn't (no friendly planet/High
         // Port left at all -- that faction is out; this peer just stays a
         // ghost, no ship, no fresh ServerWelcome, until the round ends).
-        const std::optional<Vector2d> pos = m_factionSystem.TryRespawn(state.team);
-        if (!pos) continue;
+        const std::optional<FactionSystem::SpawnPoint> spawn = m_factionSystem.TryRespawn(state.team);
+        if (!spawn) continue;
 
         const id_t playerModel = "models/ships/fighter-1"_id;
-        state.ship = m_entitySpawner.SpawnPlayer(playerModel, *pos, state.team);
+        state.ship = m_entitySpawner.SpawnPlayer(playerModel, spawn->pos, state.team, spawn->vel, spawn->rot);
 
         ServerWelcomePacket welcome;
         welcome.clientId = peer;

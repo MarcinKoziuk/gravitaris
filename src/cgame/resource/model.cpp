@@ -48,6 +48,8 @@ ResourcePtr<const Model> Model::Create(id_t id, const Shape& shape)
 
 void Model::InitFromShape(const Shape& shape)
 {
+    m_renderOrder = shape.GetRenderOrder();
+
     std::unordered_map<id_t, std::size_t> offsets;
 
     for (const Shape::Path& path : shape.GetPaths()) {

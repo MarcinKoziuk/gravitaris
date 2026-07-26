@@ -4,20 +4,22 @@
 
 namespace Gravitaris {
 
-// The seven planetary/orbital installation types (gravity-well-1997.md's
-// "Machines of War"). Distinct from Team/Damageable, which every structure
-// also carries -- this only says WHICH kind it is; the client can also infer
-// that from EntityState::modelId (each type gets its own model), but keeping
-// it explicit here means UI/logic never has to reverse-engineer type from a
+// The planetary/orbital installation types (gravity-well-1997.md's "Machines
+// of War"). Distinct from Team/Damageable, which every structure also
+// carries -- this only says WHICH kind it is; the client can also infer that
+// from EntityState::modelId (each type gets its own model), but keeping it
+// explicit here means UI/logic never has to reverse-engineer type from a
 // model id hash.
+//
+// The original's Space Dock and Sensor Array are folded into the High Port:
+// one drawing, one entity. Split them back out if they ever need to be
+// destroyed or built independently.
 enum class StructureType : std::uint8_t {
     Base,
     Colony,
     Lab,
     CommCenter,
     HighPort,
-    SpaceDock,
-    SensorArray,
 };
 
 // Stable membership (a structure's type never changes), so a real component.

@@ -70,11 +70,11 @@ const EntityState* FindByNetId(const SnapshotData& snapshot, std::uint32_t netId
 std::optional<SnapshotData> SnapshotInterpolator::Compute(const std::deque<SnapshotData>& history, double renderTick,
                                                           std::uint32_t exemptNetId, float tickRate,
                                                           const Params& params,
-                                                          std::optional<std::uint64_t> planetTick)
+                                                          std::optional<double> planetTick)
 {
     if (history.empty()) return std::nullopt;
     const auto renderTickWhole = static_cast<std::uint64_t>(std::max(renderTick, 0.0));
-    const std::uint64_t evalPlanetsAt = planetTick.value_or(renderTickWhole);
+    const double evalPlanetsAt = planetTick.value_or(static_cast<double>(renderTickWhole));
 
     SnapshotData out;
     out.tick = renderTickWhole;
@@ -197,13 +197,20 @@ std::optional<SnapshotData> SnapshotInterpolator::Compute(const std::deque<Snaps
         e.pos = Magnum::Vector2{static_cast<float>(pos.x()), static_cast<float>(pos.y())};
         e.vel = Magnum::Vector2{static_cast<float>(vel.x()), static_cast<float>(vel.y())};
 
-        // Only a Ship-typed attached entity is a Freighter (High Port/Space
-        // Dock/Sensor Array are Structure-typed and keep whatever fixed
-        // orientation they were placed at) -- faces the *local* attachment
-        // velocity alone, matching StructureAttachmentSystem's identical
-        // server-side distinction (see EvaluateAttachment's own comment).
+        // Facing is re-derived here rather than taken from the snapshot for
+        // the same reason the position is: it has to agree with the *locally
+        // evaluated* attachment, not with whichever tick the raw rot came
+        // from. A Ship-typed attached entity is a Freighter and faces its
+        // local attachment velocity; an orbiting station keeps its floor
+        // (local +Y) toward the planet. Both match
+        // StructureAttachmentSystem's server-side distinction. A planetside
+        // structure rides a zero-angular-speed "orbit" and stays upright.
         if (e.type == NetEntityType::Ship) {
             e.rot = static_cast<float>(std::atan2(localVel.x(), -localVel.y()));
+        }
+        else if (e.attachAngularSpeed != 0.f) {
+            const Magnum::Vector2d radial = pos - parentPos;
+            e.rot = static_cast<float>(std::atan2(radial.x(), -radial.y()));
         }
     }
 

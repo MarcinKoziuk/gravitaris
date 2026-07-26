@@ -7,6 +7,7 @@
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/physics.hpp>
+#include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/transform.hpp>
@@ -15,17 +16,12 @@
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/gwell/economy-system.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
+#include <gravitaris/game/scenario/structure-layout.hpp>
 #include <gravitaris/game/system/gwell/freighter-system.hpp>
 
 namespace Gravitaris {
 
 namespace {
-
-// Planetside offsets match starting-complex.cpp's own layout, so a
-// freighter-built complex looks identical to a hand-assembled one.
-const Vector2d BASE_OFFSET{-15., -10.};
-const Vector2d COLONY_OFFSET{15., -10.};
-constexpr double HIGH_PORT_ORBIT_RADIUS = 90.0;
 
 // True if `planetNetId` already has a live structure of `type` attached to
 // it (planetside or orbital) -- the "new-unit rule", re-checked at build
@@ -43,8 +39,8 @@ bool HasStructure(flecs::world& registry, std::uint32_t planetNetId, StructureTy
     return found;
 }
 
-// Base is always planetside (see starting-complex.cpp/FreighterSystem's own
-// BASE_OFFSET), so only the surface attachment needs checking here.
+// Base is always planetside (StructureLayout gives it a surface slot), so
+// only the surface attachment needs checking here.
 flecs::entity FindBase(flecs::world& registry, std::uint32_t planetNetId)
 {
     flecs::entity found;
@@ -196,16 +192,16 @@ void FreighterSystem::Update()
             switch (state.buildOrder) {
                 case BuildOrder::Base:
                     built = m_entitySpawner.SpawnStructure(StructureType::Base, "models/structures/base"_id, planet,
-                                                           team.id, BASE_OFFSET);
+                                                           team.id);
                     break;
                 case BuildOrder::Colony:
                     built = m_entitySpawner.SpawnStructure(StructureType::Colony, "models/structures/colony"_id,
-                                                           planet, team.id, COLONY_OFFSET);
+                                                           planet, team.id);
                     break;
                 case BuildOrder::HighPort:
-                    built = m_entitySpawner.SpawnOrbitingStructure(StructureType::HighPort,
-                                                                   "models/structures/high-port"_id, planet, team.id,
-                                                                   HIGH_PORT_ORBIT_RADIUS, 1.0, 0.0);
+                    built = m_entitySpawner.SpawnOrbitingStructure(
+                            StructureType::HighPort, "models/structures/high-port-0"_id, planet, team.id,
+                            StructureLayout::OrbitRadius(planet.get<Planet>().radius), 1.0, 0.0);
                     break;
             }
             const Transform& builtTransf = built.get<Transform>();

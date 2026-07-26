@@ -24,7 +24,7 @@ void ApplyAIPersonalityPreset(AIPilot& pilot, AIPersonalityPreset preset)
             p.standoffDistance = 35.0;
             p.fireRange = 400.0;
             p.fireTolerance = 0.13;
-            p.evadeRadius = 70.0;
+            p.evadeRadius = 140.0;
             p.evadeMargin = 1.3;
             p.dangerLookaheadSteps = 90;
             p.decisionInterval = 10;
@@ -46,7 +46,7 @@ void ApplyAIPersonalityPreset(AIPilot& pilot, AIPersonalityPreset preset)
             p.standoffDistance = 70.0;
             p.fireRange = 300.0;
             p.fireTolerance = 0.08;
-            p.evadeRadius = 130.0;
+            p.evadeRadius = 260.0;
             p.evadeMargin = 2.0;
             p.dangerLookaheadSteps = 150;
             p.decisionInterval = 15;
@@ -68,7 +68,7 @@ void ApplyAIPersonalityPreset(AIPilot& pilot, AIPersonalityPreset preset)
             p.standoffDistance = 180.0;
             p.fireRange = 450.0;
             p.fireTolerance = 0.04;
-            p.evadeRadius = 100.0;
+            p.evadeRadius = 200.0;
             p.evadeMargin = 1.6;
             p.dangerLookaheadSteps = 120;
             p.decisionInterval = 15;
@@ -87,7 +87,7 @@ void ApplyAIPersonalityPreset(AIPilot& pilot, AIPersonalityPreset preset)
             p.standoffDistance = 30.0;
             p.fireRange = 380.0;
             p.fireTolerance = 0.15;
-            p.evadeRadius = 60.0;
+            p.evadeRadius = 120.0;
             p.evadeMargin = 1.2;
             p.dangerLookaheadSteps = 60;
             p.decisionInterval = 12;

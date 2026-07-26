@@ -16,6 +16,7 @@
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 
 #include <gravitaris/cgame/component/renderable.hpp>
@@ -277,11 +278,18 @@ void ModelRenderer2::HandleModelAdded(const Model& model, const id_t id)
 
         groups.emplace(tag, std::move(baked));
     }
+
+    const auto entry = std::make_pair(model.GetRenderOrder(), id);
+    m_drawOrder.insert(std::lower_bound(m_drawOrder.begin(), m_drawOrder.end(), entry), entry);
 }
 
-void ModelRenderer2::HandleModelRemoved(const Model&, const id_t id)
+void ModelRenderer2::HandleModelRemoved(const Model& model, const id_t id)
 {
     m_baked.erase(id);
+
+    const auto entry = std::make_pair(model.GetRenderOrder(), id);
+    const auto it = std::lower_bound(m_drawOrder.begin(), m_drawOrder.end(), entry);
+    if (it != m_drawOrder.end() && *it == entry) m_drawOrder.erase(it);
 }
 
 Matrix3 ModelRenderer2::ViewProjection() const
@@ -339,10 +347,16 @@ void ModelRenderer2::RenderTag(id_t tag, const std::function<bool(flecs::entity)
         }
     }
 
-    for (auto& [modelId, instances] : m_instanceScratch) {
-        if (instances.empty()) continue;
+    for (const auto& [order, modelId] : m_drawOrder) {
+        auto instancesIt = m_instanceScratch.find(modelId);
+        if (instancesIt == m_instanceScratch.end() || instancesIt->second.empty()) continue;
+        std::vector<InstanceData>& instances = instancesIt->second;
 
-        auto& baked = m_baked.at(modelId).at(tag);
+        auto bakedGroupsIt = m_baked.find(modelId);
+        if (bakedGroupsIt == m_baked.end()) continue;
+        auto bakedIt = bakedGroupsIt->second.find(tag);
+        if (bakedIt == bakedGroupsIt->second.end()) continue;
+        auto& baked = bakedIt->second;
         if (unsigned long ex = SafeUpload(baked.instanceBuffer, instances.data(),
                                           instances.size() * sizeof(InstanceData))) {
             LOG(error) << "[MR2] instance buffer upload raised exception 0x" << std::hex << ex
@@ -377,9 +391,12 @@ void ModelRenderer2::Render(double)
 
     RenderTag(OVERLAY_TAG, {});
 
+    // A structure's thrusters are station-keeping: nobody flies it, and it
+    // is always correcting, so its _thrust group burns permanently.
     RenderTag("_thrust"_id, [](flecs::entity entity) {
         const auto* controls = entity.try_get<Controls>();
-        return controls && controls->actionFlags.thrustForward;
+        if (!controls) return entity.has<Structure>();
+        return controls->actionFlags.thrustForward;
     });
 
     // Freighter-0's cargo pods -- always drawn for now (no

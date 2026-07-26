@@ -10,6 +10,8 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/event/game-event.hpp>
+#include <gravitaris/game/component/physics.hpp>
+#include <gravitaris/game/resource/body.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/gwell/faction-system.hpp>
 
@@ -54,7 +56,7 @@ flecs::entity FactionSystem::GetOrCreate(TeamId team)
     return created;
 }
 
-std::optional<Magnum::Vector2d> FactionSystem::SpawnPosition(TeamId team)
+std::optional<FactionSystem::SpawnPoint> FactionSystem::SpawnPosition(TeamId team)
 {
     flecs::entity factionEntity = GetOrCreate(team);
     const FactionState& state = factionEntity.get<FactionState>();
@@ -68,50 +70,81 @@ std::optional<Magnum::Vector2d> FactionSystem::SpawnPosition(TeamId team)
             if (candidateTeam && candidateTeam->id == team) site = candidate;
         }
     }
-    // ...else any remaining friendly planet...
-    if (!site.is_alive()) {
-        m_registry.each([&](flecs::entity e, const Planet&, const Team& t) {
-            if (site.is_alive() || t.id != team) return;
-            site = e;
-        });
-    }
-    // ...else any remaining friendly High Port.
+    // ...else any remaining friendly High Port -- launching from the station
+    // beats launching from the dirt, so it outranks the planet here...
     if (!site.is_alive()) {
         m_registry.each([&](flecs::entity e, const Structure& s, const Team& t, const PlanetOrbitAttachment&) {
             if (site.is_alive() || t.id != team || s.type != StructureType::HighPort) return;
             site = e;
         });
     }
+    // ...else any remaining friendly planet.
+    if (!site.is_alive()) {
+        m_registry.each([&](flecs::entity e, const Planet&, const Team& t) {
+            if (site.is_alive() || t.id != team) return;
+            site = e;
+        });
+    }
     if (!site.is_alive()) return std::nullopt; // nothing left -- that faction is out
 
     const Transform& siteTransf = site.get<Transform>();
-    return siteTransf.pos + Magnum::Vector2d{0., -RESPAWN_OFFSET_RADIUS};
+
+    // Launching from a station: stand on its "spawn" hardpoint if the model
+    // marks one (feet on the deck, nose out), else just off its outward side.
+    // RESPAWN_OFFSET_RADIUS is sized to clear a whole planet *and* the
+    // station orbiting it, which would put you nowhere near the port you
+    // launched from.
+    if (const PlanetOrbitAttachment* attach = site.try_get<PlanetOrbitAttachment>()) {
+        const flecs::entity planet = m_entitySpawner.EntityForNetId(attach->planetNetId);
+        Magnum::Vector2d outward{0., -1.};
+        if (planet.is_alive()) {
+            const Magnum::Vector2d radial = siteTransf.pos - planet.get<Transform>().pos;
+            if (radial.length() > 1e-6) outward = radial.normalized();
+        }
+
+        // Nose (local -Y) pointing away from the planet, i.e. standing on the
+        // deck the same way the station's own floor faces inward.
+        const double rot = std::atan2(outward.x(), -outward.y());
+
+        const ResourcePtr<Body>& body = site.get<RigidBodyDesc>().body;
+        const Body::Hardpoint* spawnPoint = body ? (*body).FindHardpoint("spawn") : nullptr;
+        if (spawnPoint) {
+            // Model space -> world: the station's own rotation, which is
+            // exactly `rot` (both put local -Y along `outward`).
+            const double c = std::cos(rot);
+            const double s = std::sin(rot);
+            const Magnum::Vector2d local = spawnPoint->pos;
+            const Magnum::Vector2d rotated{local.x() * c - local.y() * s, local.x() * s + local.y() * c};
+            return SpawnPoint{siteTransf.pos + rotated + outward * SPAWN_HARDPOINT_CLEARANCE,
+                              siteTransf.vel, rot};
+        }
+
+        return SpawnPoint{siteTransf.pos + outward * STATION_RESPAWN_OFFSET, siteTransf.vel, rot};
+    }
+
+    return SpawnPoint{siteTransf.pos + Magnum::Vector2d{0., -RESPAWN_OFFSET_RADIUS}, siteTransf.vel, 0.0};
 }
 
-std::optional<Magnum::Vector2d> FactionSystem::TryRespawn(TeamId team)
+std::optional<FactionSystem::SpawnPoint> FactionSystem::TryRespawn(TeamId team)
 {
-    const std::optional<Magnum::Vector2d> pos = SpawnPosition(team);
+    const std::optional<SpawnPoint> pos = SpawnPosition(team);
     if (!pos) return std::nullopt;
 
-    // Funding: a Base with an accompanying Lab, or a High Port with an
-    // accompanying Space Dock, belonging to this team, affording
-    // FIGHTER_COST -- same funder rule EconomySystem's freighter dispatch
-    // uses (the producer needs to physically exist, not just its funder).
+    // Funding: a Base with an accompanying Lab, or a High Port (its own
+    // producer since it absorbed the Space Dock), belonging to this team,
+    // affording FIGHTER_COST -- same funder rule EconomySystem's freighter
+    // dispatch uses (the producer needs to physically exist, not just its
+    // funder).
     flecs::entity funder;
     m_registry.each([&](flecs::entity e, const Structure& s, const Team& t) {
         if (funder.is_alive() || t.id != team) return;
         if (s.type != StructureType::Base && s.type != StructureType::HighPort) return;
         if (s.finishedMaterials < FIGHTER_COST) return;
 
-        std::uint32_t planetNetId = 0;
         if (s.type == StructureType::Base) {
-            if (const PlanetSurfaceAttachment* a = e.try_get<PlanetSurfaceAttachment>()) planetNetId = a->planetNetId;
+            const PlanetSurfaceAttachment* a = e.try_get<PlanetSurfaceAttachment>();
+            if (!a || !HasFriendlyStructure(m_registry, a->planetNetId, StructureType::Lab, team)) return;
         }
-        else {
-            if (const PlanetOrbitAttachment* a = e.try_get<PlanetOrbitAttachment>()) planetNetId = a->planetNetId;
-        }
-        const StructureType producerType = s.type == StructureType::Base ? StructureType::Lab : StructureType::SpaceDock;
-        if (planetNetId == 0 || !HasFriendlyStructure(m_registry, planetNetId, producerType, team)) return;
 
         funder = e;
     });

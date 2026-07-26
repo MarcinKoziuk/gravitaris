@@ -5,6 +5,7 @@
 #include <gravitaris/game/component/ai-pilot.hpp>
 #include <gravitaris/game/gnc/ai-personality-presets.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
+#include <gravitaris/game/system/gwell/faction-system.hpp>
 
 #include <gravitaris/cgame/cgame.hpp>
 
@@ -21,16 +22,23 @@ constexpr AIPersonalityPreset PRESETS[] = {
 };
 
 // Only for the dropdown-selected preset; the random button uses
-// Game::SpawnRandomAIShip() directly, shared with the J shortcut.
-void SpawnAINearPlayer(CGame& game, AIPersonalityPreset preset)
+// Game::SpawnRandomAIShip() directly, shared with the J shortcut. Same site
+// rule as that one: Red launches from its own High Port/planet, and only
+// falls back to the player's neighbourhood when it holds nothing.
+void SpawnAI(CGame& game, AIPersonalityPreset preset)
 {
-    Vector2d pos{300.0, 200.0};
-    const std::optional<flecs::entity> player = game.GetPlayer();
-    const Transform* transform = player ? player->try_get<Transform>() : nullptr;
-    if (transform) {
-        pos = transform->pos + Vector2d{250.0, 150.0};
+    FactionSystem::SpawnPoint spawn;
+    spawn.pos = Vector2d{300.0, 200.0};
+    if (const std::optional<FactionSystem::SpawnPoint> site = game.GetFactionSystem().SpawnPosition(TeamId::Red)) {
+        spawn = *site;
     }
-    game.GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, pos, preset);
+    else {
+        const std::optional<flecs::entity> player = game.GetPlayer();
+        if (const Transform* transform = player ? player->try_get<Transform>() : nullptr) {
+            spawn.pos = transform->pos + Vector2d{250.0, 150.0};
+        }
+    }
+    game.GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, spawn.pos, preset, spawn.vel, spawn.rot);
 }
 
 } // namespace
@@ -43,7 +51,7 @@ void DrawSpawnPanel(CGame& game)
     ImGui::Combo("Personality", &presetIndex, PRESET_NAMES, IM_ARRAYSIZE(PRESET_NAMES));
 
     if (ImGui::Button("Spawn AI fighter near player")) {
-        SpawnAINearPlayer(game, PRESETS[presetIndex]);
+        SpawnAI(game, PRESETS[presetIndex]);
     }
 
     if (ImGui::Button("Spawn AI fighter (random personality)")) {

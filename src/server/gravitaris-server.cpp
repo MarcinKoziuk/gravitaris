@@ -186,10 +186,11 @@ int main(int argc, char** argv)
     // system (planets, AI ships) without it -- players arrive entirely
     // through NetServer's ClientHello handling.
     Game game(fs);
-    const flecs::entity homePlanet = BuildClassicScenario(game.GetEntitySpawner());
-    // Single, shared starting complex for now (docs/gravity-well-mode-plan.md
+    const ClassicScenarioHomes homes = BuildClassicScenario(game.GetEntitySpawner());
+    // One developed complex per side, a sun apart (docs/gravity-well-mode-plan.md
     // Phase 2) -- per-faction starting planets are Phase 6's job.
-    BuildStartingComplex(game.GetEntitySpawner(), homePlanet, TeamId::Blue);
+    BuildStartingComplex(game.GetEntitySpawner(), homes.blue, TeamId::Blue);
+    BuildStartingComplex(game.GetEntitySpawner(), homes.red, TeamId::Red);
 
     WebRtcServerTransport transport(port);
     NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),

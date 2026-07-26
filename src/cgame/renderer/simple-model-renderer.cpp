@@ -4,6 +4,7 @@
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/structure.hpp>
 
 #include <gravitaris/cgame/component/renderable.hpp>
 #include <gravitaris/cgame/renderer/simple-model-renderer.hpp>
@@ -108,6 +109,13 @@ void SimpleModelRenderer::Render(double)
     m_registry.each([&](flecs::entity, Transform& transf, Renderable& rend, Controls& controls) {
         if (!controls.actionFlags.thrustForward) return;
 
+        auto it = m_meshes.find(rend.model.Id());
+        if (it == m_meshes.end()) return;
+        RenderGroup("_thrust"_id, it->second, transf);
+    });
+
+    // Station-keeping thrusters, always burning (see ModelRenderer2).
+    m_registry.each([&](flecs::entity, Transform& transf, Renderable& rend, Structure&) {
         auto it = m_meshes.find(rend.model.Id());
         if (it == m_meshes.end()) return;
         RenderGroup("_thrust"_id, it->second, transf);

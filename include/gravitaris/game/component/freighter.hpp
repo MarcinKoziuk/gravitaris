@@ -16,7 +16,7 @@ enum class BuildOrder : std::uint8_t {
 
 // A freighter in flight to build a structure at a claimed planet
 // (docs/gravity-well-mode-plan.md Phase 3). Pre-loaded at spawn -- its
-// materials cost is paid out of the producing Lab/Space Dock's
+// materials cost is paid out of the producing Lab/High Port's
 // finishedMaterials at dispatch time -- so unlike the original there is no
 // separate "visit a colony to load cargo" trip for this construction role
 // (see FreighterSystem's own doc comment for the full scope note).

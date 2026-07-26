@@ -177,7 +177,9 @@ public:
         static constexpr float lineWidth = 1.f;
         static constexpr float zoomWidthFactor = 0.5f;
         // Startup zoom, and the reference at which lineWidth is literal pixels.
-        static constexpr float cameraZoom = 2.f;
+        // Halved along with CameraParams' zoom range when the celestial bodies
+        // doubled in size, so a planet frames the same as it used to.
+        static constexpr float cameraZoom = 1.f;
     };
 
     static constexpr float MIN_LINE_WIDTH = 0.5f;

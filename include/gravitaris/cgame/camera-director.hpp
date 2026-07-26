@@ -23,8 +23,11 @@ public:
     // Tunables for the camera director (exposed in the Camera debug tab).
     struct CameraParams {
         bool dynamicZoom = true;
-        float minZoom = 0.5f;       // most zoomed-out (fast / framing) end
-        float maxZoom = 5.f;        // most zoomed-in (at rest) end
+        // Both halved when the celestial bodies doubled in size: the whole
+        // speed-driven curve is maxZoom/(1 + speed/speedFalloff), so scaling
+        // the ends keeps the same amount of world on screen as before.
+        float minZoom = 0.25f;      // most zoomed-out (fast / framing) end
+        float maxZoom = 2.5f;       // most zoomed-in (at rest) end
         float speedFalloff = 220.f; // world units/sec at which zoom noticeably backs off
         float zoomTau = 2.f;        // zoom smoothing time constant (s), for the dynamic (speed/framing) target
         float manualZoomTau = 0.25f;// zoom smoothing time constant (s), for a wheel-driven target -- snappier
@@ -46,8 +49,8 @@ public:
         // band of surface distances (planetReleaseDist..planetFramingRange), so
         // it does nothing far out and hands back control right at the surface.
         bool planetFraming = true;
-        float planetFramingRange = 2000.f; // surface distance at which framing starts fading in
-        float planetReleaseDist = 90.f;    // surface distance below which framing releases (zoom in to land)
+        float planetFramingRange = 3000.f; // surface distance at which framing starts fading in
+        float planetReleaseDist = 180.f;   // surface distance below which framing releases (zoom in to land)
         float planetFramingMargin = 350.f; // extra world units kept around the fitted body
 
         // Close-combat zoom-in: when the framed enemy gets near (almost

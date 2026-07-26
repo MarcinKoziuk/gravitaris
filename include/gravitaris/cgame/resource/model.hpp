@@ -59,6 +59,7 @@ public:
 
 private:
     std::unordered_map<id_t, Group> m_groups;
+    int m_renderOrder = 0;
 
     static ResourcePtr<const Model> placeholder;
 
@@ -74,6 +75,10 @@ public:
 
     [[nodiscard]] const std::unordered_map<id_t, Group>& GetModelGroups() const
     { return m_groups; }
+
+    // See Shape::GetRenderOrder.
+    [[nodiscard]] int GetRenderOrder() const
+    { return m_renderOrder; }
 
     static ResourcePtr<const Model> Placeholder();
 

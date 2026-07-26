@@ -5,6 +5,7 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/planet-attachment.hpp>
+#include <gravitaris/game/scenario/structure-layout.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
 #include <gravitaris/game/game.hpp>
@@ -29,7 +30,7 @@ void StructureAttachmentSystem::Update()
         const Vector2d pos = planetTransf.pos + attach.localOffset;
         const Vector2d vel = planetTransf.vel;
 
-        m_physicsSystem.SetKinematicMotion(ref, pos, vel);
+        m_physicsSystem.SetKinematicMotion(ref, pos, vel, std::nullopt);
         transf.pos = pos;
         transf.vel = vel;
     });
@@ -42,7 +43,11 @@ void StructureAttachmentSystem::Update()
 
         const Transform& planetTransf = planet.get<Transform>();
 
-        const double angularSpeed = attach.direction * std::sqrt(
+        // A freighter parks in a real ballistic orbit; a station flies its
+        // ring under thrust, deliberately slower (ORBIT_SPEED_FACTOR) so a
+        // ship can match it and land on the deck.
+        const double speedFactor = entity.has<Freighter>() ? 1.0 : StructureLayout::ORBIT_SPEED_FACTOR;
+        const double angularSpeed = attach.direction * speedFactor * std::sqrt(
                 PhysicsSystem::GRAVITY_CONSTANT * gravityMultiplier * attach.centerMass
                 / (attach.radius * attach.radius * attach.radius));
         attach.angularSpeed = angularSpeed; // cached for GatherSnapshot; see the field's own doc comment
@@ -55,17 +60,20 @@ void StructureAttachmentSystem::Update()
         const Vector2d pos = planetTransf.pos + Vector2d{c, s} * attach.radius;
         const Vector2d vel = planetTransf.vel + localVel;
 
-        // Only a Freighter faces prograde (nose is local -Y, see
+        // A Freighter faces prograde (nose is local -Y, see
         // ShipControlsSystem::ApplyMovement's thrust direction, so that's
-        // rot = atan2(vel.x, -vel.y)) -- High Port/Space Dock/Sensor Array
-        // keep whatever fixed orientation they were placed at, unchanged.
-        // Faces the *local* orbital velocity, not the combined `vel` used
-        // for motion -- the planet's own drift around its star can dwarf the
-        // freighter's tight local orbit, and facing the combined vector then
-        // reads as flying at a constant offset angle rather than tangent to
-        // the visible circle around the planet.
-        const std::optional<double> rot =
-                entity.has<Freighter>() ? std::optional<double>(std::atan2(localVel.x(), -localVel.y())) : std::nullopt;
+        // rot = atan2(vel.x, -vel.y)). Faces the *local* orbital velocity,
+        // not the combined `vel` used for motion -- the planet's own drift
+        // around its star can dwarf the freighter's tight local orbit, and
+        // facing the combined vector then reads as flying at a constant
+        // offset angle rather than tangent to the visible circle around the
+        // planet.
+        //
+        // A station instead keeps its floor (local +Y) toward the planet all
+        // the way around, so local -Y points along the radial {c, s}.
+        const double rot = entity.has<Freighter>()
+                ? std::atan2(localVel.x(), -localVel.y())
+                : std::atan2(c, -s);
 
         m_physicsSystem.SetKinematicMotion(ref, pos, vel, rot);
         transf.pos = pos;

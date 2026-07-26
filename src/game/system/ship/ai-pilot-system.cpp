@@ -11,6 +11,7 @@
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
+#include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/ai-pilot.hpp>
@@ -31,6 +32,16 @@ static constexpr double PI = 3.14159265358979323846;
 
 static constexpr double BULLET_SPEED = 200.0; // matches ship-controls-system's BULLET_MUZZLE_SPEED
 
+// A rival target has to be this much closer (squared distance) than the
+// current one before a pilot switches to it.
+static constexpr double RETARGET_RATIO = 0.5;
+
+// Floor under a personality's evadeRadius, as a multiple of the body's own
+// radius. Personalities are authored against planets; a sun is 2.5x a planet
+// and would otherwise sit entirely inside even a Cautious pilot's evade
+// radius, i.e. flying into it would never read as danger at all.
+static constexpr double EVADE_SURFACE_CLEARANCE = 1.25;
+
 static double WrapToPi(double angle);
 static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Vector2d& relVel,
                                                 double projectileSpeed);
@@ -49,10 +60,12 @@ void AIPilotSystem::Update(std::uint64_t step)
         flecs::entity entity;
         Vector2d pos;
         double mass;
+        double radius;
     };
     std::vector<Source> sources;
     m_registry.each([&](flecs::entity ent, const Transform& transf, const GravitySource& gs) {
-        sources.push_back({ent, transf.pos, gs.mass * gs.multiplier});
+        const Planet* planet = ent.try_get<Planet>();
+        sources.push_back({ent, transf.pos, gs.mass * gs.multiplier, planet ? planet->radius : 0.0});
     });
 
     // Every potential combat target -- a piloted ship (player or AI), not a
@@ -89,7 +102,16 @@ void AIPilotSystem::Update(std::uint64_t step)
             if (!well || src.mass > well->mass) well = &src;
         }
 
-        if (!pilot.target.is_alive()) {
+        const double evadeRadius = well
+                ? std::max(personality.evadeRadius, well->radius * EVADE_SURFACE_CLEARANCE)
+                : personality.evadeRadius;
+
+        // Re-picked on the decision cadence, not only when the current target
+        // dies: a pilot locked on a distant enemy flies off at cruise speed
+        // past whoever is actually shooting at it, which reads as fleeing.
+        // Switching needs the newcomer to be clearly closer (RETARGET_RATIO)
+        // so two enemies at similar range don't make it flip-flop.
+        if (!pilot.target.is_alive() || pilot.decisionCooldown == 0) {
             flecs::entity nearest;
             double nearestDistSq = std::numeric_limits<double>::max();
             for (const Candidate& c : candidates) {
@@ -100,7 +122,17 @@ void AIPilotSystem::Update(std::uint64_t step)
                     nearest = c.entity;
                 }
             }
-            pilot.target = nearest;
+
+            if (!pilot.target.is_alive()) {
+                pilot.target = nearest;
+            }
+            else if (nearest.is_alive() && nearest != pilot.target) {
+                const Transform* current = pilot.target.try_get<Transform>();
+                const double currentDistSq = current ? (current->pos - transf.pos).dot() : 0.0;
+                if (!current || nearestDistSq < currentDistSq * RETARGET_RATIO) {
+                    pilot.target = nearest;
+                }
+            }
         }
         const Transform* targetTransf =
                 pilot.target.is_alive() ? pilot.target.try_get<Transform>() : nullptr;
@@ -134,7 +166,7 @@ void AIPilotSystem::Update(std::uint64_t step)
                 pilot.behavior = AIBehavior::Orbit;
                 if (previous != AIBehavior::Orbit) {
                     const Vector2d r = transf.pos - well->pos;
-                    pilot.patrolRadius = std::max(r.length(), personality.evadeRadius * 2.0);
+                    pilot.patrolRadius = std::max(r.length(), evadeRadius * 2.0);
                     const double cross = r.x() * transf.vel.y() - r.y() * transf.vel.x();
                     pilot.patrolDirection = (cross < 0.0) ? -1.0 : 1.0;
                 }
@@ -156,7 +188,7 @@ void AIPilotSystem::Update(std::uint64_t step)
             const std::vector<Vector2d> path =
                     m_predictor.Predict(ent, personality.dangerLookaheadSteps, Game::PHYSICS_DELTA);
             for (const Vector2d& p : path) {
-                if ((p - well->pos).length() < personality.evadeRadius) {
+                if ((p - well->pos).length() < evadeRadius) {
                     predictedDanger = true;
                     break;
                 }
@@ -185,7 +217,7 @@ void AIPilotSystem::Update(std::uint64_t step)
             // clears -- wait until genuinely clear of the well, or this would
             // flap Evade/Intercept right at the trigger boundary.
             const bool clear = !well
-                    || (transf.pos - well->pos).length() > personality.evadeRadius * personality.evadeMargin;
+                    || (transf.pos - well->pos).length() > evadeRadius * personality.evadeMargin;
             if (clear) {
                 pilot.decisionCooldown = 0; // re-pick a tactical behavior next tick
             }
@@ -196,7 +228,7 @@ void AIPilotSystem::Update(std::uint64_t step)
             case AIBehavior::Evade:
                 if (well) {
                     desiredVel = EvadeBody(transf, well->pos,
-                                          personality.evadeRadius * personality.evadeMargin, pilot.guidance);
+                                          evadeRadius * personality.evadeMargin, pilot.guidance);
                 }
                 break;
             case AIBehavior::Intercept:

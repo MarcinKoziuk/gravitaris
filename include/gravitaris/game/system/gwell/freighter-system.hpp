@@ -41,10 +41,10 @@ public:
     static constexpr double TRANSIT_ACCELERATION = 20.0;
 
     // "Close enough" to a planet to stop transiting and start orbiting it,
-    // and the radius that orbit rides at. Past High Port/Space Dock/Sensor
-    // Array's own orbitRadius (starting-complex.cpp, 180) so a freighter's
-    // parking orbit doesn't sit on top of them.
-    static constexpr double ARRIVAL_RADIUS = 220.0;
+    // and the radius that orbit rides at. Past the High Port's own orbit
+    // (StructureLayout::ORBIT_RADIUS_FACTOR x the 120-unit planet radius, so
+    // 240) to keep a freighter's parking orbit off it.
+    static constexpr double ARRIVAL_RADIUS = 440.0;
 
     // Ticks between cargo unloads (300 == 5s at Game::PHYSICS_DELTA) -- makes
     // the two-cargo unload read as sequential events rather than an instant

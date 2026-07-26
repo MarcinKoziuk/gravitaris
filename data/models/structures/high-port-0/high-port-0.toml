@@ -1,0 +1,8 @@
+# Authored on Inkscape's mm page grid (~25 units across), unlike the
+# px-authored ships -- scaled up here to sit at ship scale in the world.
+scale = 1.34
+
+[physics]
+kinematic = true
+friction = 5.0
+restitution = 0.3

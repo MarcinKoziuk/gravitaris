@@ -29,7 +29,10 @@ struct AIPersonality {
     // Gravity-well danger avoidance. A predicted approach inside evadeRadius
     // triggers Evade; once evading, the ship must clear evadeRadius*evadeMargin
     // before handing control back (hysteresis, avoids flapping at the boundary).
-    double evadeRadius = 90.0;
+    // Authored against the 120-unit planets; AIPilotSystem raises it for any
+    // body too big for the authored value (a sun) so it always clears the
+    // surface (EVADE_SURFACE_CLEARANCE).
+    double evadeRadius = 180.0;
     double evadeMargin = 1.5;
     int dangerLookaheadSteps = 120;  // ~2s at the fixed tick
 

@@ -85,7 +85,7 @@ struct EntityState {
     // Non-zero when this entity rides a fixed-radius offset off a (possibly
     // moving) parent planet -- PlanetSurfaceAttachment (attachAngularSpeed
     // stays 0: a fixed offset is just a zero-angular-speed "orbit") or
-    // PlanetOrbitAttachment (High Port/Space Dock/Sensor Array, or an
+    // PlanetOrbitAttachment (a High Port, or an
     // arrived Freighter). Lets a client re-derive this entity's exact
     // position the same closed-form way it already does for planets (see
     // EvaluateAttachment below) instead of lerping/extrapolating the raw
@@ -148,7 +148,7 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out);
 //
 // Only meaningful when `planet.isStar` is false; callers must check that
 // themselves (a star has no orbit data to evaluate, and isn't moving anyway).
-void EvaluateOrbit(const EntityState& planet, std::uint64_t baseTick, std::uint64_t atTick,
+void EvaluateOrbit(const EntityState& planet, std::uint64_t baseTick, double atTick,
                    Magnum::Vector2d& outPos, Magnum::Vector2d& outVel);
 
 // Same idea as EvaluateOrbit, but composed on top of a parent's own live
@@ -161,7 +161,7 @@ void EvaluateOrbit(const EntityState& planet, std::uint64_t baseTick, std::uint6
 // around its star can dwarf the attachment's tight local orbit (see
 // StructureAttachmentSystem's identical distinction server-side).
 void EvaluateAttachment(const Magnum::Vector2d& parentPos, const Magnum::Vector2d& parentVel,
-                        const EntityState& attached, std::uint64_t baseTick, std::uint64_t atTick,
+                        const EntityState& attached, std::uint64_t baseTick, double atTick,
                         Magnum::Vector2d& outPos, Magnum::Vector2d& outVel, Magnum::Vector2d& outLocalVel);
 
 } // namespace Gravitaris

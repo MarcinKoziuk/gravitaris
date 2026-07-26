@@ -7,6 +7,7 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/planet.hpp>
+#include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
@@ -39,21 +40,32 @@ void LandingStateSystem::Update()
     std::vector<std::pair<TeamId, std::uint32_t>> friendlyLandings;
 
     m_registry.each([&](flecs::entity ship, LandingState& state, Transform& transf, PhysicsRef& ref) {
+        // A High Port is a landing site too: its deck faces away from the
+        // planet it orbits, so a ship set down on it is upright by the same
+        // legs-toward-the-body test a planet uses, with the station as the
+        // body. Planet wins if a ship somehow touches both.
         struct Ctx {
             flecs::entity planet;
+            flecs::entity station;
         } ctx;
 
         m_physicsSystem.ForEachTouching(ref, [](flecs::entity touched, void* raw) {
             auto* c = static_cast<Ctx*>(raw);
             if (!c->planet.is_alive() && touched.has<Planet>()) c->planet = touched;
+            if (!c->station.is_alive()) {
+                const Structure* structure = touched.try_get<Structure>();
+                if (structure && structure->type == StructureType::HighPort) c->station = touched;
+            }
         }, &ctx);
 
-        bool landed = false;
-        if (ctx.planet.is_alive()) {
-            const Transform& planetTransf = ctx.planet.get<Transform>();
+        const flecs::entity site = ctx.planet.is_alive() ? ctx.planet : ctx.station;
 
-            const Magnum::Vector2d relVel = transf.vel - planetTransf.vel;
-            const Magnum::Vector2d toCenter = (planetTransf.pos - transf.pos).normalized();
+        bool landed = false;
+        if (site.is_alive()) {
+            const Transform& siteTransf = site.get<Transform>();
+
+            const Magnum::Vector2d relVel = transf.vel - siteTransf.vel;
+            const Magnum::Vector2d toCenter = (siteTransf.pos - transf.pos).normalized();
             const Magnum::Vector2d legs{-std::sin(static_cast<double>(transf.rot)),
                                         std::cos(static_cast<double>(transf.rot))};
 
@@ -63,12 +75,12 @@ void LandingStateSystem::Update()
 
         if (landed) {
             state.landed = true;
-            state.landedOnNetId = ctx.planet.get<NetId>().value;
+            state.landedOnNetId = site.get<NetId>().value;
             ++state.landedTicks;
 
             const Team* shipTeam = ship.try_get<Team>();
-            const Team* planetTeam = ctx.planet.try_get<Team>();
-            if (shipTeam && planetTeam && planetTeam->id == shipTeam->id) {
+            const Team* siteTeam = site.try_get<Team>();
+            if (shipTeam && siteTeam && siteTeam->id == shipTeam->id) {
                 state.lastFriendlySiteNetId = state.landedOnNetId;
                 friendlyLandings.emplace_back(shipTeam->id, state.landedOnNetId);
             }

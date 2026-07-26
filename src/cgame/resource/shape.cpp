@@ -41,6 +41,10 @@ ResourcePtr<const Shape> Shape::Create(id_t id, LoadingContext& context)
     std::unique_ptr<ShapeFiles> shapeFiles = GetShapeFiles(context.filesystem, path);
     Matrix4d transform = GetTransformMatrix(*shapeFiles);
 
+    if (const auto renderOrder = shapeFiles->cfg["render_order"].value<int>()) {
+        shape->m_renderOrder = *renderOrder;
+    }
+
     NSVGimage& svg = *shapeFiles->svg;
 
     for (const NSVGshape* svgShape = svg.shapes; svgShape != nullptr; svgShape = svgShape->next) {

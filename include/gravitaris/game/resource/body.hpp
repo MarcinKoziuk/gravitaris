@@ -45,6 +45,10 @@ public:
             bool utility : 1;
         } supports;
         Vector2d pos;
+        // The Inkscape layer *label* of the marker (not its id), so a model
+        // can name a point the game looks up by meaning -- "spawn" on a High
+        // Port is where a fighter's feet go when it launches from the deck.
+        std::string name;
 
         Hardpoint() : size(TINY), supports{false, false, false} {}
     };
@@ -98,6 +102,9 @@ public:
 
     [[nodiscard]] const std::vector<std::vector<TVector2<cpFloat>>>& GetPolygonShapes() const
     { return m_polygonShapes; }
+
+    // The named hardpoint, or nullptr when this model has none by that name.
+    [[nodiscard]] const Hardpoint* FindHardpoint(const char* name) const;
 
     [[nodiscard]] const std::vector<Hardpoint>& GetHardpoints() const
     { return m_hardpoints; }

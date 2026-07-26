@@ -240,16 +240,17 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
     return in.Ok();
 }
 
-void EvaluateOrbit(const EntityState& planet, std::uint64_t baseTick, std::uint64_t atTick,
+void EvaluateOrbit(const EntityState& planet, std::uint64_t baseTick, double atTick,
                    Magnum::Vector2d& outPos, Magnum::Vector2d& outVel)
 {
     // Signed tick delta (atTick can be behind baseTick briefly -- e.g. a
     // reconciliation replaying ticks not-yet-newer than the snapshot that
     // just arrived) -- same math either direction, just run the clock
-    // backward. atTick/baseTick are uint64_t: casting to double before
-    // subtracting is load-bearing, not redundant -- subtracting first would
-    // wrap around unsigned and teleport the planet.
-    const double elapsedSeconds = (static_cast<double>(atTick) - static_cast<double>(baseTick)) * Game::PHYSICS_DELTA;
+    // backward. baseTick is uint64_t: casting to double before subtracting
+    // is load-bearing, not redundant -- subtracting first would wrap around
+    // unsigned and teleport the planet. atTick is fractional so a renderer
+    // can ask for a position *between* two ticks (see the callers).
+    const double elapsedSeconds = (atTick - static_cast<double>(baseTick)) * Game::PHYSICS_DELTA;
     const double theta = planet.orbitTheta + planet.orbitAngularSpeed * elapsedSeconds;
 
     const double c = std::cos(theta);
@@ -263,10 +264,10 @@ void EvaluateOrbit(const EntityState& planet, std::uint64_t baseTick, std::uint6
 }
 
 void EvaluateAttachment(const Magnum::Vector2d& parentPos, const Magnum::Vector2d& parentVel,
-                        const EntityState& attached, std::uint64_t baseTick, std::uint64_t atTick,
+                        const EntityState& attached, std::uint64_t baseTick, double atTick,
                         Magnum::Vector2d& outPos, Magnum::Vector2d& outVel, Magnum::Vector2d& outLocalVel)
 {
-    const double elapsedSeconds = (static_cast<double>(atTick) - static_cast<double>(baseTick)) * Game::PHYSICS_DELTA;
+    const double elapsedSeconds = (atTick - static_cast<double>(baseTick)) * Game::PHYSICS_DELTA;
     const double theta = attached.attachTheta + attached.attachAngularSpeed * elapsedSeconds;
 
     const double c = std::cos(theta);

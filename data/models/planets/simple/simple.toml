@@ -1,7 +1,11 @@
-scale = 0.2
+# Radius 299.5 in the svg, so ~120 world units. Mass scales with the square
+# of that radius, keeping the pull at the surface -- the thing the whole game
+# is built around -- where it was at the old half-size planet.
+scale = 0.4
+render_order = -10
 
 [physics]
-mass = 25000
+mass = 100000
 kinematic = true
 density = 10
 restitution = 0.5

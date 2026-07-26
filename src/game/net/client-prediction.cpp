@@ -52,12 +52,26 @@ void ClientPrediction::SpawnOwnShip(id_t modelId, Magnum::Vector2d initialPos, T
 namespace {
 
 // Which of `snapshotEntities` get a collision proxy at all: every planet,
-// and every ship other than this peer's own (already real and dynamic in
-// this same registry -- see the class doc comment on why never both).
+// every structure, and every ship other than this peer's own (already real
+// and dynamic in this same registry -- see the class doc comment on why
+// never both).
+//
+// A structure's motion is as deterministic as a planet's -- it rides a
+// replicated attachment (EvaluateAttachment) -- so the predicted ship can be
+// collided against it exactly, which is what makes landing on a High Port
+// deck work client-side rather than being a server-only surprise.
 bool NeedsCollisionProxy(const EntityState& state, std::uint32_t ownShipNetId)
 {
     if (state.type == NetEntityType::Planet) return true;
+    if (state.type == NetEntityType::Structure) return true;
     return state.type == NetEntityType::Ship && state.netId != ownShipNetId;
+}
+
+const EntityState* FindState(const std::vector<EntityState>& states, std::uint32_t netId)
+{
+    const auto it = std::find_if(states.begin(), states.end(),
+                                 [&](const EntityState& e) { return e.netId == netId; });
+    return it != states.end() ? &*it : nullptr;
 }
 
 } // namespace
@@ -123,6 +137,34 @@ void ClientPrediction::SyncCollisionProxies(const std::vector<EntityState>& snap
             Magnum::Vector2d pos, vel;
             EvaluateOrbit(state, baseTick, atTick, pos, vel);
             m_physicsSystem.SetKinematicMotion(proxy.get<PhysicsRef>(), pos, vel);
+        }
+        else if (state.attachParentNetId != 0) {
+            // Composed on the parent's own analytic position at the same
+            // tick, not on its (staler) raw snapshot one -- the same two-step
+            // SnapshotInterpolator does for rendering. An orbiting station
+            // additionally faces floor-inward, matching
+            // StructureAttachmentSystem, so the deck a ship lands on is
+            // where the server says it is.
+            Magnum::Vector2d parentPos{state.pos}, parentVel{state.vel};
+            if (const EntityState* parent = FindState(snapshotEntities, state.attachParentNetId)) {
+                if (parent->orbitRadius > 0.f) {
+                    EvaluateOrbit(*parent, baseTick, atTick, parentPos, parentVel);
+                }
+                else {
+                    parentPos = Magnum::Vector2d{parent->pos};
+                    parentVel = Magnum::Vector2d{parent->vel};
+                }
+            }
+
+            Magnum::Vector2d pos, vel, localVel;
+            EvaluateAttachment(parentPos, parentVel, state, baseTick, atTick, pos, vel, localVel);
+
+            std::optional<double> angle;
+            if (state.attachAngularSpeed != 0.f) {
+                const Magnum::Vector2d radial = pos - parentPos;
+                angle = std::atan2(radial.x(), -radial.y());
+            }
+            m_physicsSystem.SetKinematicMotion(proxy.get<PhysicsRef>(), pos, vel, angle);
         }
         else {
             const double elapsedSeconds =

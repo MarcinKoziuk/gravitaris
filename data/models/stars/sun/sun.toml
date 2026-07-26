@@ -1,7 +1,9 @@
-scale = 0.5
+# ~300 world units, 2.5x the planets, as before (see planets/simple).
+scale = 1.0
+render_order = -10
 
 [physics]
-mass = 120000
+mass = 480000
 kinematic = true
 density = 10
 restitution = 0.5

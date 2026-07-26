@@ -15,6 +15,7 @@
 #include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/component/net-id.hpp>
+#include <gravitaris/game/scenario/structure-layout.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
 namespace Gravitaris {
@@ -64,12 +65,13 @@ flecs::entity EntitySpawner::EntityForNetId(std::uint32_t netId) const
     return it != m_netIdToEntity.end() ? it->second : flecs::entity{};
 }
 
-flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position, TeamId team)
+flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position, TeamId team,
+                                         Vector2d velocity, double rot)
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
 
     auto entity = m_registry.entity();
-    entity.emplace<Transform>(position);
+    entity.emplace<Transform>(position, Magnum::Radd{rot}, Vector2d{1., 1.}, velocity);
     entity.emplace<RigidBodyDesc>("main"_id, body, /*sensor=*/false, CollisionClass::Ship);
     entity.emplace<Controls>();
     entity.emplace<InputQueue>();
@@ -82,12 +84,13 @@ flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position, TeamId
     return entity;
 }
 
-flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, AIPersonalityPreset preset)
+flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, AIPersonalityPreset preset,
+                                         Vector2d velocity, double rot)
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
 
     auto entity = m_registry.entity();
-    entity.emplace<Transform>(position);
+    entity.emplace<Transform>(position, Magnum::Radd{rot}, Vector2d{1., 1.}, velocity);
     entity.emplace<RigidBodyDesc>("main"_id, body, /*sensor=*/false, CollisionClass::Ship);
     entity.emplace<Controls>();
     entity.emplace<InputQueue>();
@@ -178,9 +181,11 @@ flecs::entity EntitySpawner::SpawnStructureBase(StructureType type, id_t modelId
     return entity;
 }
 
-flecs::entity EntitySpawner::SpawnStructure(StructureType type, id_t modelId, flecs::entity planet, TeamId team,
-                                            Vector2d localOffset)
+flecs::entity EntitySpawner::SpawnStructure(StructureType type, id_t modelId, flecs::entity planet, TeamId team)
 {
+    const double planetRadius = planet.get<Planet>().radius;
+    const Vector2d localOffset = StructureLayout::SurfaceOffset(type, planetRadius);
+
     const Vector2d initialPos = planet.get<Transform>().pos + localOffset;
     flecs::entity entity = SpawnStructureBase(type, modelId, initialPos, team);
     entity.emplace<PlanetSurfaceAttachment>(PlanetSurfaceAttachment{planet.get<NetId>().value, localOffset});
