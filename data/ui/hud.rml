@@ -28,9 +28,27 @@
 				border-color: #0ff;
 				pointer-events: none;
 			}
+
+			/* Build identity + ping, set from the frame loop (see
+			   UI::SetHudStatusText). Sits above the minimap rather than in
+			   the corner the minimap already occupies: 16dp margin + 170dp
+			   box + 2*2dp border + a small gap. */
+			div#status_readout
+			{
+				position: absolute;
+				bottom: 196dp;
+				right: 16dp;
+
+				font-family: LatoLatin;
+				font-size: 12dp;
+				color: #8ff;
+				text-align: right;
+				pointer-events: none;
+			}
 		</style>
 	</head>
 	<body>
 		<img id="minimap" src="live://minimap"/>
+		<div id="status_readout"></div>
 	</body>
 </rml>

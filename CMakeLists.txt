@@ -447,6 +447,43 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# Generated build-info header (build tree only, never the tracked source
+# tree). Regenerated as a build step, not just at configure time, so the git
+# hash and timestamp it carries describe the binary you just built.
+# ---------------------------------------------------------------------------
+set(GT_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated")
+set(GT_BUILD_CONFIG_HEADER   "${GT_GENERATED_INCLUDE_DIR}/gravitaris/build-config.hpp")
+
+if(EMSCRIPTEN)
+    set(GT_PLATFORM "wasm")
+elseif(WIN32)
+    set(GT_PLATFORM "windows")
+elseif(APPLE)
+    set(GT_PLATFORM "macos")
+else()
+    set(GT_PLATFORM "linux")
+endif()
+
+set(GT_BUILD_INFO_ARGS
+    "-DGT_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+    "-DGT_TEMPLATE=${CMAKE_SOURCE_DIR}/cmake/build-config.hpp.in"
+    "-DGT_OUTPUT=${GT_BUILD_CONFIG_HEADER}"
+    "-DGT_PLATFORM=${GT_PLATFORM}"
+)
+
+execute_process(COMMAND ${CMAKE_COMMAND} ${GT_BUILD_INFO_ARGS}
+    "-DGT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+    -P "${CMAKE_SOURCE_DIR}/cmake/build-info.cmake")
+
+add_custom_target(gravitaris-build-info ALL
+    COMMAND ${CMAKE_COMMAND} ${GT_BUILD_INFO_ARGS} "-DGT_BUILD_TYPE=$<CONFIG>"
+            -P "${CMAKE_SOURCE_DIR}/cmake/build-info.cmake"
+    BYPRODUCTS "${GT_BUILD_CONFIG_HEADER}"
+    COMMENT "Refreshing build-config.hpp"
+    VERBATIM
+)
+
+# ---------------------------------------------------------------------------
 # Main target
 # ---------------------------------------------------------------------------
 add_executable(GravitarisNG
@@ -673,7 +710,11 @@ add_executable(GravitarisNG
     src/cgame/ui/debug/hud-panel.hpp
     src/cgame/ui/debug/hud-panel.cpp
     src/cgame/ui/debug/world-to-ui.hpp
+    include/gravitaris/game/build-info.hpp
+    src/game/build-info.cpp
 )
+
+add_dependencies(GravitarisNG gravitaris-build-info)
 
 # DPI-aware manifest, per https://doc.magnum.graphics/magnum/platforms-windows.html --
 # without it, Windows doesn't consider the app DPI-aware and dpiScaling()/
@@ -697,6 +738,7 @@ target_include_directories(GravitarisNG PRIVATE
     src/
     include/
     extlibs/
+    "${GT_GENERATED_INCLUDE_DIR}"
 )
 
 target_compile_definitions(GravitarisNG PRIVATE

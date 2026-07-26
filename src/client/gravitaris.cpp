@@ -26,6 +26,7 @@
 #endif
 
 #include <gravitaris/gravitaris.hpp>
+#include <gravitaris/game/build-info.hpp>
 #include <gravitaris/game/fs/filesystem-physfs.hpp>
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/perf-monitor.hpp>
@@ -74,8 +75,6 @@ private:
     double m_frameTimeAccumulator;
     double m_startTime;
 
-    bool m_uiInWorld = true; // render UI into the scene so it gets bloom + CRT
-
     // Live keyboard action state; FeedInput() turns it into one tick-stamped
     // command per sim tick. The sim never reads the keyboard directly.
     ControlFlags m_currentInput{};
@@ -83,10 +82,15 @@ private:
     // Record/replay: F5 toggles recording to disk, F6 replays it back, F7 stops.
     ReplayController m_replay;
 
+    // Wall-clock time of the last HUD readout refresh; see RefreshHudReadout.
+    double m_lastHudReadoutTime = 0.;
+
     void FeedInput();
     void ToggleRecording();
     void StartReplay();
     void StopReplay();
+    void UpdateUi();
+    void RefreshHudReadout();
 
     void tickEvent() override;
     void drawEvent() override;
@@ -110,6 +114,24 @@ private:
     {
         const Magnum::Vector2 fbRatio = Magnum::Vector2{framebufferSize()} / Magnum::Vector2{windowSize()};
         return Magnum::Math::max(fbRatio, dpiScaling());
+    }
+
+    // Pointer position in the UI context's coordinate space (physical pixels,
+    // matching SetDimensions(framebufferSize())).
+    //
+    // Natively SDL reports logical points, so the HiDPI scale above has to be
+    // applied. Under Emscripten it doesn't: windowSize() and framebufferSize()
+    // are both the canvas *backing store* size, and Emscripten's SDL port
+    // already scales client coordinates by backingSize/cssSize before handing
+    // them over -- multiplying again would apply devicePixelRatio twice, which
+    // is what made the browser build only react outside a window's visible box.
+    Magnum::Vector2i UiPointerPosition(const Magnum::Vector2& position) const
+    {
+#ifdef CORRADE_TARGET_EMSCRIPTEN
+        return Magnum::Vector2i{position};
+#else
+        return Magnum::Vector2i{position * PixelScale()};
+#endif
     }
 
     static int RmlButtonIndex(Pointer pointer);
@@ -196,8 +218,7 @@ void GravitarisApplication::tickEvent()
         }
         m_currentInput.fireSecondary = false; // one-shot, same as FeedInput()
         redraw();
-        ScopedPerfTimer timer(m_game->GetPerfMonitor(), "UI Update");
-        m_ui.Update();
+        UpdateUi();
         return;
     }
 
@@ -232,10 +253,38 @@ void GravitarisApplication::tickEvent()
 
     redraw();
 
-    {
-        ScopedPerfTimer timer(m_game->GetPerfMonitor(), "UI Update");
-        m_ui.Update();
+    UpdateUi();
+}
+
+void GravitarisApplication::UpdateUi()
+{
+    RefreshHudReadout();
+
+    ScopedPerfTimer timer(m_game->GetPerfMonitor(), "UI Update");
+    m_ui.Update();
+}
+
+// Build identity, plus the measured round-trip when connected to a server.
+// Throttled: the text changes at most a few times a second, and SetInnerRML
+// reflows the element.
+void GravitarisApplication::RefreshHudReadout()
+{
+    static constexpr double REFRESH_INTERVAL = 0.25;
+
+    const double now = GetTime();
+    if (now - m_lastHudReadoutTime < REFRESH_INTERVAL) return;
+    m_lastHudReadoutTime = now;
+
+    std::string text = BuildInfoString();
+    if (m_game->IsNetClient()) {
+        // Negative until the first Pong arrives; show that it's pending
+        // rather than "-1 ms".
+        const float ping = m_game->GetAveragePingMs();
+        text += ping < 0.f ? "  ping --"
+                           : "  ping " + std::to_string(std::lround(ping)) + " ms";
     }
+
+    m_ui.SetHudStatusText(text);
 }
 
 // One command for the tick Update() is about to run: keyboard, autopilot and
@@ -332,24 +381,23 @@ void GravitarisApplication::drawEvent()
     // would lose float precision. Wraps every 1000s.
     const float animTime = static_cast<float>(std::fmod(GetTime() - m_startTime, 1000.0));
 
-    if (m_uiInWorld) {
-        // UI into the scene before compositing, so it gets bloom + CRT too.
-        RenderUi();
+    {
         ScopedPerfTimer timer(perf, "Post-process Composite");
         m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, fbSize, animTime);
-    } else {
-        {
-            ScopedPerfTimer timer(perf, "Post-process Composite");
-            m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, fbSize, animTime);
-        }
-        RenderUi();
     }
 
-    // Restore viewport to full size; RmlUi sets it to its own context size.
-    Magnum::GL::defaultFramebuffer.setViewport({{}, fbSize});
-
-    // Dev overlay on top of everything, crisp (drawn after the CRT present).
+    // UI to the screen, after the scene has been composited: no bloom, no CRT
+    // scanlines, no glow-threshold interaction -- text stays crisp and
+    // legible. RmlUi issues raw GL draws into whatever is bound, so bind and
+    // size the default framebuffer explicitly rather than inheriting whatever
+    // the composite left behind.
     Magnum::GL::defaultFramebuffer.bind();
+    Magnum::GL::defaultFramebuffer.setViewport({{}, fbSize});
+    RenderUi();
+
+    // Dev overlay on top of everything. Restore the viewport first -- RmlUi
+    // sets it to its own context size.
+    Magnum::GL::defaultFramebuffer.setViewport({{}, fbSize});
     {
         ScopedPerfTimer timer(perf, "Debug UI");
         m_debugUi->Draw();
@@ -409,9 +457,6 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
             return;
         case KeyEvent::Key::LeftBracket:
             m_glow->AddIntensity(-0.25f);
-            return;
-        case KeyEvent::Key::U:
-            m_uiInWorld = !m_uiInWorld;
             return;
         case KeyEvent::Key::F:
             m_game->ToggleCameraFollow();
@@ -544,9 +589,8 @@ void GravitarisApplication::pointerPressEvent(PointerEvent& event)
         return;
     }
 
-    // event.position() is in logical points; UI context is in physical pixels.
-    const Vector2 p = event.position() * PixelScale();
-    m_ui.ProcessMouseMove(static_cast<int>(p.x()), static_cast<int>(p.y()));
+    const Magnum::Vector2i p = UiPointerPosition(event.position());
+    m_ui.ProcessMouseMove(p.x(), p.y());
     if (m_ui.ProcessMouseButton(RmlButtonIndex(event.pointer()), true)) {
         event.setAccepted();
     }
@@ -571,8 +615,8 @@ void GravitarisApplication::pointerMoveEvent(PointerMoveEvent& event)
         return;
     }
 
-    const Vector2 p = event.position() * PixelScale();
-    if (m_ui.ProcessMouseMove(static_cast<int>(p.x()), static_cast<int>(p.y()))) {
+    const Magnum::Vector2i p = UiPointerPosition(event.position());
+    if (m_ui.ProcessMouseMove(p.x(), p.y())) {
         event.setAccepted();
     }
 }

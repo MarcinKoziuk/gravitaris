@@ -1,8 +1,7 @@
 /* Vector-display UI theme: thin cyan lines on near-black, no sprites, so it
-   matches the game's glowing-vector aesthetic. When the UI is rendered into
-   the scene target (option 4), the bright cyan borders/text pick up the same
-   bloom + CRT scanlines as the game's vector lines automatically. The
-   font-effect glow below is a subtle baked fallback for when that pass is off. */
+   matches the game's glowing-vector aesthetic. The UI is drawn outside the
+   postprocess pass, so the font-effect glow below is what carries the look --
+   nothing here picks up the scene's bloom or CRT scanlines. */
 
 body
 {

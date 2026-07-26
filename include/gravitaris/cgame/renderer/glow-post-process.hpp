@@ -106,10 +106,10 @@ private:
 
     // Bright-pass cutoff before the blur (0-1, in linear-ish 8-bit color
     // units): pixels at/below this don't bloom at all. Without it, blurring a
-    // large flat-filled area (a UI dialog's background) returns nearly that
-    // same color, which the composite then ADDS back on top — inflating
-    // brightness across the whole interior regardless of size. Vector lines
-    // (near-white/cyan, ~1.0) stay well above this; dim UI panel fills don't.
+    // large flat-filled area returns nearly that same color, which the
+    // composite then ADDS back on top — inflating brightness across the whole
+    // interior regardless of size. Vector lines (near-white/cyan, ~1.0) stay
+    // well above this; dim fills don't.
     float m_threshold = Defaults::threshold;
 
     bool m_crtEnabled = false;

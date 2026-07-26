@@ -7,6 +7,7 @@
 
 namespace Rml {
 class Context;
+class Element;
 class ElementDocument;
 class EventListener;
 }
@@ -30,6 +31,9 @@ private:
 
     std::unique_ptr<Rml::EventListener> m_buttonListener;
 
+    Rml::Element* m_hudStatus = nullptr;
+    std::string m_hudStatusText;
+
     int m_width = 1280;
     int m_height = 720;
 
@@ -50,6 +54,11 @@ public:
 
     bool ProcessMouseMove(int x, int y);
     bool ProcessMouseButton(int rmlButtonIndex, bool down);
+
+    // Bottom-right HUD readout (build identity, ping). The caller formats the
+    // text; this layer holds no game or net state. Repeated identical text is
+    // ignored, so calling it every frame is fine.
+    void SetHudStatusText(const std::string& text);
 
     // Exposes an engine-owned GL texture to RML/RCSS as src="live://name"
     // (see RenderInterfaceGL3::RegisterLiveTexture). Register before the

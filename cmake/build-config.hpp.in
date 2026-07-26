@@ -1,0 +1,15 @@
+// Generated into the build tree by cmake/build-info.cmake -- not tracked,
+// do not edit. BuildInfoString() (gravitaris/game/build-info.hpp) is the
+// only intended consumer; include that instead of this.
+#pragma once
+
+#define GRAVITARIS_BUILD_PLATFORM  "@GT_PLATFORM@"
+#define GRAVITARIS_BUILD_TYPE      "@GT_BUILD_TYPE@"
+#define GRAVITARIS_BUILD_GIT_HASH  "@GT_GIT_HASH@"
+#define GRAVITARIS_BUILD_GIT_DIRTY @GT_GIT_DIRTY@
+
+// A real build time, not a configure time: the generating script re-runs as a
+// build step, so this refreshes whenever the binary does. Minute resolution,
+// UTC -- configure_file leaves the output untouched when nothing differs, so
+// a rebuild within the same minute doesn't recompile anything.
+#define GRAVITARIS_BUILD_TIMESTAMP "@GT_TIMESTAMP@"

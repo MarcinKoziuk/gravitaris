@@ -62,6 +62,7 @@ bool UI::Init()
     // HUD first so interactive windows loaded after it stack on top of it.
     if (Rml::ElementDocument* hud = m_context->LoadDocument("ui/hud.rml")) {
         hud->Show();
+        m_hudStatus = hud->GetElementById("status_readout");
     }
 
     m_document = m_context->LoadDocument("ui/main.rml");
@@ -110,6 +111,14 @@ bool UI::ProcessMouseButton(int rmlButtonIndex, bool down)
     if (!m_context) return false;
     return down ? !m_context->ProcessMouseButtonDown(rmlButtonIndex, 0)
                 : !m_context->ProcessMouseButtonUp(rmlButtonIndex, 0);
+}
+
+void UI::SetHudStatusText(const std::string& text)
+{
+    if (!m_hudStatus || text == m_hudStatusText) return;
+
+    m_hudStatusText = text;
+    m_hudStatus->SetInnerRML(text);
 }
 
 void UI::RegisterLiveTexture(const std::string& name, unsigned glTextureId, int width, int height)

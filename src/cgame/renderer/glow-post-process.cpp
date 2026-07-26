@@ -125,7 +125,7 @@ void GlowPostProcess::EndSceneAndComposite(GL::AbstractFramebuffer& target, cons
     GL::Renderer::disable(GL::Renderer::Feature::Blending);
 
     // Bright-pass + first 2x downsample in one pass: extracts only pixels
-    // above m_threshold (so large dim UI fills don't bloom, see m_threshold's
+    // above m_threshold (so large dim fills don't bloom, see m_threshold's
     // comment) while box-filtering full -> 1/2.
     m_halfFbo.bind();
     m_halfFbo.setViewport(Range2Di{{}, m_halfSize});

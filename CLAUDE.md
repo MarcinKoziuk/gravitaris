@@ -68,8 +68,9 @@ Eventually the game should be multiplayer, so the game is split into separate mo
 
 - Vector/CRT aesthetic: phosphor glow (multi-pass blur + additive composite)
   and CRT scanlines
-- UI (RmlUi) is drawn into the same offscreen scene target before compositing
-  when `m_uiInWorld` is true, so it picks up bloom/CRT like the game world.
+- UI (RmlUi) is drawn to the default framebuffer *after* the postprocess
+  composite, so glow/CRT never touch it and text stays crisp. Only the game
+  world goes through the scene target.
 
 ## Code style
 - Keep consistent with current style 

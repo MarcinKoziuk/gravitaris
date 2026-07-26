@@ -1,5 +1,10 @@
 # Selective postprocess for RmlUi (glow/CRT on chrome, not on text)
 
+**Superseded by `docs/ui-todo.md` T2.** The UI is now drawn to the default
+framebuffer after compositing, so no postprocess touches it at all — none of
+the splitting techniques below are needed. Kept for the analysis, not as a
+plan.
+
 Problem: `GlowPostProcess` (bloom + CRT scanlines) currently applies to the
 whole scene, including RmlUi when `m_uiInWorld` is true. Want backgrounds/
 panels affected but text (and possibly images/video) to stay crisp.
