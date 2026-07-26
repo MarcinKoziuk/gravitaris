@@ -1,4 +1,6 @@
-scale = 1.0
+# 20% up on the authored drawing -- kept here rather than baked into the
+# svg so the art stays at whatever grid it was drawn on.
+scale = 1.2
 
 [physics]
 kinematic = true

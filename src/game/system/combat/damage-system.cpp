@@ -24,7 +24,7 @@ static constexpr double BULLET_QUERY_RADIUS = 2.0;
 // than speed: an upright landing shrugs off a hard touchdown almost entirely,
 // while a tipped-over one starts hurting at a much lower speed and per-unit
 // harder on top of that.
-static constexpr double UPRIGHT_SAFE_DELTAV = 90.0;
+static constexpr double UPRIGHT_SAFE_DELTAV = 30.0;
 static constexpr double TIPPED_SAFE_DELTAV = 12.0;
 static constexpr double DAMAGE_PER_DELTAV = 0.6;
 static constexpr float TIPPED_DAMAGE_MULTIPLIER = 3.0f;

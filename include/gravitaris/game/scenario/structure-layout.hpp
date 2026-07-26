@@ -22,13 +22,19 @@ namespace StructureLayout {
 // arrangement at any planet size; the models themselves are authored around
 // their own center, sized against the current 120-unit planet (they do not
 // rescale with it, so a much smaller planet would need them redrawn).
+//
+// The Base sits dead centre -- the planet's ownership marker is drawn there
+// too, so a claimed planet reads as a Base with a team-coloured core. The
+// other three are spaced to clear it and each other at their authored sizes
+// (see each model's `scale`); Lab and Comm Center are pulled in slightly
+// from a uniform spacing so their far corners stay inside the outline.
 inline Vector2d SurfaceOffset(StructureType type, double planetRadius)
 {
     switch (type) {
-        case StructureType::Colony:     return Vector2d{-0.42,  0.00} * planetRadius;
-        case StructureType::Base:       return Vector2d{-0.05, -0.12} * planetRadius;
-        case StructureType::Lab:        return Vector2d{ 0.30, -0.45} * planetRadius;
-        case StructureType::CommCenter: return Vector2d{ 0.20,  0.30} * planetRadius;
+        case StructureType::Base:       return Vector2d{};
+        case StructureType::Colony:     return Vector2d{-0.56,  0.00} * planetRadius;
+        case StructureType::Lab:        return Vector2d{ 0.40, -0.55} * planetRadius;
+        case StructureType::CommCenter: return Vector2d{ 0.27,  0.50} * planetRadius;
         default:                        return Vector2d{};
     }
 }

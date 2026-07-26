@@ -12,9 +12,10 @@ namespace Gravitaris {
 class LandingStateSystem {
 public:
     // Relative speed (world units/s) below which contact counts as resting
-    // rather than an impact still in progress. Well under DamageSystem's
-    // UPRIGHT_SAFE_DELTAV (90) so "landed" always implies "took no damage";
-    // also the HUD's "safe to land" threshold.
+    // rather than an impact still in progress. Under DamageSystem's
+    // UPRIGHT_SAFE_DELTAV (30) so "landed" still implies "took no damage",
+    // though with much less room than it used to have; also the HUD's "safe
+    // to land" threshold.
     static constexpr double SAFE_LANDING_SPEED = 20.0;
 
 private:
