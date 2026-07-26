@@ -66,10 +66,10 @@ void DrawHudPanel(CGame& game)
     ImGui::SetItemTooltip("World units from the map center to the map edge. Default 12000.");
     ImGui::SetNextItemWidth(220.f);
     ImGui::DragFloat("Ship dot (px)", &minimap.shipDotPx, 0.1f, 1.f, 12.f, "%.1f");
-    ImGui::SetItemTooltip("Ship dot radius in minimap texture pixels. Default 3.");
+    ImGui::SetItemTooltip("Ship dot radius in minimap texture pixels. Default 6.");
     ImGui::SetNextItemWidth(220.f);
     ImGui::DragFloat("Player dot (px)", &minimap.playerDotPx, 0.1f, 0.5f, 12.f, "%.1f");
-    ImGui::SetItemTooltip("Player marker dot radius in minimap texture pixels. Default 1.5.");
+    ImGui::SetItemTooltip("Player marker dot radius in minimap texture pixels. Default 3.");
     ImGui::SetNextItemWidth(220.f);
     ImGui::DragFloat("Planet min (px)", &minimap.planetMinPx, 0.1f, 1.f, 24.f, "%.1f");
     ImGui::SetItemTooltip("Smallest ring a planet can shrink to; real world radius is used when it maps "

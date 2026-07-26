@@ -29,7 +29,7 @@ how KSP's MechJeb autopilot is structured, which is the closest real prior art
 | Guidance | What velocity do I want now? | desired velocity (or heading + burn) | behaviors: KillVelocity, GotoPoint, Orbit, Intercept, Evade, Land |
 | Control | How do I actuate that? | tick command (`Controls` bits) | `FlightController`: PD on heading + bang-bang thrust |
 | Tactics | Which behavior, which target? | active guidance behavior | utility scorer in `AIPilotSystem` |
-| Strategy | Build/attack decisions | goals for tactics | `AIStrategy` (slice-one, deferred) |
+| Strategy | Build/attack decisions | goals for tactics | `AIStrategy` + `AIStrategySystem` (built in gravity-well-mode-plan.md Phase 5) |
 
 Notes:
 - Classic Reynolds steering behaviors assume omnidirectional thrust — our
@@ -281,10 +281,12 @@ stale predictions, so this is a drop-in optimization, not a redesign.
   Revisit when netcode starts (per-connection is the likely landing spot).
   Note: AI pilots are pure functions of sim state, so replays never need to
   record AI commands — only human input.
-- **`Land` guidance** (phase 3 remainder): suicide-burn retro-thrust descent,
-  the hardest behavior; predictor gives time-to-impact, controller holds
-  retrograde, burn starts when stopping distance ≈ altitude, gentle terminal
-  phase below some altitude.
+- **`Land` guidance** (phase 3 remainder): built as `LandOnBody` in
+  gravity-well-mode-plan.md Phase 5. It went the analytic route rather than
+  the predictor one — the descent speed is solved directly from altitude and
+  the thrust left over after gravity, so no time-to-impact prediction is
+  involved — plus the gentle terminal phase anticipated here, which turned
+  out to be load-bearing for uprightness, not just for gentleness.
 - **Predictor-based drift compensation in `GotoPoint`**: reactive control has
   been sufficient; revisit if AI ships visibly miss in stronger wells.
 - **Verification practice**: no test target exists yet (needs a game-lib

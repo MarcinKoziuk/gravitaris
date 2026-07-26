@@ -75,6 +75,7 @@ void DrawFlightPanel(CGame& game)
 
     ImGui::SeparatorText("Guidance");
     DrawSliderD("Max speed", g.maxSpeed, 5.f, 200.f, "%.0f");
+    DrawSliderD("Transit speed", g.transitSpeed, 20.f, 800.f, "%.0f");
     DrawSliderD("Flip time (s)", g.flipTime, 0.f, 4.f);
     DrawSliderD("Arrive radius", g.arriveRadius, 0.5f, 20.f, "%.1f");
     DrawSliderD("Orbit radial Kp", g.orbitRadialKp, 0.f, 3.f);

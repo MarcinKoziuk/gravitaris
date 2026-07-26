@@ -90,13 +90,13 @@ void GlowPostProcess::BeginScene(const Vector2i& framebufferSize, const Vector2i
 }
 
 void GlowPostProcess::Present(GL::Texture2D& sourceTex, GL::Framebuffer& sourceFbo,
-                             GL::AbstractFramebuffer& target, const Vector2i& windowSize, float time)
+                             GL::AbstractFramebuffer& target, const Range2Di& targetRect, float time)
 {
     if (m_crtEnabled) {
         GL::Renderer::disable(GL::Renderer::Feature::Blending);
         target.bind();
-        target.setViewport(Range2Di{{}, windowSize});
-        m_crtShader.setViewportSize(Vector2{windowSize})
+        target.setViewport(targetRect);
+        m_crtShader.setViewportSize(Vector2{targetRect.size()})
                 .setScanlineStrength(m_scanlineStrength)
                 .setLineWidthPx(m_scanlineWidthPx)
                 .setPeriodPx(m_scanlinePeriodPx)
@@ -109,16 +109,16 @@ void GlowPostProcess::Present(GL::Texture2D& sourceTex, GL::Framebuffer& sourceF
                 .bindImage(sourceTex)
                 .draw(m_fullscreenTri);
     } else {
-        GL::AbstractFramebuffer::blit(sourceFbo, target, Range2Di{{}, m_fullSize}, Range2Di{{}, windowSize},
+        GL::AbstractFramebuffer::blit(sourceFbo, target, Range2Di{{}, m_fullSize}, targetRect,
                                        GL::FramebufferBlit::Color, GL::FramebufferBlitFilter::Linear);
     }
 }
 
-void GlowPostProcess::EndSceneAndComposite(GL::AbstractFramebuffer& target, const Vector2i& windowSize, float time)
+void GlowPostProcess::EndSceneAndComposite(GL::AbstractFramebuffer& target, const Range2Di& targetRect, float time)
 {
     if (!m_enabled) {
         // No glow: present the sharp scene directly (CRT pass still applies).
-        Present(m_sceneColor, m_sceneFbo, target, windowSize, time);
+        Present(m_sceneColor, m_sceneFbo, target, targetRect, time);
         return;
     }
 
@@ -177,7 +177,7 @@ void GlowPostProcess::EndSceneAndComposite(GL::AbstractFramebuffer& target, cons
             .bindGlow(m_blurA)
             .draw(m_fullscreenTri);
 
-    Present(m_outputColor, m_outputFbo, target, windowSize, time);
+    Present(m_outputColor, m_outputFbo, target, targetRect, time);
 }
 
 } // namespace Gravitaris

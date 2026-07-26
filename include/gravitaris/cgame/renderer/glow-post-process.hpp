@@ -126,10 +126,10 @@ private:
 
     void Resize(const Vector2i& framebufferSize, const Vector2i& logicalSize);
 
-    // Present `sourceTex` (in `sourceFbo`) to `target`, through the CRT
-    // scanline shader if enabled, else a plain blit.
+    // Present `sourceTex` (in `sourceFbo`) into `targetRect` of `target`,
+    // through the CRT scanline shader if enabled, else a plain blit.
     void Present(Magnum::GL::Texture2D& sourceTex, Magnum::GL::Framebuffer& sourceFbo,
-                 Magnum::GL::AbstractFramebuffer& target, const Vector2i& windowSize, float time);
+                 Magnum::GL::AbstractFramebuffer& target, const Magnum::Range2Di& targetRect, float time);
 
 public:
     explicit GlowPostProcess(IFilesystem& filesystem);
@@ -185,11 +185,13 @@ public:
     // logicalSize (window points) sets the DPI-independent blur resolution.
     void BeginScene(const Vector2i& framebufferSize, const Vector2i& logicalSize);
 
-    // Blur+composite (or plain blit, if disabled) the scene into `target`.
+    // Blur+composite (or plain blit, if disabled) the scene into `targetRect`
+    // of `target` — the rect is in `target`'s pixels and need not start at the
+    // origin, since the HUD sidebar reserves a strip of the window.
     // `time` (seconds, any monotonically-increasing small-magnitude clock —
     // NOT wall-clock epoch time, which would lose float precision in the
     // shader's sin()) drives the CRT wiggle when the CRT pass is enabled.
-    void EndSceneAndComposite(Magnum::GL::AbstractFramebuffer& target, const Vector2i& windowSize, float time);
+    void EndSceneAndComposite(Magnum::GL::AbstractFramebuffer& target, const Magnum::Range2Di& targetRect, float time);
 };
 
 } // namespace Gravitaris

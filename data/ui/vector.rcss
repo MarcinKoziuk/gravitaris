@@ -8,7 +8,7 @@ body
     font-family: LatoLatin;
     font-weight: normal;
     font-style: normal;
-    font-size: 15dp;
+    font-size: 17dp;
     color: #8ff;
 }
 
@@ -22,9 +22,9 @@ body.window
     min-height: 90dp;
     max-height: 700dp;
 
-    background-color: #01141aec;   /* near-black, slightly translucent */
+    background-color: #000000ec;   /* black, slightly translucent */
     border-width: 2dp;
-    border-color: #0ff;
+    border-color: #0cf;
 }
 
 /* Title bar: a labelled strip with a cyan underline; the <handle> inside it
@@ -40,9 +40,9 @@ div#title_bar
     height: 26dp;
     text-align: left;
 
-    background-color: #0ff2;       /* faint cyan wash */
+    background-color: #0cf2;       /* faint cyan wash */
     border-bottom-width: 1dp;
-    border-bottom-color: #0ff;
+    border-bottom-color: #0cf;
 }
 
 div#title_bar div#icon
@@ -56,9 +56,9 @@ div#title_bar span#title
     padding: 5dp 10dp;
 
     color: #cff;
-    font-size: 16dp;
+    font-size: 18dp;
     font-weight: bold;
-    font-effect: glow(2dp #0ff8);
+    font-effect: glow(2dp #0cf8);
 }
 
 div#window
@@ -87,29 +87,29 @@ button
     padding: 8dp 22dp;
     margin: 4dp;
 
-    color: #0ff;
-    font-size: 15dp;
+    color: #0cf;
+    font-size: 17dp;
     font-weight: bold;
     text-align: center;
     tab-index: auto;
 
-    background-color: #0ff1;
+    background-color: #0cf1;
     border-width: 1dp;
-    border-color: #0ff;
+    border-color: #0cf;
     cursor: pointer;
-    font-effect: glow(2dp #0ff6);
+    font-effect: glow(2dp #0cf6);
 }
 
 button:hover
 {
-    background-color: #0ff3;
+    background-color: #0cf3;
     border-color: #bff;
     color: #dff;
 }
 
 button:active
 {
-    background-color: #0ff;
+    background-color: #0cf;
     color: #012;                   /* inverted: dark text on cyan fill */
     font-effect: none;
 }

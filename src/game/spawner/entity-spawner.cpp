@@ -7,6 +7,7 @@
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/component/ai-pilot.hpp>
+#include <gravitaris/game/component/ai-strategy.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
@@ -85,7 +86,7 @@ flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position, TeamId
 }
 
 flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, AIPersonalityPreset preset,
-                                         Vector2d velocity, double rot)
+                                         Vector2d velocity, double rot, TeamId team)
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
 
@@ -95,13 +96,22 @@ flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, AIPers
     entity.emplace<Controls>();
     entity.emplace<InputQueue>();
     entity.emplace<AIPilot>();
-    entity.emplace<Team>(TeamId::Red);
+    entity.emplace<Team>(team);
     entity.emplace<Damageable>();
     entity.emplace<LandingState>();
     ApplyAIPersonalityPreset(entity.get_mut<AIPilot>(), preset);
     AssignNetId(entity);
     AddRenderable(entity, modelId);
 
+    return entity;
+}
+
+flecs::entity EntitySpawner::SpawnAILeader(id_t modelId, Vector2d position, TeamId team,
+                                           AIPersonalityPreset preset, Vector2d velocity, double rot)
+{
+    flecs::entity entity = SpawnAIShip(modelId, position, preset, velocity, rot, team);
+    entity.emplace<AIStrategy>();
+    ApplyAIStrategyPreset(entity.get_mut<AIStrategy>(), preset);
     return entity;
 }
 

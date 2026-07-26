@@ -10,6 +10,7 @@
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/event/game-event.hpp>
+#include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
 #include <gravitaris/game/system/combat/damage-system.hpp>
 
@@ -19,15 +20,8 @@ namespace Gravitaris {
 // centerline doesn't have to intersect the target polygon precisely.
 static constexpr double BULLET_QUERY_RADIUS = 2.0;
 
-// Landing/ram damage tuning. deltaV (impact speed) below the threshold does
-// no damage; above it, damage scales linearly. Uprightness matters far more
-// than speed: an upright landing shrugs off a hard touchdown almost entirely,
-// while a tipped-over one starts hurting at a much lower speed and per-unit
-// harder on top of that.
-static constexpr double UPRIGHT_SAFE_DELTAV = 30.0;
-static constexpr double TIPPED_SAFE_DELTAV = 12.0;
-static constexpr double DAMAGE_PER_DELTAV = 0.6;
-static constexpr float TIPPED_DAMAGE_MULTIPLIER = 3.0f;
+// Landing/ram damage below one hull point is discarded entirely.
+static constexpr float MIN_LANDING_DAMAGE = 1.f;
 
 DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue)
         : m_registry(registry)
@@ -47,12 +41,23 @@ void DamageSystem::Update()
         Damageable* dmg = hitEntity.try_get_mut<Damageable>();
         if (!dmg) continue; // planets etc. aren't damageable
 
-        const double safe = ev.upright ? UPRIGHT_SAFE_DELTAV : TIPPED_SAFE_DELTAV;
+        const double safe = ev.upright ? m_landingParams.uprightThreshold
+                                       : m_landingParams.tippedThreshold;
         const double over = ev.deltaV - safe;
         if (over <= 0.0) continue;
 
-        float damage = static_cast<float>(over * DAMAGE_PER_DELTAV);
-        if (!ev.upright) damage *= TIPPED_DAMAGE_MULTIPLIER;
+        const float multiplier = ev.upright ? 1.f : m_landingParams.tippedMultiplier;
+        const float damage = static_cast<float>(over * m_landingParams.damagePerDeltaV) * multiplier;
+
+        // Sub-point scratches aren't worth an hp change, an event, or a line in
+        // the log -- a barely-over-threshold touchdown should read as clean.
+        if (damage < MIN_LANDING_DAMAGE) continue;
+
+        LOG(info) << "[landing] deltaV " << ev.deltaV << (ev.upright ? " upright" : " tipped")
+                  << " threshold " << safe << " over " << over
+                  << " x perDeltaV " << m_landingParams.damagePerDeltaV
+                  << " x mult " << multiplier << " = " << damage << " damage"
+                  << "; hp " << dmg->hp << " -> " << (dmg->hp - damage);
 
         dmg->hp -= damage;
 

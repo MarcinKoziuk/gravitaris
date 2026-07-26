@@ -8,8 +8,9 @@ namespace Gravitaris {
 
 // Claiming planets by landing on them (docs/gravity-well-mode-plan.md Phase
 // 1): a team's ship that stays safely landed on a claimable planet for
-// CLAIM_TICKS takes ownership. Suns are excluded (no Orbit component -- you
-// can't land on them anyway, per IDEAS.md).
+// CLAIM_TICKS takes ownership, unless another team still has a structure
+// standing there. Suns are excluded (no Orbit component -- you can't land on
+// them anyway, per IDEAS.md).
 class ConquestSystem {
 public:
     // Consecutive landed ticks before the claim fires: long enough that a

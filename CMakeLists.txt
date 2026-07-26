@@ -574,6 +574,9 @@ add_executable(GravitarisNG
     include/gravitaris/game/component/ai-pilot.hpp
     include/gravitaris/game/system/ship/ai-pilot-system.hpp
     src/game/system/ship/ai-pilot-system.cpp
+    include/gravitaris/game/component/ai-strategy.hpp
+    include/gravitaris/game/system/ship/ai-strategy-system.hpp
+    src/game/system/ship/ai-strategy-system.cpp
     include/gravitaris/game/gnc/nav/trajectory-predictor.hpp
     src/game/gnc/nav/trajectory-predictor.cpp
     include/gravitaris/game/gnc/control/flight-controller.hpp
@@ -695,6 +698,8 @@ add_executable(GravitarisNG
     src/cgame/ui/debug/net-panel.cpp
     src/cgame/ui/debug/spawn-panel.hpp
     src/cgame/ui/debug/spawn-panel.cpp
+    src/cgame/ui/debug/ai-panel.hpp
+    src/cgame/ui/debug/ai-panel.cpp
     src/cgame/ui/debug/trajectory-panel.hpp
     src/cgame/ui/debug/trajectory-panel.cpp
     src/cgame/ui/debug/flight-panel.hpp
@@ -857,6 +862,7 @@ add_executable(gravitaris-sim-test
     src/game/input/input-log.cpp
     src/game/system/ship/input-system.cpp
     src/game/system/ship/ai-pilot-system.cpp
+    src/game/system/ship/ai-strategy-system.cpp
     src/game/system/ship/ship-controls-system.cpp
     src/game/system/combat/bullet-lifetime-system.cpp
     src/game/system/combat/damage-system.cpp
@@ -955,6 +961,7 @@ if(NOT EMSCRIPTEN)
         src/game/input/input-log.cpp
         src/game/system/ship/input-system.cpp
         src/game/system/ship/ai-pilot-system.cpp
+        src/game/system/ship/ai-strategy-system.cpp
         src/game/system/ship/ship-controls-system.cpp
         src/game/system/combat/bullet-lifetime-system.cpp
         src/game/system/combat/damage-system.cpp

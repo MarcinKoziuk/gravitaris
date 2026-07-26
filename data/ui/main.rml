@@ -1,21 +1,87 @@
 <rml>
 	<head>
-		<title>Gravitaris</title>
+		<title>GRAVITARIS</title>
 		<link type="text/template" href="vector-window.rml" />
 		<style>
+			/* Everything here is one step up from the shared theme's sizes --
+			   this is the first thing the player reads. */
+			/* margin: auto centres the document in the context. */
 			body
 			{
-				width: 220dp;
-				height: 130dp;
-				margin: 60dp;
+				width: 520dp;
+				height: 380dp;
+				margin: auto;
+
+				font-size: 20dp;
 			}
 			div#title_bar span#title
 			{
-				/* set per-window title text via the span content below */
+				font-size: 22dp;
+			}
+			button
+			{
+				font-size: 20dp;
+			}
+			p
+			{
+				margin-bottom: 12dp;
+			}
+			p#byline
+			{
+				color: #cff;
+				font-weight: bold;
+				font-effect: glow(2dp #0cf6);
+			}
+			div#team_row
+			{
+				margin-top: 20dp;
+			}
+			div#team_row p
+			{
+				margin-bottom: 6dp;
+				font-size: 16dp;
+				color: #7cc;
+			}
+			/* Team buttons carry their side's colour on the border so the
+			   choice is readable without reading the label; the selected one
+			   fills in. Set from code -- see UI::SelectIntroTeam. */
+			button#team_blue
+			{
+				color: #6af;
+				border-color: #6af;
+				background-color: #6af1;
+			}
+			button#team_blue.selected
+			{
+				background-color: #6af;
+				color: #012;
+				font-effect: none;
+			}
+			button#team_red
+			{
+				color: #f66;
+				border-color: #f66;
+				background-color: #f661;
+			}
+			button#team_red.selected
+			{
+				background-color: #f66;
+				color: #210;
+				font-effect: none;
 			}
 		</style>
 	</head>
 	<body template="vector-window">
-		<button id="launch_button">LAUNCH</button>
+		<p>This is a game in development</p>
+		<p id="byline">by Marcin Koziuk</p>
+		<p>Thanks for testing!</p>
+
+		<div id="team_row">
+			<p>Pick your side</p>
+			<button id="team_blue">BLUE</button>
+			<button id="team_red">RED</button>
+		</div>
+
+		<button id="dismiss_intro">OK</button>
 	</body>
 </rml>

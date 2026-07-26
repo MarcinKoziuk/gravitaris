@@ -42,9 +42,33 @@ static constexpr double RETARGET_RATIO = 0.5;
 // radius, i.e. flying into it would never read as danger at all.
 static constexpr double EVADE_SURFACE_CLEARANCE = 1.25;
 
+// Patrol ring radius, as a multiple of the patrolled planet's own radius --
+// outside the High Port's orbit (StructureLayout::ORBIT_RADIUS_FACTOR) so a
+// defending pilot circles the complex rather than through it.
+static constexpr double PATROL_RADIUS_FACTOR = 4.0;
+
+// Beyond this multiple of the patrol radius, fly to the ring instead of
+// orbiting toward it.
+static constexpr double PATROL_APPROACH_FACTOR = 1.5;
+
+// Added to a landing site's radius so the descent flares against the ship's
+// own hull rather than the planet's surface (a fighter is ~18 units long).
+static constexpr double SHIP_LANDING_CLEARANCE = 12.0;
+
+// How far past a departure planet's surface a pilot climbs before it may
+// turn onto its course -- outside the High Port's own orbit
+// (StructureLayout::ORBIT_RADIUS_FACTOR), so leaving means leaving the whole
+// complex rather than sliding through the middle of it.
+static constexpr double DEPARTURE_CLEARANCE = 260.0;
+
+// Hysteresis on that radius, so a course that dips back inside doesn't flap
+// the pilot between departing and flying it (same idea as evadeMargin).
+static constexpr double DEPARTURE_MARGIN = 1.25;
+
 static double WrapToPi(double angle);
 static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Vector2d& relVel,
                                                 double projectileSpeed);
+static double DepartureRadius(flecs::entity site);
 
 AIPilotSystem::AIPilotSystem(flecs::world& registry, PhysicsSystem& physicsSystem,
                              TrajectoryPredictor& predictor)
@@ -59,14 +83,40 @@ void AIPilotSystem::Update(std::uint64_t step)
     struct Source {
         flecs::entity entity;
         Vector2d pos;
+        Vector2d vel;
         double mass;
         double radius;
     };
     std::vector<Source> sources;
     m_registry.each([&](flecs::entity ent, const Transform& transf, const GravitySource& gs) {
         const Planet* planet = ent.try_get<Planet>();
-        sources.push_back({ent, transf.pos, gs.mass * gs.multiplier, planet ? planet->radius : 0.0});
+        sources.push_back({ent, transf.pos, transf.vel, gs.mass * gs.multiplier,
+                           planet ? planet->radius * transf.scale.x() : 0.0});
     });
+
+    const auto findSource = [&sources](flecs::entity ent) -> const Source* {
+        for (const Source& src : sources) {
+            if (src.entity == ent) return &src;
+        }
+        return nullptr;
+    };
+
+    const auto nearestSource = [&sources](const Vector2d& pos) -> const Source* {
+        const Source* nearest = nullptr;
+        double nearestDistSq = std::numeric_limits<double>::max();
+        for (const Source& src : sources) {
+            const double distSq = (src.pos - pos).dot();
+            if (distSq < nearestDistSq) {
+                nearestDistSq = distSq;
+                nearest = &src;
+            }
+        }
+        return nearest;
+    };
+
+    // LandOnBody subtracts gravity from available thrust, so it needs the
+    // world's real attraction, not the per-body figure Source carries.
+    const double gravityMultiplier = static_cast<double>(m_physicsSystem.GetGravityMultiplier());
 
     // Every potential combat target -- a piloted ship (player or AI), not a
     // Freighter (background economy actor, never fought) or a Structure
@@ -106,12 +156,19 @@ void AIPilotSystem::Update(std::uint64_t step)
                 ? std::max(personality.evadeRadius, well->radius * EVADE_SURFACE_CLEARANCE)
                 : personality.evadeRadius;
 
+        // A live Attack order names the target outright -- the strategy layer
+        // has already weighed a structure or freighter against the nearest
+        // enemy fighter, and the proximity rule below would only undo that.
+        const bool ordered = pilot.order.kind != AIOrderKind::None && pilot.order.subject.is_alive();
+        if (ordered && pilot.order.kind == AIOrderKind::Attack) {
+            pilot.target = pilot.order.subject;
+        }
         // Re-picked on the decision cadence, not only when the current target
         // dies: a pilot locked on a distant enemy flies off at cruise speed
         // past whoever is actually shooting at it, which reads as fleeing.
         // Switching needs the newcomer to be clearly closer (RETARGET_RATIO)
         // so two enemies at similar range don't make it flip-flop.
-        if (!pilot.target.is_alive() || pilot.decisionCooldown == 0) {
+        else if (!pilot.target.is_alive() || pilot.decisionCooldown == 0) {
             flecs::entity nearest;
             double nearestDistSq = std::numeric_limits<double>::max();
             for (const Candidate& c : candidates) {
@@ -156,23 +213,69 @@ void AIPilotSystem::Update(std::uint64_t step)
             pilot.guidance.accel = ShipControlsSystem::THRUST_FORCE
                     / cpBodyGetMass(m_physicsSystem.GetBody(ref).cp.body.get());
 
-            // Tactical pick among Intercept/Orbit/Idle; the danger check below
-            // (which runs every tick, not just on this slower cadence) can
-            // still override this with Evade regardless of what's picked here.
-            if (targetTransf && (targetTransf->pos - transf.pos).length() < personality.engageRange) {
+            // A Patrol order circles the body it names (the faction's own
+            // planet); with no order, the dominant well.
+            const bool patrolOrdered = ordered && pilot.order.kind == AIOrderKind::Patrol;
+            const Source* patrolBody = patrolOrdered ? findSource(pilot.order.subject) : well;
+
+            // Tactical pick among Land/Intercept/Orbit/Idle; the danger check
+            // below (which runs every tick, not just on this slower cadence)
+            // can still override this with Evade regardless of what's picked
+            // here.
+            if (ordered && pilot.order.kind == AIOrderKind::Land) {
+                pilot.behavior = AIBehavior::Land;
+            }
+            else if (targetTransf && (targetTransf->pos - transf.pos).length() < personality.engageRange) {
                 pilot.behavior = AIBehavior::Intercept;
             }
-            else if (well) {
+            else if (patrolBody) {
                 pilot.behavior = AIBehavior::Orbit;
-                if (previous != AIBehavior::Orbit) {
-                    const Vector2d r = transf.pos - well->pos;
-                    pilot.patrolRadius = std::max(r.length(), evadeRadius * 2.0);
+                if (previous != AIBehavior::Orbit || pilot.patrolBody != patrolBody->entity) {
+                    const Vector2d r = transf.pos - patrolBody->pos;
+                    pilot.patrolBody = patrolBody->entity;
+                    pilot.patrolRadius = patrolOrdered
+                            ? patrolBody->radius * PATROL_RADIUS_FACTOR
+                            : std::max(r.length(), evadeRadius * 2.0);
                     const double cross = r.x() * transf.vel.y() - r.y() * transf.vel.x();
                     pilot.patrolDirection = (cross < 0.0) ? -1.0 : 1.0;
                 }
             }
             else {
                 pilot.behavior = AIBehavior::Idle;
+            }
+        }
+
+        // Where this pilot's business actually is: the order's subject, or
+        // whoever it is dogfighting.
+        const Transform* objective = nullptr;
+        if (ordered) {
+            objective = pilot.order.subject.try_get<Transform>();
+        }
+        else if (targetTransf) {
+            objective = targetTransf;
+        }
+
+        // Departure, checked every tick like the danger override below: a
+        // ship whose business is elsewhere climbs clear of the body it is
+        // sitting on before turning onto its course, since turning where it
+        // stands drags it across the deck, the surface, or the rest of the
+        // complex. An objective at that same body -- a landing, an attack on
+        // its structures, a patrol of it -- is not elsewhere.
+        const Source* neighbourhood = nearestSource(transf.pos);
+        if (neighbourhood) {
+            const double clearRadius = DepartureRadius(neighbourhood->entity);
+            const double distance = (transf.pos - neighbourhood->pos).length();
+            const bool objectiveHere = objective
+                    && (objective->pos - neighbourhood->pos).length() < clearRadius;
+            const bool departing = pilot.departureSite == neighbourhood->entity;
+
+            if (objective && !objectiveHere
+                && distance < clearRadius * (departing ? DEPARTURE_MARGIN : 1.0)) {
+                pilot.departureSite = neighbourhood->entity;
+                pilot.behavior = AIBehavior::Depart;
+            }
+            else if (departing) {
+                pilot.departureSite = flecs::entity();
             }
         }
 
@@ -227,8 +330,8 @@ void AIPilotSystem::Update(std::uint64_t step)
         switch (pilot.behavior) {
             case AIBehavior::Evade:
                 if (well) {
-                    desiredVel = EvadeBody(transf, well->pos,
-                                          evadeRadius * personality.evadeMargin, pilot.guidance);
+                    desiredVel = EvadeBody(transf, well->pos, well->vel,
+                                           evadeRadius * personality.evadeMargin, pilot.guidance);
                 }
                 break;
             case AIBehavior::Intercept:
@@ -239,16 +342,40 @@ void AIPilotSystem::Update(std::uint64_t step)
                 }
                 break;
             case AIBehavior::Orbit:
-                if (well) {
-                    desiredVel = OrbitBody(transf, well->pos, well->mass,
-                                           pilot.patrolRadius, pilot.patrolDirection, pilot.guidance);
+                if (const Source* body = findSource(pilot.patrolBody)) {
+                    const Vector2d r = transf.pos - body->pos;
+                    const double dist = r.length();
+                    if (dist > pilot.patrolRadius * PATROL_APPROACH_FACTOR) {
+                        // OrbitBody's radial term is clamped to a station
+                        // -keeping trickle, so closing a long way to the ring
+                        // is GotoPoint's job.
+                        desiredVel = GotoPoint(transf, body->pos + r * (pilot.patrolRadius / dist),
+                                               pilot.guidance) + body->vel;
+                    }
+                    else {
+                        desiredVel = OrbitBody(transf, body->pos, body->mass, pilot.patrolRadius,
+                                               pilot.patrolDirection, pilot.guidance) + body->vel;
+                    }
+                }
+                break;
+            case AIBehavior::Depart:
+                if (pilot.departureSite.is_alive()) {
+                    const Transform& site = pilot.departureSite.get<Transform>();
+                    desiredVel = EvadeBody(transf, site.pos, site.vel,
+                                           DepartureRadius(pilot.departureSite), pilot.guidance);
+                }
+                break;
+            case AIBehavior::Land:
+                if (const Source* site = ordered ? findSource(pilot.order.subject) : nullptr) {
+                    desiredVel = LandOnBody(transf, site->pos, site->vel, site->mass * gravityMultiplier,
+                                            site->radius + SHIP_LANDING_CLEARANCE, pilot.guidance);
                 }
                 break;
             case AIBehavior::Idle:
                 break;
         }
 
-        ControlFlags flags = FlyToVelocity(transf, desiredVel, pilot.flight);
+        ControlFlags flags = FlyToVelocity(transf, desiredVel, pilot.flight, &pilot.throttle);
 
         if (pilot.fireCooldown > 0) {
             --pilot.fireCooldown;
@@ -300,6 +427,17 @@ void AIPilotSystem::Update(std::uint64_t step)
 
         queue.Push(InputCommand{step, flags});
     });
+}
+
+// Distance from a departure site's center a pilot must reach to be clear of
+// it: its own surface, plus room for the turn onto course.
+static double DepartureRadius(flecs::entity site)
+{
+    double radius = 0.0;
+    if (const Planet* planet = site.try_get<Planet>()) {
+        radius = planet->radius * site.get<Transform>().scale.x();
+    }
+    return radius + DEPARTURE_CLEARANCE;
 }
 
 static double WrapToPi(double angle)

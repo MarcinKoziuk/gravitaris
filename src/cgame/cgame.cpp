@@ -2,6 +2,8 @@
 #include <cmath>
 #include <memory>
 #include <optional>
+#include <utility>
+#include <vector>
 
 #include <gravitaris/game/logging.hpp>
 
@@ -11,6 +13,9 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/team.hpp>
+#include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/net-id.hpp>
+#include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 
 #include <gravitaris/cgame/fx/hit-flash-system.hpp>
@@ -71,6 +76,50 @@ SceneView CGame::CurrentSceneView()
     return SceneView{m_registry, nullptr, &m_modelRenderer2};
 }
 
+std::optional<flecs::entity> CGame::CameraSubject()
+{
+    if (m_spectateTarget.is_alive()) return m_spectateTarget;
+    return GetPlayer();
+}
+
+std::optional<float> CGame::GetHullFraction()
+{
+    const std::optional<flecs::entity> subject = CameraSubject();
+    if (!subject) return std::nullopt;
+
+    const Damageable* damageable = subject->try_get<Damageable>();
+    if (!damageable || damageable->maxHp <= 0.f) return std::nullopt;
+
+    return std::clamp(damageable->hp / damageable->maxHp, 0.f, 1.f);
+}
+
+void CGame::CycleSpectate(int direction)
+{
+    // NetId order, so the roster reads the same however flecs happens to
+    // iterate and whichever world an entity lives in.
+    std::vector<std::pair<std::uint32_t, flecs::entity>> units;
+    CurrentSceneView().Each([&](flecs::entity ent, const Transform&, const Team&, const Damageable&,
+                                const NetId& netId) {
+        if (ent.has<Structure>() || ent.has<Planet>()) return;
+        units.emplace_back(netId.value, ent);
+    });
+    if (units.empty()) return;
+    std::sort(units.begin(), units.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    const std::optional<flecs::entity> subject = CameraSubject();
+    std::size_t index = 0;
+    for (std::size_t i = 0; i < units.size(); ++i) {
+        if (subject && units[i].second == *subject) index = i;
+    }
+
+    const int count = static_cast<int>(units.size());
+    const int next = ((static_cast<int>(index) + direction) % count + count) % count;
+
+    const std::optional<flecs::entity> player = GetPlayer();
+    m_spectateTarget = (player && units[next].second == *player) ? flecs::entity() : units[next].second;
+}
+
 void CGame::SubmitPlanetOwnershipMarkers(const SceneView& view)
 {
     if (!view.overlays) return;
@@ -87,22 +136,26 @@ void CGame::SubmitPlanetOwnershipMarkers(const SceneView& view)
 
 void CGame::RenderMinimap()
 {
-    const std::optional<flecs::entity> player = GetPlayer();
-    const Transform* transform = player ? player->try_get<Transform>() : nullptr;
+    const std::optional<flecs::entity> subject = CameraSubject();
+    const Transform* transform = subject ? subject->try_get<Transform>() : nullptr;
     if (!transform) return; // between death and respawn (or MP: no snapshot yet): freeze the last frame
 
     const Camera& camera = m_cameraDirector.GetCamera();
-    const Magnum::Vector2 playerPos{static_cast<float>(transform->pos.x()),
-                                    static_cast<float>(transform->pos.y())};
+    const Magnum::Vector2 subjectPos{static_cast<float>(transform->pos.x()),
+                                     static_cast<float>(transform->pos.y())};
     const Magnum::Vector2 viewHalfExtent = m_viewportSize / (2.f * std::max(camera.GetZoom(), 1e-3f));
 
-    // Static, not player-centered: the solar system is laid out symmetrically
-    // around the origin (see Game::Start), so that's the whole map's center.
     // In MP, everything but the own ship lives in m_mirrorWorld (see
     // m_netClient's field comment) -- sweep it too so remote ships/planets
     // show up exactly like single-player's real registry entities do.
     const SceneView view = CurrentSceneView();
-    m_minimapRenderer.Render(view, Magnum::Vector2{0.f, 0.f}, playerPos, camera.GetPosition(), viewHalfExtent);
+    m_minimapRenderer.Render(view, MinimapCenter(), subjectPos, camera.GetPosition(), viewHalfExtent);
+}
+
+void CGame::LookAtMapPoint(const Magnum::Vector2& normalized)
+{
+    const float worldRadius = std::max(m_minimapRenderer.GetParams().worldRadius, 1.f);
+    m_cameraDirector.LookAt(MinimapCenter() + normalized * worldRadius);
 }
 
 void CGame::ConnectToServer(const std::string& wsUrl)
@@ -286,7 +339,10 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
     // alongside it for enemy/planet framing, since every entity but the own
     // ship lives there in this mode (see m_netClient's field comment).
     const SceneView view = CurrentSceneView();
-    m_cameraDirector.Update(view, GetPlayer(), m_viewportSize, dtSeconds, smoothedPlayerPos);
+    // The smoothed-position override belongs to the own predicted ship alone;
+    // a spectated unit's Transform is never reconciled, so it needs none.
+    m_cameraDirector.Update(view, CameraSubject(), m_viewportSize, dtSeconds,
+                            IsSpectating() ? std::nullopt : std::optional<Magnum::Vector2>(smoothedPlayerPos));
     Camera& camera = m_cameraDirector.GetCamera();
 
     // Decays HitFlash on both worlds; ApplyRemoteEvents above is what sets
@@ -309,7 +365,7 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
     m_starfieldRenderer.Render();
 
     SubmitPlanetOwnershipMarkers(view);
-    m_indicatorRenderer.Update(view, GetPlayer(), camera.GetPosition(), camera.GetZoom(), m_viewportSize,
+    m_indicatorRenderer.Update(view, CameraSubject(), camera.GetPosition(), camera.GetZoom(), m_viewportSize,
                                m_pixelScale);
     m_mirrorRenderer2.SetZoom(camera.GetZoom());
     m_mirrorRenderer2.SetCameraPosition(camera.GetPosition());
@@ -365,7 +421,7 @@ void CGame::Render(double delta)
     }
 
     const SceneView view = CurrentSceneView();
-    m_cameraDirector.Update(view, GetPlayer(), m_viewportSize, dtSeconds);
+    m_cameraDirector.Update(view, CameraSubject(), m_viewportSize, dtSeconds);
     m_hitFlashSystem.Update(dtSeconds);
 
     const Camera& camera = m_cameraDirector.GetCamera();
@@ -383,7 +439,7 @@ void CGame::Render(double delta)
     // the end of its Render), so only submit them when that renderer actually
     // runs this frame -- otherwise the overlay scratch grows unboundedly.
     if (m_activeRenderer == RendererKind::Baked) {
-        m_indicatorRenderer.Update(view, GetPlayer(), camera.GetPosition(), camera.GetZoom(), m_viewportSize,
+        m_indicatorRenderer.Update(view, CameraSubject(), camera.GetPosition(), camera.GetZoom(), m_viewportSize,
                                    m_pixelScale);
         SubmitPlanetOwnershipMarkers(view);
     }

@@ -14,6 +14,26 @@ enum class AIBehavior {
     Evade,     // climbing out of a gravity well
     Intercept, // pursuing the target
     Orbit,     // patrolling the heaviest body
+    Land,      // descending onto the order's subject body
+    Depart,    // climbing clear of the body it launched from
+};
+
+// What the strategy layer (AIStrategySystem, docs/ai-ships.md's table) hands
+// down to the tactical one. Tactics still own every reflex -- danger
+// evasion, firing, retargeting when the subject dies -- so an order steers a
+// pilot rather than driving it; with no order (or a dead subject) the pilot
+// falls back to its own nearest-enemy dogfight pick, which is exactly what
+// AIGoal::Dogfight wants anyway.
+enum class AIOrderKind : std::uint8_t {
+    None,
+    Attack, // shoot the subject entity (ship, structure or freighter)
+    Land,   // set down on the subject planet
+    Patrol, // hold an orbit around the subject planet
+};
+
+struct AIOrder {
+    AIOrderKind kind = AIOrderKind::None;
+    flecs::entity subject;
 };
 
 // Tactical/temperament knobs for one AI pilot -- the tunable "personality"
@@ -65,16 +85,26 @@ struct AIPersonality {
 struct AIPilot {
     AIBehavior behavior = AIBehavior::Idle;
     flecs::entity target; // becomes NetId when netcode lands
+    AIOrder order;        // written by AIStrategySystem; None on a pilot with no AIStrategy
     std::uint32_t decisionCooldown = 0;
     std::uint32_t fireCooldown = 0;
 
-    // Captured when entering Orbit so the patrol ring stays put.
+    // The body the pilot is climbing clear of, while it is. Held across the
+    // climb so the hysteresis margin has something to compare against.
+    flecs::entity departureSite;
+
+    // Captured when entering Orbit so the patrol ring stays put. patrolBody
+    // is the body being circled: the dominant well by default, the order's
+    // subject under Patrol.
+    flecs::entity patrolBody;
     double patrolRadius = 0.0;
     double patrolDirection = 1.0;
 
     FlightControllerParams flight;
     GuidanceParams guidance;
     AIPersonality personality;
+
+    ThrottleState throttle;
 
     // Transient danger-episode tracking for AIPersonality::dangerIgnoreChance;
     // not part of the personality itself.

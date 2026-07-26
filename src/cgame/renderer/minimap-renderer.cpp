@@ -29,16 +29,18 @@ namespace {
 // Line thickness inside the minimap texture, px.
 constexpr float MAP_LINE_WIDTH = 1.5f;
 
-// Opaque near-black backdrop (the UI theme's #01141a). Opaque on purpose:
-// with alpha 1 everywhere, straight-vs-premultiplied blending in the RmlUi
-// pass can't tint the panel.
-constexpr Color4 BACKGROUND{0.004f, 0.078f, 0.102f, 1.f};
+// Black backdrop, so the map reads as a framed window onto space rather than a
+// tinted panel. Opaque on purpose: with alpha 1 everywhere, straight-vs-
+// premultiplied blending in the RmlUi pass can't tint it.
+constexpr Color4 BACKGROUND{0.f, 0.f, 0.f, 1.f};
 
 // Match the world assets: yellow suns (data/models/stars/sun), green planets
 // (data/models/planets/simple).
 const Vector3 SUN_COLOR{1.f, 0.87f, 0.13f};
 const Vector3 PLANET_COLOR{0.2f, 1.f, 0.2f};
-const Vector3 VIEW_RECT_COLOR{0.12f, 0.42f, 0.48f};
+// The camera-extent box: an unfilled dark-gray outline, dim enough not to
+// compete with the icons it encloses.
+const Vector3 VIEW_RECT_COLOR{0.28f, 0.31f, 0.34f};
 const Vector3 PLAYER_COLOR{1.f, 1.f, 1.f};
 
 // Must match Line2Shader's vertex layout (same contract as ModelRenderer2's
@@ -138,7 +140,7 @@ MinimapRenderer::MinimapRenderer(IFilesystem& filesystem)
           .setInstanceCount(1);
 }
 
-void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, const Vector2& playerPos,
+void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, const Vector2& subjectPos,
                              const Vector2& viewCenter, const Vector2& viewHalfExtent)
 {
     m_framebuffer.setViewport({{}, TextureSize()})
@@ -182,13 +184,13 @@ void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, co
     };
     view.Each(considerShip);
 
-    // Player marker: brighter, ringed, drawn on top of the team dots.
-    EmitBillboard(vertices, playerPos, m_params.playerDotPx / ppu, PLAYER_COLOR, PRIM_DISC);
-    EmitBillboard(vertices, playerPos, (m_params.playerDotPx + 3.f) / ppu, PLAYER_COLOR, PRIM_RING);
-
     if (m_params.showViewRect) {
         EmitRect(vertices, viewCenter, viewHalfExtent, VIEW_RECT_COLOR);
     }
+
+    // Subject marker: brighter, ringed, drawn on top of the team dots.
+    EmitBillboard(vertices, subjectPos, m_params.playerDotPx / ppu, PLAYER_COLOR, PRIM_DISC);
+    EmitBillboard(vertices, subjectPos, (m_params.playerDotPx + 6.f) / ppu, PLAYER_COLOR, PRIM_RING);
 
     if (vertices.empty()) return;
 

@@ -3,6 +3,7 @@
 #include <memory>
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 #include <flecs.h>
 
@@ -27,6 +28,8 @@
 #include <gravitaris/game/system/gwell/conquest-system.hpp>
 #include <gravitaris/game/system/combat/death-system.hpp>
 #include <gravitaris/game/system/ship/ai-pilot-system.hpp>
+#include <gravitaris/game/system/ship/ai-strategy-system.hpp>
+#include <gravitaris/game/gnc/ai-personality-presets.hpp>
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
@@ -80,6 +83,8 @@ protected:
 
     AIPilotSystem m_aiPilotSystem;
 
+    AIStrategySystem m_aiStrategySystem;
+
     // Dev performance overlay's timing data; sections are recorded from
     // Game::Update() (physics/game logic) and, in CGame, from Render() too.
     PerfMonitor m_perfMonitor;
@@ -88,11 +93,21 @@ protected:
 
     std::optional<flecs::entity> m_player;
 
-    // Countdown after the player's death before HandlePlayerRespawn starts
-    // retrying TryRespawn. -1 means no respawn pending (alive, or
-    // permanently gone).
+    // Countdown after a ship's death before TickRespawn starts retrying
+    // TryRespawn. -1 means no respawn pending (alive, or permanently gone).
     int m_playerRespawnTimer = -1;
     static constexpr int RESPAWN_DELAY_TICKS = 90; // 1.5 s at the fixed tick
+
+    // An AI faction fielding a leader fighter (docs/gravity-well-mode-plan.md
+    // Phase 5). Populated by Start(); a dedicated server builds its own
+    // scenario and fields none until round setup exists.
+    struct AIFaction {
+        TeamId team = TeamId::Red;
+        AIPersonalityPreset preset = AIPersonalityPreset::Balanced;
+        std::optional<flecs::entity> leader;
+        int respawnTimer = -1;
+    };
+    std::vector<AIFaction> m_aiFactions;
 
     // Deterministic per-(tick, spawn) seed for SpawnRandomAIShip's preset pick
     // (ADR 0001: no std::rand -- it mutates sim state, so it must be
@@ -108,7 +123,17 @@ protected:
     // there; CGame sets its own tuned default at startup.
     float m_shipWeightMultiplier = 1.f;
 
+    // Death -> delay -> funded respawn, one tick's worth. Returns the spawn
+    // point on the tick a replacement should be created (its materials are
+    // already spent by then); nullopt while alive, waiting out the delay, or
+    // waiting for a funder. Shared by the player and every AI leader --
+    // no faction-specific respawn rules.
+    std::optional<FactionSystem::SpawnPoint> TickRespawn(std::optional<flecs::entity>& ship, int& timer,
+                                                         TeamId team);
+
     void HandlePlayerRespawn();
+
+    void HandleAILeaderRespawns();
 
     virtual std::unique_ptr<EntitySpawner> CreateEntitySpawner();
 
@@ -117,7 +142,25 @@ public:
 
     Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner);
 
+    // Builds the scenario -- celestials plus a developed complex per side --
+    // with no combatants in it, so a client can render the world while the
+    // player is still picking a side.
+    void BuildWorld();
+
+    // Spawns the player on `playerTeam` and an AI faction on the opposing
+    // side. Call after BuildWorld().
+    void SpawnCombatants(TeamId playerTeam);
+
+    // BuildWorld() + SpawnCombatants(TeamId::Blue).
     void Start();
+
+    // Places every rail-driven body -- orbiting planets, then the structures
+    // riding them -- at its real position and velocity. A freshly spawned
+    // Transform carries no velocity, so anything read before the first
+    // Update() (a launch site, most of all) otherwise sees a station standing
+    // still that is in fact sweeping past at its orbital speed. Call once
+    // after building a scenario, before spawning anything into it.
+    void SettleScenario();
 
     void Update();
 
@@ -149,6 +192,9 @@ public:
 
     FactionSystem& GetFactionSystem()
     { return m_factionSystem; }
+
+    DamageSystem::LandingParams& GetLandingDamageParams()
+    { return m_damageSystem.GetLandingParams(); }
 
     // The sim's one-shot event stream (docs/networking-plan.md Phase 1).
     // Consumers keep their own cursor and read via ConsumeSince.

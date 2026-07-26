@@ -118,6 +118,10 @@ protected:
     ResourcePtr<const Model> m_teamMarkerModel;
     void SubmitPlanetOwnershipMarkers(const SceneView& view);
 
+    // Unit the camera is following instead of the own ship; empty = not
+    // spectating. May live in either world (see CycleSpectate).
+    flecs::entity m_spectateTarget;
+
     // The worlds and overlay renderer this frame reads and draws into --
     // single-player and multiplayer differ in exactly this and nothing else,
     // as far as the camera and HUD are concerned (see SceneView).
@@ -154,6 +158,11 @@ protected:
     void RenderNetClient(float dtSeconds, double tickFraction);
 
     Magnum::Vector2 m_viewportSize{1280.f, 720.f};
+
+    // Bottom-left corner of the scene viewport within the framebuffer, in
+    // framebuffer pixels. Non-zero because the HUD sidebar claims a fixed
+    // strip of the window that the world is not rendered into.
+    Magnum::Vector2 m_viewportOrigin{0.f, 0.f};
 
     // Wall-clock dt for the camera director and hit-flash decay -- both are
     // presentation-only and driven by real time, not the fixed sim tick (see
@@ -195,6 +204,12 @@ public:
 
     explicit CGame(IFilesystem& filesystem);
 
+    void SetViewport(const Magnum::Vector2& origin, const Magnum::Vector2& size)
+    {
+        m_viewportOrigin = origin;
+        SetViewportSize(size);
+    }
+
     void SetViewportSize(const Magnum::Vector2& size)
     {
         m_viewportSize = size;
@@ -222,6 +237,21 @@ public:
     // scene target (not from within Render()).
     void RenderMinimap();
 
+    // The solar system is laid out symmetrically around the origin (see
+    // Game::BuildWorld), so that's the map's center -- static, not
+    // player-centered, so flying doesn't scroll the map.
+    [[nodiscard]] static Magnum::Vector2 MinimapCenter() { return {0.f, 0.f}; }
+
+    // Parks the camera at the point the player clicked on the minimap.
+    // `normalized` is -1..1 across the map in each axis, +Y up (the UI layer
+    // knows the panel's pixels, this knows the map's world scale). Camera
+    // follow stops until FocusCamera().
+    void LookAtMapPoint(const Magnum::Vector2& normalized);
+
+    void FocusCamera() { m_cameraDirector.FocusSubject(); }
+
+    [[nodiscard]] bool IsCameraFollowing() const { return m_cameraDirector.IsFollowing(); }
+
     // The camera director owns all zoom/framing state and logic; these
     // forward to it so external callers (the client app, debug panels,
     // WorldToUi) don't need to know it exists as a separate object.
@@ -244,7 +274,34 @@ public:
     // 1 px/unit at zoom 1), camera-centered.
     [[nodiscard]] const Magnum::Vector2& GetViewportSize() const { return m_viewportSize; }
 
+    [[nodiscard]] const Magnum::Vector2& GetViewportOrigin() const { return m_viewportOrigin; }
+
+    [[nodiscard]] float GetPixelScale() const { return m_pixelScale; }
+
+    // Hull integrity of the unit the HUD represents (the camera subject, so
+    // it follows a spectated unit), 0..1. Empty when there's nothing to show.
+    [[nodiscard]] std::optional<float> GetHullFraction();
+
     void ToggleCameraFollow() { m_cameraDirector.ToggleCameraFollow(); }
+
+    // Spectating: the camera (and everything framed off it) follows another
+    // unit instead of your own ship. Cycles NetId order across both worlds,
+    // so multiplayer sees the same roster single-player does; landing back on
+    // your own ship stops spectating. Free to use for now -- watching a unit
+    // that isn't yours is a cheat and belongs behind a cheat gate once one
+    // exists (the player-facing version is docs/gravity-well-mode-plan.md
+    // U3's unit list).
+    void CycleSpectate(int direction);
+
+    void SetSpectateTarget(flecs::entity unit) { m_spectateTarget = unit; }
+
+    void StopSpectating() { m_spectateTarget = flecs::entity(); }
+
+    [[nodiscard]] bool IsSpectating() const { return m_spectateTarget.is_alive(); }
+
+    // The entity the camera is centered on: the spectated unit, or your own
+    // ship (including when the spectated one just died).
+    [[nodiscard]] std::optional<flecs::entity> CameraSubject();
 
     void SetActiveRenderer(RendererKind kind) { m_activeRenderer = kind; }
     [[nodiscard]] RendererKind GetActiveRenderer() const { return m_activeRenderer; }

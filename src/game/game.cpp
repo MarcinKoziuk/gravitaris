@@ -36,6 +36,7 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_deathSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_trajectoryPredictor(m_registry, m_physicsSystem)
         , m_aiPilotSystem(m_registry, m_physicsSystem, m_trajectoryPredictor)
+        , m_aiStrategySystem(m_registry)
         , m_step(0L)
 {
     // Claude: if registry must be initiated first, why don't we construct it before, and pass it to Game::? (could be even moved?)
@@ -50,7 +51,7 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
     m_entitySpawner->Init();
 }
 
-void Game::Start()
+void Game::BuildWorld()
 {
     const ClassicScenarioHomes homes = BuildClassicScenario(*m_entitySpawner);
     // One developed complex per side, a sun apart (docs/gravity-well-mode-plan.md
@@ -59,13 +60,37 @@ void Game::Start()
     BuildStartingComplex(*m_entitySpawner, homes.blue, TeamId::Blue);
     BuildStartingComplex(*m_entitySpawner, homes.red, TeamId::Red);
 
+    SettleScenario();
+}
+
+void Game::SpawnCombatants(TeamId playerTeam)
+{
     // Same site selection a respawn uses (just no funding -- the first
     // fighter is free), so the initial spawn lands exactly where a respawn
     // would rather than at an arbitrary world origin.
     const FactionSystem::SpawnPoint spawn =
-            m_factionSystem.SpawnPosition(TeamId::Blue).value_or(FactionSystem::SpawnPoint{});
-    m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, spawn.pos, TeamId::Blue,
+            m_factionSystem.SpawnPosition(playerTeam).value_or(FactionSystem::SpawnPoint{});
+    m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, spawn.pos, playerTeam,
                                             spawn.vel, spawn.rot);
+
+    // The opposing complex gets a leader that plays the mode, not just a
+    // dogfighter. Per-faction presets are U4's round-setup screen.
+    const TeamId aiTeam = playerTeam == TeamId::Blue ? TeamId::Red : TeamId::Blue;
+    m_aiFactions.push_back(AIFaction{aiTeam, AIPersonalityPreset::Balanced});
+    for (AIFaction& faction : m_aiFactions) {
+        if (const std::optional<FactionSystem::SpawnPoint> site =
+                    m_factionSystem.SpawnPosition(faction.team)) {
+            faction.leader = m_entitySpawner->SpawnAILeader("models/ships/fighter-1"_id, site->pos,
+                                                            faction.team, faction.preset, site->vel,
+                                                            site->rot);
+        }
+    }
+}
+
+void Game::Start()
+{
+    BuildWorld();
+    SpawnCombatants(TeamId::Blue);
 }
 
 Game::Game(IFilesystem& filesystem)
@@ -86,6 +111,12 @@ Game::Game(IFilesystem& filesystem)
         // question.
         : Game(filesystem, Game::CreateEntitySpawner())
 {}
+
+void Game::SettleScenario()
+{
+    m_orbitSystem.Update();
+    m_structureAttachmentSystem.Update();
+}
 
 void Game::Update()
 {
@@ -134,6 +165,9 @@ void Game::Update()
         m_factionSystem.Update();
         // Detect a player death from DeathSystem before any system reads m_player.
         HandlePlayerRespawn();
+        HandleAILeaderRespawns();
+        // Before AIPilotSystem, so an order issued this tick is flown this tick.
+        m_aiStrategySystem.Update();
         m_aiPilotSystem.Update(m_step);
         m_inputSystem.Update(m_step);
         m_shipControlsSystem.Update(m_step);
@@ -143,30 +177,47 @@ void Game::Update()
     m_step++;
 }
 
+std::optional<FactionSystem::SpawnPoint> Game::TickRespawn(std::optional<flecs::entity>& ship, int& timer,
+                                                           TeamId team)
+{
+    if (ship && !ship->is_alive()) {
+        ship.reset();
+        timer = RESPAWN_DELAY_TICKS;
+    }
+
+    if (timer < 0) return std::nullopt;
+    if (timer > 0) {
+        --timer;
+        return std::nullopt;
+    }
+
+    // The timer stays at 0 and retries every tick: a site with no funder yet
+    // is a transient wait, no site at all is that faction being out of the
+    // round (for the player, game over -- not surfaced yet).
+    std::optional<FactionSystem::SpawnPoint> spawn = m_factionSystem.TryRespawn(team);
+    if (spawn) timer = -1;
+    return spawn;
+}
+
 void Game::HandlePlayerRespawn()
 {
-    if (m_player && !m_player->is_alive()) {
-        m_player.reset();
-        m_playerRespawnTimer = RESPAWN_DELAY_TICKS;
-    }
-
-    if (m_playerRespawnTimer < 0) return;
-    if (m_playerRespawnTimer > 0) {
-        --m_playerRespawnTimer;
-        return;
-    }
-
-    // Timer expired: single-player is always Blue (SpawnPlayer's own
-    // default team, never overridden here). Keep retrying every tick from
-    // here (m_playerRespawnTimer stays 0) until TryRespawn succeeds -- a
-    // site exists but nothing can fund the fighter yet is a transient
-    // wait, not a failure -- or permanently doesn't (no friendly
-    // planet/High Port left at all -- docs/gravity-well-mode-plan.md
-    // Phase 4's "for the player: game over", not otherwise surfaced yet).
-    if (const std::optional<FactionSystem::SpawnPoint> spawn = m_factionSystem.TryRespawn(TeamId::Blue)) {
+    // Single-player is always Blue (SpawnPlayer's own default team).
+    if (const std::optional<FactionSystem::SpawnPoint> spawn =
+                TickRespawn(m_player, m_playerRespawnTimer, TeamId::Blue)) {
         m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, spawn->pos, TeamId::Blue,
                                                 spawn->vel, spawn->rot);
-        m_playerRespawnTimer = -1;
+    }
+}
+
+void Game::HandleAILeaderRespawns()
+{
+    for (AIFaction& faction : m_aiFactions) {
+        if (const std::optional<FactionSystem::SpawnPoint> spawn =
+                    TickRespawn(faction.leader, faction.respawnTimer, faction.team)) {
+            faction.leader = m_entitySpawner->SpawnAILeader("models/ships/fighter-1"_id, spawn->pos,
+                                                            faction.team, faction.preset, spawn->vel,
+                                                            spawn->rot);
+        }
     }
 }
 

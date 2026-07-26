@@ -421,27 +421,80 @@ Goal: enemy leaders play the same game: scout, claim, defend, intercept.
 This is `docs/ai-ships.md`'s deferred Strategy layer — read that doc's
 architecture table first; tactics/guidance/control already exist.
 
-- [ ] **Land guidance behavior** (the known GNC gap — fighters only;
-  freighters orbit): add to `game/gnc/guidance/behaviors.hpp/.cpp` —
-  approach the planet surface point, cap descent speed by flip-and-burn
-  stopping distance against gravity (reuse `GotoPoint`'s solved-velocity
-  idea), touch down below Phase 1's safe threshold. Riskiest item in the
-  plan — budget for iteration; prove it in sim-test with a scripted descent
-  before wiring it into strategy.
-- [ ] `AIStrategy` (component on AI leader fighters + a system): utility
-  scorer over goals — ClaimNearestUnowned, AttackWeakestEnemyComplex,
-  InterceptEnemyFreighter, DefendOwnComplex, plus the existing dogfight
-  tactics when engaged. Personality presets weight the scores
-  (`AIPersonalityPreset` exists in `game/gnc/ai-personality-presets.hpp`;
-  the original's preset names — Aggressive, Determined, Shrewd, Tenacious,
-  Voracious, Defensive, Maniacal — can extend it).
-- [ ] AI factions get a starting complex + fighter; claiming triggers the
-  same freighter/complex machinery as the player (no special-casing — if a
-  rule needs faction-specific branching, the rule is wrong).
-- Sim-test: run a headless round a few thousand ticks with 2 AI factions;
-  assert at least one new planet gets claimed by an AI; checksum stability
-  across two runs (this doubles as the mode's determinism proof under full
-  AI load).
+- [x] **Land guidance behavior** — `LandOnBody`
+  (`game/gnc/guidance/behaviors.hpp/.cpp`). Solved in the body's frame
+  (planets orbit; a touchdown is only gentle *relative to the site*):
+  descent speed is the fastest a flip-and-burn can still bleed to
+  `GuidanceParams::touchdownSpeed` before contact, with gravity subtracted
+  from the available thrust, and the radial command kills tangential drift
+  on the way in. Below `flareAltitude` it stops commanding a descent and
+  only matches the site's velocity — a commanded descent down there aims the
+  thruster, and so the legs, away from the surface, which fails the
+  uprightness test at exactly the moment it is checked. Proven on its own by
+  sim-test `TestLandGuidance` (open-loop through `FlyToVelocity`, no
+  strategy involved) before anything drove it.
+- [x] `AIStrategy` + `AIStrategySystem`
+  (`component/ai-strategy.hpp`, `system/ship/ai-strategy-system.cpp`):
+  utility scorer over Dogfight / ClaimPlanet / AttackComplex /
+  InterceptFreighter / DefendComplex. Every goal's score is a proximity term
+  times a quality term on the same 0..1 footing, so `AIStrategyWeights`
+  compare across goals; `ApplyAIStrategyPreset` gives each personality
+  preset its own weights. The winner becomes an `AIOrder` (Attack / Land /
+  Patrol) on the pilot — the strategy layer never touches flight, and a
+  pilot with no `AIStrategy` keeps its old nearest-enemy tactics, which is
+  all dogfight fodder needs. A `GOAL_SWITCH_MARGIN` stops near-ties
+  oscillating, and a claim is held for a bounded commitment window
+  (`commitCooldown`) so a leader does not re-decide halfway down a descent.
+- [x] AI factions get a starting complex + fighter: `Game::m_aiFactions`
+  fields one leader per AI faction (Red today; per-faction presets are U4's
+  round-setup screen), respawned through the same
+  `FactionSystem::TryRespawn` the player uses — `Game::TickRespawn` is now
+  shared by both, so no faction-specific respawn rule exists to drift.
+  `EntitySpawner::SpawnAILeader` is `SpawnAIShip` plus the strategy
+  component; AI ships also take a team rather than being hardcoded Red.
+- [x] Sim-test `TestAIStrategy`: an all-AI round (2 factions, 12000 ticks)
+  claims planets neither faction started with, both leaders survive it, and
+  the whole round replays to an identical checksum and the same claims.
+
+Three things this phase had to fix rather than work around:
+
+- **Tactical departure phase** (`AIBehavior::Depart`). A leader launched
+  from a High Port turned onto its course while still standing on the deck
+  and dragged itself along the station — repeatedly, until it died. The rule
+  now is positional, not contact-based (contact breaks the moment the ship
+  lifts, which is too late and too early at once): a pilot whose objective
+  lies outside the body it is sitting on climbs clear of that body first, at
+  `DEPARTURE_CLEARANCE` past the surface — outside the High Port's own orbit,
+  so leaving means leaving the whole complex. An objective *at* that body (a
+  landing, an attack on its structures, a patrol of it) is not elsewhere and
+  needs no departure, which is what keeps the rule from fighting the other
+  behaviors.
+- **`EvadeBody` now works in the evaded body's frame.** It clamped the
+  desired velocity to `maxSpeed` in *world* space, which is harmless around
+  a static sun but asks for a brake rather than a climb when leaving a
+  station moving at ~120 u/s — the ship stayed pinned to the deck being
+  scraped. Same fix as `LandOnBody`'s: solve relative, add the centre's
+  velocity back.
+- **`Game::SettleScenario`.** A freshly spawned `Transform` carries no
+  velocity, and the rail-driven bodies only get theirs when
+  `OrbitSystem`/`StructureAttachmentSystem` first run — so *every* first
+  fighter of a round, the player's included, was launched from a station the
+  world believed was standing still and was in fact sweeping past at its
+  orbital speed. Scenario setup now settles the rails before anything is
+  spawned into them (`Game::Start` and `gravitaris-server` both call it).
+
+Also closed here, since `AttackComplex` has no payoff without it: Phase 1's
+marked TODO in `ConquestSystem` — a planet does not flip while another
+team's structure still stands on it. The garrison is read as a team bitmask
+per planet, so the rule is exact rather than dependent on which structure
+iteration happens to reach first.
+
+**Verification status** (2026-07-26): native `GravitarisNG`,
+`gravitaris-sim-test` and `gravitaris-server` build clean; sim-test passes
+with both new proofs and the two-run determinism checksum stable. Not yet
+done: playing a solitaire round by hand to judge whether it is *genuinely*
+contested (the sim-test only proves the AI expands and survives), and wasm
+build verification.
 
 Done when: a solitaire round against AI leaders is genuinely contested.
 

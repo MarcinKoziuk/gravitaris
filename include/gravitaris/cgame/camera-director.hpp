@@ -148,6 +148,8 @@ private:
     std::optional<Magnum::Vector2> SelectFramedEnemy(const Magnum::Vector2& from, TeamId playerTeam,
                                                      float& outCoverDist);
 
+    void SmoothZoom(float zoomTarget, float dtSeconds);
+
 public:
     explicit CameraDirector(float initialZoom);
 
@@ -163,6 +165,19 @@ public:
     void NudgeManualZoom(float notches);
 
     void ToggleCameraFollow() { m_cameraFollow = !m_cameraFollow; }
+
+    [[nodiscard]] bool IsFollowing() const { return m_cameraFollow; }
+
+    // Free-look: parks the camera on `position` and stops following the
+    // subject, so Update() leaves it there until FocusSubject() re-engages.
+    // Zoom stops easing too -- the whole director is idle while unfollowed.
+    void LookAt(const Magnum::Vector2& position)
+    {
+        m_camera.SetPosition(position);
+        m_cameraFollow = false;
+    }
+
+    void FocusSubject() { m_cameraFollow = true; }
 
     // Per-frame camera director: eases position (with enemy framing) and zoom
     // (speed-driven, enemy-fit, planet-fit, close-combat, or manual override)

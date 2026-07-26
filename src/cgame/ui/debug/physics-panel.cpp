@@ -1,5 +1,6 @@
 #include <imgui.h>
 
+#include <gravitaris/game/system/combat/damage-system.hpp>
 #include <gravitaris/cgame/cgame.hpp>
 
 #include "physics-panel.hpp"
@@ -66,6 +67,36 @@ void DrawPhysicsPanel(CGame& game)
 
     if (ImGui::Button("Reset##shipcontact")) {
         contact = defaults;
+    }
+
+    ImGui::SeparatorText("Landing / crash damage");
+    ImGui::TextWrapped("Impact speed below the threshold is free; above it, damage scales linearly. "
+                       "Legs-down and tipped-over touchdowns have separate thresholds.");
+
+    DamageSystem::LandingParams& landing = game.GetLandingDamageParams();
+    const DamageSystem::LandingParams landingDefaults;
+
+    slider("Upright threshold (speed)", landing.uprightThreshold, 0.f, 2000.f, "%.0f",
+           "Impact speed a legs-down landing takes for free. Raise it to make touchdowns forgiving. "
+           "Every damaging impact is logged with its deltaV and the whole formula, so the log says "
+           "which speeds actually need covering.");
+    slider("Tipped threshold (speed)", landing.tippedThreshold, 0.f, 2000.f, "%.0f",
+           "Impact speed a tipped-over landing takes for free. Normally well below the upright one -- "
+           "watch the log for whether your touchdowns are being counted as tipped at all.");
+    slider("Damage per speed", landing.damagePerDeltaV, 0.f, 3.f, "%.2f",
+           "Hull points lost per unit of impact speed over the threshold.");
+
+    auto floatSlider = [](const char* label, float& value, float min, float max, const char* fmt,
+                          const char* tooltip) {
+        ImGui::SetNextItemWidth(220.f);
+        ImGui::SliderFloat(label, &value, min, max, fmt);
+        ImGui::SetItemTooltip("%s", tooltip);
+    };
+    floatSlider("Tipped multiplier", landing.tippedMultiplier, 1.f, 10.f, "%.1f",
+                "Extra factor applied on top when the landing wasn't upright.");
+
+    if (ImGui::Button("Reset##landing")) {
+        landing = landingDefaults;
     }
 }
 

@@ -21,4 +21,9 @@ enum class AIPersonalityPreset : std::uint8_t {
 // preset's tuning. Does not touch pilot.behavior/target/cooldowns.
 void ApplyAIPersonalityPreset(AIPilot& pilot, AIPersonalityPreset preset);
 
+// The same presets read as strategic temperament: overwrites
+// strategy.weights only, leaving the active goal alone. Split from the call
+// above because most AI ships are dogfight fodder with no AIStrategy at all.
+void ApplyAIStrategyPreset(AIStrategy& strategy, AIPersonalityPreset preset);
+
 } // namespace Gravitaris

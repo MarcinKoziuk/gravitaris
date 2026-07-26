@@ -1,10 +1,13 @@
 <rml>
 	<head>
 		<title>HUD</title>
+		<link type="text/rcss" href="rml.rcss"/>
+		<link type="text/rcss" href="vector.rcss"/>
 		<style>
-			/* Full-screen, click-through overlay: gameplay elements only, no
-			   chrome. pointer-events: none keeps it from swallowing mouse
-			   input meant for the game or the draggable windows above it. */
+			/* Full-screen overlay: gameplay chrome only. pointer-events: none
+			   keeps the empty area from swallowing mouse input meant for the
+			   game or the draggable windows above it; the sidebar opts back
+			   in below. */
 			body
 			{
 				width: 100%;
@@ -12,43 +15,174 @@
 				pointer-events: none;
 			}
 
+			/* Fixed-width gameplay-info column down the left edge, itself
+			   invisible: the framed boxes inside it are the visible chrome.
+			   The scene is rendered only to the right of it -- the client reads
+			   this element's laid-out width every frame and insets the game
+			   viewport by it (see UI::GetSidebarWidthPx), so this declaration
+			   is the single source of truth for the split.
+
+			   Column flex layout: the minimap keeps its fixed square, the
+			   panel below takes whatever height is left. */
+			div#sidebar
+			{
+				position: absolute;
+				top: 0;
+				left: 0;
+				bottom: 0;
+				width: 370dp;
+				box-sizing: border-box;
+				padding: 10dp;
+
+				display: flex;
+				flex-direction: column;
+
+				background-color: #000;
+				pointer-events: auto;
+			}
+
 			/* The minimap texture is rendered by the engine every frame (see
 			   MinimapRenderer) and projected here via the live-texture bridge.
 			   Everything visual about the panel -- placement, size, frame --
-			   is styled right here in RCSS. */
+			   is styled right here in RCSS. Square only as long as the height
+			   matches the sidebar's content width (370 - 2*10). */
 			img#minimap
 			{
-				position: absolute;
-				bottom: 16dp;
-				right: 16dp;
-				width: 170dp;
-				height: 170dp;
+				flex: 0 0 auto;
+				width: 100%;
+				height: 350dp;
+				box-sizing: border-box;
 
 				border-width: 2dp;
-				border-color: #0ff;
+				border-color: #0cf;
+				cursor: pointer;
+
+				/* Enables the drag events the click handler also listens on, so
+				   holding and sweeping pans the camera continuously. */
+				drag: drag;
+			}
+
+			/* Everything that isn't the map: one framed box filling the rest
+			   of the column. */
+			div#info_panel
+			{
+				flex: 1 1 auto;
+				position: relative;
+				box-sizing: border-box;
+				margin-top: 10dp;
+				padding: 10dp;
+
+				border-width: 2dp;
+				border-color: #0cf;
+			}
+
+			div.stat
+			{
+				margin-bottom: 18dp;
+			}
+
+			/* Covers exactly the rendered game view, so anything anchored to
+			   the view's own corners uses plain offsets from here instead of
+			   repeating the sidebar's width. Click-through except where a
+			   child opts back in. The left offset is the one place that has to
+			   track div#sidebar's width. */
+			div#view_overlay
+			{
+				position: absolute;
+				left: 370dp;
+				right: 0;
+				top: 0;
+				bottom: 0;
 				pointer-events: none;
 			}
 
+			button#recenter
+			{
+				position: absolute;
+				left: 16dp;
+				bottom: 16dp;
+				pointer-events: auto;
+			}
+
+			div.stat_head
+			{
+				font-size: 15dp;
+				color: #7cc;
+			}
+
+			span.stat_value
+			{
+				float: right;
+				color: #cff;
+				font-weight: bold;
+			}
+
+			div.bar_track
+			{
+				height: 18dp;
+				margin-top: 5dp;
+				box-sizing: border-box;
+
+				background-color: #0cf1;
+				border-width: 1dp;
+				border-color: #0cf;
+			}
+
+			/* Width is set from code as a percentage (UI::SetHullFraction);
+			   the colour steps come from the classes it toggles. Starts empty:
+			   before there's a ship to report on, SetHullFraction is a no-op. */
+			div#health_fill
+			{
+				height: 100%;
+				width: 0%;
+				background-color: #0cfc;
+			}
+
+			div#health_fill.warn
+			{
+				background-color: #fc0c;
+			}
+
+			div#health_fill.critical
+			{
+				background-color: #f33c;
+			}
+
 			/* Build identity + ping, set from the frame loop (see
-			   UI::SetHudStatusText). Sits above the minimap rather than in
-			   the corner the minimap already occupies: 16dp margin + 170dp
-			   box + 2*2dp border + a small gap. */
+			   UI::SetHudStatusText). */
 			div#status_readout
 			{
 				position: absolute;
-				bottom: 196dp;
-				right: 16dp;
+				left: 0;
+				right: 0;
+				bottom: 0;
 
-				font-family: LatoLatin;
-				font-size: 12dp;
+				font-size: 14dp;
 				color: #8ff;
-				text-align: right;
-				pointer-events: none;
 			}
 		</style>
 	</head>
 	<body>
-		<img id="minimap" src="live://minimap"/>
-		<div id="status_readout"></div>
+		<div id="sidebar">
+			<img id="minimap" src="live://minimap"/>
+
+			<div id="info_panel">
+				<div class="stat">
+					<div class="stat_head">
+						<span>HULL</span>
+						<span id="health_value" class="stat_value">--</span>
+					</div>
+					<div class="bar_track">
+						<div id="health_fill"></div>
+					</div>
+				</div>
+
+				<div id="status_readout"></div>
+			</div>
+		</div>
+
+		<div id="view_overlay">
+			<button id="recenter">FOCUS MY SHIP</button>
+		</div>
 	</body>
 </rml>

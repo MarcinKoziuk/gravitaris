@@ -79,7 +79,15 @@ public:
 
     flecs::entity SpawnAIShip(id_t modelId, Vector2d position,
                               AIPersonalityPreset preset = AIPersonalityPreset::Balanced,
-                              Vector2d velocity = {}, double rot = 0.0);
+                              Vector2d velocity = {}, double rot = 0.0, TeamId team = TeamId::Red);
+
+    // An AI ship that plays the mode rather than only fighting in it: the
+    // same fighter plus an AIStrategy weighted by `preset` (see
+    // AIStrategySystem). One per AI faction, respawned by whoever owns the
+    // faction's slot.
+    flecs::entity SpawnAILeader(id_t modelId, Vector2d position, TeamId team,
+                                AIPersonalityPreset preset = AIPersonalityPreset::Balanced,
+                                Vector2d velocity = {}, double rot = 0.0);
 
     flecs::entity SpawnStar(id_t modelId, Vector2d position);
 

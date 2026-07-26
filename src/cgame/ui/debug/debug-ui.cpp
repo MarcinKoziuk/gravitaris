@@ -15,10 +15,30 @@
 #include "hud-panel.hpp"
 #include "physics-panel.hpp"
 #include "net-panel.hpp"
+#include "ai-panel.hpp"
 
 namespace Gravitaris {
 
 using namespace Magnum;
+
+namespace {
+
+// Full labels with scroll arrows rather than the default shrink-to-fit,
+// which ellipsizes names away exactly when there are enough to need them.
+constexpr ImGuiTabBarFlags INNER_TABS = ImGuiTabBarFlags_FittingPolicyScroll;
+
+// Keeps a leaf tab to one line, so the grouping above stays readable as a
+// table of contents.
+template <typename F>
+void Tab(const char* name, const F& draw)
+{
+    if (ImGui::BeginTabItem(name)) {
+        draw();
+        ImGui::EndTabItem();
+    }
+}
+
+} // namespace
 
 DebugUi::DebugUi(CGame& game, GlowPostProcess& glow,
                  const Vector2& uiSize, const Vector2i& windowSize, const Vector2i& framebufferSize)
@@ -51,7 +71,7 @@ bool DebugUi::WantsTextInput() const
 
 void DebugUi::BuildFrame()
 {
-    ImGui::SetNextWindowSize(ImVec2(380.f, 460.f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(460.f, 520.f), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(24.f, 24.f), ImGuiCond_FirstUseEver);
 
     // Passing &m_visible gives the window a close button that hides the overlay.
@@ -59,53 +79,45 @@ void DebugUi::BuildFrame()
         ImGui::TextDisabled("Ctrl+click or double-click any slider to type an exact value.");
         ImGui::Separator();
 
-        if (ImGui::BeginTabBar("##debug-tabs")) {
-            if (ImGui::BeginTabItem("Post-process")) {
-                DrawPostProcessPanel(m_glow);
+        // Two levels, not thirteen tabs: a single bar's worth of names
+        // stopped being readable well before the window is wide enough to
+        // show them all.
+        if (ImGui::BeginTabBar("##debug-groups")) {
+            if (ImGui::BeginTabItem("Video")) {
+                if (ImGui::BeginTabBar("##video", INNER_TABS)) {
+                    Tab("Post-process", [&] { DrawPostProcessPanel(m_glow); });
+                    Tab("Renderer", [&] { DrawRendererPanel(m_game); });
+                    Tab("Starfield", [&] { DrawStarfieldPanel(m_game); });
+                    ImGui::EndTabBar();
+                }
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Renderer")) {
-                DrawRendererPanel(m_game);
+            if (ImGui::BeginTabItem("View")) {
+                if (ImGui::BeginTabBar("##view", INNER_TABS)) {
+                    Tab("Camera", [&] { DrawCameraPanel(m_game); });
+                    Tab("HUD", [&] { DrawHudPanel(m_game); });
+                    ImGui::EndTabBar();
+                }
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Audio")) {
-                DrawAudioPanel(m_game);
+            if (ImGui::BeginTabItem("Sim")) {
+                if (ImGui::BeginTabBar("##sim", INNER_TABS)) {
+                    Tab("Spawn", [&] { DrawSpawnPanel(m_game); });
+                    Tab("AI", [&] { DrawAiPanel(m_game); });
+                    Tab("Flight", [&] { DrawFlightPanel(m_game); });
+                    Tab("Physics", [&] { DrawPhysicsPanel(m_game); });
+                    Tab("Trajectory", [&] { DrawTrajectoryPanel(m_game); });
+                    ImGui::EndTabBar();
+                }
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Spawn")) {
-                DrawSpawnPanel(m_game);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Trajectory")) {
-                DrawTrajectoryPanel(m_game);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Flight")) {
-                DrawFlightPanel(m_game);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Physics")) {
-                DrawPhysicsPanel(m_game);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Camera")) {
-                DrawCameraPanel(m_game);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("HUD")) {
-                DrawHudPanel(m_game);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Starfield")) {
-                DrawStarfieldPanel(m_game);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Net")) {
-                DrawNetPanel(m_game);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Performance")) {
-                DrawPerformancePanel(m_game);
+            if (ImGui::BeginTabItem("System")) {
+                if (ImGui::BeginTabBar("##system", INNER_TABS)) {
+                    Tab("Net", [&] { DrawNetPanel(m_game); });
+                    Tab("Performance", [&] { DrawPerformancePanel(m_game); });
+                    Tab("Audio", [&] { DrawAudioPanel(m_game); });
+                    ImGui::EndTabBar();
+                }
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();

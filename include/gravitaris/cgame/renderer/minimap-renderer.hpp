@@ -35,16 +35,16 @@ using Magnum::Vector3;
 class MinimapRenderer {
 public:
     // Fixed texture resolution; RCSS scales the on-screen panel independently.
-    static constexpr int TEXTURE_SIZE = 256;
+    static constexpr int TEXTURE_SIZE = 512;
 
     struct Params {
         bool enabled = true;
         float worldRadius = 24000.f; // world units from the map center to the map edge
-        float shipDotPx = 3.f;      // ship dot radius, minimap texture px
-        float playerDotPx = 1.5f;   // player marker dot radius, minimap texture px
-        float planetMinPx = 2.f;    // floor for a planet ring that'd map below this
-        float starMinPx = 3.5f;     // floor for a sun ring that'd map below this (bigger than a planet)
-        bool showViewRect = false;  // outline the main camera's visible extent
+        float shipDotPx = 6.f;      // ship dot radius, minimap texture px
+        float playerDotPx = 3.f;    // player marker dot radius, minimap texture px
+        float planetMinPx = 4.f;    // floor for a planet ring that'd map below this
+        float starMinPx = 7.f;      // floor for a sun ring that'd map below this (bigger than a planet)
+        bool showViewRect = true;   // shade the main camera's visible extent
     };
 
 private:
@@ -69,9 +69,11 @@ public:
     [[nodiscard]] static Vector2i TextureSize() { return {TEXTURE_SIZE, TEXTURE_SIZE}; }
 
     // Renders the map: static, centered on `mapCenter` (not the player) so
-    // panning the ship doesn't scroll the map. `playerPos` places the player
-    // marker within that static view. viewCenter/viewHalfExtent describe the
-    // main camera's world-space extent for the (optional) view rectangle.
+    // panning the ship doesn't scroll the map. `subjectPos` places the ringed
+    // marker within that static view -- the camera subject, so it follows a
+    // spectated ship rather than always sitting on your own. viewCenter/
+    // viewHalfExtent describe the main camera's world-space extent, shaded as
+    // the (optional) view rectangle.
     // Every world in `view` is swept for planets and ships, so multiplayer's
     // mirror-world entities show up exactly like single-player registry ones.
     // Binds its own framebuffer; the caller is

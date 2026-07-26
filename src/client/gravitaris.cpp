@@ -15,6 +15,7 @@
 #include <Magnum/GL/Renderer.h>
 #include <Magnum/GL/Version.h>
 #include <Magnum/Math/Color.h>
+#include <Magnum/Math/Range.h>
 #include <Magnum/Platform/Sdl2Application.h>
 #include <Magnum/Platform/GLContext.h>
 
@@ -134,6 +135,15 @@ private:
 #endif
     }
 
+    // Manual flight input hands the ship back to the player: the autopilot
+    // lets go, and so does a spectated unit -- otherwise the keys answer
+    // off-screen.
+    void ResumeOwnShip()
+    {
+        m_game->SetAutopilotMode(AutopilotMode::Off);
+        m_game->StopSpectating();
+    }
+
     static int RmlButtonIndex(Pointer pointer);
     void RenderUi();
 };
@@ -166,11 +176,25 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
         m_game->ConnectToServer(connectUrl);
     }
     else {
-        m_game->Start();
+        // World now, combatants once the intro dialog reports which side the
+        // player picked -- so the dialog sits over the real solar system
+        // rather than an empty void.
+        m_game->BuildWorld();
     }
 
     m_ui.RegisterLiveTexture("minimap", m_game->GetMinimapRenderer().TextureId(),
                              MinimapRenderer::TextureSize().x(), MinimapRenderer::TextureSize().y());
+
+    // Multiplayer sides come from the server, so there's nothing to pick.
+    m_ui.SetTeamChoiceEnabled(!m_game->IsNetClient());
+    m_ui.SetIntroConfirmCallback([this](TeamId team) {
+        if (!m_game->IsNetClient()) m_game->SpawnCombatants(team);
+    });
+    m_ui.SetMinimapClickCallback([this](float nx, float ny) {
+        m_game->LookAtMapPoint(Magnum::Vector2{nx, ny});
+    });
+    m_ui.SetRecenterCallback([this] { m_game->FocusCamera(); });
+
     m_ui.Init();
 
     m_glow = std::make_unique<GlowPostProcess>(m_filesystem);
@@ -259,6 +283,10 @@ void GravitarisApplication::tickEvent()
 void GravitarisApplication::UpdateUi()
 {
     RefreshHudReadout();
+
+    // Every frame, unlike the throttled readout above: a hull bar that lags a
+    // quarter second behind the hit that caused it reads as broken.
+    m_ui.SetHullFraction(m_game->GetHullFraction().value_or(-1.f));
 
     ScopedPerfTimer timer(m_game->GetPerfMonitor(), "UI Update");
     m_ui.Update();
@@ -354,10 +382,21 @@ void GravitarisApplication::drawEvent()
     const Magnum::Vector2i fbSize = framebufferSize();
     const Magnum::Vector2i logicalSize = windowSize();
 
-    m_game->SetViewportSize(Magnum::Vector2{fbSize});
-    m_game->SetPixelScale(PixelScale().x());
     m_ui.SetDimensions(fbSize.x(), fbSize.y());
     m_ui.SetDensityIndependentPixelRatio(PixelScale().x());
+
+    // The HUD sidebar owns a fixed strip of the left edge; the world renders
+    // only to the right of it. The UI context is sized in framebuffer pixels,
+    // so its laid-out width is already in the right units. Clamped so a
+    // narrow window can never leave a zero-width or inverted scene rect.
+    const int sidebarPx = std::clamp(m_ui.GetSidebarWidthPx(), 0, fbSize.x() / 2);
+    const Magnum::Vector2i sceneOrigin{sidebarPx, 0};
+    const Magnum::Vector2i sceneSize = fbSize - sceneOrigin;
+    const Magnum::Vector2i sceneLogicalSize{
+            std::max(1, logicalSize.x() - static_cast<int>(sidebarPx / PixelScale().x())), logicalSize.y()};
+
+    m_game->SetViewport(Magnum::Vector2{sceneOrigin}, Magnum::Vector2{sceneSize});
+    m_game->SetPixelScale(PixelScale().x());
 
     PerfMonitor& perf = m_game->GetPerfMonitor();
 
@@ -372,7 +411,7 @@ void GravitarisApplication::drawEvent()
     // so it can be blurred/composited.
     {
         ScopedPerfTimer timer(perf, "Post-process Begin");
-        m_glow->BeginScene(fbSize, logicalSize);
+        m_glow->BeginScene(sceneSize, sceneLogicalSize);
     }
     const double delta = m_frameTimeAccumulator / Game::PHYSICS_DELTA;
     m_game->Render(delta);
@@ -383,7 +422,13 @@ void GravitarisApplication::drawEvent()
 
     {
         ScopedPerfTimer timer(perf, "Post-process Composite");
-        m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer, fbSize, animTime);
+        // The composite covers only the scene rect, so the sidebar strip has
+        // to be cleared by us rather than overwritten every frame.
+        Magnum::GL::defaultFramebuffer.bind();
+        Magnum::GL::defaultFramebuffer.setViewport({{}, fbSize});
+        Magnum::GL::defaultFramebuffer.clear(Magnum::GL::FramebufferClear::Color);
+        m_glow->EndSceneAndComposite(Magnum::GL::defaultFramebuffer,
+                                     Magnum::Range2Di{sceneOrigin, fbSize}, animTime);
     }
 
     // UI to the screen, after the scene has been composited: no bloom, no CRT
@@ -452,11 +497,13 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         case KeyEvent::Key::V:
             m_glow->SetCrtEnabled(!m_glow->IsCrtEnabled());
             return;
+        // Glow intensity used to live on these two; it has a slider (with a
+        // reset) in the Post-process tab, spectating has nowhere else to go.
         case KeyEvent::Key::RightBracket:
-            m_glow->AddIntensity(0.25f);
+            m_game->CycleSpectate(1);
             return;
         case KeyEvent::Key::LeftBracket:
-            m_glow->AddIntensity(-0.25f);
+            m_game->CycleSpectate(-1);
             return;
         case KeyEvent::Key::F:
             m_game->ToggleCameraFollow();
@@ -499,21 +546,23 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
     switch (event.key()) {
         // Manual movement input disengages the autopilot.
         case KeyEvent::Key::Up:
-            m_game->SetAutopilotMode(AutopilotMode::Off);
+            ResumeOwnShip();
             m_currentInput.thrustForward = true;
             break;
         case KeyEvent::Key::Right:
-            m_game->SetAutopilotMode(AutopilotMode::Off);
+            ResumeOwnShip();
             m_currentInput.rotateRight = true;
             break;
         case KeyEvent::Key::Left:
-            m_game->SetAutopilotMode(AutopilotMode::Off);
+            ResumeOwnShip();
             m_currentInput.rotateLeft = true;
             break;
         case KeyEvent::Key::Down:
+            m_game->StopSpectating();
             m_currentInput.firePrimary = true;   // held; cadence paced by the sim
             break;
         case KeyEvent::Key::Space:
+            m_game->StopSpectating();
             m_currentInput.fireSecondary = true; // one-shot, cleared after the tick
             break;
         default:

@@ -191,6 +191,7 @@ int main(int argc, char** argv)
     // Phase 2) -- per-faction starting planets are Phase 6's job.
     BuildStartingComplex(game.GetEntitySpawner(), homes.blue, TeamId::Blue);
     BuildStartingComplex(game.GetEntitySpawner(), homes.red, TeamId::Red);
+    game.SettleScenario();
 
     WebRtcServerTransport transport(port);
     NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),

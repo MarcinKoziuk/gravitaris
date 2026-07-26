@@ -22,7 +22,7 @@ Vector2d GotoPoint(const Transform& ship, const Vector2d& target, const Guidance
     const double t = params.flipTime;
     const double vArrive = a * (-t + std::sqrt(t * t + 2.0 * dist / a));
 
-    const double speed = std::min(params.maxSpeed, vArrive);
+    const double speed = std::min(params.transitSpeed, vArrive);
     return toTarget * (speed / dist);
 }
 
@@ -75,8 +75,38 @@ Vector2d InterceptEntity(const Transform& ship, const Transform& target, const G
     return desired;
 }
 
-Vector2d EvadeBody(const Transform& ship, const Vector2d& center, double safeRadius,
-                   const GuidanceParams& params)
+Vector2d LandOnBody(const Transform& ship, const Vector2d& center, const Vector2d& centerVel,
+                    double effectiveMass, double surfaceRadius, const GuidanceParams& params)
+{
+    const Vector2d r = ship.pos - center;
+    const double dist = r.length();
+    if (dist < 1e-6) {
+        return centerVel;
+    }
+
+    const Vector2d up = r / dist;
+    const double altitude = dist - surfaceRadius;
+    if (altitude < params.flareAltitude) {
+        return centerVel;
+    }
+
+    // Only the thrust left over from holding the ship up can bleed off
+    // descent speed. The floor covers thrust <= local gravity, where no
+    // approach speed is actually stoppable.
+    const double gravity = PhysicsSystem::GRAVITY_CONSTANT * effectiveMass / (dist * dist);
+    const double brake = std::max(params.accel - gravity, 1.0);
+
+    // altitude = v*flipTime + (v^2 - touchdown^2)/(2*brake), solved for v.
+    const double t = params.flipTime;
+    const double vDescent = -brake * t
+            + std::sqrt(brake * brake * t * t + 2.0 * brake * (altitude - params.flareAltitude)
+                        + params.touchdownSpeed * params.touchdownSpeed);
+
+    return centerVel - up * std::clamp(vDescent, params.touchdownSpeed, params.transitSpeed);
+}
+
+Vector2d EvadeBody(const Transform& ship, const Vector2d& center, const Vector2d& centerVel,
+                   double safeRadius, const GuidanceParams& params)
 {
     const Vector2d r = ship.pos - center;
     const double dist = r.length();
@@ -85,14 +115,15 @@ Vector2d EvadeBody(const Transform& ship, const Vector2d& center, double safeRad
     }
 
     const Vector2d radialDir = r / dist;
-    const Vector2d tangentialVel = ship.vel - radialDir * Magnum::Math::dot(ship.vel, radialDir);
+    const Vector2d relVel = ship.vel - centerVel;
+    const Vector2d tangentialVel = relVel - radialDir * Magnum::Math::dot(relVel, radialDir);
 
     Vector2d desired = tangentialVel + radialDir * params.maxSpeed;
     const double speed = desired.length();
     if (speed > params.maxSpeed) {
         desired *= params.maxSpeed / speed;
     }
-    return desired;
+    return centerVel + desired;
 }
 
 } // namespace Gravitaris

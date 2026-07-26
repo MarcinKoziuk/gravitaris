@@ -146,7 +146,13 @@ void CameraDirector::Update(const SceneView& view, std::optional<flecs::entity> 
                             const Magnum::Vector2& viewportSize, float dtSeconds,
                             std::optional<Magnum::Vector2> positionOverride)
 {
-    if (!m_cameraFollow) return;
+    if (!m_cameraFollow) {
+        // Free-look (see LookAt): nothing steers position or the dynamic zoom,
+        // but the wheel must still work, so keep easing toward the manual
+        // target -- or hold where we are when the player hasn't scrolled.
+        SmoothZoom(m_manualZoomActive ? m_manualZoom : m_cameraZoom, dtSeconds);
+        return;
+    }
     if (!player) return;
 
     // Valid only for the duration of this call (see field comment) --
@@ -293,11 +299,16 @@ void CameraDirector::Update(const SceneView& view, std::optional<flecs::entity> 
         zoomTarget = m_params.maxZoom;
     }
 
-    // Exponential smoothing toward the target: frame-rate independent, and it
-    // gives the free "interpolate back" when the manual override expires. A
-    // wheel-driven target uses its own (snappier) tau so scrolling reads
-    // immediately without changing how smooth the dynamic zoom (speed/enemy
-    // framing) feels.
+    SmoothZoom(zoomTarget, dtSeconds);
+}
+
+// Exponential smoothing toward the target: frame-rate independent, and it
+// gives the free "interpolate back" when the manual override expires. A
+// wheel-driven target uses its own (snappier) tau so scrolling reads
+// immediately without changing how smooth the dynamic zoom (speed/enemy
+// framing) feels.
+void CameraDirector::SmoothZoom(float zoomTarget, float dtSeconds)
+{
     const float tau = m_manualZoomActive ? m_params.manualZoomTau : m_params.zoomTau;
     const float alpha = 1.f - std::exp(-dtSeconds / std::max(tau, 1e-3f));
     m_cameraZoom += (zoomTarget - m_cameraZoom) * alpha;
