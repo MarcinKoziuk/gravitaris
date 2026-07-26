@@ -1,17 +1,41 @@
+#include <algorithm>
+#include <cstdlib>
+#include <string_view>
+
 #include <rtc/rtc.hpp>
 
+#include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/net/webrtc-signaling.hpp>
 #include <gravitaris/game/net/webrtc-transport.hpp>
 
 namespace Gravitaris {
 
-WebRtcTransport::WebRtcTransport(Role role)
+static constexpr const char* BUILTIN_ICE_SERVERS[] = {
+        "stun:stun.l.google.com:19302",
+        "stun:stun1.l.google.com:19302",
+};
+
+static rtc::Configuration MakeConfiguration(const std::vector<std::string>& iceServers);
+
+std::vector<std::string> DefaultIceServers()
+{
+    if (const char* env = std::getenv("GRAVITARIS_ICE_SERVERS")) {
+        std::vector<std::string> out;
+        const std::string_view list{env};
+        for (std::size_t start = 0; start <= list.size();) {
+            const std::size_t comma = std::min(list.find(',', start), list.size());
+            const std::string_view entry = list.substr(start, comma - start);
+            if (!entry.empty()) out.emplace_back(entry);
+            start = comma + 1;
+        }
+        return out;
+    }
+    return std::vector<std::string>(std::begin(BUILTIN_ICE_SERVERS), std::end(BUILTIN_ICE_SERVERS));
+}
+
+WebRtcTransport::WebRtcTransport(Role role, std::vector<std::string> iceServers)
         : m_role(role)
-        // rtc::PeerConnection's no-arg constructor is declared but never
-        // defined in datachannel-wasm (link error under Emscripten only) --
-        // pass an explicit empty Configuration, which both backends
-        // implement and behaves identically to the no-arg ctor on native.
-        , m_pc(std::make_shared<rtc::PeerConnection>(rtc::Configuration{}))
+        , m_pc(std::make_shared<rtc::PeerConnection>(MakeConfiguration(iceServers)))
 {}
 
 WebRtcTransport::~WebRtcTransport() = default;
@@ -121,6 +145,27 @@ std::vector<NetEvent> WebRtcTransport::Poll()
         m_incoming.pop();
     }
     return out;
+}
+
+static rtc::Configuration MakeConfiguration(const std::vector<std::string>& iceServers)
+{
+    rtc::Configuration config;
+    for (const std::string& url : iceServers) {
+        // rtc::IceServer parses the URL in its constructor and throws on a
+        // malformed one; a typo in GRAVITARIS_ICE_SERVERS shouldn't take the
+        // process down with it.
+        try {
+            config.iceServers.emplace_back(url);
+        }
+        catch (const std::exception& e) {
+            LOG(warning) << "ignoring ICE server \"" << url << "\": " << e.what();
+        }
+    }
+    if (config.iceServers.empty()) {
+        LOG(warning) << "no usable ICE servers; only host candidates will be gathered "
+                        "(same-LAN connections only)";
+    }
+    return config;
 }
 
 } // namespace Gravitaris

@@ -11,18 +11,18 @@ struct WebRtcServerTransport::PeerState {
     std::unique_ptr<WebRtcTransport> transport;
 };
 
-WebRtcServerTransport::WebRtcServerTransport(uint16_t port)
+WebRtcServerTransport::WebRtcServerTransport(uint16_t port, std::vector<std::string> iceServers)
 {
     rtc::WebSocketServerConfiguration config;
     config.port = port;
     m_wsServer = std::make_unique<rtc::WebSocketServer>(config);
 
-    m_wsServer->onClient([this](std::shared_ptr<rtc::WebSocket> ws) {
+    m_wsServer->onClient([this, iceServers = std::move(iceServers)](std::shared_ptr<rtc::WebSocket> ws) {
         const PeerId peer = m_nextPeerId++;
 
         auto peerState = std::make_unique<PeerState>();
         peerState->ws = ws;
-        peerState->transport = std::make_unique<WebRtcTransport>(WebRtcTransport::Role::Answerer);
+        peerState->transport = std::make_unique<WebRtcTransport>(WebRtcTransport::Role::Answerer, iceServers);
 
         peerState->transport->SetLocalDescriptionCallback([ws](const std::string& sdp, const std::string& type) {
             if (ws->isOpen()) ws->send(EncodeDescriptionFrame(sdp, type));

@@ -18,6 +18,18 @@ class WebSocket;
 
 namespace Gravitaris {
 
+// ICE servers every peer connection uses unless given its own list. Without
+// at least one STUN server a peer gathers only host candidates -- its LAN
+// addresses -- so ICE succeeds on a LAN and fails between peers on different
+// networks, which is the common deployment. STUN adds the server-reflexive
+// candidate (the peer's public ip:port as seen from outside its NAT) that
+// makes hole punching possible.
+//
+// Overridable via GRAVITARIS_ICE_SERVERS: a comma-separated list of
+// stun:/turn: URLs (turn:user:pass@host:port). STUN alone doesn't cover
+// symmetric NAT or strict CGNAT on either side -- only a TURN relay does.
+std::vector<std::string> DefaultIceServers();
+
 // Single-peer WebRTC transport over an rtc::DataChannel (docs/networking
 // -plan.md 3.1b): game traffic rides an unreliable/unordered data channel
 // (SCTP-over-DTLS-over-UDP), avoiding the TCP head-of-line blocking a
@@ -46,7 +58,7 @@ public:
         Answerer, // waits for the remote-created data channel; server role
     };
 
-    explicit WebRtcTransport(Role role);
+    explicit WebRtcTransport(Role role, std::vector<std::string> iceServers = DefaultIceServers());
     ~WebRtcTransport() override;
 
     WebRtcTransport(const WebRtcTransport&) = delete;

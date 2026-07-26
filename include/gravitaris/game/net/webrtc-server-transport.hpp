@@ -3,19 +3,19 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include <ankerl/unordered_dense.h>
 
 #include <gravitaris/game/net/transport.hpp>
+#include <gravitaris/game/net/webrtc-transport.hpp>
 
 namespace rtc {
 class WebSocketServer;
 } // namespace rtc
 
 namespace Gravitaris {
-
-class WebRtcTransport;
 
 // Native-only (a browser can't listen): the multi-peer counterpart to
 // WebRtcTransport, for gravitaris-server (docs/networking-plan.md 3.5.2).
@@ -29,7 +29,10 @@ class WebRtcTransport;
 // children are live.
 class WebRtcServerTransport : public INetTransport {
 public:
-    explicit WebRtcServerTransport(uint16_t port);
+    // iceServers is handed to every per-peer WebRtcTransport; the server needs
+    // its own server-reflexive candidate just as much as the client does --
+    // see DefaultIceServers() in webrtc-transport.hpp.
+    explicit WebRtcServerTransport(uint16_t port, std::vector<std::string> iceServers = DefaultIceServers());
     ~WebRtcServerTransport() override;
 
     WebRtcServerTransport(const WebRtcServerTransport&) = delete;
