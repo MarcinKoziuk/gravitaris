@@ -2,6 +2,8 @@
 
 #include <flecs.h>
 
+#include <gravitaris/cgame/scene-view.hpp>
+
 #include <Magnum/Magnum.h>
 #include <Magnum/GL/Framebuffer.h>
 #include <Magnum/GL/Mesh.h>
@@ -46,7 +48,6 @@ public:
     };
 
 private:
-    flecs::world& m_registry;
 
     Line2Shader m_shader;
     Magnum::GL::Texture2D m_texture;
@@ -59,7 +60,7 @@ private:
     Params m_params;
 
 public:
-    MinimapRenderer(flecs::world& registry, IFilesystem& filesystem);
+    explicit MinimapRenderer(IFilesystem& filesystem);
 
     Params& GetParams() { return m_params; }
 
@@ -71,15 +72,13 @@ public:
     // panning the ship doesn't scroll the map. `playerPos` places the player
     // marker within that static view. viewCenter/viewHalfExtent describe the
     // main camera's world-space extent for the (optional) view rectangle.
-    // `remoteWorld`, when non-null, is swept alongside `registry` for planets
-    // and ships -- multiplayer's mirror world, so remote entities the player
-    // never locally simulates still show up exactly like a single-player
-    // registry entity would. Binds its own framebuffer; the caller is
+    // Every world in `view` is swept for planets and ships, so multiplayer's
+    // mirror-world entities show up exactly like single-player registry ones.
+    // Binds its own framebuffer; the caller is
     // expected to bind whatever it renders to next itself (the app runs this
     // before the glow pass claims the scene target).
-    void Render(const Vector2& mapCenter, const Vector2& playerPos,
-               const Vector2& viewCenter, const Vector2& viewHalfExtent,
-               flecs::world* remoteWorld = nullptr);
+    void Render(const SceneView& view, const Vector2& mapCenter, const Vector2& playerPos,
+               const Vector2& viewCenter, const Vector2& viewHalfExtent);
 };
 
 } // namespace Gravitaris

@@ -106,9 +106,8 @@ void EmitRect(std::vector<LineVertex>& out, const Vector2& center, const Vector2
 
 } // namespace
 
-MinimapRenderer::MinimapRenderer(flecs::world& registry, IFilesystem& filesystem)
-        : m_registry(registry)
-        , m_shader(filesystem)
+MinimapRenderer::MinimapRenderer(IFilesystem& filesystem)
+        : m_shader(filesystem)
         , m_framebuffer({{}, TextureSize()})
 {
     m_texture.setStorage(1, GL::TextureFormat::RGBA8, TextureSize())
@@ -139,9 +138,8 @@ MinimapRenderer::MinimapRenderer(flecs::world& registry, IFilesystem& filesystem
           .setInstanceCount(1);
 }
 
-void MinimapRenderer::Render(const Vector2& mapCenter, const Vector2& playerPos,
-                             const Vector2& viewCenter, const Vector2& viewHalfExtent,
-                             flecs::world* remoteWorld)
+void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, const Vector2& playerPos,
+                             const Vector2& viewCenter, const Vector2& viewHalfExtent)
 {
     m_framebuffer.setViewport({{}, TextureSize()})
                  .clearColor(0, BACKGROUND)
@@ -160,8 +158,7 @@ void MinimapRenderer::Render(const Vector2& mapCenter, const Vector2& playerPos,
     // that also picks the floor and color to match the world assets. Radius
     // comes straight off the replicated Planet component (see its own doc
     // comment) -- no PhysicsSystem/PhysicsRef needed, so the same query works
-    // against `remoteWorld` (multiplayer's mirror world) too, swept alongside
-    // `m_registry` when set.
+    // against every world in the view, mirror world included.
     const auto considerPlanet = [&](flecs::entity entity, const Transform& t, const Planet& planet) {
         const bool isStar = !entity.has<Orbit>();
         const Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
@@ -172,8 +169,7 @@ void MinimapRenderer::Render(const Vector2& mapCenter, const Vector2& playerPos,
         if ((pos - mapCenter).length() - radius > worldRadius) return;
         EmitBillboard(vertices, pos, radius, isStar ? SUN_COLOR : PLANET_COLOR, PRIM_RING);
     };
-    m_registry.each(considerPlanet);
-    if (remoteWorld) remoteWorld->each(considerPlanet);
+    view.Each(considerPlanet);
 
     // Ships: team-colored dots (same "enemy/ship" notion as the HUD arrows:
     // damageable + real team; bullets/shrapnel have neither). Same
@@ -184,8 +180,7 @@ void MinimapRenderer::Render(const Vector2& mapCenter, const Vector2& playerPos,
         if ((pos - mapCenter).length() > worldRadius) return;
         EmitBillboard(vertices, pos, m_params.shipDotPx / ppu, Vector3{TeamColor(team.id)}, PRIM_DISC);
     };
-    m_registry.each(considerShip);
-    if (remoteWorld) remoteWorld->each(considerShip);
+    view.Each(considerShip);
 
     // Player marker: brighter, ringed, drawn on top of the team dots.
     EmitBillboard(vertices, playerPos, m_params.playerDotPx / ppu, PLAYER_COLOR, PRIM_DISC);

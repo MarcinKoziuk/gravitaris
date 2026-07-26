@@ -11,6 +11,7 @@
 #include <gravitaris/game/resource/common/resource-ptr.hpp>
 
 #include <gravitaris/cgame/fwd.hpp>
+#include <gravitaris/cgame/scene-view.hpp>
 
 namespace Gravitaris {
 
@@ -44,8 +45,6 @@ public:
     };
 
 private:
-    flecs::world& m_registry;
-    ModelRenderer2& m_modelRenderer2;
 
     // Kept alive so the arrow glyph stays baked in ModelRenderer2 (loading a
     // Model is what fires the renderer's OnCreate<Model>); overlays aren't
@@ -55,17 +54,19 @@ private:
     Params m_params;
 
 public:
-    IndicatorRenderer(flecs::world& registry, ResourceLoader& resourceLoader, ModelRenderer2& modelRenderer2);
+    // Must be constructed after the renderers that will draw its arrows --
+    // loading the glyph is what bakes it into them (see the constructor).
+    explicit IndicatorRenderer(ResourceLoader& resourceLoader);
 
     Params& GetParams() { return m_params; }
 
-    // Submits an arrow overlay per nearby-but-off-screen enemy. `player` may
-    // be a dead/invalid entity (between death and respawn) -- the update is
-    // then a no-op. `cameraPos`/`zoom` are the camera director's final
-    // values for this frame; `pixelScale` is framebuffer-pixels-per-logical
-    // -pixel (HiDPI).
-    void Update(std::optional<flecs::entity> player, const Magnum::Vector2& cameraPos, float zoom,
-               const Magnum::Vector2& viewportSize, float pixelScale);
+    // Submits an arrow overlay per nearby-but-off-screen enemy, into
+    // `view.overlays`. `player` may be a dead/invalid entity (between death
+    // and respawn) -- the update is then a no-op. `cameraPos`/`zoom` are the
+    // camera director's final values for this frame; `pixelScale` is
+    // framebuffer-pixels-per-logical-pixel (HiDPI).
+    void Update(const SceneView& view, std::optional<flecs::entity> player, const Magnum::Vector2& cameraPos,
+               float zoom, const Magnum::Vector2& viewportSize, float pixelScale);
 };
 
 } // namespace Gravitaris

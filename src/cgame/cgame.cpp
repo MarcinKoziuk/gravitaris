@@ -41,11 +41,11 @@ CGame::CGame(IFilesystem &filesystem)
     , m_mirrorRenderer2(m_mirrorWorld, filesystem, m_resourceLoader)
     , m_snapshotApplier(m_mirrorWorld, m_resourceLoader)
     , m_starfieldRenderer(filesystem)
-    , m_minimapRenderer(m_registry, filesystem)
+    , m_minimapRenderer(filesystem)
     , m_audioSystem(m_registry, m_resourceLoader, m_eventQueue)
     , m_hitFlashSystem(m_registry, m_eventQueue, *m_entitySpawner)
-    , m_cameraDirector(m_registry, Defaults::cameraZoom)
-    , m_indicatorRenderer(m_registry, m_resourceLoader, m_modelRenderer2)
+    , m_cameraDirector(Defaults::cameraZoom)
+    , m_indicatorRenderer(m_resourceLoader)
     , m_clientPrediction(m_registry, m_physicsSystem, *m_entitySpawner, m_eventQueue, m_resourceLoader)
     , m_cosmeticBulletDespawner(m_registry, m_mirrorWorld)
     , m_autopilot(m_registry, m_physicsSystem)
@@ -65,15 +65,23 @@ CGame::CGame(IFilesystem &filesystem)
     m_teamMarkerModel = m_resourceLoader.Load<Model>("models/ui/team-marker"_id);
 }
 
-void CGame::SubmitPlanetOwnershipMarkers(flecs::world& world, ModelRenderer2& renderer)
+SceneView CGame::CurrentSceneView()
 {
+    if (m_netClient) return SceneView{m_registry, &m_mirrorWorld, &m_mirrorRenderer2};
+    return SceneView{m_registry, nullptr, &m_modelRenderer2};
+}
+
+void CGame::SubmitPlanetOwnershipMarkers(const SceneView& view)
+{
+    if (!view.overlays) return;
+
     static constexpr float MARKER_WORLD_SIZE = 22.f;
-    world.each([&](const Planet&, const Transform& t, const Team& team) {
+    view.Each([&](const Planet&, const Transform& t, const Team& team) {
         if (team.id == TeamId::None) return;
         const Magnum::Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
         const Matrix3 transform =
                 Matrix3::translation(pos) * Matrix3::scaling({MARKER_WORLD_SIZE, MARKER_WORLD_SIZE});
-        renderer.SubmitOverlay(m_teamMarkerModel.Id(), transform, Magnum::Vector3{TeamColor(team.id)});
+        view.overlays->SubmitOverlay(m_teamMarkerModel.Id(), transform, Magnum::Vector3{TeamColor(team.id)});
     });
 }
 
@@ -93,8 +101,8 @@ void CGame::RenderMinimap()
     // In MP, everything but the own ship lives in m_mirrorWorld (see
     // m_netClient's field comment) -- sweep it too so remote ships/planets
     // show up exactly like single-player's real registry entities do.
-    m_minimapRenderer.Render(Magnum::Vector2{0.f, 0.f}, playerPos, camera.GetPosition(), viewHalfExtent,
-                             m_netClient ? &m_mirrorWorld : nullptr);
+    const SceneView view = CurrentSceneView();
+    m_minimapRenderer.Render(view, Magnum::Vector2{0.f, 0.f}, playerPos, camera.GetPosition(), viewHalfExtent);
 }
 
 void CGame::ConnectToServer(const std::string& wsUrl)
@@ -277,7 +285,8 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
     // own ship (dead-zone follow, dynamic zoom); m_mirrorWorld is swept
     // alongside it for enemy/planet framing, since every entity but the own
     // ship lives there in this mode (see m_netClient's field comment).
-    m_cameraDirector.Update(GetPlayer(), m_viewportSize, dtSeconds, &m_mirrorWorld, smoothedPlayerPos);
+    const SceneView view = CurrentSceneView();
+    m_cameraDirector.Update(view, GetPlayer(), m_viewportSize, dtSeconds, smoothedPlayerPos);
     Camera& camera = m_cameraDirector.GetCamera();
 
     // Decays HitFlash on both worlds; ApplyRemoteEvents above is what sets
@@ -299,7 +308,9 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
     m_starfieldRenderer.SetCameraPosition(camera.GetPosition());
     m_starfieldRenderer.Render();
 
-    SubmitPlanetOwnershipMarkers(m_mirrorWorld, m_mirrorRenderer2);
+    SubmitPlanetOwnershipMarkers(view);
+    m_indicatorRenderer.Update(view, GetPlayer(), camera.GetPosition(), camera.GetZoom(), m_viewportSize,
+                               m_pixelScale);
     m_mirrorRenderer2.SetZoom(camera.GetZoom());
     m_mirrorRenderer2.SetCameraPosition(camera.GetPosition());
     m_mirrorRenderer2.SetLineWidth(m_lineWidthPixels);
@@ -353,7 +364,8 @@ void CGame::Render(double delta)
         return;
     }
 
-    m_cameraDirector.Update(GetPlayer(), m_viewportSize, dtSeconds);
+    const SceneView view = CurrentSceneView();
+    m_cameraDirector.Update(view, GetPlayer(), m_viewportSize, dtSeconds);
     m_hitFlashSystem.Update(dtSeconds);
 
     const Camera& camera = m_cameraDirector.GetCamera();
@@ -371,8 +383,9 @@ void CGame::Render(double delta)
     // the end of its Render), so only submit them when that renderer actually
     // runs this frame -- otherwise the overlay scratch grows unboundedly.
     if (m_activeRenderer == RendererKind::Baked) {
-        m_indicatorRenderer.Update(GetPlayer(), camera.GetPosition(), camera.GetZoom(), m_viewportSize, m_pixelScale);
-        SubmitPlanetOwnershipMarkers(m_registry, m_modelRenderer2);
+        m_indicatorRenderer.Update(view, GetPlayer(), camera.GetPosition(), camera.GetZoom(), m_viewportSize,
+                                   m_pixelScale);
+        SubmitPlanetOwnershipMarkers(view);
     }
 
     {

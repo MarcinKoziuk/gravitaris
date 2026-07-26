@@ -18,6 +18,7 @@
 #include <gravitaris/game/net/webrtc-transport.hpp>
 
 #include <gravitaris/cgame/camera.hpp>
+#include <gravitaris/cgame/scene-view.hpp>
 #include <gravitaris/cgame/net/cosmetic-bullet-despawner.hpp>
 #include <gravitaris/cgame/net/net-diagnostics.hpp>
 #include <gravitaris/cgame/net/remote-event-applier.hpp>
@@ -79,10 +80,10 @@ protected:
     // round-trip, and the own ship is a real, locally-predicted m_registry
     // entity (Phase 5's ClientPrediction) rendered through the same
     // CameraDirector/ModelRenderer2/MinimapRenderer single-player uses.
-    // Enemy/planet camera framing and the minimap both sweep m_mirrorWorld
-    // alongside m_registry for this (CameraDirector::Update/
-    // MinimapRenderer::Render's remoteWorld parameter), since every entity
-    // but the own ship lives there, not in m_registry, in this mode.
+    // Camera framing, the minimap and the HUD all read both worlds in this
+    // mode, since every entity but the own ship lives in m_mirrorWorld -- one
+    // SceneView (see CurrentSceneView) carries that split, so a consumer
+    // can't be written for single-player only by accident.
     std::unique_ptr<WebRtcTransport> m_netTransport;
     // Sits between m_netTransport and m_netClient (constructed with a
     // reference to *this*, not directly to m_netTransport -- see
@@ -112,11 +113,15 @@ protected:
     // Draws a filled team-colored square at the center of every owned planet
     // (Team != None) in `world`, via `renderer`'s overlay path -- immediate
     // conquest feedback, matching the original's claimed-planet marker (see
-    // docs/gwell/screenshots). Single-player sweeps m_registry via
-    // m_modelRenderer2; net-client sweeps m_mirrorWorld via m_mirrorRenderer2
-    // (planets/ownership live in whichever world the mode simulates them in).
+    // docs/gwell/screenshots). Planets and their ownership live in whichever
+    // world the mode simulates them in; the view knows which.
     ResourcePtr<const Model> m_teamMarkerModel;
-    void SubmitPlanetOwnershipMarkers(flecs::world& world, ModelRenderer2& renderer);
+    void SubmitPlanetOwnershipMarkers(const SceneView& view);
+
+    // The worlds and overlay renderer this frame reads and draws into --
+    // single-player and multiplayer differ in exactly this and nothing else,
+    // as far as the camera and HUD are concerned (see SceneView).
+    [[nodiscard]] SceneView CurrentSceneView();
 
     // Constructed in ConnectToServer once m_netClient exists (RemoteEventApplier
     // needs a live NetClient&) -- always populated by the time ApplyRemoteEvents

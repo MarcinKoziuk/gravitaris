@@ -1650,7 +1650,10 @@ void TestWebRtcSignalingRoundtrip()
     Game game(fs);
     game.Start();
 
-    constexpr std::uint16_t port = 17890;
+    // Not gravitaris-server's own default (17890): a dev server left running
+    // on this machine would otherwise hold the port and fail this test for
+    // reasons that have nothing to do with the code under test.
+    constexpr std::uint16_t port = 17899;
     WebRtcServerTransport serverTransport(port);
     NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
                      serverTransport);

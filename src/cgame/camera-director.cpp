@@ -39,9 +39,8 @@ float PlanetFramingGoal(float surfaceDist, float releaseDist, float framingRange
 
 } // namespace
 
-CameraDirector::CameraDirector(flecs::world& registry, float initialZoom)
-        : m_registry(registry)
-        , m_cameraZoom(initialZoom)
+CameraDirector::CameraDirector(float initialZoom)
+        : m_cameraZoom(initialZoom)
         , m_manualZoom(initialZoom)
 {
     m_camera.SetZoom(initialZoom);
@@ -51,8 +50,8 @@ bool CameraDirector::SameEntity(const flecs::entity& a, const flecs::entity& b)
 {
     // flecs::entity's implicit operator id_t() only exposes the raw 64-bit
     // id -- two different flecs::world instances assign ids independently,
-    // so raw == alone can spuriously match an m_registry entity against an
-    // unrelated m_remoteWorld one that happens to share a numeric id. Compare
+    // so raw == alone can spuriously match a local-world entity against an
+    // unrelated mirror-world one that happens to share a numeric id. Compare
     // the owning world too.
     return a == b && a.world().c_ptr() == b.world().c_ptr();
 }
@@ -87,10 +86,10 @@ std::optional<Magnum::Vector2> CameraDirector::SelectFramedEnemy(const Magnum::V
 
     // Enemy = damageable (a ship, not a bullet) on a real opposing team
     // (excludes neutral planets, which have no Team, and None-team shrapnel).
-    // Swept across m_registry and, in multiplayer, m_remoteWorld too -- every
-    // ship other than the local player's own predicted one lives there (see
-    // m_remoteWorld's field comment), so this one lambda finds enemies
-    // regardless of which world they're actually simulated/mirrored in.
+    // Swept across every world in the view -- in multiplayer that means the
+    // mirror world too, where every ship other than the local player's own
+    // predicted one lives, so this one lambda finds enemies regardless of
+    // which world they're actually simulated in.
     const auto considerShip = [&](flecs::entity entity, const Transform& t, const Team& team, const Damageable&) {
         if (team.id == playerTeam || team.id == TeamId::None) return;
 
@@ -110,8 +109,7 @@ std::optional<Magnum::Vector2> CameraDirector::SelectFramedEnemy(const Magnum::V
             nearest = entity;
         }
     };
-    m_registry.each(considerShip);
-    if (m_remoteWorld) m_remoteWorld->each(considerShip);
+    if (m_view) m_view->Each(considerShip);
 
     // Sticky selection: keep the current target while it's alive and inside
     // the (slightly enlarged, exit-hysteresis) radius, unless the nearest
@@ -144,8 +142,8 @@ std::optional<Magnum::Vector2> CameraDirector::SelectFramedEnemy(const Magnum::V
     return framedPos;
 }
 
-void CameraDirector::Update(std::optional<flecs::entity> player, const Magnum::Vector2& viewportSize,
-                            float dtSeconds, flecs::world* remoteWorld,
+void CameraDirector::Update(const SceneView& view, std::optional<flecs::entity> player,
+                            const Magnum::Vector2& viewportSize, float dtSeconds,
                             std::optional<Magnum::Vector2> positionOverride)
 {
     if (!m_cameraFollow) return;
@@ -153,7 +151,7 @@ void CameraDirector::Update(std::optional<flecs::entity> player, const Magnum::V
 
     // Valid only for the duration of this call (see field comment) --
     // SelectFramedEnemy and the planet sweep below both read it.
-    m_remoteWorld = remoteWorld;
+    m_view = &view;
 
     const Transform* transform = player->try_get<Transform>();
     if (!transform) return;
@@ -182,7 +180,7 @@ void CameraDirector::Update(std::optional<flecs::entity> player, const Magnum::V
     if (m_params.planetFraming) {
         // Radius comes straight off the replicated Planet component now (see
         // its own doc comment) -- no PhysicsSystem/PhysicsRef needed, so this
-        // sweeps m_remoteWorld exactly like the enemy search above.
+        // sweeps the whole view exactly like the enemy search above.
         const auto considerPlanet = [&](flecs::entity, const Transform& t, const Planet& planet) {
             const float radius = planet.radius * static_cast<float>(t.scale.x());
             const Magnum::Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
@@ -192,8 +190,7 @@ void CameraDirector::Update(std::optional<flecs::entity> player, const Magnum::V
                 nearestPlanetRadius = radius;
             }
         };
-        m_registry.each(considerPlanet);
-        if (m_remoteWorld) m_remoteWorld->each(considerPlanet);
+        if (m_view) m_view->Each(considerPlanet);
     }
 
     // Cancel a manual zoom override once the player actively flies the ship

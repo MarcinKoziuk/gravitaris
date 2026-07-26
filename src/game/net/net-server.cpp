@@ -125,15 +125,24 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
                 ++m_nextAutoAssign;
             }
 
-            // Placeholder spawn point/model until Phase 3 grows real player
-            // -slot selection; matches Game::Start()'s single local player.
-            // Offset by however many peers already hold a slot (this one
-            // included, since Connected already inserted it) so players
-            // don't stack on top of each other.
+            // Same site rule a respawn uses (Game::Start does this too, so
+            // single-player and multiplayer both launch a first fighter from
+            // the team's own High Port), but free -- no funding check on the
+            // ship you join with. Only a team with nothing left falls back to
+            // the old placeholder, offset by however many peers already hold
+            // a slot (this one included, since Connected already inserted it)
+            // so players don't stack on top of each other.
             const id_t playerModel = "models/ships/fighter-1"_id;
-            const double spawnOffset = 200. * static_cast<double>(m_peers.size() - 1);
-            const flecs::entity ship =
-                    m_entitySpawner.SpawnPlayer(playerModel, Vector2d{spawnOffset, 0.}, it->second.team);
+            FactionSystem::SpawnPoint spawn;
+            if (const std::optional<FactionSystem::SpawnPoint> site =
+                        m_factionSystem.SpawnPosition(it->second.team)) {
+                spawn = *site;
+            }
+            else {
+                spawn.pos = Vector2d{200. * static_cast<double>(m_peers.size() - 1), 0.};
+            }
+            const flecs::entity ship = m_entitySpawner.SpawnPlayer(playerModel, spawn.pos, it->second.team,
+                                                                   spawn.vel, spawn.rot);
             it->second.ship = ship;
             it->second.welcomed = true;
             it->second.lastQueuedInputTick = currentTick; // dead-man baseline: "joined now", not tick 0
@@ -148,7 +157,8 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             WriteServerWelcome(welcome, writer);
             m_transport.Send(peer, 0, writer.Data(), writer.Size(), true);
             LOG(info) << "net: peer " << peer << " welcomed, ship NetId " << welcome.yourShipNetId
-                      << " at (" << spawnOffset << ", 0), team " << static_cast<int>(it->second.team);
+                      << " at (" << spawn.pos.x() << ", " << spawn.pos.y() << "), team "
+                      << static_cast<int>(it->second.team);
             break;
         }
         case PacketType::ClientInput: {

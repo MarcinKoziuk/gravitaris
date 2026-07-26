@@ -20,20 +20,21 @@ namespace Gravitaris {
 
 using Magnum::Matrix3;
 
-IndicatorRenderer::IndicatorRenderer(flecs::world& registry, ResourceLoader& resourceLoader,
-                                     ModelRenderer2& modelRenderer2)
-        : m_registry(registry)
-        , m_modelRenderer2(modelRenderer2)
+IndicatorRenderer::IndicatorRenderer(ResourceLoader& resourceLoader)
 {
-    // Loading it is what bakes it into m_modelRenderer2 (via OnCreate<Model>);
-    // the ResourcePtr member then keeps it baked.
+    // Loading it is what bakes it into every renderer alive at that point
+    // (each ModelRenderer2 subscribes to OnCreate<Model> in its own
+    // constructor); the ResourcePtr member then keeps it baked. Both the
+    // single-player and the mirror renderer need it, since either can be the
+    // frame's overlay target.
     m_arrowModel = resourceLoader.Load<Model>("models/ui/arrow-1"_id);
 }
 
-void IndicatorRenderer::Update(std::optional<flecs::entity> player, const Magnum::Vector2& cameraPos, float zoom,
+void IndicatorRenderer::Update(const SceneView& view, std::optional<flecs::entity> player,
+                               const Magnum::Vector2& cameraPos, float zoom,
                                const Magnum::Vector2& viewportSize, float pixelScale)
 {
-    if (!m_params.enabled || !m_arrowModel) return;
+    if (!m_params.enabled || !m_arrowModel || !view.overlays) return;
     if (!player) return;
     const Transform* playerTransf = player->try_get<Transform>();
     if (!playerTransf) return;
@@ -61,13 +62,14 @@ void IndicatorRenderer::Update(std::optional<flecs::entity> player, const Magnum
 
     // Enemy = damageable ship on a real opposing team -- same notion
     // CameraDirector's SelectFramedEnemy uses.
-    m_registry.each([&](flecs::entity, const Transform& t, const Team& team, const Damageable&) {
+    const auto considerEnemy = [&](flecs::entity, const Transform& t, const Team& team, const Damageable&) {
         if (team.id == playerTeam || team.id == TeamId::None) return;
         const Magnum::Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
         const float dist = (pos - playerPos).length();
         if (dist > m_params.enemyRange) return;
         enemies.push_back({pos, Magnum::Vector3{TeamColor(team.id)}, dist});
-    });
+    };
+    view.Each(considerEnemy);
 
     // Nearest-first, then cap: with a crowded field the closest threats are the
     // ones worth the screen space.
@@ -123,7 +125,7 @@ void IndicatorRenderer::Update(std::optional<flecs::entity> player, const Magnum
 
         // No alpha in the line shader: on the black backdrop, scaling the color
         // toward black is the fade.
-        m_modelRenderer2.SubmitOverlay(m_arrowModel.Id(), transform, c.color * strength);
+        view.overlays->SubmitOverlay(m_arrowModel.Id(), transform, c.color * strength);
     };
 
     for (const Candidate& c : enemies) submit(c, m_params.enemyRange);

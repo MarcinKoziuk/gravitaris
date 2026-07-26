@@ -9,6 +9,7 @@
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/component/team.hpp>
 
+#include <gravitaris/cgame/scene-view.hpp>
 #include <gravitaris/cgame/camera.hpp>
 
 namespace Gravitaris {
@@ -62,14 +63,9 @@ public:
     };
 
 private:
-    flecs::world& m_registry;
-
-    // Second world swept alongside m_registry for enemy/planet framing, set
-    // for the duration of one Update() call (see its own parameter doc) --
-    // multiplayer's mirror world, where every entity except the local
-    // player's own (real, m_registry-resident) predicted ship lives. Null in
-    // single-player, where m_registry alone already has everything.
-    flecs::world* m_remoteWorld = nullptr;
+    // The frame's worlds, set for the duration of one Update() call (see its
+    // own parameter doc). Enemy and planet framing sweep it.
+    const SceneView* m_view = nullptr;
 
     Camera m_camera;
     bool m_cameraFollow = true;
@@ -107,7 +103,7 @@ private:
     // (FRAMING_SWITCH_FACTOR) -- pure nearest-wins would snap the pan target
     // between ships every few frames.
     //
-    // May come from m_registry or m_remoteWorld -- two *different*
+    // May come from either of the view's worlds -- two *different*
     // flecs::world instances, each assigning ids independently, so a
     // same-world identity check is required wherever this is compared
     // (flecs::entity's operator== only compares the raw 64-bit id via its
@@ -148,13 +144,12 @@ private:
     // Updates m_framedEnemy (sticky nearest hostile, see field comment) and
     // returns the framed enemy's current position, or nullopt when nothing is
     // in range. `outCoverDist` receives the distance to the farthest in-range
-    // enemy (0 if none), for the group zoom-fit. Sweeps m_registry and, if
-    // set, m_remoteWorld.
+    // enemy (0 if none), for the group zoom-fit. Sweeps the whole view.
     std::optional<Magnum::Vector2> SelectFramedEnemy(const Magnum::Vector2& from, TeamId playerTeam,
                                                      float& outCoverDist);
 
 public:
-    CameraDirector(flecs::world& registry, float initialZoom);
+    explicit CameraDirector(float initialZoom);
 
     Camera& GetCamera() { return m_camera; }
     CameraParams& GetCameraParams() { return m_params; }
@@ -172,11 +167,10 @@ public:
     // Per-frame camera director: eases position (with enemy framing) and zoom
     // (speed-driven, enemy-fit, planet-fit, close-combat, or manual override)
     // toward their targets. `player` may be a dead/invalid entity (between
-    // death and respawn) -- the update is then a no-op. `remoteWorld`, when
-    // non-null, is swept alongside `player`'s own world for enemy/planet
-    // framing -- multiplayer's mirror world, so a remote ship/planet the
-    // player never locally simulates can still be framed exactly like
-    // single-player frames a local one.
+    // death and respawn) -- the update is then a no-op. Every world in `view`
+    // is swept for enemy/planet framing, so a remote ship/planet the player
+    // never locally simulates is framed exactly like a single-player local
+    // one.
     //
     // `positionOverride`, when set, replaces `player`'s own Transform::pos as
     // the position fed into dead-zone follow, enemy-framing distance, and
@@ -190,9 +184,8 @@ public:
     // easily mistaken for) network lag in synced enemy/planet data. The
     // caller is expected to pass an already-smoothed position instead (see
     // CGame::m_visualCorrectionOffset).
-    void Update(std::optional<flecs::entity> player, const Magnum::Vector2& viewportSize, float dtSeconds,
-               flecs::world* remoteWorld = nullptr,
-               std::optional<Magnum::Vector2> positionOverride = std::nullopt);
+    void Update(const SceneView& view, std::optional<flecs::entity> player, const Magnum::Vector2& viewportSize,
+               float dtSeconds, std::optional<Magnum::Vector2> positionOverride = std::nullopt);
 };
 
 } // namespace Gravitaris
