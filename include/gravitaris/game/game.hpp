@@ -24,6 +24,7 @@
 #include <gravitaris/game/system/ship/ship-controls-system.hpp>
 #include <gravitaris/game/system/combat/bullet-lifetime-system.hpp>
 #include <gravitaris/game/system/combat/damage-system.hpp>
+#include <gravitaris/game/system/combat/missile-system.hpp>
 #include <gravitaris/game/system/gwell/faction-system.hpp>
 #include <gravitaris/game/system/ship/landing-state-system.hpp>
 #include <gravitaris/game/system/gwell/conquest-system.hpp>
@@ -71,6 +72,8 @@ protected:
     BulletLifetimeSystem m_bulletLifetimeSystem;
 
     DamageSystem m_damageSystem;
+
+    MissileSystem m_missileSystem;
 
     // Declared before LandingStateSystem/ConquestSystem: both take a
     // reference to it in their constructors (member init order).

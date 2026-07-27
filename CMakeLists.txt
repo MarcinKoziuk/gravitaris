@@ -589,6 +589,9 @@ add_executable(GravitarisNG
     src/game/system/combat/bullet-lifetime-system.cpp
     include/gravitaris/game/system/combat/damage-system.hpp
     src/game/system/combat/damage-system.cpp
+    include/gravitaris/game/component/missile.hpp
+    include/gravitaris/game/system/combat/missile-system.hpp
+    src/game/system/combat/missile-system.cpp
     include/gravitaris/game/system/gwell/faction-system.hpp
     src/game/system/gwell/faction-system.cpp
     include/gravitaris/game/component/faction-state.hpp
@@ -870,6 +873,7 @@ add_executable(gravitaris-sim-test
     src/game/system/ship/ship-controls-system.cpp
     src/game/system/combat/bullet-lifetime-system.cpp
     src/game/system/combat/damage-system.cpp
+    src/game/system/combat/missile-system.cpp
     src/game/system/gwell/faction-system.cpp
     src/game/system/ship/landing-state-system.cpp
     src/game/system/gwell/conquest-system.cpp
@@ -970,6 +974,7 @@ if(NOT EMSCRIPTEN)
         src/game/system/ship/ship-controls-system.cpp
         src/game/system/combat/bullet-lifetime-system.cpp
         src/game/system/combat/damage-system.cpp
+        src/game/system/combat/missile-system.cpp
         src/game/system/gwell/faction-system.cpp
         src/game/system/ship/landing-state-system.cpp
         src/game/system/gwell/conquest-system.cpp

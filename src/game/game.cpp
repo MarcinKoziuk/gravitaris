@@ -31,6 +31,7 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue)
         , m_bulletLifetimeSystem(m_registry)
         , m_damageSystem(m_registry, m_physicsSystem, m_eventQueue)
+        , m_missileSystem(m_registry, *m_entitySpawner, m_physicsSystem)
         , m_factionSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_landingStateSystem(m_registry, m_physicsSystem, m_factionSystem)
         , m_conquestSystem(m_registry, *m_entitySpawner, m_eventQueue, m_factionSystem)
@@ -146,6 +147,10 @@ void Game::Update()
                 m_physicsSystem.SetMassMultiplier(*ref, m_shipWeightMultiplier);
             }
         }
+
+        // Guidance steers before the step integrates it, so a missile's
+        // turn lands on the same tick it was decided.
+        m_missileSystem.Update();
 
         m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
         m_physicsSystem.Update();

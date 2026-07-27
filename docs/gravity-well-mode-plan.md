@@ -437,14 +437,26 @@ The Lab's research role (`ResearchSystem`), ahead of the upgrades themselves:
 - Pickup: a same-team ship landed at a lab's own planet, or at that planet's
   High Port, collects it — clearing the flag and restarting research, and
   emitting `GameEventType::UpgradeCollected`.
-- First upgrade: **missiles.** `ResearchSystem::MISSILES_PER_UPGRADE` rounds
-  onto the collector's `ShipLoadout::missileAmmo` (capacity
-  `MISSILE_CAPACITY`), replicated per-ship on the wire (v8) for the sidebar's
-  MISSILES readout — count plus one tick per round. Fired with Space
-  (`ControlFlags::fireMissile`, wire bit 0x20) at `MISSILE_COOLDOWN_TICKS`
-  cadence: `MISSILE_DAMAGE` and `MISSILE_LIFETIME_SECONDS` on an unguided
-  `Bullet` carrying `models/missiles/missile-0`. **Guidance is the next
-  step.** Faster guns and shields become further `ShipLoadout` fields.
+- First upgrade: **missiles.** `ResearchSystem::MISSILES_PER_UPGRADE` (30)
+  rounds onto the collector's `ShipLoadout::missileAmmo` (capacity
+  `MISSILE_CAPACITY`, 60), replicated per-ship on the wire (v8) for the
+  sidebar's MISSILES readout — count plus one tick per round, wrapping. Fired
+  with Space (`ControlFlags::fireMissile`, wire bit 0x20) at
+  `MISSILE_COOLDOWN_TICKS` cadence: `MISSILE_DAMAGE` and
+  `MISSILE_LIFETIME_SECONDS` on a `Bullet` carrying
+  `models/missiles/missile-0`. Faster guns and shields become further
+  `ShipLoadout` fields.
+- Guidance (`MissileSystem`, server-only `Missile` component): locks the
+  nearest hostile *damageable* — ship or structure, so planets are never
+  targets — then turns the missile's velocity toward it at
+  `TURN_RATE` while accelerating to `TOP_SPEED`. Re-acquires only when the
+  lock dies or stops being hostile (a planet claim can flip a structure's
+  owner mid-flight), so it doesn't flip-flop between equidistant targets.
+  Runs inside the physics block *before* `Simulate()`, so the steer lands on
+  the tick it was decided. Because the speed is re-derived each tick rather
+  than accumulated, gravity only bends a missile through the heading it
+  inherits. Player-chosen targeting is the follow-up; that will need the
+  target replicated.
   - Missiles deliberately carry `ownerNetId = 0`: that field only exists to
     omit a peer's own *predicted* bullets from its snapshots, and missile
     fire is not predicted, so the shooter's own missile has to come down the

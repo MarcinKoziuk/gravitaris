@@ -28,6 +28,7 @@
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
+#include <gravitaris/game/component/missile.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/physics.hpp>
@@ -1290,6 +1291,12 @@ void TestResearch()
         });
         return count;
     };
+    // A hostile off to the side of where the missile is pointed (the landed
+    // ship's nose is straight up, away from the planet), so guidance has to
+    // turn it rather than just fly straight into a target already ahead.
+    flecs::entity enemy = spawner.SpawnPlayer("models/ships/fighter-1"_id,
+                                              Vector2d{800. + 500., planetRadius + 250.}, TeamId::Red);
+
     const int ammoBeforeFiring = ship.get<ShipLoadout>().missileAmmo;
     for (int tick = 0; tick < 3; ++tick) {
         InputCommand cmd;
@@ -1301,6 +1308,36 @@ void TestResearch()
     Require(ship.get<ShipLoadout>().missileAmmo == ammoBeforeFiring - 1,
             "research: three ticks of held fire spends exactly one missile");
     Require(liveMissiles() == 1, "research: firing put a missile in the world");
+
+    // Guidance: this exact missile locks the nearest hostile and closes the
+    // angle to it. Tracked by entity, not by "whichever missile is alive" --
+    // an empty InputQueue repeats the last command, so fire has to be
+    // released below or the rack keeps launching replacements.
+    flecs::entity firedMissile;
+    game.GetRegistry().each([&](flecs::entity e, const Missile&) { firedMissile = e; });
+    Require(firedMissile.is_alive(), "research: the fired missile is trackable");
+
+    const auto angleToEnemy = [&] {
+        const Transform& transf = firedMissile.get<Transform>();
+        const Vector2d toTarget = enemy.get<Transform>().pos - transf.pos;
+        const double speed = transf.vel.length();
+        if (toTarget.length() < 1e-6 || speed < 1e-6) return 0.0;
+        return std::acos(std::clamp(Magnum::Math::dot(transf.vel / speed, toTarget.normalized()), -1.0, 1.0));
+    };
+
+    Require(firedMissile.get<Missile>().targetNetId == enemy.get<NetId>().value,
+            "research: the missile locked the nearest hostile ship");
+    const double launchAngle = angleToEnemy();
+    Require(launchAngle > 0.3, "research: the target starts well off the missile's nose (setup check)");
+
+    for (int tick = 0; tick < 60 && firedMissile.is_alive(); ++tick) {
+        InputCommand cmd;
+        cmd.tick = game.GetStep();
+        ship.get_mut<InputQueue>().Push(cmd); // fire released
+        game.Update();
+    }
+    Require(firedMissile.is_alive(), "research: the missile is still flying a second later");
+    Require(angleToEnemy() < launchAngle * 0.5, "research: guidance turned the missile toward its target");
 
     fs.Shutdown();
 }

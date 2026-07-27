@@ -10,6 +10,7 @@
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/missile.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
@@ -144,6 +145,7 @@ void ShipControlsSystem::Update(std::uint64_t step)
             missile.emplace<Bullet>(ShipControlsSystem::MISSILE_LIFETIME_SECONDS,
                                     shooterTeam ? shooterTeam->id : TeamId::Blue, MISSILE_DAMAGE,
                                     /*ownerNetId=*/0u);
+            missile.emplace<Missile>(); // MissileSystem locks a target on its first tick
 
             m_eventQueue.Emit(GameEventType::BulletFired, entity,
                               Magnum::Vector2{static_cast<float>(muzzlePos.x()),

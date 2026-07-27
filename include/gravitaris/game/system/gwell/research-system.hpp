@@ -22,10 +22,11 @@ public:
     static constexpr double RESEARCH_SECONDS = 30.0;
 
     // What collecting one upgrade grants, and the rack's size -- the sidebar
-    // draws one tick per stored missile, so the cap is also how wide that row
-    // has to be. Placeholder magnitudes pending playtesting.
-    static constexpr int MISSILES_PER_UPGRADE = 3;
-    static constexpr int MISSILE_CAPACITY = 8;
+    // draws one tick per stored missile, so the cap is also how many of those
+    // have to fit in the sidebar's width. Placeholder magnitudes pending
+    // playtesting.
+    static constexpr int MISSILES_PER_UPGRADE = 30;
+    static constexpr int MISSILE_CAPACITY = 60;
 
     // Materials are not spent yet (research is unfunded for now); when it
     // becomes a cost, it comes out of the accompanying Base's finished

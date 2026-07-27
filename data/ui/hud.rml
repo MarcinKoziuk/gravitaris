@@ -148,21 +148,22 @@
 				background-color: #f33c;
 			}
 
-			/* One tick per stored missile, laid out where the hull's bar sits
-			   in the stat above -- same height, so the two rows line up. The
+			/* One tick per stored missile, starting where the hull's bar sits
+			   in the stat above. A full rack is wider than the sidebar, so the
+			   ticks wrap -- hence a min-height rather than a fixed one. The
 			   ticks themselves are written from code (UI::SetMissileAmmo). */
 			div#missile_ticks
 			{
-				height: 18dp;
+				min-height: 18dp;
 				margin-top: 5dp;
 			}
 
 			span.missile_tick
 			{
 				display: inline-block;
-				width: 3dp;
-				height: 100%;
-				margin-right: 5dp;
+				width: 2dp;
+				height: 18dp;
+				margin-right: 3dp;
 				background-color: #0cfc;
 			}
 
