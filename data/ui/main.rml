@@ -1,6 +1,6 @@
 <rml>
 	<head>
-		<title>GRAVITARIS</title>
+		<title>Gravitaris</title>
 		<link type="text/template" href="vector-window.rml" />
 		<style>
 			/* Everything here is one step up from the shared theme's sizes --
@@ -9,7 +9,7 @@
 			body
 			{
 				width: 520dp;
-				height: 380dp;
+				height: 200dp;
 				margin: auto;
 
 				font-size: 20dp;
@@ -22,15 +22,31 @@
 			{
 				font-size: 20dp;
 			}
+			/* Out of the flow, in the window's own bottom-right corner -- so
+			   the copy above it doesn't have to leave room for it. Filled
+			   rather than outlined: it's the confirm action, and the side
+			   buttons next to it are the only other things competing for the
+			   eye. */
+			button#dismiss_intro
+			{
+				position: absolute;
+				right: 14dp;
+				bottom: 12dp;
+				margin: 0;
+
+				background-color: #0cf;
+				color: #012;
+				font-effect: none;
+			}
+			button#dismiss_intro:hover
+			{
+				background-color: #bff;
+				border-color: #fff;
+				color: #012;
+			}
 			p
 			{
 				margin-bottom: 12dp;
-			}
-			p#byline
-			{
-				color: #cff;
-				font-weight: bold;
-				font-effect: glow(2dp #0cf6);
 			}
 			div#team_row
 			{
@@ -39,8 +55,16 @@
 			div#team_row p
 			{
 				margin-bottom: 6dp;
-				font-size: 16dp;
+				font-size: 14dp;
+				letter-spacing: 2dp;
 				color: #7cc;
+			}
+			/* Matched pair: without a floor the two boxes differ in width just
+			   because their labels do, which reads as two unrelated buttons
+			   rather than one either/or choice. */
+			button#team_blue, button#team_red
+			{
+				min-width: 120dp;
 			}
 			/* Team buttons carry their side's colour on the border so the
 			   choice is readable without reading the label; the selected one
@@ -72,16 +96,14 @@
 		</style>
 	</head>
 	<body template="vector-window">
-		<p>This is a game in development</p>
-		<p id="byline">by Marcin Koziuk</p>
-		<p>Thanks for testing!</p>
+		<p>This is a game in development. Thanks for testing!</p>
 
 		<div id="team_row">
-			<p>Pick your side</p>
+			<p>PICK YOUR SIDE</p>
 			<button id="team_blue">BLUE</button>
 			<button id="team_red">RED</button>
 		</div>
 
-		<button id="dismiss_intro">OK</button>
+		<button id="dismiss_intro">Let's fly!</button>
 	</body>
 </rml>

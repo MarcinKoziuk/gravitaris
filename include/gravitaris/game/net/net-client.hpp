@@ -32,9 +32,8 @@ class NetClient {
     std::uint32_t m_tickRate = 60;
     TeamId m_yourTeam = TeamId::Blue;
     // Sent with ClientHello; TeamId::None (the default) means "no
-    // preference, auto-assign" -- see ClientHelloPacket::requestedTeam.
-    // No round-setup UI exists yet to ever call SetRequestedTeam with
-    // anything else.
+    // preference, auto-assign" -- see ClientHelloPacket::requestedTeam. The
+    // client's intro dialog fills this in via CGame::ConnectToServer.
     TeamId m_requestedTeam = TeamId::None;
 
     // See GetInputLeadTicks's own doc comment (declared further down, in the

@@ -14,7 +14,7 @@ body
 
 body.window
 {
-    padding-top: 34dp;
+    padding-top: 41dp;
     padding-bottom: 14dp;
 
     min-width: 180dp;
@@ -37,7 +37,7 @@ div#title_bar
     left: 0;
     right: 0;
 
-    height: 26dp;
+    height: 33dp;
     text-align: left;
 
     background-color: #0cf2;       /* faint cyan wash */

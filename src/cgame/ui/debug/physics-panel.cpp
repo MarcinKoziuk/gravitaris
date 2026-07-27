@@ -81,8 +81,8 @@ void DrawPhysicsPanel(CGame& game)
            "Every damaging impact is logged with its deltaV and the whole formula, so the log says "
            "which speeds actually need covering.");
     slider("Tipped threshold (speed)", landing.tippedThreshold, 0.f, 2000.f, "%.0f",
-           "Impact speed a tipped-over landing takes for free. Normally well below the upright one -- "
-           "watch the log for whether your touchdowns are being counted as tipped at all.");
+           "Impact speed a tipped-over landing takes for free -- watch the log for whether your "
+           "touchdowns are being counted as tipped at all.");
     slider("Damage per speed", landing.damagePerDeltaV, 0.f, 3.f, "%.2f",
            "Hull points lost per unit of impact speed over the threshold.");
 
