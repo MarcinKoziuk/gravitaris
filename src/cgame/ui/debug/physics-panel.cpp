@@ -31,9 +31,9 @@ void DrawPhysicsPanel(CGame& game)
     ImGui::SetItemTooltip("Scales the player ship's mass off its resource-authored base. Heavier "
                           "= more sluggish under thrust and less speed change per impact; gravity's "
                           "own pull on the ship is unaffected (real physics: falling doesn't care "
-                          "about your own mass). Default 0.667.");
+                          "about your own mass).");
     if (ImGui::Button("Reset##weight")) {
-        game.SetShipWeightMultiplier(0.667f);
+        game.SetShipWeightMultiplier(CGame::Defaults::shipWeight);
     }
 
     ImGui::SeparatorText("Ship-vs-ship contact (networking-plan Phase 9)");

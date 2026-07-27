@@ -1,4 +1,6 @@
-scale = 1.0
+# Half the authored drawing -- kept here rather than baked into the svg so the
+# art stays on the grid it was drawn on.
+scale = 0.5
 
 [physics]
 mass = 0.02

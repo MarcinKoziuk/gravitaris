@@ -59,11 +59,7 @@ CGame::CGame(IFilesystem &filesystem)
     m_modelRenderer2.SetReferenceZoom(Defaults::cameraZoom);
     m_mirrorRenderer2.SetReferenceZoom(Defaults::cameraZoom);
 
-    // This game's tuned default (Game's own default is 1 = unmodified): a
-    // lighter ship reads better against the solar system's gravity wells.
-    // Headless Games (sim-test) never call this, so their determinism is
-    // unaffected by this specific value.
-    SetShipWeightMultiplier(0.667f);
+    SetShipWeightMultiplier(Defaults::shipWeight);
 
     // Loaded here (after both renderers' OnCreate<Model> observers exist, in
     // their own constructors above) so both m_modelRenderer2 and

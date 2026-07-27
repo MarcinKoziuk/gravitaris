@@ -196,6 +196,12 @@ public:
         // Halved along with CameraParams' zoom range when the celestial bodies
         // doubled in size, so a planet frames the same as it used to.
         static constexpr float cameraZoom = 1.f;
+        // Player-ship mass scale off the resource-authored base (Game's own
+        // default is 1 = unmodified): a lighter ship reads better against the
+        // solar system's gravity wells, and lifting off a planet by hand
+        // needs it. Headless Games (sim-test) never apply this, so their
+        // determinism is unaffected by the value.
+        static constexpr float shipWeight = 0.534f;
     };
 
     static constexpr float MIN_LINE_WIDTH = 0.5f;
