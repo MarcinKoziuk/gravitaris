@@ -45,19 +45,25 @@ private:
     TeamId m_introTeam = TeamId::Blue;
     Rml::Element* m_teamBlueButton = nullptr;
     Rml::Element* m_teamRedButton = nullptr;
-    Rml::Element* m_teamRow = nullptr;
 
     Rml::Element* m_minimap = nullptr;
+    Rml::Element* m_recenterButton = nullptr;
+    bool m_recenterVisible = true;
 
     Rml::Element* m_hudStatus = nullptr;
     std::string m_hudStatusText;
+
+    Rml::Element* m_hudPing = nullptr;
+    std::string m_hudPingText;
 
     Rml::Element* m_sidebar = nullptr;
     Rml::Element* m_healthFill = nullptr;
     Rml::Element* m_healthValue = nullptr;
     float m_hullFraction = -1.f;
 
-    bool m_teamChoiceEnabled = true;
+    Rml::Element* m_missileTicks = nullptr;
+    Rml::Element* m_missileValue = nullptr;
+    int m_missileAmmo = -2; // no valid count, not even "no subject" (-1)
 
     int m_width = 1280;
     int m_height = 720;
@@ -90,30 +96,36 @@ public:
     bool ProcessMouseMove(int x, int y);
     bool ProcessMouseButton(int rmlButtonIndex, bool down);
 
-    // Sidebar readout (build identity, ping). The caller formats the text;
-    // this layer holds no game or net state. Repeated identical text is
-    // ignored, so calling it every frame is fine.
-    void SetHudStatusText(const std::string& text);
+    // Sidebar footer: build identity on one line, ping on the next (empty
+    // when there's no server). The caller formats both; this layer holds no
+    // game or net state. Repeated identical text is ignored, so calling it
+    // every frame is fine.
+    void SetHudStatus(const std::string& build, const std::string& ping);
 
     // Hull bar fill, 0..1; negative means "no subject" and blanks the bar.
     // Unchanged values are ignored, so calling it every frame is fine.
     void SetHullFraction(float fraction);
 
+    // Missiles on the rack: the count as a number, plus one tick per round
+    // with the rest of `capacity` drawn empty. Negative blanks the row.
+    // Unchanged values are ignored, so calling it every frame is fine.
+    void SetMissileAmmo(int ammo, int capacity);
+
     // Fired when the intro dialog's OK is clicked, with the side the player
     // picked. Set before Init(), which is what shows the dialog.
     void SetIntroConfirmCallback(std::function<void(TeamId)> callback);
-
-    // Hides the intro dialog's team picker (multiplayer: the server assigns
-    // sides, so there's nothing to choose). Call before Init().
-    void SetTeamChoiceEnabled(bool enabled) { m_teamChoiceEnabled = enabled; }
 
     // Fired while the minimap panel is pressed or dragged, with the cursor as
     // -1..1 across the map in each axis, +Y up. The UI knows the panel's
     // pixels; mapping that to the world is the caller's job.
     void SetMinimapClickCallback(std::function<void(float, float)> callback);
 
-    // Fired by the sidebar's recenter button.
+    // Fired by the recenter button.
     void SetRecenterCallback(std::function<void()> callback);
+
+    // The recenter button only earns its place while the view is off the
+    // player's ship. Repeated identical values are ignored.
+    void SetRecenterVisible(bool visible);
 
     // Laid-out width of the gameplay sidebar in context pixels, which the
     // caller insets the game viewport by so the scene never renders under it.

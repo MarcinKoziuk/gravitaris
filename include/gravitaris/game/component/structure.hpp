@@ -32,6 +32,12 @@ struct Structure {
     StructureType type = StructureType::Base;
     float rawMaterials = 0.f;
     float finishedMaterials = 0.f;
+    // Only written on a Lab: its faction's pooled research state (owned by
+    // FactionState, which is server-only), copied here every tick by
+    // ResearchSystem so it rides the existing Structure replication -- the
+    // client's lab glow is the only reader.
+    float researchProgress = 0.f;
+    bool upgradeReady = false;
 };
 
 // Marks a structure as an auto-firing defense installation (Base, High

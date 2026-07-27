@@ -12,6 +12,7 @@
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/input/input-command.hpp>
@@ -22,7 +23,7 @@ namespace Gravitaris {
 
 // Bump on any wire-layout change; ReadSnapshot rejects mismatches outright
 // (no cross-version compatibility until there's a reason to have it).
-static constexpr std::uint8_t SNAPSHOT_VERSION = 6; // v6: +attachParentNetId/attachRadius/attachTheta/attachAngularSpeed
+static constexpr std::uint8_t SNAPSHOT_VERSION = 8; // v8: +missileAmmo
 
 // Sanity caps so a garbage buffer can't make ReadSnapshot allocate wildly.
 static constexpr std::uint32_t MAX_ENTITIES = 4096;
@@ -66,6 +67,9 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
         if (const Damageable* damageable = entity.try_get<Damageable>()) {
             state.hp = damageable->hp;
         }
+        if (const ShipLoadout* loadout = entity.try_get<ShipLoadout>()) {
+            state.missileAmmo = loadout->missileAmmo;
+        }
         if (const GravitySource* source = entity.try_get<GravitySource>()) {
             state.gravityMass = static_cast<float>(source->mass);
             state.gravityMultiplier = source->multiplier;
@@ -84,6 +88,8 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             state.structureType = structure->type;
             state.rawMaterials = structure->rawMaterials;
             state.finishedMaterials = structure->finishedMaterials;
+            state.researchProgress = structure->researchProgress;
+            state.upgradeReady = structure->upgradeReady;
         }
         if (const PlanetSurfaceAttachment* attach = entity.try_get<PlanetSurfaceAttachment>()) {
             state.attachParentNetId = attach->planetNetId;
@@ -129,6 +135,7 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteF32(e.angVel);
         out.WriteU8(e.controlsFlags);
         out.WriteF32(e.hp);
+        out.WriteU8(e.missileAmmo);
         out.WriteF32(e.gravityMass);
         out.WriteF32(e.gravityMultiplier);
         out.WriteU8(e.isStar ? 1 : 0);
@@ -140,6 +147,8 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteU8(static_cast<std::uint8_t>(e.structureType));
         out.WriteF32(e.rawMaterials);
         out.WriteF32(e.finishedMaterials);
+        out.WriteF32(e.researchProgress);
+        out.WriteU8(e.upgradeReady ? 1 : 0);
         out.WriteU32(e.attachParentNetId);
         out.WriteF32(e.attachRadius);
         out.WriteF32(e.attachTheta);
@@ -203,6 +212,7 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.angVel = in.ReadF32();
         e.controlsFlags = in.ReadU8();
         e.hp = in.ReadF32();
+        e.missileAmmo = in.ReadU8();
         e.gravityMass = in.ReadF32();
         e.gravityMultiplier = in.ReadF32();
         e.isStar = in.ReadU8() != 0;
@@ -214,6 +224,8 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.structureType = static_cast<StructureType>(in.ReadU8());
         e.rawMaterials = in.ReadF32();
         e.finishedMaterials = in.ReadF32();
+        e.researchProgress = in.ReadF32();
+        e.upgradeReady = in.ReadU8() != 0;
         e.attachParentNetId = in.ReadU32();
         e.attachRadius = in.ReadF32();
         e.attachTheta = in.ReadF32();

@@ -19,6 +19,7 @@
 #include <gravitaris/game/system/combat/structure-defense-system.hpp>
 #include <gravitaris/game/system/gwell/freighter-system.hpp>
 #include <gravitaris/game/system/gwell/economy-system.hpp>
+#include <gravitaris/game/system/gwell/research-system.hpp>
 #include <gravitaris/game/system/ship/input-system.hpp>
 #include <gravitaris/game/system/ship/ship-controls-system.hpp>
 #include <gravitaris/game/system/combat/bullet-lifetime-system.hpp>
@@ -60,6 +61,8 @@ protected:
     FreighterSystem m_freighterSystem;
 
     EconomySystem m_economySystem;
+
+    ResearchSystem m_researchSystem;
 
     InputSystem m_inputSystem;
 

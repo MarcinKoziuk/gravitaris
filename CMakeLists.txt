@@ -604,6 +604,9 @@ add_executable(GravitarisNG
     src/game/system/gwell/freighter-system.cpp
     include/gravitaris/game/system/gwell/economy-system.hpp
     src/game/system/gwell/economy-system.cpp
+    include/gravitaris/game/system/gwell/research-system.hpp
+    src/game/system/gwell/research-system.cpp
+    include/gravitaris/game/component/ship-loadout.hpp
     include/gravitaris/game/component/structure.hpp
     include/gravitaris/game/component/planet-attachment.hpp
     include/gravitaris/game/component/freighter.hpp
@@ -625,6 +628,7 @@ add_executable(GravitarisNG
     include/gravitaris/cgame/audio/backend/miniaudio-backend.hpp
     src/cgame/audio/backend/miniaudio-backend.cpp
     extlibs/miniaudio/miniaudio_impl.c
+    include/gravitaris/cgame/fx/lab-glow.hpp
     include/gravitaris/cgame/fx/hit-flash-system.hpp
     src/cgame/fx/hit-flash-system.cpp
     include/gravitaris/cgame/resource/audio-clip.hpp
@@ -873,6 +877,7 @@ add_executable(gravitaris-sim-test
     src/game/system/combat/structure-defense-system.cpp
     src/game/system/gwell/freighter-system.cpp
     src/game/system/gwell/economy-system.cpp
+    src/game/system/gwell/research-system.cpp
     src/game/system/combat/death-system.cpp
     src/game/system/core/physics-system.cpp
     src/game/system/core/orbit-system.cpp
@@ -972,6 +977,7 @@ if(NOT EMSCRIPTEN)
         src/game/system/combat/structure-defense-system.cpp
         src/game/system/gwell/freighter-system.cpp
         src/game/system/gwell/economy-system.cpp
+        src/game/system/gwell/research-system.cpp
         src/game/system/combat/death-system.cpp
         src/game/system/core/physics-system.cpp
         src/game/system/core/orbit-system.cpp

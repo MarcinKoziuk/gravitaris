@@ -169,6 +169,8 @@ protected:
     // Render()). Clamped there so a stall doesn't snap the camera.
     std::chrono::steady_clock::time_point m_lastCameraTime{};
     bool m_cameraTimeValid = false;
+    // Same dt, accumulated: what animated colors run off (ModelRenderer2::SetTime).
+    float m_renderTimeSeconds = 0.f;
 
 protected:
     // framebuffer-pixels per logical-pixel; needed here (not just forwarded to
@@ -282,6 +284,10 @@ public:
     // it follows a spectated unit), 0..1. Empty when there's nothing to show.
     [[nodiscard]] std::optional<float> GetHullFraction();
 
+    // Missiles that unit has on the rack. Empty when it has no rack at all
+    // (nothing to show, as opposed to an empty one).
+    [[nodiscard]] std::optional<int> GetMissileAmmo();
+
     void ToggleCameraFollow() { m_cameraDirector.ToggleCameraFollow(); }
 
     // Spectating: the camera (and everything framed off it) follows another
@@ -376,7 +382,11 @@ public:
     // "ws://host:port"). Call instead of Game::Start() -- the local sim
     // never runs in this mode (see IsNetClient()), so starting it first
     // would spawn an uncontrolled, unreplicated local player ship.
-    void ConnectToServer(const std::string& wsUrl);
+    // `requestedTeam` rides along in ClientHello, which is built the instant
+    // the transport reports Connected -- so the side has to be known by the
+    // time this is called, not set afterwards. TeamId::None asks the server to
+    // auto-assign.
+    void ConnectToServer(const std::string& wsUrl, TeamId requestedTeam = TeamId::None);
 
     // True once ConnectToServer has been called. While true, the caller
     // (GravitarisApplication) must not call Game::Update()/CGame's normal

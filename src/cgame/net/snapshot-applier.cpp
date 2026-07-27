@@ -6,6 +6,7 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/structure.hpp>
@@ -85,10 +86,13 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
                 // here) -- bullets can carry Team too (friendly-fire check)
                 // but never Damageable, so gating like this matches that.
                 entity.emplace<Damageable>(state.hp, 100.f);
+                entity.emplace<ShipLoadout>(ShipLoadout{state.missileAmmo});
             }
             if (state.type == NetEntityType::Structure) {
                 entity.emplace<Damageable>(state.hp, 100.f);
-                entity.emplace<Structure>(Structure{state.structureType, state.rawMaterials, state.finishedMaterials});
+                entity.emplace<Structure>(Structure{state.structureType, state.rawMaterials,
+                                                    state.finishedMaterials, state.researchProgress,
+                                                    state.upgradeReady});
             }
             if (state.type == NetEntityType::Planet) {
                 entity.emplace<GravitySource>(GravitySource{state.gravityMass, state.gravityMultiplier});
@@ -178,9 +182,14 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
         if (Damageable* damageable = entity.try_get_mut<Damageable>()) {
             damageable->hp = state.hp;
         }
+        if (ShipLoadout* loadout = entity.try_get_mut<ShipLoadout>()) {
+            loadout->missileAmmo = state.missileAmmo;
+        }
         if (Structure* structure = entity.try_get_mut<Structure>()) {
             structure->rawMaterials = state.rawMaterials;
             structure->finishedMaterials = state.finishedMaterials;
+            structure->researchProgress = state.researchProgress;
+            structure->upgradeReady = state.upgradeReady;
         }
         if (GravitySource* source = entity.try_get_mut<GravitySource>()) {
             source->mass = state.gravityMass;

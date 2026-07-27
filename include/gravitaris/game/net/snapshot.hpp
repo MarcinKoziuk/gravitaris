@@ -78,9 +78,16 @@ struct EntityState {
     float orbitTheta = 0.f;
     float orbitAngularSpeed = 0.f;
     // Only meaningful for NetEntityType::Structure.
+    // Only meaningful for NetEntityType::Ship: what the sidebar's ammo
+    // readout shows for whichever unit the camera is on.
+    std::uint8_t missileAmmo = 0;
     StructureType structureType = StructureType::Base;
     float rawMaterials = 0.f;
     float finishedMaterials = 0.f;
+    // Only written on a Lab (see Structure's own fields): what the client's
+    // lab glow animates off.
+    float researchProgress = 0.f;
+    bool upgradeReady = false;
 
     // Non-zero when this entity rides a fixed-radius offset off a (possibly
     // moving) parent planet -- PlanetSurfaceAttachment (attachAngularSpeed

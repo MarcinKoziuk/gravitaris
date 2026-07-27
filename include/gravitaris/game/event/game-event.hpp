@@ -24,6 +24,7 @@ enum class GameEventType : std::uint8_t {
     StructureBuilt, // source = the new structure, pos = its position, param = StructureType
     FactionDefeated, // source = none, pos = unused, param = the defeated TeamId
     RoundOver,       // source = none, pos = unused, param = the winning TeamId
+    UpgradeCollected, // source = the collecting ship, pos = its position, param = its TeamId
 };
 
 struct GameEvent {

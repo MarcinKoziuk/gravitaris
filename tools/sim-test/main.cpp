@@ -23,6 +23,10 @@
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/faction-state.hpp>
+#include <gravitaris/game/system/ship/ship-controls-system.hpp>
+#include <gravitaris/game/component/input-queue.hpp>
+#include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/orbit.hpp>
@@ -36,6 +40,7 @@
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/scenario/starting-complex.hpp>
+#include <gravitaris/game/system/gwell/research-system.hpp>
 #include <gravitaris/game/scenario/structure-layout.hpp>
 #include <gravitaris/game/net/byte-stream.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
@@ -1193,6 +1198,113 @@ void TestSelfDevelopment()
     fs.Shutdown();
 }
 
+// ResearchSystem: a faction's labs pool their progress (two finish sooner
+// than one), the bar's state is mirrored onto each lab for replication, and a
+// same-team ship landed at a lab's planet collects the finished upgrade,
+// restarting research.
+void TestResearch()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    flecs::entity planet =
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 1e-9, 800., 1.0, 0.0);
+    planet.set<Team>(Team{TeamId::Blue});
+    flecs::entity lab = spawner.SpawnStructure(StructureType::Lab, "models/structures/lab"_id, planet,
+                                               TeamId::Blue);
+
+    const auto research = [&] {
+        FactionState found{};
+        game.GetRegistry().each([&](const FactionState& fs2) {
+            if (fs2.team == TeamId::Blue) found = fs2;
+        });
+        return found;
+    };
+
+    // One lab: RESEARCH_SECONDS' worth of ticks, no sooner.
+    const int soloTicks = static_cast<int>(ResearchSystem::RESEARCH_SECONDS / Game::PHYSICS_DELTA);
+    for (int tick = 0; tick < soloTicks - 1; ++tick) game.Update();
+    Require(!research().upgradeReady, "research: one lab is not done before RESEARCH_SECONDS");
+    Require(lab.get<Structure>().researchProgress > 0.9f,
+            "research: the lab mirrors its faction's progress for replication");
+    for (int tick = 0; tick < 5 && !research().upgradeReady; ++tick) game.Update();
+    Require(research().upgradeReady, "research: one lab finishes after RESEARCH_SECONDS");
+    Require(lab.get<Structure>().upgradeReady, "research: the ready flag reaches the lab too");
+
+    // Nobody landed, so it just waits.
+    for (int tick = 0; tick < 60; ++tick) game.Update();
+    Require(research().upgradeReady, "research: a finished upgrade waits until someone collects it");
+
+    // Pickup: same setup TestLandingAndClaiming uses to get a ship down
+    // gently, on the planet the lab sits on.
+    const float planetRadius = planet.get<Planet>().radius
+            * static_cast<float>(planet.get<Transform>().scale.x());
+    flecs::entity ship = spawner.SpawnPlayer("models/ships/fighter-1"_id,
+                                             Vector2d{800., planetRadius + 15.}, TeamId::Blue);
+    cpBody* shipBody = game.GetPhysicsSystem().GetBody(ship.get<PhysicsRef>()).cp.body.get();
+    cpBodySetAngle(shipBody, CP_PI);
+    cpBodySetVelocity(shipBody, cpv(0., -8.));
+
+    std::uint32_t collectedSeq = 0;
+    for (int tick = 0; tick < 900 && ship.is_alive() && !collectedSeq; ++tick) {
+        game.Update();
+        game.GetEventQueue().ConsumeSince(0, [&](const GameEvent& event) {
+            if (event.type == GameEventType::UpgradeCollected) collectedSeq = event.seq;
+        });
+    }
+    Require(ship.is_alive(), "research: the collecting ship survives touchdown");
+    Require(collectedSeq != 0, "research: landing at the lab's planet emits UpgradeCollected");
+    Require(!research().upgradeReady, "research: collecting clears the ready flag");
+
+    // Second lab: the pooled bar now fills twice as fast, and the still
+    // -landed ship collects again.
+    spawner.SpawnStructure(StructureType::Lab, "models/structures/lab"_id, planet, TeamId::Blue);
+    int secondCycleTicks = 0;
+    std::uint32_t nextSeq = 0;
+    for (int tick = 0; tick < soloTicks && !nextSeq; ++tick) {
+        game.Update();
+        ++secondCycleTicks;
+        game.GetEventQueue().ConsumeSince(collectedSeq, [&](const GameEvent& event) {
+            if (event.type == GameEventType::UpgradeCollected) nextSeq = event.seq;
+        });
+    }
+    Require(nextSeq != 0, "research: a second upgrade comes round after the first is collected");
+    Require(secondCycleTicks < soloTicks * 3 / 4, "research: two labs research faster than one");
+
+    // Both pickups landed on the same ship: missiles, the first upgrade.
+    const int expectedAmmo = std::min(2 * ResearchSystem::MISSILES_PER_UPGRADE,
+                                      ResearchSystem::MISSILE_CAPACITY);
+    Require(ship.get<ShipLoadout>().missileAmmo == expectedAmmo,
+            "research: collecting an upgrade loads the ship's missile rack");
+
+    // Firing spends one round per MISSILE_COOLDOWN_TICKS, not one per tick.
+    const auto liveMissiles = [&] {
+        int count = 0;
+        game.GetRegistry().each([&](const Bullet& b) {
+            if (b.damage == ShipControlsSystem::MISSILE_DAMAGE) ++count;
+        });
+        return count;
+    };
+    const int ammoBeforeFiring = ship.get<ShipLoadout>().missileAmmo;
+    for (int tick = 0; tick < 3; ++tick) {
+        InputCommand cmd;
+        cmd.tick = game.GetStep();
+        cmd.flags.fireMissile = true;
+        ship.get_mut<InputQueue>().Push(cmd);
+        game.Update();
+    }
+    Require(ship.get<ShipLoadout>().missileAmmo == ammoBeforeFiring - 1,
+            "research: three ticks of held fire spends exactly one missile");
+    Require(liveMissiles() == 1, "research: firing put a missile in the world");
+
+    fs.Shutdown();
+}
+
 // Phase 4's defeat/win rules (FactionSystem): a faction with zero colonies
 // AND zero freighters is defeated; a round is won once every claimed planet
 // belongs to one team. Both are sticky, edge-triggered GameEvents.
@@ -1768,6 +1880,7 @@ int main()
     TestStructures();
     TestFreighterEconomy();
     TestSelfDevelopment();
+    TestResearch();
     TestFactionDefeatAndWin();
     TestOwnBulletSuppression();
     TestWebRtcRoundtrip();

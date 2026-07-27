@@ -23,7 +23,8 @@ inline std::uint8_t PackControlFlags(const ControlFlags& f)
         (f.rotateLeft    ? 0x02 : 0) |
         (f.rotateRight   ? 0x04 : 0) |
         (f.firePrimary   ? 0x08 : 0) |
-        (f.fireSecondary ? 0x10 : 0));
+        (f.fireSecondary ? 0x10 : 0) |
+        (f.fireMissile   ? 0x20 : 0));
 }
 
 inline ControlFlags UnpackControlFlags(std::uint8_t b)
@@ -34,6 +35,7 @@ inline ControlFlags UnpackControlFlags(std::uint8_t b)
     f.rotateRight   = (b & 0x04) != 0;
     f.firePrimary   = (b & 0x08) != 0;
     f.fireSecondary = (b & 0x10) != 0;
+    f.fireMissile   = (b & 0x20) != 0;
     return f;
 }
 

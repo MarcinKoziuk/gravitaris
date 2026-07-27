@@ -14,6 +14,7 @@
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
@@ -93,6 +94,17 @@ std::optional<float> CGame::GetHullFraction()
     return std::clamp(damageable->hp / damageable->maxHp, 0.f, 1.f);
 }
 
+std::optional<int> CGame::GetMissileAmmo()
+{
+    const std::optional<flecs::entity> subject = CameraSubject();
+    if (!subject) return std::nullopt;
+
+    const ShipLoadout* loadout = subject->try_get<ShipLoadout>();
+    if (!loadout) return std::nullopt; // a structure/planet being spectated has no rack
+
+    return static_cast<int>(loadout->missileAmmo);
+}
+
 void CGame::CycleSpectate(int direction)
 {
     // NetId order, so the roster reads the same however flecs happens to
@@ -158,11 +170,12 @@ void CGame::LookAtMapPoint(const Magnum::Vector2& normalized)
     m_cameraDirector.LookAt(MinimapCenter() + normalized * worldRadius);
 }
 
-void CGame::ConnectToServer(const std::string& wsUrl)
+void CGame::ConnectToServer(const std::string& wsUrl, TeamId requestedTeam)
 {
     m_netTransport = std::make_unique<WebRtcTransport>(WebRtcTransport::Role::Offerer);
     m_simulatedTransport = std::make_unique<SimulatedNetTransport>(*m_netTransport);
     m_netClient = std::make_unique<NetClient>(*m_simulatedTransport, "gravitaris-client");
+    m_netClient->SetRequestedTeam(requestedTeam);
     m_ownShipSync.emplace(m_clientPrediction, *m_netClient, m_predictedTickClock);
     m_remoteEventApplier.emplace(*m_netClient, m_eventQueue, m_cosmeticBulletDespawner);
     m_netTransport->ConnectSignaling(wsUrl);
@@ -217,6 +230,22 @@ void CGame::TickNetClient(const ControlFlags& flags)
     if (const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot()) {
         m_clientPrediction.Step(tick, flags, snapshot->entities, snapshot->tick, m_netClient->GetYourShipNetId());
         m_bulletLifetimeSystem.Update(PHYSICS_DELTA);
+
+        // The own ship is predicted locally, so it never passes through
+        // SnapshotApplier -- its ammo has to be copied off the wire here or
+        // the sidebar would report the count it spawned with forever.
+        // Missile fire itself is not predicted, so this arriving a round trip
+        // late is the whole story of the readout's latency.
+        const std::uint32_t yourShipNetId = m_netClient->GetYourShipNetId();
+        if (const std::optional<flecs::entity> player = GetPlayer(); player && yourShipNetId != 0) {
+            for (const EntityState& state : snapshot->entities) {
+                if (state.netId != yourShipNetId) continue;
+                if (ShipLoadout* loadout = player->try_get_mut<ShipLoadout>()) {
+                    loadout->missileAmmo = state.missileAmmo;
+                }
+                break;
+            }
+        }
     }
 }
 
@@ -414,6 +443,10 @@ void CGame::Render(double delta)
     }
     m_lastCameraTime = now;
     m_cameraTimeValid = true;
+
+    m_renderTimeSeconds += dtSeconds;
+    m_modelRenderer2.SetTime(m_renderTimeSeconds);
+    m_mirrorRenderer2.SetTime(m_renderTimeSeconds);
 
     if (m_netClient) {
         RenderNetClient(dtSeconds, delta);

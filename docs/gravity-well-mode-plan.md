@@ -45,9 +45,9 @@ checkboxes and add a short "Verification status" note per phase as you go
 - **Sector generation comes late** (its own phase near the end). Until then
   the mode plays on the existing classic two-sun layout with hand-picked
   starting planets.
-- **Rockets/missiles, tech upgrades, shields: deferred.** The HUD reserves
-  space for them but nothing implements them in this slice. Ships have
-  `Damageable` hull only.
+- **Tech upgrades, shields: deferred** (missiles no longer are — see "Lab
+  research" below, where they are the first upgrade a lab hands out). Ships
+  otherwise have `Damageable` hull only.
 - **Win/lose is per-faction (team), not per-pilot**: a team wins when every
   planet is claimed by it; a faction is defeated when all its colonies AND
   freighters are destroyed (can no longer expand, the original's rule). An
@@ -414,6 +414,47 @@ reproduce after the fix.
 
 Phase 4 is now fully implemented server-side; only the client-visibility gap
 above remains.
+
+## Lab research (2026-07-27)
+
+The Lab's research role (`ResearchSystem`), ahead of the upgrades themselves:
+
+- One pooled bar per faction (`FactionState::researchProgress`/
+  `upgradeReady`), advanced by `ResearchSystem::RESEARCH_SECONDS` per lab —
+  N labs finish N times as fast, the original's "all labs cooperate".
+  Unfunded for now: materials cost is a later tuning question, so a lab with
+  no accompanying Base still researches.
+- Replication: `FactionState` is still server-only, so each Lab's own
+  `Structure` carries a mirrored copy (wire v7) and the client's glow reads
+  it from there.
+- Glow (`cgame/fx/lab-glow.hpp`, applied in `ModelRenderer2::RenderTag` to
+  team-color strokes only): a white/blue pulse while researching, switching
+  to a red/yellow/blue cycle at twice that rate once an upgrade is waiting —
+  the speed-up is the tell. Both run off the client's own render clock:
+  cosmetic, needs no tick agreement. Note a lab therefore does *not* show its
+  team colour; team identity for labs has to come from elsewhere (the
+  ownership markers, the minimap).
+- Pickup: a same-team ship landed at a lab's own planet, or at that planet's
+  High Port, collects it — clearing the flag and restarting research, and
+  emitting `GameEventType::UpgradeCollected`.
+- First upgrade: **missiles.** `ResearchSystem::MISSILES_PER_UPGRADE` rounds
+  onto the collector's `ShipLoadout::missileAmmo` (capacity
+  `MISSILE_CAPACITY`), replicated per-ship on the wire (v8) for the sidebar's
+  MISSILES readout — count plus one tick per round. Fired with Space
+  (`ControlFlags::fireMissile`, wire bit 0x20) at `MISSILE_COOLDOWN_TICKS`
+  cadence: `MISSILE_DAMAGE` and `MISSILE_LIFETIME_SECONDS` on an unguided
+  `Bullet` carrying `models/missiles/missile-0`. **Guidance is the next
+  step.** Faster guns and shields become further `ShipLoadout` fields.
+  - Missiles deliberately carry `ownerNetId = 0`: that field only exists to
+    omit a peer's own *predicted* bullets from its snapshots, and missile
+    fire is not predicted, so the shooter's own missile has to come down the
+    wire like everyone else's (own-ship ammo is likewise copied from the
+    snapshot in `CGame::TickNetClient`, so the readout trails by a round
+    trip).
+  - The debug box spawn moved off Space to `X`.
+- Sim-test `TestResearch`: solo timing, the lab mirror, one-lab pickup via a
+  real landing, two labs beating one, ammo granted on pickup, and held fire
+  spending one round per cooldown.
 
 ## Phase 5 — AI opponents (strategy layer)
 

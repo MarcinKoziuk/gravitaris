@@ -1,4 +1,5 @@
 #include <gravitaris/game/event/game-event.hpp>
+#include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 
 #include <gravitaris/cgame/component/hit-flash.hpp>
@@ -35,6 +36,10 @@ void RemoteEventApplier::Apply(const std::function<flecs::entity(std::uint32_t)>
             if (event.type == GameEventType::Impact) {
                 const Vector2d impactPos{static_cast<double>(event.pos.x()), static_cast<double>(event.pos.y())};
                 m_bulletDespawner.MatchImpact(impactPos);
+            }
+
+            if (event.type == GameEventType::UpgradeCollected && event.sourceNetId == yourShipNetId) {
+                LOG(info) << "research: you collected an upgrade (nothing applied yet)";
             }
 
             if (event.type != GameEventType::Impact && event.type != GameEventType::LandingCrash) continue;

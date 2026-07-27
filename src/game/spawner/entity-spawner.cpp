@@ -9,6 +9,7 @@
 #include <gravitaris/game/component/ai-pilot.hpp>
 #include <gravitaris/game/component/ai-strategy.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
+#include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/planet.hpp>
@@ -79,6 +80,7 @@ flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position, TeamId
     entity.emplace<Team>(team);
     entity.emplace<Damageable>();
     entity.emplace<LandingState>();
+    entity.emplace<ShipLoadout>();
     AssignNetId(entity);
     AddRenderable(entity, modelId);
 
@@ -99,6 +101,7 @@ flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, AIPers
     entity.emplace<Team>(team);
     entity.emplace<Damageable>();
     entity.emplace<LandingState>();
+    entity.emplace<ShipLoadout>();
     ApplyAIPersonalityPreset(entity.get_mut<AIPilot>(), preset);
     AssignNetId(entity);
     AddRenderable(entity, modelId);
@@ -159,12 +162,13 @@ flecs::entity EntitySpawner::SpawnOrbitingPlanet(id_t modelId, Vector2d center, 
     return entity;
 }
 
-flecs::entity EntitySpawner::SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity, bool sensor)
+flecs::entity EntitySpawner::SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity, bool sensor,
+                                         double rot, Vector2d scale)
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
 
     auto entity = m_registry.entity();
-    entity.emplace<Transform>(position, Radd{0}, Vector2d{ 3., 3. }, velocity);
+    entity.emplace<Transform>(position, Radd{rot}, scale, velocity);
     entity.emplace<RigidBodyDesc>("main"_id, body, sensor);
     AssignNetId(entity);
     AddRenderable(entity, modelId);

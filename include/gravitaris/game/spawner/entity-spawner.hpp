@@ -101,7 +101,10 @@ public:
 
     // sensor: true for bullets whose hits are resolved by DamageSystem's
     // segment query rather than Chipmunk collision response (see RigidBodyDesc).
-    flecs::entity SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity, bool sensor = false);
+    // `rot`/`scale` matter for a projectile whose drawing has a facing (a
+    // missile); a bullet is a dot, hence the round-dot defaults.
+    flecs::entity SpawnBullet(id_t modelId, Vector2d position, Vector2d velocity, bool sensor = false,
+                              double rot = 0.0, Vector2d scale = Vector2d{3., 3.});
 
     // A structure nested inside `planet`'s outline (planetside: Base,
     // Colony, Lab, Comm Center) at the slot StructureLayout gives its type --

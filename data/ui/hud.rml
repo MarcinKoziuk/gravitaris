@@ -53,7 +53,7 @@
 				height: 350dp;
 				box-sizing: border-box;
 
-				border-width: 2dp;
+				border-width: 1dp;
 				border-color: #0cf;
 				cursor: pointer;
 
@@ -72,7 +72,7 @@
 				margin-top: 10dp;
 				padding: 10dp;
 
-				border-width: 2dp;
+				border-width: 1dp;
 				border-color: #0cf;
 			}
 
@@ -148,9 +148,33 @@
 				background-color: #f33c;
 			}
 
-			/* Build identity + ping, set from the frame loop (see
-			   UI::SetHudStatusText). */
-			div#status_readout
+			/* One tick per stored missile, laid out where the hull's bar sits
+			   in the stat above -- same height, so the two rows line up. The
+			   ticks themselves are written from code (UI::SetMissileAmmo). */
+			div#missile_ticks
+			{
+				height: 18dp;
+				margin-top: 5dp;
+			}
+
+			span.missile_tick
+			{
+				display: inline-block;
+				width: 3dp;
+				height: 100%;
+				margin-right: 5dp;
+				background-color: #0cfc;
+			}
+
+			span.missile_tick.empty
+			{
+				background-color: #0cf3;
+			}
+
+			/* Build identity on top, then the ping with the byline pushed to
+			   the panel's right edge beside it. Both texts come from the frame
+			   loop (see UI::SetHudStatus); the byline is static markup. */
+			div#panel_footer
 			{
 				position: absolute;
 				left: 0;
@@ -159,6 +183,12 @@
 
 				font-size: 14dp;
 				color: #8ff;
+			}
+
+			span#byline
+			{
+				float: right;
+				color: #cff;
 			}
 		</style>
 	</head>
@@ -177,7 +207,21 @@
 					</div>
 				</div>
 
-				<div id="status_readout"></div>
+				<div class="stat">
+					<div class="stat_head">
+						<span>MISSILES</span>
+						<span id="missile_value" class="stat_value">--</span>
+					</div>
+					<div id="missile_ticks"></div>
+				</div>
+
+				<div id="panel_footer">
+					<div id="status_readout"></div>
+					<div>
+						<span id="ping_readout"></span>
+						<span id="byline">by Marcin Koziuk</span>
+					</div>
+				</div>
 			</div>
 		</div>
 

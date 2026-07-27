@@ -14,6 +14,7 @@ struct ControlFlags {
     bool rotateRight : 1 = false;
     bool firePrimary : 1 = false;
     bool fireSecondary : 1 = false;
+    bool fireMissile : 1 = false;
 };
 
 // Written each tick by InputSystem from the entity's InputQueue, consumed by
@@ -22,6 +23,9 @@ struct Controls {
     ControlFlags actionFlags;
     // Ticks until the primary weapon can fire again; sim-side state, not input.
     std::uint32_t fireCooldown = 0;
+    // Same, for missiles -- their own cadence, so emptying the rack takes
+    // several seconds however hard the button is held.
+    std::uint32_t missileCooldown = 0;
 };
 
 } // namespace Gravitaris

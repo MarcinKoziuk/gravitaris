@@ -29,6 +29,14 @@ public:
 
     static constexpr double BULLET_LIFETIME_SECONDS = 3.0;
 
+    // Missiles (the Lab's first upgrade -- ResearchSystem): slower to leave
+    // the rail than a bullet, but they fly far longer and hit much harder.
+    // Unguided for now; guidance is the next step and will keep these.
+    static constexpr std::uint32_t MISSILE_COOLDOWN_TICKS = 30;
+    static constexpr double MISSILE_LIFETIME_SECONDS = 10.0;
+    static constexpr double MISSILE_MUZZLE_SPEED = 140.0;
+    static constexpr float MISSILE_DAMAGE = 45.f;
+
 private:
     flecs::world& m_registry;
 

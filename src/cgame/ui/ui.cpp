@@ -70,9 +70,12 @@ bool UI::Init()
     if (Rml::ElementDocument* hud = m_context->LoadDocument("ui/hud.rml")) {
         hud->Show();
         m_hudStatus = hud->GetElementById("status_readout");
+        m_hudPing = hud->GetElementById("ping_readout");
         m_sidebar = hud->GetElementById("sidebar");
         m_healthFill = hud->GetElementById("health_fill");
         m_healthValue = hud->GetElementById("health_value");
+        m_missileTicks = hud->GetElementById("missile_ticks");
+        m_missileValue = hud->GetElementById("missile_value");
         m_minimap = hud->GetElementById("minimap");
 
         if (m_minimap) {
@@ -82,10 +85,12 @@ bool UI::Init()
             Listen(*m_minimap, "mousedown", [this](Rml::Event& event) { HandleMinimapPoint(event); });
             Listen(*m_minimap, "drag", [this](Rml::Event& event) { HandleMinimapPoint(event); });
         }
-        if (Rml::Element* recenter = hud->GetElementById("recenter")) {
-            Listen(*recenter, "click", [this](Rml::Event&) {
+        m_recenterButton = hud->GetElementById("recenter");
+        if (m_recenterButton) {
+            Listen(*m_recenterButton, "click", [this](Rml::Event&) {
                 if (m_onRecenter) m_onRecenter();
             });
+            SetRecenterVisible(false);
         }
     }
 
@@ -97,11 +102,8 @@ bool UI::Init()
             title->SetInnerRML(m_document->GetTitle());
         }
 
-        m_teamRow = m_document->GetElementById("team_row");
         m_teamBlueButton = m_document->GetElementById("team_blue");
         m_teamRedButton = m_document->GetElementById("team_red");
-
-        if (m_teamRow && !m_teamChoiceEnabled) m_teamRow->SetProperty("display", "none");
 
         if (m_teamBlueButton) {
             Listen(*m_teamBlueButton, "click", [this](Rml::Event&) { SelectIntroTeam(TeamId::Blue); });
@@ -160,12 +162,16 @@ bool UI::ProcessMouseButton(int rmlButtonIndex, bool down)
                 : !m_context->ProcessMouseButtonUp(rmlButtonIndex, 0);
 }
 
-void UI::SetHudStatusText(const std::string& text)
+void UI::SetHudStatus(const std::string& build, const std::string& ping)
 {
-    if (!m_hudStatus || text == m_hudStatusText) return;
-
-    m_hudStatusText = text;
-    m_hudStatus->SetInnerRML(text);
+    if (m_hudStatus && build != m_hudStatusText) {
+        m_hudStatusText = build;
+        m_hudStatus->SetInnerRML(build);
+    }
+    if (m_hudPing && ping != m_hudPingText) {
+        m_hudPingText = ping;
+        m_hudPing->SetInnerRML(ping);
+    }
 }
 
 void UI::SetHullFraction(float fraction)
@@ -193,6 +199,32 @@ void UI::SetHullFraction(float fraction)
     m_healthFill->SetClass("critical", quantised <= HULL_CRITICAL_FRACTION);
 }
 
+void UI::SetMissileAmmo(int ammo, int capacity)
+{
+    if (!m_missileTicks || !m_missileValue) return;
+    if (ammo == m_missileAmmo) return;
+
+    m_missileAmmo = ammo;
+
+    if (ammo < 0) {
+        m_missileValue->SetInnerRML("--");
+        m_missileTicks->SetInnerRML("");
+        return;
+    }
+
+    m_missileValue->SetInnerRML(std::to_string(ammo));
+
+    // Rebuilt rather than toggling classes on persistent ticks: the row only
+    // changes when a missile is fired or a rack is collected, and the count
+    // gate above means that's the only time this runs at all.
+    std::string ticks;
+    for (int i = 0; i < capacity; ++i) {
+        ticks += i < ammo ? "<span class=\"missile_tick\"></span>"
+                          : "<span class=\"missile_tick empty\"></span>";
+    }
+    m_missileTicks->SetInnerRML(ticks);
+}
+
 int UI::GetSidebarWidthPx() const
 {
     return m_sidebar ? static_cast<int>(m_sidebar->GetOffsetWidth()) : 0;
@@ -211,6 +243,14 @@ void UI::SetMinimapClickCallback(std::function<void(float, float)> callback)
 void UI::SetRecenterCallback(std::function<void()> callback)
 {
     m_onRecenter = std::move(callback);
+}
+
+void UI::SetRecenterVisible(bool visible)
+{
+    if (!m_recenterButton || visible == m_recenterVisible) return;
+
+    m_recenterVisible = visible;
+    m_recenterButton->SetProperty("display", visible ? "block" : "none");
 }
 
 void UI::Listen(Rml::Element& element, const char* event, std::function<void(Rml::Event&)> handler)

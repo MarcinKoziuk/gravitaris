@@ -24,6 +24,13 @@ struct FactionState {
     // Set once a faction has zero colonies AND zero freighters (nothing left
     // that can regrow the economy); sticky -- never clears back to false.
     bool defeated = false;
+    // Fighter-upgrade research, pooled across the faction's Labs (all labs
+    // cooperate, so more labs finish sooner -- gravity-well-1997.md). 0..1;
+    // holds at 1 with upgradeReady set until a ship collects it at one of
+    // those labs' sites, then restarts from 0. Authoritative copy: clients
+    // read it off each Lab's Structure, which ResearchSystem mirrors it into.
+    float researchProgress = 0.f;
+    bool upgradeReady = false;
 };
 
 } // namespace Gravitaris

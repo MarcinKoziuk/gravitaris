@@ -21,6 +21,7 @@
 
 #include <gravitaris/cgame/component/renderable.hpp>
 #include <gravitaris/cgame/component/hit-flash.hpp>
+#include <gravitaris/cgame/fx/lab-glow.hpp>
 #include <gravitaris/cgame/team-color.hpp>
 #include <gravitaris/cgame/renderer/gl-safe-upload.hpp>
 #include <gravitaris/cgame/renderer/model-renderer2.hpp>
@@ -326,7 +327,13 @@ void ModelRenderer2::RenderTag(id_t tag, const std::function<bool(flecs::entity)
         // Only placeholder-authored strokes take this color (team mask);
         // unteamed entities render those strokes white.
         const Team* team = entity.try_get<Team>();
-        const Vector3 teamColor = team ? Vector3{TeamColor(team->id)} : Vector3{1.f, 1.f, 1.f};
+        Vector3 teamColor = team ? Vector3{TeamColor(team->id)} : Vector3{1.f, 1.f, 1.f};
+
+        // A Lab shows its faction's research on those same strokes.
+        const Structure* structure = entity.try_get<Structure>();
+        if (structure && structure->type == StructureType::Lab) {
+            teamColor = Vector3{LabGlowColor(*structure, m_timeSeconds)};
+        }
 
         const HitFlash* hitFlash = entity.try_get<HitFlash>();
         const float flash = hitFlash ? hitFlash->amount : 0.f;

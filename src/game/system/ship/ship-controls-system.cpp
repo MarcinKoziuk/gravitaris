@@ -10,6 +10,7 @@
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
@@ -22,6 +23,7 @@ using Magnum::Vector2d;
 static constexpr float BULLET_DAMAGE = 10.f;
 static constexpr double BULLET_MUZZLE_SPEED = 200.0; // matches ai-pilot-system's BULLET_SPEED; 33% slower than the original 300
 static constexpr float BOX_HP = 30.f; // a couple of primary hits or one ram
+static constexpr double HALF_PI = 1.5707963267948966;
 
 ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner,
                                        PhysicsSystem& physicsSystem, GameEventQueue& eventQueue)
@@ -115,6 +117,39 @@ void ShipControlsSystem::Update(std::uint64_t step)
                               Magnum::Vector2{static_cast<float>(ret.first.x()),
                                               static_cast<float>(ret.first.y())});
         }
+        // Missiles: same held-button pacing as the primary, but each shot
+        // spends a round off the rack the Lab's upgrade filled (ResearchSystem).
+        // ownerNetId stays 0 deliberately, unlike a bullet's: a peer's own
+        // bullets are omitted from its snapshots because it predicts them
+        // locally, and missiles are not predicted -- suppressing them would
+        // leave the shooter the only player who never sees their own missile.
+        if (scontrols.missileCooldown > 0) {
+            --scontrols.missileCooldown;
+        }
+        ShipLoadout* loadout = entity.try_get_mut<ShipLoadout>();
+        if (scontrols.actionFlags.fireMissile && scontrols.missileCooldown == 0 && loadout
+            && loadout->missileAmmo > 0) {
+            scontrols.missileCooldown = ShipControlsSystem::MISSILE_COOLDOWN_TICKS;
+            --loadout->missileAmmo;
+
+            const Vector2d muzzlePos = ShipControlsSystem::ComputeBulletSpawn(transf, phys).first;
+            const double heading = static_cast<double>(transf.rot) - HALF_PI; // nose is local -Y
+            const Vector2d vel =
+                    Vector2d{std::cos(heading), std::sin(heading)} * MISSILE_MUZZLE_SPEED + transf.vel;
+
+            const Team* shooterTeam = entity.try_get<Team>();
+            flecs::entity missile = m_entitySpawner.SpawnBullet(
+                    "models/missiles/missile-0"_id, muzzlePos, vel, /*sensor=*/true,
+                    static_cast<double>(transf.rot), Vector2d{1., 1.});
+            missile.emplace<Bullet>(ShipControlsSystem::MISSILE_LIFETIME_SECONDS,
+                                    shooterTeam ? shooterTeam->id : TeamId::Blue, MISSILE_DAMAGE,
+                                    /*ownerNetId=*/0u);
+
+            m_eventQueue.Emit(GameEventType::BulletFired, entity,
+                              Magnum::Vector2{static_cast<float>(muzzlePos.x()),
+                                              static_cast<float>(muzzlePos.y())});
+        }
+
         if (scontrols.actionFlags.fireSecondary) {
             scontrols.actionFlags.fireSecondary = false;
             std::pair<Vector2d, Vector2d> ret = ShipControlsSystem::ComputeBulletSpawn(transf, phys);

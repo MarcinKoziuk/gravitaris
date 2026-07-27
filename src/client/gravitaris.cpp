@@ -34,6 +34,7 @@
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/input/input-command.hpp>
+#include <gravitaris/game/system/gwell/research-system.hpp>
 
 #include <gravitaris/cgame/cgame.hpp>
 #include <gravitaris/cgame/renderer/glow-post-process.hpp>
@@ -86,6 +87,13 @@ private:
     // Wall-clock time of the last HUD readout refresh; see RefreshHudReadout.
     double m_lastHudReadoutTime = 0.;
 
+    // docs/networking-plan.md 3.5.3: --connect ws://host:port (native) or
+    // ?connect=ws://host:port (wasm, read from the page URL). Empty means
+    // single-player. Held until the intro dialog names a side, since the
+    // requested team has to be in place before the handshake fires.
+    std::string m_connectUrl;
+
+    void StartSession(TeamId team);
     void FeedInput();
     void ToggleRecording();
     void StartReplay();
@@ -171,25 +179,19 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     // docs/networking-plan.md 3.5.3: --connect ws://host:port (native) or
     // ?connect=ws://host:port (wasm, read from the page URL) switches into
     // multiplayer-client mode instead of the usual local single-player sim.
-    const std::string connectUrl = GetConnectUrl(arguments);
-    if (!connectUrl.empty()) {
-        m_game->ConnectToServer(connectUrl);
-    }
-    else {
+    m_connectUrl = GetConnectUrl(arguments);
+    if (m_connectUrl.empty()) {
         // World now, combatants once the intro dialog reports which side the
         // player picked -- so the dialog sits over the real solar system
-        // rather than an empty void.
+        // rather than an empty void. Multiplayer's world arrives from the
+        // server instead, once connected.
         m_game->BuildWorld();
     }
 
     m_ui.RegisterLiveTexture("minimap", m_game->GetMinimapRenderer().TextureId(),
                              MinimapRenderer::TextureSize().x(), MinimapRenderer::TextureSize().y());
 
-    // Multiplayer sides come from the server, so there's nothing to pick.
-    m_ui.SetTeamChoiceEnabled(!m_game->IsNetClient());
-    m_ui.SetIntroConfirmCallback([this](TeamId team) {
-        if (!m_game->IsNetClient()) m_game->SpawnCombatants(team);
-    });
+    m_ui.SetIntroConfirmCallback([this](TeamId team) { StartSession(team); });
     m_ui.SetMinimapClickCallback([this](float nx, float ny) {
         m_game->LookAtMapPoint(Magnum::Vector2{nx, ny});
     });
@@ -280,6 +282,15 @@ void GravitarisApplication::tickEvent()
     UpdateUi();
 }
 
+// The intro dialog gates the whole session either way: single-player spawns
+// the combatants now, multiplayer starts the handshake carrying the side the
+// player picked.
+void GravitarisApplication::StartSession(TeamId team)
+{
+    if (m_connectUrl.empty()) m_game->SpawnCombatants(team);
+    else m_game->ConnectToServer(m_connectUrl, team);
+}
+
 void GravitarisApplication::UpdateUi()
 {
     RefreshHudReadout();
@@ -287,6 +298,9 @@ void GravitarisApplication::UpdateUi()
     // Every frame, unlike the throttled readout above: a hull bar that lags a
     // quarter second behind the hit that caused it reads as broken.
     m_ui.SetHullFraction(m_game->GetHullFraction().value_or(-1.f));
+    m_ui.SetMissileAmmo(m_game->GetMissileAmmo().value_or(-1), ResearchSystem::MISSILE_CAPACITY);
+
+    m_ui.SetRecenterVisible(!m_game->IsCameraFollowing());
 
     ScopedPerfTimer timer(m_game->GetPerfMonitor(), "UI Update");
     m_ui.Update();
@@ -303,16 +317,16 @@ void GravitarisApplication::RefreshHudReadout()
     if (now - m_lastHudReadoutTime < REFRESH_INTERVAL) return;
     m_lastHudReadoutTime = now;
 
-    std::string text = BuildInfoString();
+    std::string pingText;
     if (m_game->IsNetClient()) {
         // Negative until the first Pong arrives; show that it's pending
         // rather than "-1 ms".
         const float ping = m_game->GetAveragePingMs();
-        text += ping < 0.f ? "  ping --"
-                           : "  ping " + std::to_string(std::lround(ping)) + " ms";
+        pingText = ping < 0.f ? "ping --"
+                              : "ping " + std::to_string(std::lround(ping)) + " ms";
     }
 
-    m_ui.SetHudStatusText(text);
+    m_ui.SetHudStatus(BuildInfoString(), pingText);
 }
 
 // One command for the tick Update() is about to run: keyboard, autopilot and
@@ -337,6 +351,7 @@ void GravitarisApplication::FeedInput()
             cmd.flags = *autopilot;
             cmd.flags.firePrimary = m_currentInput.firePrimary;
             cmd.flags.fireSecondary = m_currentInput.fireSecondary;
+            cmd.flags.fireMissile = m_currentInput.fireMissile;
         }
     }
 
@@ -563,6 +578,10 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
             break;
         case KeyEvent::Key::Space:
             m_game->StopSpectating();
+            m_currentInput.fireMissile = true;   // held; cadence paced by the sim
+            break;
+        case KeyEvent::Key::X:
+            m_game->StopSpectating();
             m_currentInput.fireSecondary = true; // one-shot, cleared after the tick
             break;
         default:
@@ -591,6 +610,9 @@ void GravitarisApplication::keyReleaseEvent(Magnum::Platform::Sdl2Application::K
             break;
         case KeyEvent::Key::Down:
             m_currentInput.firePrimary = false;
+            break;
+        case KeyEvent::Key::Space:
+            m_currentInput.fireMissile = false;
             break;
         default:
             (void)0;

@@ -26,6 +26,7 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_structureDefenseSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_freighterSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue)
         , m_economySystem(m_registry, *m_entitySpawner, m_eventQueue)
+        , m_researchSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_inputSystem(m_registry)
         , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue)
         , m_bulletLifetimeSystem(m_registry)
@@ -163,6 +164,9 @@ void Game::Update()
         // After DeathSystem: defeat/win checks should see this tick's freshest
         // colony/freighter/planet-ownership state, not last tick's.
         m_factionSystem.Update();
+        // After FactionSystem: reads the FactionState entities it creates, and
+        // this tick's LandingStateSystem flags for upgrade pickup.
+        m_researchSystem.Update();
         // Detect a player death from DeathSystem before any system reads m_player.
         HandlePlayerRespawn();
         HandleAILeaderRespawns();
