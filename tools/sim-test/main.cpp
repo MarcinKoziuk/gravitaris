@@ -1199,6 +1199,70 @@ void TestSelfDevelopment()
     fs.Shutdown();
 }
 
+// Planetside structures sit nested inside their planet's own collision
+// circle, so a shot at one crosses the (non-damageable) planet first. It must
+// still reach the structure.
+void TestPlanetsideStructureHits()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    flecs::entity planet =
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 1e-9, 800., 1.0, 0.0);
+    BuildStartingComplex(spawner, planet, TeamId::Red);
+    game.SettleScenario();
+
+    const auto shootAt = [&](const Vector2d& aim, TeamId team) {
+        const Vector2d planetPos = planet.get<Transform>().pos;
+        Vector2d dir = aim - planetPos;
+        dir = dir.length() > 1e-6 ? dir.normalized() : Vector2d{0., 1.};
+        const Vector2d from = aim + dir * 300.;
+        flecs::entity bullet = spawner.SpawnBullet("models/bullets/bullet-0"_id, from, -dir * 250.,
+                                                  /*sensor=*/true);
+        bullet.emplace<Bullet>(3.0, team, 10.f, 0u);
+        return bullet;
+    };
+
+    // Total hull across the complex, not the aimed structure's own: the
+    // complex is packed tightly enough inside the planet that a radial shot
+    // can cross a neighbour first, which is fair game. What must not happen
+    // (the bug) is a shot damaging nothing at all and flying on through.
+    const auto complexHp = [&] {
+        float total = 0.f;
+        game.GetRegistry().each([&](const Structure&, const Damageable& dmg, const PlanetSurfaceAttachment&) {
+            total += dmg.hp;
+        });
+        return total;
+    };
+
+    // Aimed at each planetside type in turn, since the symptom was
+    // per-structure: the ones poking out past their planet's rim were
+    // hittable and the rest silently were not.
+    for (const StructureType type : {StructureType::Base, StructureType::Colony, StructureType::Lab,
+                                     StructureType::CommCenter}) {
+        flecs::entity structure;
+        game.GetRegistry().each([&](flecs::entity e, const Structure& s, const PlanetSurfaceAttachment&) {
+            if (s.type == type) structure = e;
+        });
+        Require(structure.is_alive(), "damage: the starting complex has every planetside structure");
+
+        const float hpBefore = complexHp();
+        flecs::entity bullet = shootAt(structure.get<Transform>().pos, TeamId::Blue);
+        for (int tick = 0; tick < 150 && bullet.is_alive(); ++tick) game.Update();
+
+        Require(complexHp() < hpBefore,
+                "damage: a shot from outside reaches a structure nested in its planet");
+        Require(!bullet.is_alive(), "damage: the shot is consumed by the structure it hit");
+    }
+
+    fs.Shutdown();
+}
+
 // ResearchSystem: a faction's labs pool their progress (two finish sooner
 // than one), the bar's state is mirrored onto each lab for replication, and a
 // same-team ship landed at a lab's planet collects the finished upgrade,
@@ -1917,6 +1981,7 @@ int main()
     TestStructures();
     TestFreighterEconomy();
     TestSelfDevelopment();
+    TestPlanetsideStructureHits();
     TestResearch();
     TestFactionDefeatAndWin();
     TestOwnBulletSuppression();

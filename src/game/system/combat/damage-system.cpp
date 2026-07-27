@@ -79,26 +79,56 @@ void DamageSystem::Update()
         const cpVect from = cpv(transf.prevPos.x(), transf.prevPos.y());
         const cpVect to = cpv(transf.pos.x(), transf.pos.y());
 
-        cpSegmentQueryInfo info;
         const cpShapeFilter filter =
                 cpShapeFilterNew(PhysicsSystem::BULLET_GROUP, CP_ALL_CATEGORIES, CP_ALL_CATEGORIES);
-        cpShape* hit = cpSpaceSegmentQueryFirst(space, from, to, BULLET_QUERY_RADIUS, filter, &info);
-        if (!hit) return;
 
-        flecs::entity hitEntity = m_physicsSystem.GetEntityForShape(hit);
-        if (!hitEntity.is_alive() || hitEntity == bulletEnt) return;
+        // The nearest DAMAGEABLE shape along the path, not simply the nearest
+        // shape: planetside structures are nested INSIDE their planet's own
+        // collision circle (see EntitySpawner::SpawnStructure), so the nearest
+        // shape to a shot aimed at a Base/Colony/Lab/Comm Center is always the
+        // planet -- which isn't damageable. Stopping at that one meant such a
+        // shot neither hurt the structure nor was consumed; it sailed on
+        // through. Only structures poking out past their planet's rim, or
+        // orbiting clear of it (the High Port), could ever be hit.
+        //
+        // A planet deliberately does NOT block the shot: it encloses the whole
+        // complex, so blocking would put every planetside structure back out
+        // of reach. Shots that meet only bare planet therefore still fly
+        // through it -- longstanding, and its own fix (structures would have
+        // to sit outside the planet's shape).
+        struct HitSearch {
+            DamageSystem* self;
+            flecs::entity bulletEnt;
+            TeamId team;
+            flecs::entity target;
+            cpVect targetPoint{};
+            cpFloat targetAlpha = 0.f;
+        } search{this, bulletEnt, bullet.team};
 
-        const Team* hitTeam = hitEntity.try_get<Team>();
-        if (hitTeam && hitTeam->id == bullet.team) return; // no friendly fire
+        cpSpaceSegmentQuery(space, from, to, BULLET_QUERY_RADIUS, filter,
+                            [](cpShape* shape, cpVect point, cpVect, cpFloat alpha, void* data) {
+            auto* s = static_cast<HitSearch*>(data);
+            const flecs::entity ent = s->self->m_physicsSystem.GetEntityForShape(shape);
+            if (!ent.is_alive() || ent == s->bulletEnt) return;
 
-        Damageable* dmg = hitEntity.try_get_mut<Damageable>();
-        if (!dmg) return;
+            const Team* entTeam = ent.try_get<Team>();
+            if (entTeam && entTeam->id == s->team) return; // no friendly fire
 
-        dmg->hp -= bullet.damage;
+            if (!ent.try_get<Damageable>()) return; // a planet: shots pass through it
+            if (!s->target.is_alive() || alpha < s->targetAlpha) {
+                s->target = ent;
+                s->targetPoint = point;
+                s->targetAlpha = alpha;
+            }
+        }, &search);
 
-        m_eventQueue.Emit(GameEventType::Impact, hitEntity,
-                          Magnum::Vector2{static_cast<float>(info.point.x),
-                                          static_cast<float>(info.point.y)},
+        if (!search.target.is_alive()) return;
+
+        search.target.get_mut<Damageable>().hp -= bullet.damage;
+
+        m_eventQueue.Emit(GameEventType::Impact, search.target,
+                          Magnum::Vector2{static_cast<float>(search.targetPoint.x),
+                                          static_cast<float>(search.targetPoint.y)},
                           static_cast<std::uint32_t>(bullet.damage * 10.f));
 
         spent.push_back(bulletEnt);
