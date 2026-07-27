@@ -9,6 +9,8 @@
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/planet.hpp>
+#include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 
 #include <gravitaris/cgame/resource/model.hpp>
@@ -60,10 +62,14 @@ void IndicatorRenderer::Update(const SceneView& view, std::optional<flecs::entit
     };
     std::vector<Candidate> enemies;
 
-    // Enemy = damageable ship on a real opposing team -- same notion
-    // CameraDirector's SelectFramedEnemy uses.
-    const auto considerEnemy = [&](flecs::entity, const Transform& t, const Team& team, const Damageable&) {
+    // Enemy = damageable *ship* on a real opposing team. Structures and owned
+    // planets carry the same Transform/Team/Damageable trio, so they have to be
+    // excluded explicitly (same test CGame::CycleSpectate uses to build its
+    // unit roster) -- a base doesn't move and needs no arrow chasing it.
+    const auto considerEnemy = [&](flecs::entity entity, const Transform& t, const Team& team,
+                                   const Damageable&) {
         if (team.id == playerTeam || team.id == TeamId::None) return;
+        if (entity.has<Structure>() || entity.has<Planet>()) return;
         const Magnum::Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
         const float dist = (pos - playerPos).length();
         if (dist > m_params.enemyRange) return;
