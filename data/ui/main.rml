@@ -3,19 +3,15 @@
 		<title>Gravitaris</title>
 		<link type="text/template" href="vector-window.rml" />
 		<style>
-			/* Everything here is one step up from the shared theme's sizes --
-			   this is the first thing the player reads. */
+			/* margin: auto centres the document in the context. */
 			body
 			{
-				width: 560dp;
-				height: 236dp;
+				width: 440dp;
+				height: 196dp;
 				margin: auto;
-
-				font-size: 19dp;
 			}
 			div#title_bar span#title
 			{
-				font-size: 19dp;
 				letter-spacing: 7dp;
 			}
 			p
@@ -23,56 +19,27 @@
 				margin-bottom: 12dp;
 				color: #bee;
 			}
+			/* Label beside the dropdown rather than above it: one line for the
+			   whole choice, which is what lets the window be this short. */
 			div#team_row
 			{
-				margin-top: 22dp;
+				display: flex;
+				align-items: center;
+				margin-top: 14dp;
 			}
 			div#team_row p
 			{
-				margin-bottom: 8dp;
+				flex: 0 0 auto;
+				margin-right: 12dp;
+				margin-bottom: 0;
 				font-size: 12dp;
 				letter-spacing: 5dp;
 				color: #588;
 			}
-			/* Matched pair: without a floor the two boxes differ in width just
-			   because their labels do, which reads as two unrelated buttons
-			   rather than one either/or choice. */
-			button#team_blue, button#team_red
+			select#team_select
 			{
-				min-width: 150dp;
-				margin-left: 0;
-				margin-right: 12dp;
-				padding-top: 12dp;
-				padding-bottom: 12dp;
-			}
-			/* Team buttons carry their side's colour on the border so the
-			   choice is readable without reading the label; the selected one
-			   fills in. Set from code -- see UI::SelectIntroTeam. */
-			button#team_blue
-			{
-				color: #6af;
-				border-color: #6af;
-				background-color: #6af1;
-				font-effect: glow(2dp #6af6);
-			}
-			button#team_blue.selected
-			{
-				background-color: #6af;
-				color: #012;
-				font-effect: none;
-			}
-			button#team_red
-			{
-				color: #f66;
-				border-color: #f66;
-				background-color: #f661;
-				font-effect: glow(2dp #f666);
-			}
-			button#team_red.selected
-			{
-				background-color: #f66;
-				color: #210;
-				font-effect: none;
+				flex: 0 0 auto;
+				width: 150dp;
 			}
 			/* Out of the flow, in the window's own bottom-right corner -- so
 			   the copy above it doesn't have to leave room for it. Filled
@@ -83,8 +50,6 @@
 				right: 18dp;
 				bottom: 14dp;
 				margin: 0;
-				padding-top: 12dp;
-				padding-bottom: 12dp;
 
 				background-color: #0cf;
 				color: #012;
@@ -103,8 +68,13 @@
 
 		<div id="team_row">
 			<p>PICK YOUR SIDE</p>
-			<button id="team_blue">Blue</button>
-			<button id="team_red">Red</button>
+			<!-- Option values are parsed back to TeamId in UI::Init. The world
+			     only builds starting complexes for blue and red so far (see
+			     Game::BuildWorld), so those are the only two offered. -->
+			<select id="team_select">
+				<option value="blue" selected>Blue</option>
+				<option value="red">Red</option>
+			</select>
 		</div>
 
 		<button id="dismiss_intro">Let's fly!</button>

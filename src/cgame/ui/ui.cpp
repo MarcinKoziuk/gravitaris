@@ -16,6 +16,8 @@ namespace Gravitaris {
 static constexpr float HULL_WARN_FRACTION = 0.5f;
 static constexpr float HULL_CRITICAL_FRACTION = 0.25f;
 
+static std::optional<TeamId> TeamIdFromOption(const Rml::String& value);
+
 static void Assign(Rml::Element* element, std::string& cached, std::optional<float> value,
                    const char* format);
 
@@ -116,16 +118,12 @@ bool UI::Init()
             title->SetInnerRML(m_document->GetTitle());
         }
 
-        m_teamBlueButton = m_document->GetElementById("team_blue");
-        m_teamRedButton = m_document->GetElementById("team_red");
-
-        if (m_teamBlueButton) {
-            Listen(*m_teamBlueButton, "click", [this](Rml::Event&) { SelectIntroTeam(TeamId::Blue); });
+        if (Rml::Element* teamSelect = m_document->GetElementById("team_select")) {
+            Listen(*teamSelect, "change", [this](Rml::Event& event) {
+                const Rml::String value = event.GetParameter<Rml::String>("value", "");
+                if (const std::optional<TeamId> team = TeamIdFromOption(value)) m_introTeam = *team;
+            });
         }
-        if (m_teamRedButton) {
-            Listen(*m_teamRedButton, "click", [this](Rml::Event&) { SelectIntroTeam(TeamId::Red); });
-        }
-        SelectIntroTeam(m_introTeam);
 
         if (Rml::Element* button = m_document->GetElementById("dismiss_intro")) {
             Listen(*button, "click", [this](Rml::Event&) {
@@ -285,11 +283,14 @@ void UI::Listen(Rml::Element& element, const char* event, std::function<void(Rml
     element.AddEventListener(event, m_listeners.back().get());
 }
 
-void UI::SelectIntroTeam(TeamId team)
+// Maps the intro dropdown's option values. Offering another side is a new
+// <option> in main.rml plus a line here -- and a world that actually has a
+// starting complex for it (see Game::BuildWorld).
+static std::optional<TeamId> TeamIdFromOption(const Rml::String& value)
 {
-    m_introTeam = team;
-    if (m_teamBlueButton) m_teamBlueButton->SetClass("selected", team == TeamId::Blue);
-    if (m_teamRedButton) m_teamRedButton->SetClass("selected", team == TeamId::Red);
+    if (value == "blue") return TeamId::Blue;
+    if (value == "red") return TeamId::Red;
+    return std::nullopt;
 }
 
 // Writes a formatted number into a readout, or "--" for an empty one, skipping

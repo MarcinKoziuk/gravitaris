@@ -42,10 +42,9 @@ private:
     std::function<void(float, float)> m_onMinimapClick;
     std::function<void()> m_onRecenter;
 
-    // The side highlighted in the intro dialog; committed when OK is clicked.
+    // The side picked in the intro dialog's dropdown; committed when OK is
+    // clicked. Must match the option marked `selected` in main.rml.
     TeamId m_introTeam = TeamId::Blue;
-    Rml::Element* m_teamBlueButton = nullptr;
-    Rml::Element* m_teamRedButton = nullptr;
 
     Rml::Element* m_minimap = nullptr;
     Rml::Element* m_recenterButton = nullptr;
@@ -79,8 +78,6 @@ private:
     // Attaches `handler` to `element`, keeping the listener alive in
     // m_listeners for as long as this UI exists.
     void Listen(Rml::Element& element, const char* event, std::function<void(Rml::Event&)> handler);
-
-    void SelectIntroTeam(TeamId team);
 
     // Shared by the minimap's mousedown and drag events: both just report
     // where the cursor currently is on the panel.

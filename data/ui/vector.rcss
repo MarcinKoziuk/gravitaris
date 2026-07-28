@@ -52,6 +52,11 @@ div.corner
     width: 9dp;
     height: 9dp;
     border-color: #0cf;
+
+    /* Decoration only. Without this the four brackets sit on top of whatever
+       the frame wraps and eat its corner clicks -- the minimap's pan, or the
+       window's resize handle. */
+    pointer-events: none;
 }
 
 div.corner.tl { top: -1dp;    left: -1dp;  border-top-width: 2dp; border-left-width: 2dp; }
@@ -86,6 +91,13 @@ body.window
     background-color: #000000f2;
     border-width: 1dp;
     border-color: #0cf;
+}
+
+/* Above the title bar (1) and content (2), so a bracket isn't cut in half by
+   whatever it overlaps at the corner. */
+body.window div.corner
+{
+    z-index: 3;
 }
 
 div#title_bar
@@ -184,4 +196,101 @@ button:active
 button:focus
 {
     border-color: #fff;
+}
+
+/* ---- dropdown ----------------------------------------------------------- */
+
+/* Outlined like a button, since it is one as far as the eye is concerned.
+   WidgetDropDown lays out the three inner elements itself: selectarrow is
+   pinned to the top right of the content box, selectvalue is sized to whatever
+   the arrow's margin box leaves, and selectbox is placed under the border box
+   offset by its own margin-top. */
+select
+{
+    box-sizing: border-box;
+    height: 34dp;
+
+    color: #0cf;
+    font-size: 15dp;
+    font-weight: bold;
+    letter-spacing: 3dp;
+    text-transform: uppercase;
+    tab-index: auto;
+
+    background-color: #0cf1;
+    border-width: 1dp;
+    border-color: #0cf;
+    cursor: pointer;
+    font-effect: glow(2dp #0cf6);
+    transition: background-color 0.12s cubic-in-out, border-color 0.12s cubic-in-out;
+}
+
+select:hover
+{
+    background-color: #0cf3;
+    border-color: #bff;
+    color: #dff;
+}
+
+select:focus
+{
+    border-color: #fff;
+}
+
+select selectvalue
+{
+    height: 100%;
+    padding: 8dp 12dp;
+}
+
+/* Chevron without a sprite: a square showing only its bottom and right edges
+   is a corner pointing down-right, so turning it 45deg points it straight
+   down. Margins inset it from the corner the widget pins it to. */
+select selectarrow
+{
+    width: 7dp;
+    height: 7dp;
+    margin: 11dp 12dp;
+
+    border-bottom-width: 2dp;
+    border-right-width: 2dp;
+    border-color: #0cf;
+    transform: rotate(45deg);
+}
+
+select:hover selectarrow
+{
+    border-color: #dff;
+}
+
+select selectbox
+{
+    box-sizing: border-box;
+    width: 100%;
+    margin-top: -1dp;              /* sit on the select's own bottom hairline
+                                      rather than doubling it */
+    padding: 0;
+
+    background-color: #000000f2;
+    border-width: 1dp;
+    border-color: #0cf;
+}
+
+select selectbox option
+{
+    width: auto;
+    padding: 7dp 12dp;
+    color: #9ff;
+}
+
+select selectbox option:hover
+{
+    background-color: #0cf3;
+    color: #dff;
+}
+
+select selectbox option:checked
+{
+    background-color: #0cf1;
+    color: #0cf;
 }

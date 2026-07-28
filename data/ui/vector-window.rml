@@ -14,5 +14,7 @@
 		</div>
 	</div>
 	<handle size_target="#document" style="position: absolute; width: 14dp; height: 14dp; bottom: 0px; right: 0px; cursor: resize;"></handle>
+	<div class="corner tl"></div><div class="corner tr"></div>
+	<div class="corner bl"></div><div class="corner br"></div>
 </body>
 </template>
