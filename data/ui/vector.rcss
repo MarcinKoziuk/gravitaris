@@ -101,16 +101,15 @@ body.window div.corner
     z-index: 3;
 }
 
-/* A boxed strip rather than an underlined one: all four edges, inset 4dp from
-   the window so its own outline reads separately from the window's. The inset
-   is what body.window's 41dp top padding is made of -- 4 + 33 + 4. */
+/* A boxed strip rather than an underlined one: all four edges, flush with the
+   window's inner edge. */
 div#title_bar
 {
     z-index: 1;
     position: absolute;
-    top: 4dp;
-    left: 4dp;
-    right: 4dp;
+    top: 0;
+    left: 0;
+    right: 0;
 
     box-sizing: border-box;
     height: 33dp;
