@@ -140,6 +140,12 @@ static void ReadPersonality(const toml::table& t, AIPersonality& p)
     if (const auto v = t["evade_radius"].value<double>()) p.evadeRadius = *v;
     if (const auto v = t["evade_margin"].value<double>()) p.evadeMargin = *v;
     if (const auto v = t["danger_lookahead_steps"].value<int>()) p.dangerLookaheadSteps = *v;
+    if (const auto v = t["flee_health_fraction"].value<double>()) p.fleeHealthFraction = *v;
+    if (const auto v = t["flee_range"].value<double>()) p.fleeRange = *v;
+    if (const auto v = t["flee_margin"].value<double>()) p.fleeMargin = *v;
+    if (const auto v = t["jink_speed"].value<double>()) p.jinkSpeed = *v;
+    if (const auto v = t["jink_period"].value<std::uint32_t>()) p.jinkPeriod = *v;
+    if (const auto v = t["under_fire_ticks"].value<std::uint32_t>()) p.underFireTicks = *v;
     if (const auto v = t["decision_interval"].value<std::uint32_t>()) p.decisionInterval = *v;
     if (const auto v = t["fire_interval"].value<std::uint32_t>()) p.fireInterval = *v;
     if (const auto v = t["burst_count"].value<std::uint32_t>()) p.burstCount = *v;

@@ -16,6 +16,7 @@ enum class AIBehavior {
     Orbit,     // patrolling the heaviest body
     Land,      // descending onto the order's subject body
     Depart,    // climbing clear of the body it launched from
+    Flee,      // breaking off from a threat while too hurt to fight it
 };
 
 // What the strategy layer (AIStrategySystem, docs/ai-ships.md's table) hands
@@ -55,6 +56,24 @@ struct AIPersonality {
     double evadeRadius = 180.0;
     double evadeMargin = 1.5;
     int dangerLookaheadSteps = 120;  // ~2s at the fixed tick
+
+    // Breaking off. A pilot under this fraction of its max hull stops
+    // pursuing and runs from any threat inside fleeRange, until the gap
+    // opens past fleeRange*fleeMargin (hysteresis, as with evadeMargin) --
+    // then it patrols instead of re-engaging. There is no repair, so the
+    // hull fraction never recovers: range is the only way back out of Flee.
+    // 0 disables breaking off entirely (fights to the death).
+    double fleeHealthFraction = 0.3;
+    double fleeRange = 700.0;
+    double fleeMargin = 1.6;
+
+    // Jinking. A pilot that has lost hull within the last underFireTicks
+    // weaves across its line of sight to the target instead of closing in a
+    // straight line. jinkSpeed is the lateral velocity added (0 disables);
+    // jinkPeriod is the ticks between reversals.
+    double jinkSpeed = 30.0;
+    std::uint32_t jinkPeriod = 26;
+    std::uint32_t underFireTicks = 90;
 
     std::uint32_t decisionInterval = 15; // ticks between tactical re-evaluations
 
@@ -110,6 +129,17 @@ struct AIPilot {
     // not part of the personality itself.
     bool wasInDanger = false;
     bool dangerSuppressed = false;
+
+    // Whether the pilot is currently breaking off (AIPersonality::fleeRange
+    // hysteresis), and the threat it is running from.
+    bool fleeing = false;
+    flecs::entity fleeThreat;
+
+    // Hull seen at the previous tick, so a drop reads as "being shot at"
+    // without a damage event to subscribe to, and the ticks of jinking that
+    // a drop buys.
+    float lastHp = -1.f;
+    std::uint32_t underFireCooldown = 0;
 
     // Transient per-shot-attempt aim bias for AIPersonality::aimJitter: rolled
     // once when a firing opportunity opens and held steady while waiting for

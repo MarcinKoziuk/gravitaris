@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <optional>
@@ -65,10 +66,16 @@ static constexpr double DEPARTURE_CLEARANCE = 260.0;
 // the pilot between departing and flying it (same idea as evadeMargin).
 static constexpr double DEPARTURE_MARGIN = 1.25;
 
+// Padding on a body's radius when testing whether a shot would hit it, so a
+// pilot doesn't graze the surface trying to shoot past a limb.
+static constexpr double SHOT_CLEARANCE = 15.0;
+
 static double WrapToPi(double angle);
 static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Vector2d& relVel,
                                                 double projectileSpeed);
 static double DepartureRadius(flecs::entity site);
+static bool SegmentHitsCircle(const Vector2d& from, const Vector2d& to, const Vector2d& center,
+                              double radius);
 
 AIPilotSystem::AIPilotSystem(flecs::world& registry, PhysicsSystem& physicsSystem,
                              TrajectoryPredictor& predictor, const UpgradeCatalog& catalog)
@@ -147,6 +154,21 @@ void AIPilotSystem::Update(std::uint64_t step)
         const ShipLoadout* loadout = ent.try_get<ShipLoadout>();
         const WeaponDef* gun = m_catalog.ResolveStats(loadout ? loadout->levels : UpgradeLevels{}).gun;
         const double bulletSpeed = gun ? gun->speed : 0.0;
+
+        // Hull state drives both breaking off and jinking. A drop since last
+        // tick is the "being shot at" signal -- damage is resolved before
+        // this system runs and nothing else needs an event for it.
+        const Damageable* hull = ent.try_get<Damageable>();
+        if (hull) {
+            if (pilot.lastHp >= 0.f && hull->hp < pilot.lastHp) {
+                pilot.underFireCooldown = personality.underFireTicks;
+            }
+            pilot.lastHp = hull->hp;
+        }
+        if (pilot.underFireCooldown > 0) --pilot.underFireCooldown;
+
+        const bool hurt = hull && hull->maxHp > 0.f && personality.fleeHealthFraction > 0.0
+                && hull->hp / hull->maxHp < static_cast<float>(personality.fleeHealthFraction);
 
         // Deterministic per-(tick, entity) seed for this pilot's jitter/
         // danger-ignore rolls below -- same value every replay of this tick.
@@ -231,7 +253,8 @@ void AIPilotSystem::Update(std::uint64_t step)
             if (ordered && pilot.order.kind == AIOrderKind::Land) {
                 pilot.behavior = AIBehavior::Land;
             }
-            else if (targetTransf && (targetTransf->pos - transf.pos).length() < personality.engageRange) {
+            else if (!hurt && targetTransf
+                     && (targetTransf->pos - transf.pos).length() < personality.engageRange) {
                 pilot.behavior = AIBehavior::Intercept;
             }
             else if (patrolBody) {
@@ -249,6 +272,35 @@ void AIPilotSystem::Update(std::uint64_t step)
             else {
                 pilot.behavior = AIBehavior::Idle;
             }
+        }
+
+        // Breaking off, checked every tick like the danger override below.
+        // The hysteresis is on range rather than on hull: nothing repairs a
+        // ship, so a hull fraction that has fallen through the threshold
+        // never climbs back out, and opening the gap is the only way a hurt
+        // pilot stops running. Above the threshold it never picked Intercept
+        // in the first place, so it patrols instead of re-engaging.
+        if (!hurt) {
+            pilot.fleeing = false;
+            pilot.fleeThreat = flecs::entity();
+        }
+        else {
+            flecs::entity threat;
+            double threatDistSq = std::numeric_limits<double>::max();
+            for (const Candidate& c : candidates) {
+                if (c.entity == ent || c.team == myTeam.id) continue;
+                const double distSq = (c.pos - transf.pos).dot();
+                if (distSq < threatDistSq) {
+                    threatDistSq = distSq;
+                    threat = c.entity;
+                }
+            }
+
+            const double range =
+                    personality.fleeRange * (pilot.fleeing ? personality.fleeMargin : 1.0);
+            pilot.fleeing = threat.is_alive() && threatDistSq < range * range;
+            pilot.fleeThreat = pilot.fleeing ? threat : flecs::entity();
+            if (pilot.fleeing) pilot.behavior = AIBehavior::Flee;
         }
 
         // Where this pilot's business actually is: the order's subject, or
@@ -345,6 +397,33 @@ void AIPilotSystem::Update(std::uint64_t step)
                     GuidanceParams standoff = pilot.guidance;
                     standoff.arriveRadius = personality.standoffDistance;
                     desiredVel = InterceptEntity(transf, *targetTransf, standoff);
+
+                    // Under fire, weave across the line of sight: a straight
+                    // closing run hands whoever is shooting a free lead
+                    // solution. The reversal phase is offset per entity so a
+                    // pair of wingmen don't weave in lockstep.
+                    if (pilot.underFireCooldown > 0 && personality.jinkSpeed > 0.0
+                        && personality.jinkPeriod > 0) {
+                        const Vector2d los = targetTransf->pos - transf.pos;
+                        const double dist = los.length();
+                        if (dist > 1e-6) {
+                            const Vector2d lateral{-los.y() / dist, los.x() / dist};
+                            const bool right = ((step / personality.jinkPeriod + ent.id()) & 1u) != 0u;
+                            desiredVel += lateral
+                                    * (right ? personality.jinkSpeed : -personality.jinkSpeed);
+                            const double speed = desiredVel.length();
+                            if (speed > pilot.guidance.maxSpeed) {
+                                desiredVel *= pilot.guidance.maxSpeed / speed;
+                            }
+                        }
+                    }
+                }
+                break;
+            case AIBehavior::Flee:
+                if (pilot.fleeThreat.is_alive()) {
+                    if (const Transform* threat = pilot.fleeThreat.try_get<Transform>()) {
+                        desiredVel = FleeThreat(transf, threat->pos, threat->vel, pilot.guidance);
+                    }
                 }
                 break;
             case AIBehavior::Orbit:
@@ -407,7 +486,23 @@ void AIPilotSystem::Update(std::uint64_t step)
                     const double tolerance = personality.fireTolerance
                             + (personality.aimJitter > 0.0 ? pilot.aimBias : 0.0);
 
-                    if (std::abs(WrapToPi(aimHeading - heading)) < tolerance) {
+                    // Weapon discipline: bullets are gravity-immune and fly
+                    // straight, so a body across the firing solution eats the
+                    // shot. Holding fire costs nothing (the cooldown is only
+                    // spent on shots actually taken) and stops a pilot from
+                    // emptying itself into a planet the target is hiding
+                    // behind.
+                    bool blocked = false;
+                    for (const Source& src : sources) {
+                        if (src.radius <= 0.0) continue;
+                        if (SegmentHitsCircle(transf.pos, transf.pos + aim, src.pos,
+                                              src.radius + SHOT_CLEARANCE)) {
+                            blocked = true;
+                            break;
+                        }
+                    }
+
+                    if (!blocked && std::abs(WrapToPi(aimHeading - heading)) < tolerance) {
                         flags.firePrimary = true;
                         pilot.aimBiasRolled = false; // roll fresh for the next shot
 
@@ -437,6 +532,18 @@ void AIPilotSystem::Update(std::uint64_t step)
 
 // Distance from a departure site's center a pilot must reach to be clear of
 // it: its own surface, plus room for the turn onto course.
+// Whether the segment from-to passes within `radius` of `center`.
+static bool SegmentHitsCircle(const Vector2d& from, const Vector2d& to, const Vector2d& center,
+                              double radius)
+{
+    const Vector2d along = to - from;
+    const double lengthSq = along.dot();
+    const double t = lengthSq > 1e-9
+            ? std::clamp(Magnum::Math::dot(center - from, along) / lengthSq, 0.0, 1.0)
+            : 0.0;
+    return (from + along * t - center).length() < radius;
+}
+
 static double DepartureRadius(flecs::entity site)
 {
     double radius = 0.0;

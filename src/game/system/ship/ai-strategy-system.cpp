@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <limits>
+#include <utility>
 #include <vector>
 
 #include <ankerl/unordered_dense.h>
@@ -36,6 +37,11 @@ static constexpr double COMPLEX_REFERENCE_HP = 100.0;
 // A rival goal must beat the incumbent by this much to take over, so a
 // leader commits to something instead of oscillating between near-ties.
 static constexpr double GOAL_SWITCH_MARGIN = 1.2;
+
+// Crowding falloff: a subject already spoken for by n other leaders scores
+// CROWDING_SHARE/(CROWDING_SHARE + n) of its worth, so the second leader to
+// look at a planet halves its appeal rather than duplicating the trip.
+static constexpr double CROWDING_SHARE = 1.0;
 
 // Upper bound on how long a claim is held without re-scoring (60s at the
 // fixed tick) -- long enough for a descent from across a star system.
@@ -136,8 +142,39 @@ void AIStrategySystem::Update()
     std::sort(ships.begin(), ships.end(),
               [](const ShipInfo& a, const ShipInfo& b) { return a.netId < b.netId; });
 
-    m_registry.each([&](flecs::entity self, const Transform& transf, const Team& myTeam, AIPilot& pilot,
-                        AIStrategy& strategy) {
+    // Who is already spoken for. Dogfights are exempt: several ships
+    // converging on one enemy fighter is a fine outcome, unlike two of them
+    // descending on the same rock.
+    ankerl::unordered_dense::map<std::uint64_t, int> takers;
+    m_registry.each([&](flecs::entity, const AIStrategy& strategy) {
+        if (strategy.goal == AIGoal::Dogfight || !strategy.subject.is_alive()) return;
+        ++takers[strategy.subject.id()];
+    });
+
+    // Leaders decide in NetId order, and each one's pick lands in `takers`
+    // before the next reads it -- pilots all spawn with a zero decision
+    // cooldown, so a whole wing's first decision happens on one tick, and a
+    // snapshot taken before the pass would let every one of them claim the
+    // same planet. Ordering the pass is what keeps that crowding-aware
+    // sequence the same on every run (ADR 0001).
+    std::vector<std::pair<std::uint32_t, flecs::entity>> leaders;
+    m_registry.each([&](flecs::entity ent, const AIStrategy&, const NetId& netId) {
+        leaders.emplace_back(netId.value, ent);
+    });
+    std::sort(leaders.begin(), leaders.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    for (const auto& entry : leaders) {
+        const flecs::entity self = entry.second;
+        const Transform* selfTransf = self.try_get<Transform>();
+        const Team* selfTeam = self.try_get<Team>();
+        AIPilot* selfPilot = self.try_get_mut<AIPilot>();
+        if (!selfTransf || !selfTeam || !selfPilot) continue;
+
+        const Transform& transf = *selfTransf;
+        const Team& myTeam = *selfTeam;
+        AIPilot& pilot = *selfPilot;
+        AIStrategy& strategy = self.get_mut<AIStrategy>();
         if (strategy.commitCooldown > 0) --strategy.commitCooldown;
 
         // Hold a claim through its descent; anyone taking the planet in the
@@ -145,13 +182,13 @@ void AIStrategySystem::Update()
         if (strategy.goal == AIGoal::ClaimPlanet && strategy.commitCooldown > 0
             && strategy.subject.is_alive()) {
             const Team* subjectTeam = strategy.subject.try_get<Team>();
-            if (subjectTeam && subjectTeam->id == TeamId::None) return;
+            if (subjectTeam && subjectTeam->id == TeamId::None) continue;
         }
 
         const bool subjectLost = strategy.goal != AIGoal::Dogfight && !strategy.subject.is_alive();
         if (strategy.decisionCooldown > 0 && !subjectLost) {
             --strategy.decisionCooldown;
-            return;
+            continue;
         }
         strategy.decisionCooldown = strategy.decisionInterval;
 
@@ -165,6 +202,16 @@ void AIStrategySystem::Update()
         Choice best;
         double incumbentScore = 0.0;
         const auto consider = [&](AIGoal goal, flecs::entity subject, double score) {
+            if (goal != AIGoal::Dogfight) {
+                const auto it = takers.find(subject.id());
+                int others = it != takers.end() ? it->second : 0;
+                // This leader's own claim is not competition for itself --
+                // discounting it would make every incumbent goal look worse
+                // than the alternatives on every re-score.
+                if (subject == strategy.subject && strategy.goal != AIGoal::Dogfight) --others;
+                score *= CROWDING_SHARE / (CROWDING_SHARE + others);
+            }
+
             if (goal == strategy.goal && subject == strategy.subject) incumbentScore = score;
             if (score > best.score) best = Choice{goal, subject, score};
         };
@@ -220,13 +267,23 @@ void AIStrategySystem::Update()
         }
 
         const bool switching = best.goal != strategy.goal || best.subject != strategy.subject;
-        if (switching && best.score < incumbentScore * GOAL_SWITCH_MARGIN) return;
+        if (switching && best.score < incumbentScore * GOAL_SWITCH_MARGIN) continue;
+
+        if (switching) {
+            if (strategy.goal != AIGoal::Dogfight && strategy.subject.is_alive()) {
+                const auto it = takers.find(strategy.subject.id());
+                if (it != takers.end() && --it->second <= 0) takers.erase(it);
+            }
+            if (best.goal != AIGoal::Dogfight && best.subject.is_alive()) {
+                ++takers[best.subject.id()];
+            }
+        }
 
         strategy.goal = best.goal;
         strategy.subject = best.subject;
         strategy.commitCooldown = best.goal == AIGoal::ClaimPlanet ? CLAIM_COMMIT_TICKS : 0;
         pilot.order = OrderFor(best.goal, best.subject);
-    });
+    }
 }
 
 } // namespace Gravitaris

@@ -239,6 +239,38 @@ velocity vector, predicted path per AI ship.
 under fire, difficulty knobs (reaction delay, aim error — quake3-style
 humanization).
 
+*Status: done 2026-07-28.* Weapon discipline: `AIPilotSystem` tests the
+firing solution (ship → lead point) against every gravity source's disc plus
+`SHOT_CLEARANCE` before setting `firePrimary`; a blocked shot holds fire and
+spends no cooldown, since bullets are gravity-immune and a body on the line
+simply eats them. Evasion under fire: a hull drop between ticks is the
+"being shot at" signal (no event needed — damage resolves before this system
+runs), buying `underFireTicks` of jinking, during which `Intercept` adds a
+lateral weave across the line of sight that reverses every `jinkPeriod`
+ticks, phase-offset per entity so a wing doesn't weave in lockstep.
+Breaking off: `AIBehavior::Flee` + `FleeThreat` guidance (full cruise away
+from the threat, solved in its frame). A pilot under `fleeHealthFraction` of
+max hull stops picking `Intercept` at all and runs from any threat inside
+`fleeRange`; hysteresis is on range (`fleeMargin`), not hull, because
+nothing repairs a ship — the hull fraction never climbs back, so opening the
+gap is the only exit, after which it patrols rather than re-engaging. Evade
+still overrides Flee (a well kills faster than a fighter does). All six
+knobs are per-personality and in `data/ai-presets.toml`: Reckless sets
+`flee_health_fraction = 0` (never breaks off), Sniper flees earliest and
+jinks least. Difficulty knobs landed earlier as the preset library itself.
+Verified by `TestAITactics` in `tools/sim-test`: fire held with a planet on
+the solution vs. fire opened without it, straight run vs. weave after a hit,
+range opened at 15% hull vs. closed at 100%, and the crowding case below.
+
+*Phase 6 note (same date):* `AIStrategySystem` now scores a subject already
+spoken for by n other leaders at `1/(1+n)` of its worth (Dogfight exempt —
+converging on one enemy fighter is fine, two ships landing on one rock is
+not), and leaders decide in NetId order with each pick landing in the
+assignment map before the next reads it. The ordering is what makes that
+sequence reproducible; a snapshot taken before the pass would let a whole
+wing — all of whom spawn with a zero decision cooldown and so decide on the
+same tick — claim the same planet.
+
 *Partly done 2026-07-26, fixing "AI runs away at full speed when chased":*
 `InterceptEntity`'s velocity feedforward now matches only the target's
 lateral motion, not its line-of-sight motion (mirroring a pursuer's charge
@@ -249,7 +281,9 @@ target death, with a hysteresis ratio, so a pilot no longer cruises past its
 attacker toward a stale distant lock. Deliberate, disadvantage-driven
 retreat (return to base to repair, fall back to defend home) is still
 unimplemented — there is no Flee behavior at all, which is the point: every
-retreat seen today is one of these two accidents.
+retreat seen today is one of these two accidents. (Deliberate retreat exists
+as of 2026-07-28 — see the phase-5 status above. There is still nothing to
+retreat *to*: no repair mechanic, so Flee is disengagement, not a trip home.)
 
 **Phase 6 — strategy layer.** `AIStrategy` per slice-components (build/attack
 decisions) issuing goals to pilots. Separate cadence (every ~1 s, not every

@@ -71,6 +71,14 @@ Magnum::Math::Vector2<double> LandOnBody(const Transform& ship,
                                          double effectiveMass, double surfaceRadius,
                                          const GuidanceParams& params);
 
+// Open the range on a threat: full cruise speed directly away from it,
+// solved in the threat's frame so running from something that is itself
+// moving asks for the speed that actually opens the gap.
+Magnum::Math::Vector2<double> FleeThreat(const Transform& ship,
+                                         const Magnum::Math::Vector2<double>& threatPos,
+                                         const Magnum::Math::Vector2<double>& threatVel,
+                                         const GuidanceParams& params);
+
 // Climb radially away from `center` until beyond `safeRadius`, preserving
 // tangential motion. Returns the current velocity (no correction) when
 // already safe. Solved in the body's frame, so climbing off something that

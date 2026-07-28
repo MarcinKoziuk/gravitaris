@@ -1644,6 +1644,152 @@ void TestFactionDefeatAndWin()
     fs.Shutdown();
 }
 
+// Phase 5 tactics (docs/ai-ships.md): weapon discipline, jinking under fire,
+// breaking off when hurt, and one leader per objective.
+//
+// Every pilot here is dialled to isolate the rule under test -- a huge
+// engage/fire range so the tactical pick is never about distance, a zero
+// danger lookahead so gravity-well evasion (which runs every tick and
+// overrides everything) can't quietly explain a result, and an explicit
+// flee threshold so hull never enters into it except where it is the point.
+void TestAITactics()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    const auto configure = [](flecs::entity ship, double fleeHealthFraction, double jinkSpeed) {
+        AIPersonality& p = ship.get_mut<AIPilot>().personality;
+        p.engageRange = 1e6;
+        p.fireRange = 1e6;
+        p.fireTolerance = 1.0;
+        p.aimJitter = 0.0;
+        p.reactionJitter = 0.0;
+        p.fireInterval = 1;
+        p.decisionInterval = 1;
+        p.dangerLookaheadSteps = 0;
+        p.fleeHealthFraction = fleeHealthFraction;
+        p.jinkSpeed = jinkSpeed;
+    };
+
+    // Weapon discipline: the same standoff twice, once with a planet sitting
+    // on the firing solution and once without.
+    const auto shotsOverTicks = [&](bool blocker) {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        if (blocker) {
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 1e-9, 1e-6, 1.0, 0.0);
+        }
+
+        flecs::entity shooter = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{-600., 0.},
+                                                    game.GetAIPresets().Default());
+        configure(shooter, /*fleeHealthFraction=*/0.0, /*jinkSpeed=*/0.0);
+        spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{600., 0.});
+
+        int shots = 0;
+        for (int tick = 0; tick < 150; ++tick) {
+            game.Update();
+            game.GetRegistry().each([&](flecs::entity, const Bullet&) { ++shots; });
+        }
+        return shots;
+    };
+
+    Require(shotsOverTicks(/*blocker=*/false) > 0,
+            "ai tactics: a pilot with a clear line of sight opens fire (setup check)");
+    Require(shotsOverTicks(/*blocker=*/true) == 0,
+            "ai tactics: a pilot holds fire while a planet sits on the firing solution");
+
+    // Jinking: a stationary target on the +X axis means a straight closing
+    // run has no lateral velocity at all, so any Y motion is the weave.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity ship = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{0., 0.},
+                                                 game.GetAIPresets().Default());
+        configure(ship, /*fleeHealthFraction=*/0.0, /*jinkSpeed=*/40.0);
+        spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{1500., 0.});
+
+        double straightLateral = 0.0;
+        for (int tick = 0; tick < 90; ++tick) {
+            game.Update();
+            straightLateral = std::max(straightLateral, std::abs(ship.get<Transform>().vel.y()));
+        }
+
+        // The hit itself, minus the bullet: AIPilotSystem reads "under fire"
+        // off a hull drop between ticks.
+        ship.get_mut<Damageable>().hp -= 5.f;
+
+        double jinkedLateral = 0.0;
+        for (int tick = 0; tick < 90; ++tick) {
+            game.Update();
+            jinkedLateral = std::max(jinkedLateral, std::abs(ship.get<Transform>().vel.y()));
+        }
+
+        Require(straightLateral < 5.0, "ai tactics: an unmolested closing run flies straight");
+        Require(jinkedLateral > 15.0, "ai tactics: taking a hit makes the closing run weave");
+    }
+
+    // Breaking off: below the flee threshold a pilot opens the range instead
+    // of closing it. Same scene at full hull is the control.
+    const auto rangeChange = [&](float hullFraction) {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity ship = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{0., 0.},
+                                                 game.GetAIPresets().Default());
+        configure(ship, /*fleeHealthFraction=*/0.3, /*jinkSpeed=*/0.0);
+        ship.get_mut<AIPilot>().personality.fleeRange = 700.0;
+
+        Damageable& hull = ship.get_mut<Damageable>();
+        hull.hp = hull.maxHp * hullFraction;
+
+        flecs::entity enemy = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{300., 0.});
+
+        const double before = (enemy.get<Transform>().pos - ship.get<Transform>().pos).length();
+        for (int tick = 0; tick < 240; ++tick) game.Update();
+        const double after = (enemy.get<Transform>().pos - ship.get<Transform>().pos).length();
+
+        Require(ship.is_alive(), "ai tactics: the pilot survives the run (setup check)");
+        return std::make_pair(after - before, ship.get<AIPilot>().behavior);
+    };
+
+    const auto hurt = rangeChange(0.15f);
+    const auto healthy = rangeChange(1.0f);
+    Require(hurt.second == AIBehavior::Flee, "ai tactics: a hurt pilot with a threat close breaks off");
+    Require(hurt.first > 100.0, "ai tactics: breaking off actually opens the range");
+    Require(healthy.second == AIBehavior::Intercept,
+            "ai tactics: a healthy pilot in the same spot still closes (setup check)");
+
+    // Crowding: two leaders side by side, a near planet and a far one. Both
+    // score the near one highest on its own merits; the second to decide has
+    // to see it as taken.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity near = spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.},
+                                                         1e-9, 1000., 1.0, 0.0);
+        flecs::entity far = spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.},
+                                                        1e-9, 3000., 1.0, 0.5);
+
+        flecs::entity first = spawner.SpawnAILeader("models/ships/fighter-1"_id, Vector2d{0., 0.},
+                                                    TeamId::Red, game.GetAIPresets().Default());
+        flecs::entity second = spawner.SpawnAILeader("models/ships/fighter-1"_id, Vector2d{0., 50.},
+                                                     TeamId::Red, game.GetAIPresets().Default());
+        game.Update();
+
+        Require(first.get<AIStrategy>().goal == AIGoal::ClaimPlanet
+                        && second.get<AIStrategy>().goal == AIGoal::ClaimPlanet,
+                "ai tactics: both leaders want a planet with nothing else on offer (setup check)");
+        Require(first.get<AIStrategy>().subject == near,
+                "ai tactics: the first leader to decide takes the nearer planet");
+        Require(second.get<AIStrategy>().subject == far,
+                "ai tactics: the second leader goes elsewhere rather than doubling up");
+    }
+
+    fs.Shutdown();
+}
+
 // A peer predicts and draws its own shots locally (ClientPrediction::Step),
 // so the server must not also send it the authoritative copies -- otherwise
 // the same shot draws twice, ~14 ticks apart (own ship renders ahead by
@@ -2164,6 +2310,7 @@ int main()
     TestResearch();
     TestFactionDefeatAndWin();
     TestOwnBulletSuppression();
+    TestAITactics();
     TestWebRtcRoundtrip();
     TestWebRtcSignalingRoundtrip();
 

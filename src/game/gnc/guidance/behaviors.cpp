@@ -105,6 +105,18 @@ Vector2d LandOnBody(const Transform& ship, const Vector2d& center, const Vector2
     return centerVel - up * std::clamp(vDescent, params.touchdownSpeed, params.transitSpeed);
 }
 
+Vector2d FleeThreat(const Transform& ship, const Vector2d& threatPos, const Vector2d& threatVel,
+                    const GuidanceParams& params)
+{
+    const Vector2d r = ship.pos - threatPos;
+    const double dist = r.length();
+    if (dist < 1e-6) {
+        return ship.vel;
+    }
+
+    return threatVel + (r / dist) * params.maxSpeed;
+}
+
 Vector2d EvadeBody(const Transform& ship, const Vector2d& center, const Vector2d& centerVel,
                    double safeRadius, const GuidanceParams& params)
 {
