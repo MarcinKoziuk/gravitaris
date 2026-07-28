@@ -60,7 +60,6 @@
 				background-color: #6af;
 				color: #012;
 				font-effect: none;
-				box-shadow: 0 0 22dp #6af8;
 			}
 			button#team_red
 			{
@@ -74,7 +73,6 @@
 				background-color: #f66;
 				color: #210;
 				font-effect: none;
-				box-shadow: 0 0 22dp #f668;
 			}
 			/* Out of the flow, in the window's own bottom-right corner -- so
 			   the copy above it doesn't have to leave room for it. Filled
@@ -91,7 +89,6 @@
 				background-color: #0cf;
 				color: #012;
 				font-effect: none;
-				box-shadow: 0 0 26dp #0cf8;
 			}
 			button#dismiss_intro:hover
 			{

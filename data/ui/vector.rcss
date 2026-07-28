@@ -6,7 +6,13 @@
    Chamfered corners are faked with bracket elements (div.corner) rather than
    a 9-slice sprite: RCSS has no clip-path, and brackets keep the theme
    sprite-free the way the rest of this file is. A framed box gets them by
-   nesting four div.corner children -- see hud.rml. */
+   nesting four div.corner children -- see hud.rml.
+
+   Don't use box-shadow: RmlUi renders it through a callback texture that needs
+   PushLayer/CompositeLayers/CompileShader, none of which RenderInterfaceGL3
+   implements, and the failed texture makes the element's whole background and
+   border render as an opaque white quad. font-effect: glow is the only glow
+   available here. */
 
 body
 {
@@ -71,8 +77,6 @@ body.window
     background-color: #000000f2;
     border-width: 1dp;
     border-color: #0cf;
-    box-shadow: 0 0 40dp #0cf4;    /* the window's own bloom, since the UI
-                                      pass doesn't get the scene's */
 }
 
 div#title_bar

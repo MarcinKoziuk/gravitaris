@@ -107,19 +107,16 @@
 				height: 100%;
 				width: 0%;
 				background-color: #0cf;
-				box-shadow: 0 0 10dp #0cf8;
 			}
 
 			div#health_fill.warn
 			{
 				background-color: #fc0;
-				box-shadow: 0 0 10dp #fc08;
 			}
 
 			div#health_fill.critical
 			{
 				background-color: #f33;
-				box-shadow: 0 0 10dp #f338;
 			}
 
 			/* One tick per stored missile. A full rack is wider than the
