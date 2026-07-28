@@ -4,6 +4,8 @@
 #include <optional>
 #include <vector>
 
+#include <ankerl/unordered_dense.h>
+
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/bullet.hpp>
@@ -16,6 +18,8 @@
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/ai-pilot.hpp>
+#include <gravitaris/game/component/ai-strategy.hpp>
+#include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
@@ -146,8 +150,37 @@ void AIPilotSystem::Update(std::uint64_t step)
         candidates.push_back({ent, transf.pos, team.id});
     });
 
+    // Wing orders. A pilot with no AIStrategy of its own -- everything that
+    // isn't a faction leader -- flies its team leader's objective instead of
+    // its own nearest-enemy pick, which is what turns one strategic ship into
+    // a squadron. A Land order is the exception: a claim is one ship setting
+    // down, so the wing covers the descent (Patrol) rather than piling onto
+    // the same rock. Lowest NetId wins if a team somehow fields two leaders,
+    // so the choice doesn't ride on flecs iteration order (ADR 0001).
+    struct WingOrder {
+        AIOrder order;
+        std::uint32_t netId = std::numeric_limits<std::uint32_t>::max();
+    };
+    ankerl::unordered_dense::map<std::uint8_t, WingOrder> wingOrders;
+    m_registry.each([&](flecs::entity ent, const AIStrategy&, const AIPilot& leader, const Team& team,
+                        const NetId& netId) {
+        if (leader.order.kind == AIOrderKind::None || !leader.order.subject.is_alive()) return;
+
+        WingOrder& slot = wingOrders[static_cast<std::uint8_t>(team.id)];
+        if (netId.value >= slot.netId) return;
+
+        slot.netId = netId.value;
+        slot.order = leader.order;
+        if (slot.order.kind == AIOrderKind::Land) slot.order.kind = AIOrderKind::Patrol;
+    });
+
     m_registry.each([&](flecs::entity ent, Transform& transf, PhysicsRef& ref,
                         AIPilot& pilot, InputQueue& queue, const Team& myTeam) {
+        if (!ent.has<AIStrategy>()) {
+            const auto wing = wingOrders.find(static_cast<std::uint8_t>(myTeam.id));
+            pilot.order = wing != wingOrders.end() ? wing->second.order : AIOrder{};
+        }
+
         const AIPersonality& personality = pilot.personality;
 
         // This pilot's own fitted gun -- what it actually has to lead with.

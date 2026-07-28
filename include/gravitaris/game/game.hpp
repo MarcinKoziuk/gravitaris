@@ -120,8 +120,8 @@ protected:
     static constexpr int RESPAWN_DELAY_TICKS = 90; // 1.5 s at the fixed tick
 
     // An AI faction fielding a leader fighter (docs/gravity-well-mode-plan.md
-    // Phase 5). Populated by Start(); a dedicated server builds its own
-    // scenario and fields none until round setup exists.
+    // Phase 5). Populated through AddAIFaction, by Start() in single-player
+    // and by the server itself in multiplayer.
     struct AIFaction {
         TeamId team = TeamId::Red;
         id_t preset = 0; // an AIPresetLibrary key; 0 means the library's default
@@ -171,6 +171,13 @@ public:
     // Spawns the player on `playerTeam` and an AI faction on the opposing
     // side. Call after BuildWorld().
     void SpawnCombatants(TeamId playerTeam);
+
+    // Fields a leader for `team` -- the ship that plays the mode rather than
+    // only fighting in it -- and keeps it respawning for the round. `preset`
+    // is an AIPresetLibrary key; 0 takes the library's default. A dedicated
+    // server calls this itself for the sides no human is playing, since it
+    // builds its own scenario instead of calling Start().
+    void AddAIFaction(TeamId team, id_t preset = 0);
 
     // BuildWorld() + SpawnCombatants(TeamId::Blue).
     void Start();

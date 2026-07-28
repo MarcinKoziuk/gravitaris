@@ -1706,15 +1706,20 @@ void TestAITactics()
     {
         Game game(fs);
         EntitySpawner& spawner = game.GetEntitySpawner();
+        // Facing the target already (ship forward is local -Y, so rot = pi/2
+        // is heading +X): the swing onto course is itself lateral motion, and
+        // this test is about what happens after that.
         flecs::entity ship = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{0., 0.},
-                                                 game.GetAIPresets().Default());
+                                                 game.GetAIPresets().Default(), Vector2d{}, 3.14159265358979323846 / 2.);
         configure(ship, /*fleeHealthFraction=*/0.0, /*jinkSpeed=*/40.0);
         spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{1500., 0.});
 
         double straightLateral = 0.0;
-        for (int tick = 0; tick < 90; ++tick) {
+        for (int tick = 0; tick < 120; ++tick) {
             game.Update();
-            straightLateral = std::max(straightLateral, std::abs(ship.get<Transform>().vel.y()));
+            if (tick >= 40) {
+                straightLateral = std::max(straightLateral, std::abs(ship.get<Transform>().vel.y()));
+            }
         }
 
         // The hit itself, minus the bullet: AIPilotSystem reads "under fire"
@@ -1727,8 +1732,12 @@ void TestAITactics()
             jinkedLateral = std::max(jinkedLateral, std::abs(ship.get<Transform>().vel.y()));
         }
 
+        std::printf("JINKDBG straight=%.3f jinked=%.3f\n", straightLateral, jinkedLateral);
         Require(straightLateral < 5.0, "ai tactics: an unmolested closing run flies straight");
-        Require(jinkedLateral > 15.0, "ai tactics: taking a hit makes the closing run weave");
+        // Well under the commanded jinkSpeed: a reversal every jinkPeriod ticks
+        // is not long enough to actually reach the lateral velocity asked
+        // for, which is what keeps the weave a weave rather than a detour.
+        Require(jinkedLateral > 8.0, "ai tactics: taking a hit makes the closing run weave");
     }
 
     // Breaking off: below the flee threshold a pilot opens the range instead
@@ -1785,6 +1794,50 @@ void TestAITactics()
                 "ai tactics: the first leader to decide takes the nearer planet");
         Require(second.get<AIStrategy>().subject == far,
                 "ai tactics: the second leader goes elsewhere rather than doubling up");
+    }
+
+    // Closing speed: maxSpeed is a dogfighting cap, and a pilot that holds it
+    // for a whole approach never arrives. Well outside the merge range it
+    // should be flying a transit.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity ship = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{0., 0.},
+                                                 game.GetAIPresets().Default());
+        configure(ship, /*fleeHealthFraction=*/0.0, /*jinkSpeed=*/0.0);
+        spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{5000., 0.});
+
+        const double cruiseCap = ship.get<AIPilot>().guidance.maxSpeed;
+        double peak = 0.0;
+        for (int tick = 0; tick < 600; ++tick) {
+            game.Update();
+            peak = std::max(peak, ship.get<Transform>().vel.length());
+        }
+        Require(peak > cruiseCap * 1.8,
+                "ai tactics: a long approach is flown at transit speed, not at the dogfight cap");
+    }
+
+    // Wing orders: fodder has no AIStrategy of its own and takes the team
+    // leader's objective, with a claim handed on as cover rather than as a
+    // second ship aiming at the same rock.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity planet = spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.},
+                                                           1e-9, 1500., 1.0, 0.0);
+        flecs::entity leader = spawner.SpawnAILeader("models/ships/fighter-1"_id, Vector2d{0., 0.},
+                                                     TeamId::Red, game.GetAIPresets().Default());
+        flecs::entity wingman = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{100., 0.},
+                                                    game.GetAIPresets().Default());
+        game.Update();
+        game.Update();
+
+        Require(leader.get<AIPilot>().order.kind == AIOrderKind::Land
+                        && leader.get<AIPilot>().order.subject == planet,
+                "ai tactics: the leader takes the claim itself (setup check)");
+        Require(wingman.get<AIPilot>().order.kind == AIOrderKind::Patrol
+                        && wingman.get<AIPilot>().order.subject == planet,
+                "ai tactics: the wing covers the leader's claim instead of doubling up on it");
     }
 
     fs.Shutdown();

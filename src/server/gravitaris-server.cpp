@@ -18,6 +18,7 @@
 #include <thread>
 
 #include <gravitaris/game/component/team.hpp>
+#include <gravitaris/game/debug/debug-spawn.hpp>
 #include <gravitaris/game/fs/filesystem-physfs.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/ai/ai-preset-library.hpp>
@@ -79,7 +80,11 @@ private:
     std::deque<std::string> m_lines;
 };
 
-    // Claude: can we use https://github.com/Neargye/magic_enum for this stuffie?
+static constexpr const char* TEAM_COLORS = "blue|red|green|yellow|magenta|cyan";
+static constexpr const char* COMMAND_USAGE =
+        "spawn [count] [preset] [color]|ai <color> [preset]|list|team <peer-id> <color>|quit";
+
+// Claude: can we use https://github.com/Neargye/magic_enum for this stuffie?
 std::optional<TeamId> ParseTeam(const std::string& name)
 {
     if (name == "blue") return TeamId::Blue;
@@ -100,44 +105,73 @@ void HandleCommand(const std::string& line, Game& game, NetServer& server, bool&
     std::string verb;
     iss >> verb;
 
-    // Claude: you are forgetting use stroustrup if/else style (CLAUDE.md)
-    if (verb.empty()) {
-        return;
-    } else if (verb == "spawn") {
-        int count = 1;
-        std::string presetName = "balanced";
-        iss >> count;
-        iss >> presetName;
-        // Presets are data (data/ai-presets.toml), so this takes whatever key
-        // the file happens to hold rather than a hardcoded list.
-        const AIPreset* preset = game.GetAIPresets().FindByKey(presetName);
+    // Presets are data (data/ai-presets.toml), so these take whatever key the
+    // file happens to hold rather than a hardcoded list.
+    const auto findPreset = [&game](const std::string& verb, const std::string& key) -> const AIPreset* {
+        const AIPreset* preset = game.GetAIPresets().FindByKey(key);
         if (!preset) {
-            std::fprintf(stderr, "spawn: unknown preset '%s'; known:", presetName.c_str());
+            std::fprintf(stderr, "%s: unknown preset '%s'; known:", verb.c_str(), key.c_str());
             for (const AIPreset& known : game.GetAIPresets().All()) {
                 std::fprintf(stderr, " %s", known.key.c_str());
             }
             std::fprintf(stderr, "\n");
+        }
+        return preset;
+    };
+
+    if (verb.empty()) {
+        return;
+    }
+    else if (verb == "spawn") {
+        int count = 1;
+        std::string presetName = "balanced";
+        std::string colorName = "red";
+        iss >> count;
+        iss >> presetName;
+        iss >> colorName;
+
+        const AIPreset* preset = findPreset(verb, presetName);
+        if (!preset) {
             return;
         }
-        count = std::clamp(count, 1, 100);
-        const id_t shipModel = "models/ships/fighter-1"_id;
-        // Claude: It's ugly that it's here, make a debug utility in game/ or something to spawn shit
-        for (int i = 0; i < count; ++i) {
-            const double angle = (2. * PI * static_cast<double>(i)) / static_cast<double>(count);
-            const Vector2d pos{600. * std::cos(angle), 600. * std::sin(angle)};
-            game.GetEntitySpawner().SpawnAIShip(shipModel, pos, *preset);
+        const std::optional<TeamId> team = ParseTeam(colorName);
+        if (!team) {
+            std::fprintf(stderr, "spawn: unknown color '%s' (%s)\n", colorName.c_str(), TEAM_COLORS);
+            return;
         }
-        std::printf("spawned %d %s ship(s)\n", count, presetName.c_str());
-    } else if (verb == "list") {
+
+        SpawnAIWave(game, count, *preset, *team);
+        std::printf("spawned %d %s %s ship(s)\n", count, colorName.c_str(), presetName.c_str());
+    }
+    else if (verb == "ai") {
+        std::string colorName;
+        std::string presetName = "balanced";
+        iss >> colorName;
+        iss >> presetName;
+
+        const std::optional<TeamId> team = ParseTeam(colorName);
+        if (!team) {
+            std::fprintf(stderr, "ai: unknown color '%s' (%s)\n", colorName.c_str(), TEAM_COLORS);
+            return;
+        }
+        const AIPreset* preset = findPreset(verb, presetName);
+        if (!preset) {
+            return;
+        }
+
+        game.AddAIFaction(*team, preset->id);
+        std::printf("%s now fields a %s AI leader\n", colorName.c_str(), presetName.c_str());
+    }
+    else if (verb == "list") {
         std::printf("peers: %zu\n", server.PeerCount());
-    } else if (verb == "team") {
+    }
+    else if (verb == "team") {
         std::uint32_t peer = 0;
         std::string colorName;
         iss >> peer >> colorName;
-        const auto team = ParseTeam(colorName);
+        const std::optional<TeamId> team = ParseTeam(colorName);
         if (!team) {
-            std::fprintf(stderr, "team: unknown color '%s' (blue|red|green|yellow|magenta|cyan)\n",
-                         colorName.c_str());
+            std::fprintf(stderr, "team: unknown color '%s' (%s)\n", colorName.c_str(), TEAM_COLORS);
             return;
         }
         if (!server.SetPeerTeam(peer, *team)) {
@@ -145,11 +179,12 @@ void HandleCommand(const std::string& line, Game& game, NetServer& server, bool&
             return;
         }
         std::printf("peer %u set to %s\n", peer, colorName.c_str());
-    } else if (verb == "quit") {
+    }
+    else if (verb == "quit") {
         running = false;
-    } else {
-        std::fprintf(stderr, "unknown command '%s' (spawn [count] [preset]|list|team <peer-id> <color>|quit)\n",
-                     verb.c_str());
+    }
+    else {
+        std::fprintf(stderr, "unknown command '%s' (%s)\n", verb.c_str(), COMMAND_USAGE);
     }
 }
 
@@ -166,8 +201,12 @@ int main(int argc, char** argv)
 {
     HasEnteredMain = true;
 
-    std::uint16_t port = 17890; // make configurable
+    // gravitaris-server [port] [bind-address]; an empty bind address listens
+    // on every interface.
+    std::uint16_t port = 17890;
+    std::string bindAddress;
     if (argc > 1) port = static_cast<std::uint16_t>(std::atoi(argv[1]));
+    if (argc > 2) bindAddress = argv[2];
 
     FilesystemPhysFS fs;
     if (!fs.Init()) {
@@ -187,13 +226,19 @@ int main(int argc, char** argv)
     BuildStartingComplex(game.GetEntitySpawner(), homes.red, TeamId::Red);
     game.SettleScenario();
 
-    WebRtcServerTransport transport(port);
+    // Without this the strategy layer has nothing to iterate: AIStrategy only
+    // ever lands on a faction leader, and Start() -- the single-player path
+    // that fields one -- is exactly what this target skips. Red by default
+    // because console-spawned fodder is Red; `ai <color>` adds more.
+    game.AddAIFaction(TeamId::Red, ID("balanced"));
+
+    WebRtcServerTransport transport(port, DefaultIceServers(), bindAddress);
     NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
                      transport);
 
-    // Claude: this binding must be configurable
-    LOG(info) << "gravitaris-server: listening on ws://0.0.0.0:" << port;
-    std::printf("commands: spawn [count] [preset]|list|team <peer-id> <color>|quit\n");
+    LOG(info) << "gravitaris-server: listening on ws://" << (bindAddress.empty() ? "0.0.0.0" : bindAddress)
+              << ":" << port;
+    std::printf("commands: %s\n", COMMAND_USAGE);
 
     StdinCommandQueue stdinQueue;
     bool running = true;

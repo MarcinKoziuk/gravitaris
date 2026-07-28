@@ -32,7 +32,10 @@ public:
     // iceServers is handed to every per-peer WebRtcTransport; the server needs
     // its own server-reflexive candidate just as much as the client does --
     // see DefaultIceServers() in webrtc-transport.hpp.
-    explicit WebRtcServerTransport(uint16_t port, std::vector<std::string> iceServers = DefaultIceServers());
+    // `bindAddress` empty listens on every interface, which is what a LAN or
+    // container-hosted server wants; pass "127.0.0.1" to keep it local.
+    explicit WebRtcServerTransport(uint16_t port, std::vector<std::string> iceServers = DefaultIceServers(),
+                                   std::string bindAddress = {});
     ~WebRtcServerTransport() override;
 
     WebRtcServerTransport(const WebRtcServerTransport&) = delete;

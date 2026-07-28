@@ -53,7 +53,26 @@ Vector2d InterceptEntity(const Transform& ship, const Transform& target, const G
 {
     const Vector2d toTarget = target.pos - ship.pos;
     const double dist = toTarget.length();
-    const double eta = dist / std::max(params.maxSpeed, 1e-6);
+
+    // maxSpeed is a dogfighting figure; holding a whole approach to it turns
+    // a 6000-unit engage range into a 75-second crawl. Outside mergeRange the
+    // cap is maxSpeed plus exactly the excess a flip-and-burn can still bleed
+    // off before the merge -- solved like GotoPoint's own arrival speed, with
+    // maxSpeed rather than zero as the speed to arrive at -- so the ship
+    // crosses at transit speed and is down to fighting speed when it gets
+    // there.
+    double cap = params.maxSpeed;
+    const double runway = dist - params.mergeRange;
+    if (runway > 0.0) {
+        const double a = params.accel;
+        const double t = params.flipTime;
+        cap = std::min(params.transitSpeed,
+                       params.maxSpeed + a * (-t + std::sqrt(t * t + 2.0 * runway / a)));
+    }
+
+    // The lead point is where the target will be when we actually get there,
+    // so the crossing speed is the one to dead-reckon with.
+    const double eta = dist / std::max(cap, 1e-6);
     const Vector2d aim = target.pos + target.vel * eta;
 
     // Only the target's *lateral* motion is matched. Matching its
@@ -69,8 +88,8 @@ Vector2d InterceptEntity(const Transform& ship, const Transform& target, const G
 
     Vector2d desired = GotoPoint(ship, aim, params) + matchVel;
     const double speed = desired.length();
-    if (speed > params.maxSpeed) {
-        desired *= params.maxSpeed / speed;
+    if (speed > cap) {
+        desired *= cap / speed;
     }
     return desired;
 }

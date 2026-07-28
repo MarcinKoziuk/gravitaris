@@ -585,6 +585,8 @@ add_executable(GravitarisNG
     src/game/gnc/guidance/behaviors.cpp
     include/gravitaris/game/ai/ai-preset-library.hpp
     src/game/ai/ai-preset-library.cpp
+    include/gravitaris/game/debug/debug-spawn.hpp
+    src/game/debug/debug-spawn.cpp
     include/gravitaris/game/system/combat/bullet-lifetime-system.hpp
     src/game/system/combat/bullet-lifetime-system.cpp
     include/gravitaris/game/system/combat/damage-system.hpp
@@ -900,6 +902,7 @@ add_executable(gravitaris-sim-test
     src/game/gnc/control/flight-controller.cpp
     src/game/gnc/guidance/behaviors.cpp
     src/game/ai/ai-preset-library.cpp
+    src/game/debug/debug-spawn.cpp
     src/game/spawner/entity-spawner.cpp
     src/game/scenario/classic-scenario.cpp
     src/game/scenario/starting-complex.cpp
@@ -1004,6 +1007,7 @@ if(NOT EMSCRIPTEN)
         src/game/gnc/control/flight-controller.cpp
         src/game/gnc/guidance/behaviors.cpp
         src/game/ai/ai-preset-library.cpp
+        src/game/debug/debug-spawn.cpp
         src/game/spawner/entity-spawner.cpp
         src/game/scenario/classic-scenario.cpp
         src/game/scenario/starting-complex.cpp

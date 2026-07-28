@@ -262,6 +262,33 @@ Verified by `TestAITactics` in `tools/sim-test`: fire held with a planet on
 the solution vs. fire opened without it, straight run vs. weave after a hit,
 range opened at 15% hull vs. closed at 100%, and the crowding case below.
 
+*Multiplayer wiring + cruise speed (2026-07-28).* Three things made the AI
+look inert in an MP session, none of them tactical:
+
+- **No strategy layer existed there at all.** `m_aiFactions` was only ever
+  populated by `Game::SpawnCombatants`, i.e. by `Game::Start()`, which a
+  dedicated server deliberately skips — so no entity carried an `AIStrategy`
+  and `AIStrategySystem` iterated nothing. Extracted `Game::AddAIFaction`
+  from `SpawnCombatants`; the server calls it for Red at startup and exposes
+  `ai <color> [preset]` for the rest.
+- **Fodder never received orders.** `SpawnAIShip` ships have no `AIStrategy`,
+  so `order.kind` stayed `None` for life and only the single leader acted on
+  a goal. `AIPilotSystem` now propagates the team leader's order to pilots
+  without an `AIStrategy` of their own (lowest NetId wins if a team fields
+  two, so it doesn't ride on iteration order). A `Land` order is handed on as
+  `Patrol` — a claim is one ship setting down, and the wing covers the
+  descent rather than piling onto the rock.
+- **Intercept crawled.** `InterceptEntity` clamped to `maxSpeed` (80), a
+  dogfighting figure, while `transitSpeed` (400) only reached `GotoPoint` /
+  `LandOnBody` — so a pilot engaging at the 6000-unit `engageRange` took 75
+  seconds to arrive. The cap is now `maxSpeed` plus whatever a flip-and-burn
+  can still bleed off before `mergeRange` (new `GuidanceParams` field, 500),
+  solved like `GotoPoint`'s arrival speed with `maxSpeed` rather than zero as
+  the arrival target. The lead point dead-reckons off that same figure.
+
+The throttle dwell was *not* a factor: `urgentFactor` abandons a coast above
+9 u/s of velocity error, which holds for any transit.
+
 *Phase 6 note (same date):* `AIStrategySystem` now scores a subject already
 spoken for by n other leaders at `1/(1+n)` of its worth (Dogfight exempt —
 converging on one enemy fighter is fine, two ships landing on one rock is

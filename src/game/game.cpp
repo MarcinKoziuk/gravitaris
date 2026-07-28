@@ -82,15 +82,18 @@ void Game::SpawnCombatants(TeamId playerTeam)
 
     // The opposing complex gets a leader that plays the mode, not just a
     // dogfighter. Per-faction presets are U4's round-setup screen.
-    const TeamId aiTeam = playerTeam == TeamId::Blue ? TeamId::Red : TeamId::Blue;
-    m_aiFactions.push_back(AIFaction{aiTeam, ID("balanced")});
-    for (AIFaction& faction : m_aiFactions) {
-        if (const std::optional<FactionSystem::SpawnPoint> site =
-                    m_factionSystem.SpawnPosition(faction.team)) {
-            faction.leader = m_entitySpawner->SpawnAILeader("models/ships/fighter-1"_id, site->pos,
-                                                            faction.team, ResolveAIPreset(faction.preset), site->vel,
-                                                            site->rot);
-        }
+    AddAIFaction(playerTeam == TeamId::Blue ? TeamId::Red : TeamId::Blue, ID("balanced"));
+}
+
+void Game::AddAIFaction(TeamId team, id_t preset)
+{
+    m_aiFactions.push_back(AIFaction{team, preset});
+    AIFaction& faction = m_aiFactions.back();
+
+    if (const std::optional<FactionSystem::SpawnPoint> site = m_factionSystem.SpawnPosition(team)) {
+        faction.leader = m_entitySpawner->SpawnAILeader("models/ships/fighter-1"_id, site->pos, team,
+                                                        ResolveAIPreset(faction.preset), site->vel,
+                                                        site->rot);
     }
 }
 
@@ -101,21 +104,12 @@ void Game::Start()
 }
 
 Game::Game(IFilesystem& filesystem)
-        // Claude: am confused, is this still needed via my suggestion for m_registry?
-        // Explicitly-qualified (non-virtual) call: this is a delegating
-        // constructor of Game itself, not a derived class's base-init (that
-        // case -- see CGame::CGame -- is fine; the derived class's own vptr
-        // is already set by the time it evaluates the base-class argument).
-        // Here, evaluating CreateEntitySpawner() is part of constructing
-        // Game via delegation to Game's own two-arg constructor, and at
-        // least one observed toolchain (Apple Clang 21 arm64) does not yet
-        // have Game's vptr installed at that point, so a virtual call reads
-        // a garbage vtable pointer and jumps into invalid memory (reliably
-        // reproducible SEGV -- confirmed via AddressSanitizer, and via
-        // bisection against every constructor in this class). Since a plain
-        // Game (as opposed to CGame) never has this overridden anyway, the
-        // qualified call changes nothing observable and sidesteps the whole
-        // question.
+        // Qualified (non-virtual) on purpose: this argument is evaluated
+        // while delegating to Game's own constructor, before Game's vptr is
+        // installed, and virtual dispatch there jumps through a garbage
+        // vtable on at least one toolchain (Apple Clang 21 arm64). A plain
+        // Game never overrides this anyway; CGame's base-init is a different
+        // case and is fine.
         : Game(filesystem, Game::CreateEntitySpawner())
 {}
 

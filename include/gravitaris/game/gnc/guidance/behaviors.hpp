@@ -17,9 +17,13 @@ struct GuidanceParams {
     // Cap for crossings that end in an arrival (GotoPoint, LandOnBody), well
     // above maxSpeed: both solve the fastest speed they can still brake from,
     // so the cap is what a transit actually flies at, and maxSpeed is a
-    // dogfighting figure. InterceptEntity clamps its own result back to
-    // maxSpeed, so this doesn't leak into combat.
+    // dogfighting figure. InterceptEntity flies the transit figure too while
+    // the target is further off than mergeRange (see its own comment).
     double transitSpeed = 400.0;
+
+    // Range at which an intercept stops being a crossing and becomes a
+    // fight, i.e. where InterceptEntity has to be down to maxSpeed.
+    double mergeRange = 500.0;
 
     double flipTime = 1.2;       // seconds to turn retrograde before a burn
     double arriveRadius = 3.0;   // inside this, want zero velocity

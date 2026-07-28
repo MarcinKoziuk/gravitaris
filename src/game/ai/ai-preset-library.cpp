@@ -160,6 +160,7 @@ static void ReadGuidance(const toml::table& t, GuidanceParams& g)
     if (const auto v = t["max_speed"].value<double>()) g.maxSpeed = *v;
     if (const auto v = t["accel"].value<double>()) g.accel = *v;
     if (const auto v = t["transit_speed"].value<double>()) g.transitSpeed = *v;
+    if (const auto v = t["merge_range"].value<double>()) g.mergeRange = *v;
     if (const auto v = t["flip_time"].value<double>()) g.flipTime = *v;
     if (const auto v = t["arrive_radius"].value<double>()) g.arriveRadius = *v;
     if (const auto v = t["orbit_radial_kp"].value<double>()) g.orbitRadialKp = *v;

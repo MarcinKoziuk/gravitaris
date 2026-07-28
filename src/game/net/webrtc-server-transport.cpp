@@ -11,10 +11,14 @@ struct WebRtcServerTransport::PeerState {
     std::unique_ptr<WebRtcTransport> transport;
 };
 
-WebRtcServerTransport::WebRtcServerTransport(uint16_t port, std::vector<std::string> iceServers)
+WebRtcServerTransport::WebRtcServerTransport(uint16_t port, std::vector<std::string> iceServers,
+                                             std::string bindAddress)
 {
     rtc::WebSocketServerConfiguration config;
     config.port = port;
+    if (!bindAddress.empty()) {
+        config.bindAddress = std::move(bindAddress);
+    }
     m_wsServer = std::make_unique<rtc::WebSocketServer>(config);
 
     m_wsServer->onClient([this, iceServers = std::move(iceServers)](std::shared_ptr<rtc::WebSocket> ws) {
