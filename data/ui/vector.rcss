@@ -114,7 +114,9 @@ div#title_bar
 
     background-color: #0cf2;
     border-bottom-width: 1dp;
-    border-bottom-color: #0cf6;
+    border-bottom-color: #0cf;     /* full strength, unlike the window's own
+                                      hairline edge: this rule under the title
+                                      is what marks the dialog as the live one */
 }
 
 div#title_bar div#icon

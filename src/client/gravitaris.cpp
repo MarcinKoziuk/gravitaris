@@ -197,6 +197,13 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     });
     m_ui.SetRecenterCallback([this] { m_game->FocusCamera(); });
 
+    // Before Init(), which is where the documents load and are first laid out.
+    // The window and its framebuffer already exist by now (the base
+    // Application constructor made them), so these are the real values rather
+    // than the placeholders drawEvent would otherwise correct a frame later.
+    m_ui.SetDimensions(framebufferSize().x(), framebufferSize().y());
+    m_ui.SetDensityIndependentPixelRatio(PixelScale().x());
+
     m_ui.Init();
 
     m_glow = std::make_unique<GlowPostProcess>(m_filesystem);

@@ -63,9 +63,12 @@ bool UI::Init()
 
     if (!Rml::Initialise()) return false;
 
-    // Placeholder size; corrected by the first SetDimensions() call once the
-    // window/framebuffer is up.
+    // Both of these have to be in place before the documents below load: RmlUi
+    // lays a document out as it is loaded, so a context still holding the
+    // placeholder size or ratio produces a layout that visibly jumps on the
+    // first frame that corrects it. The caller sets them before calling Init().
     m_context = Rml::CreateContext("default", Rml::Vector2i(m_width, m_height));
+    m_context->SetDensityIndependentPixelRatio(m_dpRatio);
 
     // Chakra Petch carries the chamfered-vector look and is the theme's base
     // face; Share Tech Mono is for readouts only, where proportional digits
@@ -156,6 +159,9 @@ void UI::SetDimensions(int width, int height)
 
 void UI::SetDensityIndependentPixelRatio(float ratio)
 {
+    if (ratio == m_dpRatio) return;
+
+    m_dpRatio = ratio;
     if (m_context) {
         m_context->SetDensityIndependentPixelRatio(ratio);
     }

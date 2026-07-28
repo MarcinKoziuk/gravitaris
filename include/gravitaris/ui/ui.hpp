@@ -74,6 +74,7 @@ private:
 
     int m_width = 1280;
     int m_height = 720;
+    float m_dpRatio = 1.f;
 
     // Attaches `handler` to `element`, keeping the listener alive in
     // m_listeners for as long as this UI exists.
@@ -94,6 +95,10 @@ public:
 
     bool Init();
 
+    // Both take effect immediately once Init() has run, and are remembered
+    // until then. Call them before Init(): documents are laid out as they load,
+    // so a context still on the placeholder size or ratio lays the HUD and the
+    // intro dialog out wrong and they jump when the first frame corrects it.
     void SetDimensions(int width, int height);
 
     void SetDensityIndependentPixelRatio(float ratio);
