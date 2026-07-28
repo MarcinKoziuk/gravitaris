@@ -170,9 +170,8 @@
 				color: #cff;
 			}
 
-			/* Build identity on top, then the ping with the byline pushed to
-			   the panel's right edge beside it. Both texts come from the frame
-			   loop (see UI::SetHudStatus); the byline is static markup. */
+			/* Build identity on top, the ping under it. Both come from the
+			   frame loop -- see UI::SetHudStatus. */
 			div#panel_footer
 			{
 				position: absolute;
@@ -182,12 +181,6 @@
 
 				font-size: 13dp;
 				color: #588;
-			}
-
-			span#byline
-			{
-				float: right;
-				color: #8bb;
 			}
 
 			/* Covers exactly the rendered game view, so anything anchored to
@@ -260,10 +253,7 @@
 
 				<div id="panel_footer">
 					<div id="status_readout" class="readout"></div>
-					<div>
-						<span id="ping_readout" class="readout"></span>
-						<span id="byline">by Marcin Koziuk</span>
-					</div>
+					<div id="ping_readout" class="readout"></div>
 				</div>
 			</div>
 		</div>

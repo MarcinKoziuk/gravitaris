@@ -36,10 +36,12 @@
 				letter-spacing: 5dp;
 				color: #588;
 			}
+			/* Takes whatever the label leaves, so the row reads as one control
+			   spanning the dialog rather than a small box floating in it. */
 			select#team_select
 			{
-				flex: 0 0 auto;
-				width: 150dp;
+				flex: 1 1 auto;
+				width: auto;
 			}
 			/* Out of the flow, in the window's own bottom-right corner -- so
 			   the copy above it doesn't have to leave room for it. Filled

@@ -90,7 +90,8 @@ body.window
 
     background-color: #000000f2;
     border-width: 1dp;
-    border-color: #0cf;
+    border-color: #0cf6;           /* the frames' hairline, not a full-strength
+                                      cyan -- the brackets do the accenting */
 }
 
 /* Above the title bar (1) and content (2), so a bracket isn't cut in half by
@@ -113,7 +114,7 @@ div#title_bar
 
     background-color: #0cf2;
     border-bottom-width: 1dp;
-    border-bottom-color: #0cf;
+    border-bottom-color: #0cf6;
 }
 
 div#title_bar div#icon
@@ -245,17 +246,27 @@ select selectvalue
 
 /* Chevron without a sprite: a square showing only its bottom and right edges
    is a corner pointing down-right, so turning it 45deg points it straight
-   down. Margins inset it from the corner the widget pins it to. */
+   down.
+
+   Every value here is load-bearing. display: block because selectarrow is
+   instanced as a generic element, and width/height do nothing on the inline
+   default. border-box so the size below is the whole 10dp, borders included.
+   And the margins have to clear the *rotated* extent, not the box: turning a
+   10dp square about its centre sweeps a 14dp diagonal, so 11dp of top margin
+   in a 32dp content box leaves it 8dp..24dp -- inside, with room either side. */
 select selectarrow
 {
-    width: 7dp;
-    height: 7dp;
-    margin: 11dp 12dp;
+    display: block;
+    box-sizing: border-box;
+    width: 10dp;
+    height: 10dp;
+    margin: 11dp 14dp;
 
     border-bottom-width: 2dp;
     border-right-width: 2dp;
     border-color: #0cf;
     transform: rotate(45deg);
+    transform-origin: center center;
 }
 
 select:hover selectarrow
