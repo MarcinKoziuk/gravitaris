@@ -319,11 +319,13 @@ select selectbox
     border-color: #0cf8;
 }
 
+/* The label tone (div.stat_head's #7cc), so the choices sit back and the one
+   already selected is the only bright line in the list. */
 select selectbox option
 {
     width: auto;
     padding: 7dp 12dp;
-    color: #9ff;
+    color: #7cc;
 }
 
 select selectbox option:hover
