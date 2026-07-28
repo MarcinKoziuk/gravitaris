@@ -38,6 +38,9 @@
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/transform.hpp>
+#include <gravitaris/game/component/upgrade-draft.hpp>
+#include <gravitaris/game/ai/ai-preset-library.hpp>
+#include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/scenario/starting-complex.hpp>
@@ -510,7 +513,11 @@ void TestClientPrediction()
     GameEventQueue eventQueue;
 
     ClientPrediction prediction(game.GetRegistry(), game.GetPhysicsSystem(), game.GetEntitySpawner(), eventQueue,
-                                game.GetResourceLoader());
+                                game.GetResourceLoader(), game.GetUpgradeCatalog());
+
+    // An unupgraded ship's cadence, which is what this prediction fires at.
+    const std::uint32_t fireCooldownTicks =
+            game.GetUpgradeCatalog().ResolveStats(UpgradeLevels{}).fireCooldownTicks;
     prediction.SpawnOwnShip("models/ships/fighter-1"_id, Vector2d{0., 0.});
     Require(prediction.HasOwnShip(), "prediction: own ship spawns");
 
@@ -590,15 +597,15 @@ void TestClientPrediction()
     });
     Require(ownedAndHarmless, "prediction: the predicted bullet is zero-damage and tagged with the shooter's NetId");
 
-    // Cooldown gates the cadence: holding the trigger for FIRE_COOLDOWN_TICKS
-    // - 1 more ticks must not emit another event yet.
-    for (std::uint64_t tick = 11; tick < 10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS; ++tick) {
+    // Cooldown gates the cadence: holding the trigger for the resolved
+    // cooldown - 1 more ticks must not emit another event yet.
+    for (std::uint64_t tick = 11; tick < 10 + fireCooldownTicks; ++tick) {
         prediction.Step(tick, firing, planets, tick, /*ownShipNetId=*/0);
     }
     Require(eventQueue.LatestSeq() == 1, "prediction: fire cooldown gates cadence, no event mid-cooldown");
 
-    prediction.Step(10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS, firing, planets,
-                    10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS, /*ownShipNetId=*/0);
+    prediction.Step(10 + fireCooldownTicks, firing, planets,
+                    10 + fireCooldownTicks, /*ownShipNetId=*/0);
     Require(eventQueue.LatestSeq() == 2, "prediction: cooldown expiring lets the next held shot fire");
 
     // Phase 7: planet collision proxies have real collision geometry, not
@@ -617,7 +624,7 @@ void TestClientPrediction()
     collidingPlanet.gravityMass = 0.f;
     const std::vector<EntityState> collidingPlanets{collidingPlanet};
 
-    const std::uint64_t collideTick = 10 + ShipControlsSystem::FIRE_COOLDOWN_TICKS + 1;
+    const std::uint64_t collideTick = 10 + fireCooldownTicks + 1;
     prediction.Step(collideTick, ControlFlags{}, collidingPlanets, collideTick, /*ownShipNetId=*/0);
     const Magnum::Vector2d afterCollision = prediction.GetOwnShip().get<Transform>().pos;
     Require((afterCollision - beforeCollision).length() > 0.1,
@@ -739,7 +746,7 @@ void TestClientPrediction()
 
 // docs/gravity-well-mode-plan.md Phase 1: safe-landing detection + claiming.
 // A ship settling gently, upright, on a planet becomes landed and claims it
-// after ConquestSystem::CLAIM_TICKS; a fast crash damages and does NOT claim.
+// after the configured claim dwell; a fast crash damages and does NOT claim.
 void TestLandingAndClaiming()
 {
     FilesystemPhysFS fs;
@@ -813,6 +820,34 @@ void TestLandingAndClaiming()
     }
     Require(damaged, "landing: crashing into a planet at speed damages the ship");
     Require(planet2.get<Team>().id == TeamId::None, "landing: a crash does not claim the planet");
+
+    // Per-hull fragility: two identical airframes dropped identically, one of
+    // them twice as fragile, take damage in that ratio. Overridden on the
+    // component rather than by flying a different model, so nothing but the
+    // multiplier differs between the two. Speed chosen so neither dies -- a
+    // clamp at zero hp would hide the ratio.
+    const auto dropAndMeasure = [&](double planetY, float fragility) {
+        spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., planetY}, 1e-9, 800., 1.0, 0.0);
+        flecs::entity faller = spawner.SpawnPlayer("models/ships/fighter-1"_id,
+                                                   Vector2d{800., planetY + planetRadius + 60.});
+        faller.get_mut<Damageable>().landingFragility = fragility;
+        cpBody* body = game.GetPhysicsSystem().GetBody(faller.get<PhysicsRef>()).cp.body.get();
+        cpBodySetAngle(body, CP_PI);
+        cpBodySetVelocity(body, cpv(0., -110.));
+
+        const float before = faller.get<Damageable>().hp;
+        for (int tick = 0; tick < 120 && faller.is_alive(); ++tick) {
+            game.Update();
+            if (faller.is_alive() && faller.get<Damageable>().hp < before) break;
+        }
+        Require(faller.is_alive(), "landing: the fragility probe survives its drop");
+        return before - faller.get<Damageable>().hp;
+    };
+
+    const float toughDamage = dropAndMeasure(-40000., 1.f);
+    const float fragileDamage = dropAndMeasure(-60000., 2.f);
+    Require(toughDamage > 0.f && std::fabs(fragileDamage - 2.f * toughDamage) < 0.01f * toughDamage,
+            "landing: a hull's [landing] fragility scales the damage a hard set-down costs it");
 
     fs.Shutdown();
 }
@@ -1265,8 +1300,113 @@ void TestPlanetsideStructureHits()
 
 // ResearchSystem: a faction's labs pool their progress (two finish sooner
 // than one), the bar's state is mirrored onto each lab for replication, and a
-// same-team ship landed at a lab's planet collects the finished upgrade,
-// restarting research.
+// same-team ship landed at a lab's planet is offered a draft of three
+// upgrades, one of which it picks -- restarting research.
+// UpgradeCatalog: the pool loads, offers respect a maxed tier, and the
+// resolved stats move the right way with each level.
+void TestUpgradeCatalog()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    UpgradeCatalog catalog;
+    Require(catalog.Load(fs), "catalog: data/upgrades.toml parses");
+    Require(!catalog.Defs().empty(), "catalog: the pool is not empty");
+
+    const UpgradeDef* fireRate = catalog.FindKind(UpgradeKind::FireRate);
+    Require(fireRate != nullptr, "catalog: the pool has a fire-rate upgrade");
+
+    UpgradeLevels levels;
+    const ShipStats base = catalog.ResolveStats(levels);
+    Require(base.gun != nullptr && base.gun->id == catalog.Fitted().shipGun,
+            "catalog: an empty loadout resolves to the ship's fitted gun");
+    Require(base.fireCooldownTicks == base.gun->cooldownTicks,
+            "catalog: an unupgraded cadence is the fitted gun's own");
+
+    levels.fireRate = fireRate->maxLevel;
+    Require(catalog.ResolveStats(levels).fireCooldownTicks < base.fireCooldownTicks,
+            "catalog: fire-rate levels shorten the gun's cooldown");
+    Require(!catalog.IsEligible(*fireRate, levels), "catalog: a maxed tier stops being offered");
+
+    // The restock is exempt from that -- it is the one thing always on the
+    // table, however many times it has been taken.
+    const UpgradeDef* rack = catalog.FindKind(UpgradeKind::MissileRack);
+    Require(rack != nullptr && catalog.IsEligible(*rack, levels),
+            "catalog: a repeatable restock is always eligible");
+
+    const UpgradeDef* gun = catalog.FindKind(UpgradeKind::WeaponTier);
+    Require(gun != nullptr && !gun->tiers.empty(), "catalog: the pool has a weapon-tier upgrade");
+    levels.gunTier = 1;
+    const ShipStats heavier = catalog.ResolveStats(levels);
+    Require(heavier.gun != nullptr && heavier.gun->id == gun->tiers[0],
+            "catalog: a gun tier fits that tier's weapon rather than scaling the stock one");
+    Require(heavier.gun->damage > base.gun->damage && heavier.gun->speed > base.gun->speed,
+            "catalog: a tiered gun hits harder and throws flatter than the stock one");
+
+    // Both shields resolve to a real reservoir, and swapping type resets the
+    // tier rather than carrying it across.
+    ShipLoadout loadout;
+    const UpgradeDef* bubble = catalog.FindKind(UpgradeKind::Shield, ShieldType::Bubble);
+    const UpgradeDef* plating = catalog.FindKind(UpgradeKind::Shield, ShieldType::Plating);
+    Require(bubble && plating, "catalog: the pool has both shield types");
+    Require(catalog.Apply(*bubble, loadout) && catalog.Apply(*bubble, loadout),
+            "catalog: a shield stacks with itself");
+    Require(loadout.levels.shield == 2 && loadout.levels.shieldType == ShieldType::Bubble,
+            "catalog: stacking the same shield raises its tier");
+    Require(catalog.ResolveStats(loadout.levels).shieldCapacity > 0.f,
+            "catalog: a fitted shield resolves to a real capacity");
+    Require(catalog.Apply(*plating, loadout), "catalog: the other shield type can be swapped in");
+    Require(loadout.levels.shieldType == ShieldType::Plating && loadout.levels.shield == 1,
+            "catalog: swapping shield type starts the new emitter at tier 1");
+
+    // Distinct offers, drawn only from what is still eligible.
+    const UpgradeCatalog::Offers offers = catalog.RollOffers(UpgradeLevels{}, 12345u);
+    Require(offers[0] != offers[1] && offers[1] != offers[2] && offers[0] != offers[2],
+            "catalog: a draft never offers the same upgrade twice");
+    Require(catalog.RollOffers(UpgradeLevels{}, 12345u) == offers,
+            "catalog: the same seed rolls the same draft");
+
+    fs.Shutdown();
+}
+
+// DamageSystem/ShieldSystem: a fitted shield eats a hit before the hull does,
+// and recharges once the fire lets up.
+void TestShields()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    flecs::entity target = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.}, TeamId::Blue);
+    const UpgradeDef* bubble = game.GetUpgradeCatalog().FindKind(UpgradeKind::Shield, ShieldType::Bubble);
+    Require(bubble != nullptr, "shields: the pool has a bubble shield");
+    game.GetUpgradeCatalog().Apply(*bubble, target.get_mut<ShipLoadout>());
+
+    // Charges from empty at the emitter's rate.
+    for (int tick = 0; tick < 600; ++tick) game.Update();
+    const float charged = target.get<ShipLoadout>().shieldHp;
+    Require(charged > 0.f, "shields: a fitted emitter charges up on its own");
+
+    const float hullBefore = target.get<Damageable>().hp;
+    flecs::entity bullet = spawner.SpawnBullet("models/bullets/bullet-0"_id, Vector2d{-200., 0.},
+                                               Vector2d{400., 0.}, /*sensor=*/true);
+    bullet.emplace<Bullet>(3.0, TeamId::Red, 20.f, 0u);
+    for (int tick = 0; tick < 60 && bullet.is_alive(); ++tick) game.Update();
+
+    Require(!bullet.is_alive(), "shields: the round is still consumed by the shielded ship");
+    Require(target.get<ShipLoadout>().shieldHp < charged, "shields: the hit comes off the shield");
+    Require(target.get<Damageable>().hp == hullBefore,
+            "shields: a bubble hit the shield can cover never reaches the hull");
+
+    fs.Shutdown();
+}
+
 void TestResearch()
 {
     FilesystemPhysFS fs;
@@ -1291,14 +1431,15 @@ void TestResearch()
         return found;
     };
 
-    // One lab: RESEARCH_SECONDS' worth of ticks, no sooner.
-    const int soloTicks = static_cast<int>(ResearchSystem::RESEARCH_SECONDS / Game::PHYSICS_DELTA);
+    // One lab: a full research period's worth of ticks, no sooner.
+    const int soloTicks =
+            static_cast<int>(game.GetEconomyConfig().research.secondsPerUpgrade / Game::PHYSICS_DELTA);
     for (int tick = 0; tick < soloTicks - 1; ++tick) game.Update();
-    Require(!research().upgradeReady, "research: one lab is not done before RESEARCH_SECONDS");
+    Require(!research().upgradeReady, "research: one lab is not done before its research period");
     Require(lab.get<Structure>().researchProgress > 0.9f,
             "research: the lab mirrors its faction's progress for replication");
     for (int tick = 0; tick < 5 && !research().upgradeReady; ++tick) game.Update();
-    Require(research().upgradeReady, "research: one lab finishes after RESEARCH_SECONDS");
+    Require(research().upgradeReady, "research: one lab finishes after its research period");
     Require(lab.get<Structure>().upgradeReady, "research: the ready flag reaches the lab too");
 
     // Nobody landed, so it just waits.
@@ -1315,16 +1456,44 @@ void TestResearch()
     cpBodySetAngle(shipBody, CP_PI);
     cpBodySetVelocity(shipBody, cpv(0., -8.));
 
+    // A player ship picks nothing on its own, so hold "accept offer 1" down:
+    // the pick is ignored on every tick there is no draft open.
+    const auto pressPick = [&](std::uint8_t slot) {
+        InputCommand cmd;
+        cmd.tick = game.GetStep();
+        cmd.upgradePick = slot;
+        ship.get_mut<InputQueue>().Push(cmd);
+    };
+
+    // Touchdown with nothing pressed: the draft opens and stays open, which
+    // is what gives the player time to read it.
+    for (int tick = 0; tick < 900 && ship.is_alive() && !ship.get<UpgradeDraft>().available; ++tick) {
+        game.Update();
+    }
+    Require(ship.is_alive(), "research: the collecting ship survives touchdown");
+    Require(ship.get<UpgradeDraft>().available,
+            "research: landing at the lab's planet opens a draft on the ship");
+
+    const UpgradeCatalog::Offers offers = ship.get<UpgradeDraft>().offers;
+    Require(offers[0] != 0 && offers[1] != 0 && offers[2] != 0,
+            "research: the draft is filled from the pool");
+    Require(offers[0] != offers[1] && offers[1] != offers[2] && offers[0] != offers[2],
+            "research: the three offers are distinct");
+
+    for (int tick = 0; tick < 30 && ship.get<UpgradeDraft>().available; ++tick) game.Update();
+    Require(ship.get<UpgradeDraft>().available, "research: an unanswered draft stays open");
+
     std::uint32_t collectedSeq = 0;
-    for (int tick = 0; tick < 900 && ship.is_alive() && !collectedSeq; ++tick) {
+    for (int tick = 0; tick < 60 && ship.is_alive() && !collectedSeq; ++tick) {
+        pressPick(1);
         game.Update();
         game.GetEventQueue().ConsumeSince(0, [&](const GameEvent& event) {
             if (event.type == GameEventType::UpgradeCollected) collectedSeq = event.seq;
         });
     }
-    Require(ship.is_alive(), "research: the collecting ship survives touchdown");
-    Require(collectedSeq != 0, "research: landing at the lab's planet emits UpgradeCollected");
+    Require(collectedSeq != 0, "research: picking an offer emits UpgradeCollected");
     Require(!research().upgradeReady, "research: collecting clears the ready flag");
+    Require(!ship.get<UpgradeDraft>().available, "research: the draft closes once it is spent");
 
     // Second lab: the pooled bar now fills twice as fast, and the still
     // -landed ship collects again.
@@ -1332,6 +1501,7 @@ void TestResearch()
     int secondCycleTicks = 0;
     std::uint32_t nextSeq = 0;
     for (int tick = 0; tick < soloTicks && !nextSeq; ++tick) {
+        pressPick(1);
         game.Update();
         ++secondCycleTicks;
         game.GetEventQueue().ConsumeSince(collectedSeq, [&](const GameEvent& event) {
@@ -1341,17 +1511,23 @@ void TestResearch()
     Require(nextSeq != 0, "research: a second upgrade comes round after the first is collected");
     Require(secondCycleTicks < soloTicks * 3 / 4, "research: two labs research faster than one");
 
-    // Both pickups landed on the same ship: missiles, the first upgrade.
-    const int expectedAmmo = std::min(2 * ResearchSystem::MISSILES_PER_UPGRADE,
-                                      ResearchSystem::MISSILE_CAPACITY);
-    Require(ship.get<ShipLoadout>().missileAmmo == expectedAmmo,
-            "research: collecting an upgrade loads the ship's missile rack");
+    // Both pickups landed on the same ship. Which two upgrades the draft
+    // rolled is deliberately not asserted -- it is seeded off the tick and
+    // the ship's NetId -- but something must have landed on the loadout.
+    const ShipLoadout& collected = ship.get<ShipLoadout>();
+    Require(collected.missileAmmo > 0 || collected.levels.fireRate > 0 || collected.levels.gunTier > 0
+                    || collected.levels.shield > 0,
+            "research: collecting an upgrade changes the ship's loadout");
 
-    // Firing spends one round per MISSILE_COOLDOWN_TICKS, not one per tick.
+    // Missiles from here on, whether or not the draft happened to offer them.
+    ship.get_mut<ShipLoadout>().missileAmmo = 30;
+
+    // Firing spends one round per missile cooldown, not one per tick.
     const auto liveMissiles = [&] {
         int count = 0;
+        const WeaponDef* round = game.GetUpgradeCatalog().ResolveStats(UpgradeLevels{}).missile;
         game.GetRegistry().each([&](const Bullet& b) {
-            if (b.damage == ShipControlsSystem::MISSILE_DAMAGE) ++count;
+            if (round && b.damage == round->damage) ++count;
         });
         return count;
     };
@@ -1927,8 +2103,9 @@ RunResult RunSimulation()
     Game game(fs);
     game.Start(); // spawns the player + a planet
 
-    game.GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, Magnum::Vector2d{200.0, -150.0});
-    game.GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, Magnum::Vector2d{-200.0, 150.0});
+    const AIPreset& preset = game.GetAIPresets().Default();
+    game.GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, Magnum::Vector2d{200.0, -150.0}, preset);
+    game.GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, Magnum::Vector2d{-200.0, 150.0}, preset);
 
     // Consume the event stream every tick (before the 256-entry ring can
     // wrap) and fold it into a running FNV-1a: two identical runs must
@@ -1982,6 +2159,8 @@ int main()
     TestFreighterEconomy();
     TestSelfDevelopment();
     TestPlanetsideStructureHits();
+    TestUpgradeCatalog();
+    TestShields();
     TestResearch();
     TestFactionDefeatAndWin();
     TestOwnBulletSuppression();

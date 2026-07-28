@@ -15,8 +15,13 @@ void InputSystem::Update(std::uint64_t step)
             queue.PopFront();
         }
 
+        // One-shots are cleared every tick; only the held flags below carry
+        // over when no command arrives.
+        controls.upgradePick = 0;
+
         if (!queue.Empty() && queue.Front().tick == step) {
             controls.actionFlags = queue.Front().flags;
+            controls.upgradePick = queue.Front().upgradePick;
             queue.PopFront();
         }
         // No command for this tick: Controls keeps its previous value

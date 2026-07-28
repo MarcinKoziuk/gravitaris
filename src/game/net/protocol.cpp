@@ -76,6 +76,7 @@ void WriteClientInput(const ClientInputPacket& packet, ByteWriter& out)
         const InputCommand& cmd = packet.commands[i];
         out.WriteU64(cmd.tick);
         out.WriteU8(PackControlFlags(cmd.flags));
+        out.WriteU8(cmd.upgradePick);
     }
 }
 
@@ -91,6 +92,7 @@ bool ReadClientInputBody(ByteReader& in, ClientInputPacket& out)
         InputCommand cmd;
         cmd.tick = in.ReadU64();
         cmd.flags = UnpackControlFlags(in.ReadU8());
+        cmd.upgradePick = in.ReadU8();
         out.commands.push_back(cmd);
     }
     return in.Ok();

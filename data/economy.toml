@@ -1,0 +1,39 @@
+# Rates for the materials economy and the round-level timers around it
+# (docs/gravity-well-mode-plan.md Phase 3). Per-tick or in ticks at
+# Game::PHYSICS_DELTA unless a key says seconds.
+
+# A Colony digs raw materials out of its planet and pushes them to that
+# planet's own Base and High Port -- two separate draws against one store, one
+# per structure, not a shared cap.
+[colony]
+raw_production_per_tick = 0.5
+raw_cap = 200.0
+supply_rate = 0.4
+
+# A Base or High Port converts raw into finished, then spends finished.
+[production]
+conversion_rate = 0.3
+finished_cap = 200.0
+freighter_cost = 60.0
+# What a Base spends developing its own planet -- a Lab, then a Comm Center.
+# Same new-unit rule as a freighter, but same-planet and instant.
+self_development_cost = 40.0
+
+# Freighters fly slowly and visibly; arrival_radius sits past the High Port's
+# own orbit so a parking freighter never lands on top of one.
+[freighter]
+transit_speed = 40.0
+transit_acceleration = 20.0
+arrival_radius = 440.0
+cargo_unload_interval_ticks = 300
+cargo_one_raw_materials = 25.0
+
+# Consecutive landed ticks before a claim fires: long enough that a bounce or
+# a graze never claims, short enough to feel immediate after a real touchdown.
+[conquest]
+claim_ticks = 60
+
+# Seconds one Lab needs to finish an upgrade alone; N labs finish N times as
+# fast. Research is unfunded -- no materials cost yet.
+[research]
+seconds_per_upgrade = 30.0

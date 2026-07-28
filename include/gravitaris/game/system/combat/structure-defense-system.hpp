@@ -14,23 +14,19 @@ namespace Gravitaris {
 // ship -- it leads the target (same intercept math AIPilotSystem's guns
 // use) and fires directly once in range and off cooldown.
 class StructureDefenseSystem {
-public:
-    // World units; comfortably past a ship's usual combat range so flying
-    // near a defended planet is genuinely risky, not just grazing distance.
-    static constexpr double FIRE_RANGE = 400.0;
-
-    // Ticks between shots -- slower than a ship's own FIRE_COOLDOWN_TICKS
-    // (7): a static defense is a deterrent, not expected to out-DPS a
-    // fighter head-on.
-    static constexpr std::uint32_t FIRE_COOLDOWN_TICKS = 90;
-
 private:
     flecs::world& m_registry;
     EntitySpawner& m_entitySpawner;
     GameEventQueue& m_eventQueue;
+    const UpgradeCatalog& m_catalog;
 
 public:
-    StructureDefenseSystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue);
+    // Range, cadence and the round itself all come from data/upgrades.toml's
+    // [turret] table: a static defense fires a ship's round far more slowly,
+    // being a deterrent rather than something expected to out-DPS a fighter
+    // head-on.
+    StructureDefenseSystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue,
+                           const UpgradeCatalog& catalog);
 
     void Update();
 };

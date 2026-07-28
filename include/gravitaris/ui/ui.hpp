@@ -19,6 +19,23 @@ class EventListener;
 
 namespace Gravitaris {
 
+// One entry of the research draft as the HUD needs it -- already resolved to
+// display text, so ui/ stays independent of the upgrade catalog.
+struct UpgradeOfferView {
+    std::string name;
+    std::string description;
+    // Currently held / how far it goes; maxLevel 0 marks a repeatable
+    // restock, which gets no tier line at all.
+    int level = 0;
+    int maxLevel = 1;
+
+    bool operator==(const UpgradeOfferView& other) const
+    {
+        return name == other.name && description == other.description && level == other.level
+               && maxLevel == other.maxLevel;
+    }
+};
+
 class SystemInterface;
 class FileInterface;
 class RenderInterfaceGL3;
@@ -75,6 +92,20 @@ private:
     // Whichever document owns focus; compared against so the class is only
     // rewritten when focus actually moves between documents.
     Rml::ElementDocument* m_activeDocument = nullptr;
+
+    Rml::Element* m_shieldFill = nullptr;
+    Rml::Element* m_shieldValue = nullptr;
+    float m_shieldFraction = -2.f;
+    std::string m_shieldStyle;
+
+    Rml::Element* m_upgradeDraft = nullptr;
+    Rml::Element* m_upgradeOffers = nullptr;
+    std::vector<UpgradeOfferView> m_shownOffers;
+    std::function<void(int)> m_onUpgradePick;
+    // Held separately from m_listeners: the cards they belong to are destroyed
+    // and rebuilt on every draft change, so these are dropped with them rather
+    // than accumulating for the session.
+    std::vector<std::unique_ptr<Rml::EventListener>> m_offerListeners;
 
     int m_width = 1280;
     int m_height = 720;
@@ -137,6 +168,21 @@ public:
     // frame is fine.
     void SetHudTelemetry(std::optional<float> speed, std::optional<float> heading,
                          std::optional<float> gravityAccel);
+
+    // Shield charge, 0..1. `styleClass` is an RCSS class toggled on the bar
+    // to colour it per emitter type ("" for the default) -- a class name
+    // rather than an enum, so adding a shield type is a data change here and
+    // in hud.rml, not a change to this interface. Negative blanks the row.
+    void SetShieldFraction(float fraction, const std::string& styleClass);
+
+    // The Lab's offers, in 1/2/3 order; an empty list hides the panel. Only
+    // rebuilt when the contents actually change, so calling it every frame is
+    // fine.
+    void SetUpgradeOffers(const std::vector<UpgradeOfferView>& offers);
+
+    // Fired when an offer card is clicked, with its 1-based slot -- the same
+    // number the keyboard sends. Set before Init().
+    void SetUpgradePickCallback(std::function<void(int)> callback);
 
     // Fired when the intro dialog's OK is clicked, with the side the player
     // picked. Set before Init(), which is what shows the dialog.

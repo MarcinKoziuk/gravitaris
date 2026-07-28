@@ -13,7 +13,7 @@
 #include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
-#include <gravitaris/game/gnc/ai-personality-presets.hpp>
+#include <gravitaris/game/ai/ai-preset-library.hpp>
 
 namespace Gravitaris {
 
@@ -77,16 +77,14 @@ public:
     flecs::entity SpawnPlayer(id_t modelId, Vector2d position, TeamId team = TeamId::Blue,
                               Vector2d velocity = {}, double rot = 0.0);
 
-    flecs::entity SpawnAIShip(id_t modelId, Vector2d position,
-                              AIPersonalityPreset preset = AIPersonalityPreset::Balanced,
+    flecs::entity SpawnAIShip(id_t modelId, Vector2d position, const AIPreset& preset,
                               Vector2d velocity = {}, double rot = 0.0, TeamId team = TeamId::Red);
 
     // An AI ship that plays the mode rather than only fighting in it: the
     // same fighter plus an AIStrategy weighted by `preset` (see
     // AIStrategySystem). One per AI faction, respawned by whoever owns the
     // faction's slot.
-    flecs::entity SpawnAILeader(id_t modelId, Vector2d position, TeamId team,
-                                AIPersonalityPreset preset = AIPersonalityPreset::Balanced,
+    flecs::entity SpawnAILeader(id_t modelId, Vector2d position, TeamId team, const AIPreset& preset,
                                 Vector2d velocity = {}, double rot = 0.0);
 
     flecs::entity SpawnStar(id_t modelId, Vector2d position);

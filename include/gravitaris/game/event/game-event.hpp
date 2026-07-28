@@ -16,7 +16,7 @@ namespace Gravitaris {
 // docs/networking-plan.md "quake3 -> Gravitaris mapping"). Continuous states
 // (thruster held, flash decay) are NOT events; they stay component state.
 enum class GameEventType : std::uint8_t {
-    BulletFired,    // source = shooter, pos = muzzle
+    BulletFired,    // source = shooter, pos = muzzle, param = gun tier (0 = base gun)
     Impact,         // source = victim,  pos = hit point,  param = damage*10
     Explosion,      // source = the ship that died, pos = its position
     LandingCrash,   // source = the ship, pos = contact,   param = damage*10
@@ -25,6 +25,8 @@ enum class GameEventType : std::uint8_t {
     FactionDefeated, // source = none, pos = unused, param = the defeated TeamId
     RoundOver,       // source = none, pos = unused, param = the winning TeamId
     UpgradeCollected, // source = the collecting ship, pos = its position, param = its TeamId
+    ShieldHit,        // source = the shielded ship, pos = hit point, param = absorbed*10
+    ResearchComplete, // source = a lab of the faction, pos = its position, param = its TeamId
 };
 
 struct GameEvent {

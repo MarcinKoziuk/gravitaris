@@ -17,6 +17,7 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
+#include <gravitaris/game/component/upgrade-draft.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
@@ -50,11 +51,12 @@ CGame::CGame(IFilesystem &filesystem)
     , m_snapshotApplier(m_mirrorWorld, m_resourceLoader)
     , m_starfieldRenderer(filesystem)
     , m_minimapRenderer(filesystem)
-    , m_audioSystem(m_registry, m_resourceLoader, m_eventQueue)
+    , m_audioSystem(m_registry, m_resourceLoader, m_eventQueue, m_upgradeCatalog)
     , m_hitFlashSystem(m_registry, m_eventQueue, *m_entitySpawner)
     , m_cameraDirector(Defaults::cameraZoom)
     , m_indicatorRenderer(m_resourceLoader)
-    , m_clientPrediction(m_registry, m_physicsSystem, *m_entitySpawner, m_eventQueue, m_resourceLoader)
+    , m_clientPrediction(m_registry, m_physicsSystem, *m_entitySpawner, m_eventQueue, m_resourceLoader,
+                         m_upgradeCatalog)
     , m_cosmeticBulletDespawner(m_registry, m_mirrorWorld)
     , m_autopilot(m_registry, m_physicsSystem)
 {
@@ -67,6 +69,7 @@ CGame::CGame(IFilesystem &filesystem)
     // their own constructors above) so both m_modelRenderer2 and
     // m_mirrorRenderer2 bake it for SubmitPlanetOwnershipMarkers.
     m_teamMarkerModel = m_resourceLoader.Load<Model>("models/ui/team-marker"_id);
+    m_shieldRingModel = m_resourceLoader.Load<Model>("models/fx/shield-ring"_id);
 }
 
 SceneView CGame::CurrentSceneView()
@@ -154,6 +157,44 @@ std::optional<float> CGame::GetGravityAccel()
     return static_cast<float>(accel.length());
 }
 
+int CGame::GetMissileCapacity() const
+{
+    return m_upgradeCatalog.ResolveStats(UpgradeLevels{}).missileCapacity;
+}
+
+CGame::ShieldReadout CGame::GetShieldReadout()
+{
+    const std::optional<flecs::entity> subject = CameraSubject();
+    if (!subject) return {};
+
+    const ShipLoadout* loadout = subject->try_get<ShipLoadout>();
+    if (!loadout) return {};
+
+    const ShipStats stats = m_upgradeCatalog.ResolveStats(loadout->levels);
+    return ShieldReadout{loadout->shieldHp, stats.shieldCapacity, loadout->levels.shieldType};
+}
+
+std::vector<CGame::UpgradeOffer> CGame::GetUpgradeOffers()
+{
+    std::vector<UpgradeOffer> offers;
+
+    const std::optional<flecs::entity> player = GetPlayer();
+    if (!player) return offers;
+
+    const UpgradeDraft* draft = player->try_get<UpgradeDraft>();
+    const ShipLoadout* loadout = player->try_get<ShipLoadout>();
+    if (!draft || !loadout || !draft->available) return offers;
+
+    for (const id_t id : draft->offers) {
+        if (id == 0) continue;
+        const UpgradeDef* def = m_upgradeCatalog.Find(id);
+        if (!def) continue;
+        offers.push_back(UpgradeOffer{def->name, def->description,
+                                      UpgradeCatalog::LevelOf(*def, loadout->levels), def->maxLevel});
+    }
+    return offers;
+}
+
 void CGame::CycleSpectate(int direction)
 {
     // NetId order, so the roster reads the same however flecs happens to
@@ -195,6 +236,38 @@ void CGame::SubmitPlanetOwnershipMarkers(const SceneView& view)
     });
 }
 
+void CGame::SubmitShieldRings(const SceneView& view)
+{
+    if (!view.overlays) return;
+
+    // Comfortably outside a fighter's hull. A bubble sits wider than plating
+    // does -- the original reason a bubble is meant to cost you hitbox, which
+    // the physics shape doesn't reflect yet.
+    static constexpr float PLATING_RADIUS = 26.f;
+    static constexpr float BUBBLE_RADIUS = 34.f;
+
+    view.Each([&](const Transform& t, const ShipLoadout& loadout) {
+        if (loadout.levels.shieldType == ShieldType::None || loadout.shieldHp <= 0.f) return;
+
+        const ShipStats stats = m_upgradeCatalog.ResolveStats(loadout.levels);
+        if (stats.shieldCapacity <= 0.f) return;
+
+        const bool bubble = loadout.levels.shieldType == ShieldType::Bubble;
+        const float radius = bubble ? BUBBLE_RADIUS : PLATING_RADIUS;
+        const float charge = std::clamp(loadout.shieldHp / stats.shieldCapacity, 0.f, 1.f);
+
+        const Magnum::Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
+        const Matrix3 transform = Matrix3::translation(pos) * Matrix3::scaling({radius, radius});
+
+        // A nearly-spent shield is a faint outline, a full one is bright --
+        // the same reading the sidebar's bar gives, without looking away.
+        const Magnum::Color3 tint = bubble ? Magnum::Color3{0.35f, 0.8f, 1.f}
+                                           : Magnum::Color3{1.f, 0.8f, 0.35f};
+        view.overlays->SubmitOverlay(m_shieldRingModel.Id(), transform,
+                                     Magnum::Vector3{tint * (0.25f + 0.75f * charge)});
+    });
+}
+
 void CGame::RenderMinimap()
 {
     const std::optional<flecs::entity> subject = CameraSubject();
@@ -230,7 +303,7 @@ void CGame::ConnectToServer(const std::string& wsUrl, TeamId requestedTeam)
     m_netTransport->ConnectSignaling(wsUrl);
 }
 
-void CGame::TickNetClient(const ControlFlags& flags)
+void CGame::TickNetClient(const ControlFlags& flags, UpgradePick upgradePick)
 {
     if (!m_netClient->IsWelcomed()) return;
 
@@ -274,23 +347,33 @@ void CGame::TickNetClient(const ControlFlags& flags)
     }
 
     const std::uint64_t tick = advance.tick;
-    m_netClient->SendInput(tick, flags);
+    m_netClient->SendInput(tick, flags, upgradePick);
 
     if (const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot()) {
         m_clientPrediction.Step(tick, flags, snapshot->entities, snapshot->tick, m_netClient->GetYourShipNetId());
         m_bulletLifetimeSystem.Update(PHYSICS_DELTA);
 
         // The own ship is predicted locally, so it never passes through
-        // SnapshotApplier -- its ammo has to be copied off the wire here or
-        // the sidebar would report the count it spawned with forever.
-        // Missile fire itself is not predicted, so this arriving a round trip
-        // late is the whole story of the readout's latency.
+        // SnapshotApplier -- its loadout and the Lab's draft have to be
+        // copied off the wire here or the sidebar would report the state it
+        // spawned with forever. Neither missile fire nor a pick is predicted,
+        // so this arriving a round trip late is the whole story of the
+        // readouts' latency.
         const std::uint32_t yourShipNetId = m_netClient->GetYourShipNetId();
         if (const std::optional<flecs::entity> player = GetPlayer(); player && yourShipNetId != 0) {
             for (const EntityState& state : snapshot->entities) {
                 if (state.netId != yourShipNetId) continue;
                 if (ShipLoadout* loadout = player->try_get_mut<ShipLoadout>()) {
                     loadout->missileAmmo = state.missileAmmo;
+                    loadout->levels.fireRate = state.fireRateLevel;
+                    loadout->levels.gunTier = state.gunTierLevel;
+                    loadout->levels.shield = state.shieldLevel;
+                    loadout->levels.shieldType = state.shieldType;
+                    loadout->shieldHp = state.shieldHp;
+                }
+                if (UpgradeDraft* draft = player->try_get_mut<UpgradeDraft>()) {
+                    draft->offers = state.upgradeOffers;
+                    draft->available = state.upgradeDraftAvailable;
                 }
                 break;
             }
@@ -443,6 +526,7 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
     m_starfieldRenderer.Render();
 
     SubmitPlanetOwnershipMarkers(view);
+    SubmitShieldRings(view);
     m_indicatorRenderer.Update(view, CameraSubject(), camera.GetPosition(), camera.GetZoom(), m_viewportSize,
                                m_pixelScale);
     m_mirrorRenderer2.SetZoom(camera.GetZoom());
@@ -524,6 +608,7 @@ void CGame::Render(double delta)
         m_indicatorRenderer.Update(view, CameraSubject(), camera.GetPosition(), camera.GetZoom(), m_viewportSize,
                                    m_pixelScale);
         SubmitPlanetOwnershipMarkers(view);
+        SubmitShieldRings(view);
     }
 
     {

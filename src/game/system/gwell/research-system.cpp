@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <vector>
 
+#include <gravitaris/game/component/ai-pilot.hpp>
+#include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/faction-state.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
 #include <gravitaris/game/component/net-id.hpp>
@@ -11,6 +13,7 @@
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/transform.hpp>
+#include <gravitaris/game/component/upgrade-draft.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
@@ -21,37 +24,74 @@ namespace Gravitaris {
 
 static constexpr std::size_t NUM_TEAMS = 7; // TeamId::Blue..None
 
-// One lab's share of the bar per tick; N labs advance N times as fast.
-static constexpr float PROGRESS_PER_LAB_PER_TICK =
-        static_cast<float>(Game::PHYSICS_DELTA / ResearchSystem::RESEARCH_SECONDS);
+// How close, and how nearly matched in velocity, a ship has to hold to its
+// own High Port to collect from it without landing on the deck. Generous on
+// distance (a station is large and the approach is by eye) but tight on
+// relative speed, so a fly-past never collects.
+static constexpr double DOCK_RADIUS = 90.0;
+static constexpr double DOCK_RELATIVE_SPEED = 25.0;
+
+static std::uint32_t DraftSeed(std::uint64_t tick, std::uint32_t netId);
 
 ResearchSystem::ResearchSystem(flecs::world& registry, EntitySpawner& entitySpawner,
-                               GameEventQueue& eventQueue)
+                               GameEventQueue& eventQueue, const UpgradeCatalog& catalog,
+                               const EconomyConfig& config)
         : m_registry(registry)
         , m_entitySpawner(entitySpawner)
         , m_eventQueue(eventQueue)
+        , m_catalog(catalog)
+        , m_config(config)
 {}
 
-void ResearchSystem::Update()
+void ResearchSystem::Update(std::uint64_t step)
 {
+    // One lab's share of the bar per tick; N labs advance N times as fast.
+    const float progressPerLabPerTick =
+            static_cast<float>(Game::PHYSICS_DELTA / m_config.research.secondsPerUpgrade);
+
     struct TeamResearch {
         std::uint32_t labs = 0;
         std::vector<std::uint32_t> labPlanets; // planets hosting this team's labs
+        flecs::entity anyLab;                  // whichever one announces a finished upgrade
+        Magnum::Vector2 anyLabPos;
         float progress = 0.f;                  // mirrored onto those labs at the end of the tick
         bool ready = false;
     };
     std::array<TeamResearch, NUM_TEAMS> byTeam{};
 
-    m_registry.each([&](const Structure& s, const Team& team, const PlanetSurfaceAttachment& attach) {
+    m_registry.each([&](flecs::entity lab, const Structure& s, const Team& team, const Transform& transf,
+                        const PlanetSurfaceAttachment& attach) {
         if (s.type != StructureType::Lab || team.id == TeamId::None) return;
         TeamResearch& tr = byTeam[static_cast<std::size_t>(team.id)];
         ++tr.labs;
         tr.labPlanets.push_back(attach.planetNetId);
+        if (!tr.anyLab.is_alive()) {
+            tr.anyLab = lab;
+            tr.anyLabPos = Magnum::Vector2{static_cast<float>(transf.pos.x()),
+                                           static_cast<float>(transf.pos.y())};
+        }
+    });
+
+    // A faction's own High Ports over a lab planet, which a ship can collect
+    // from by holding station alongside rather than setting down on -- see
+    // the docking pass below.
+    struct Dock {
+        TeamId team = TeamId::None;
+        Magnum::Vector2d pos;
+        Magnum::Vector2d vel;
+    };
+    std::vector<Dock> docks;
+    m_registry.each([&](const Structure& s, const Team& team, const Transform& transf,
+                        const PlanetOrbitAttachment& orbit) {
+        if (s.type != StructureType::HighPort || team.id == TeamId::None) return;
+        const std::vector<std::uint32_t>& labPlanets = byTeam[static_cast<std::size_t>(team.id)].labPlanets;
+        if (std::find(labPlanets.begin(), labPlanets.end(), orbit.planetNetId) == labPlanets.end()) return;
+        docks.push_back(Dock{team.id, transf.pos, transf.vel});
     });
 
     // Who, if anyone, picks this tick's finished upgrade up: a landed
-    // same-team ship at a lab's own planet, or at that planet's High Port.
-    // One per faction -- there is one upgrade to hand out.
+    // same-team ship at a lab's own planet, or one docked at that planet's
+    // High Port. One per faction -- there is one upgrade to hand out.
     std::array<flecs::entity, NUM_TEAMS> collector{};
     m_registry.each([&](flecs::entity ship, const LandingState& landing, const Team& team) {
         if (!landing.landed || landing.landedOnNetId == 0 || team.id == TeamId::None) return;
@@ -75,40 +115,98 @@ void ResearchSystem::Update()
         collector[teamIndex] = ship;
     });
 
+    // Docking: setting a fighter down on a station deck that is itself sweeping
+    // along its orbit is far fiddlier than landing on a planet, and failing it
+    // reads as the upgrade simply not being collectable at a High Port. Holding
+    // station alongside one -- close, and near its velocity -- counts instead.
+    m_registry.each([&](flecs::entity ship, const Transform& transf, const Team& team, const ShipLoadout&) {
+        if (team.id == TeamId::None) return;
+        const std::size_t teamIndex = static_cast<std::size_t>(team.id);
+        if (collector[teamIndex].is_alive()) return;
+
+        for (const Dock& dock : docks) {
+            if (dock.team != team.id) continue;
+            if ((dock.pos - transf.pos).length() > DOCK_RADIUS) continue;
+            if ((transf.vel - dock.vel).length() > DOCK_RELATIVE_SPEED) continue;
+            collector[teamIndex] = ship;
+            return;
+        }
+    });
+
+    // Ships holding an open draft this tick; every other ship's panel is
+    // blanked at the end (see the last pass).
+    std::vector<flecs::entity> offered;
+
     m_registry.each([&](FactionState& fs) {
         TeamResearch& tr = byTeam[static_cast<std::size_t>(fs.team)];
 
         if (fs.upgradeReady) {
             if (const flecs::entity ship = collector[static_cast<std::size_t>(fs.team)]; ship.is_alive()) {
-                fs.upgradeReady = false;
-                fs.researchProgress = 0.f;
+                ShipLoadout* loadout = ship.try_get_mut<ShipLoadout>();
+                UpgradeDraft* draft = ship.try_get_mut<UpgradeDraft>();
+                if (loadout && draft) {
+                    if (!draft->available) {
+                        const NetId* netId = ship.try_get<NetId>();
+                        draft->offers = m_catalog.RollOffers(
+                                loadout->levels, DraftSeed(step, netId ? netId->value : 0u));
+                        draft->available = true;
+                    }
 
-                // Missiles are the only upgrade so far; faster guns and
-                // shields join it as further ShipLoadout fields.
-                ShipLoadout& loadout = ship.get_mut<ShipLoadout>();
-                loadout.missileAmmo = static_cast<std::uint8_t>(
-                        std::min<int>(loadout.missileAmmo + MISSILES_PER_UPGRADE, MISSILE_CAPACITY));
+                    // An AI has no HUD to pick from, so it takes the first
+                    // offer on the tick it lands -- the roll is weighted, so
+                    // that is still a varied choice across a match.
+                    const Controls* controls = ship.try_get<Controls>();
+                    const std::uint8_t slot = ship.has<AIPilot>()
+                            ? 1
+                            : (controls ? controls->upgradePick : 0);
 
-                const Transform& shipTransf = ship.get<Transform>();
-                m_eventQueue.Emit(GameEventType::UpgradeCollected, ship,
-                                  Magnum::Vector2{static_cast<float>(shipTransf.pos.x()),
-                                                  static_cast<float>(shipTransf.pos.y())},
-                                  static_cast<std::uint32_t>(fs.team));
-                LOG(info) << "research: team " << static_cast<int>(fs.team) << " collected missiles ("
-                          << int(loadout.missileAmmo) << " on the rack)";
+                    if (slot >= 1 && slot <= UpgradeCatalog::OFFER_COUNT) {
+                        const id_t chosen = draft->offers[slot - 1];
+                        const UpgradeDef* def = m_catalog.Find(chosen);
+                        // A no-op pick (unknown id, or a tier that maxed out
+                        // between the roll and the press) leaves the bar full
+                        // so the player can pick again rather than losing it.
+                        if (def && m_catalog.Apply(*def, *loadout)) {
+                            fs.upgradeReady = false;
+                            fs.researchProgress = 0.f;
+                            draft->available = false;
+
+                            const Transform& shipTransf = ship.get<Transform>();
+                            m_eventQueue.Emit(GameEventType::UpgradeCollected, ship,
+                                              Magnum::Vector2{static_cast<float>(shipTransf.pos.x()),
+                                                              static_cast<float>(shipTransf.pos.y())},
+                                              static_cast<std::uint32_t>(fs.team));
+                            LOG(info) << "research: team " << static_cast<int>(fs.team) << " collected "
+                                      << def->key;
+                        }
+                    }
+
+                    if (draft->available) offered.push_back(ship);
+                }
             }
         }
         // Lose every lab and the bar simply stalls where it stood.
         else if (tr.labs > 0) {
-            fs.researchProgress += PROGRESS_PER_LAB_PER_TICK * static_cast<float>(tr.labs);
+            fs.researchProgress += progressPerLabPerTick * static_cast<float>(tr.labs);
             if (fs.researchProgress >= 1.f) {
                 fs.researchProgress = 1.f;
                 fs.upgradeReady = true;
+                // Announced from a lab rather than from nowhere, so the sound
+                // has a position -- it is that building that finished the work.
+                // Distinct from UpgradeCollected, which fires later, when a
+                // ship actually turns up to spend it.
+                m_eventQueue.Emit(GameEventType::ResearchComplete, tr.anyLab,
+                                  tr.anyLabPos, static_cast<std::uint32_t>(fs.team));
             }
         }
 
         tr.progress = fs.researchProgress;
         tr.ready = fs.upgradeReady;
+    });
+
+    m_registry.each([&](flecs::entity ship, UpgradeDraft& draft) {
+        if (!draft.available) return;
+        if (std::find(offered.begin(), offered.end(), ship) == offered.end()) draft.available = false;
     });
 
     // FactionState is server-only and a Lab's Structure is replicated, so the
@@ -119,6 +217,23 @@ void ResearchSystem::Update()
         s.researchProgress = tr.progress;
         s.upgradeReady = tr.ready;
     });
+}
+
+// Mixes the tick and the collecting ship's NetId into a draft seed. Derived
+// from sim state alone, so a replay -- and eventually a second peer -- rolls
+// the same three offers (ADR 0001).
+static std::uint32_t DraftSeed(std::uint64_t tick, std::uint32_t netId)
+{
+    std::uint32_t h = 2166136261u;
+    const auto mix = [&h](std::uint32_t v) {
+        for (int byte = 0; byte < 4; ++byte) {
+            h = (h ^ ((v >> (byte * 8)) & 0xffu)) * 16777619u;
+        }
+    };
+    mix(static_cast<std::uint32_t>(tick));
+    mix(static_cast<std::uint32_t>(tick >> 32));
+    mix(netId);
+    return h;
 }
 
 } // namespace Gravitaris

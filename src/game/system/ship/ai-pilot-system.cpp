@@ -15,6 +15,8 @@
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/ai-pilot.hpp>
+#include <gravitaris/game/component/ship-loadout.hpp>
+#include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
 #include <gravitaris/game/gnc/guidance/behaviors.hpp>
 #include <gravitaris/game/gnc/control/flight-controller.hpp>
@@ -29,8 +31,6 @@ namespace Gravitaris {
 using Magnum::Vector2d;
 
 static constexpr double PI = 3.14159265358979323846;
-
-static constexpr double BULLET_SPEED = 200.0; // matches ship-controls-system's BULLET_MUZZLE_SPEED
 
 // A rival target has to be this much closer (squared distance) than the
 // current one before a pilot switches to it.
@@ -71,10 +71,11 @@ static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Ve
 static double DepartureRadius(flecs::entity site);
 
 AIPilotSystem::AIPilotSystem(flecs::world& registry, PhysicsSystem& physicsSystem,
-                             TrajectoryPredictor& predictor)
+                             TrajectoryPredictor& predictor, const UpgradeCatalog& catalog)
         : m_registry(registry)
         , m_physicsSystem(physicsSystem)
         , m_predictor(predictor)
+        , m_catalog(catalog)
 {}
 
 void AIPilotSystem::Update(std::uint64_t step)
@@ -141,6 +142,11 @@ void AIPilotSystem::Update(std::uint64_t step)
     m_registry.each([&](flecs::entity ent, Transform& transf, PhysicsRef& ref,
                         AIPilot& pilot, InputQueue& queue, const Team& myTeam) {
         const AIPersonality& personality = pilot.personality;
+
+        // This pilot's own fitted gun -- what it actually has to lead with.
+        const ShipLoadout* loadout = ent.try_get<ShipLoadout>();
+        const WeaponDef* gun = m_catalog.ResolveStats(loadout ? loadout->levels : UpgradeLevels{}).gun;
+        const double bulletSpeed = gun ? gun->speed : 0.0;
 
         // Deterministic per-(tick, entity) seed for this pilot's jitter/
         // danger-ignore rolls below -- same value every replay of this tick.
@@ -384,7 +390,7 @@ void AIPilotSystem::Update(std::uint64_t step)
             const Vector2d relPos = targetTransf->pos - transf.pos;
             const Vector2d relVel = targetTransf->vel - transf.vel;
             if (relPos.length() < personality.fireRange) {
-                if (std::optional<double> t = SolveInterceptTime(relPos, relVel, BULLET_SPEED)) {
+                if (std::optional<double> t = SolveInterceptTime(relPos, relVel, bulletSpeed)) {
                     const Vector2d aim = relPos + relVel * (*t);
                     const double aimHeading = std::atan2(aim.y(), aim.x());
                     const double heading = static_cast<double>(transf.rot) - PI / 2.0;

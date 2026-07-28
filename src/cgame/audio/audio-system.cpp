@@ -1,8 +1,11 @@
+#include <algorithm>
+
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/event/game-event.hpp>
+#include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 
 #include <gravitaris/cgame/resource/audio-clip.hpp>
 #include <gravitaris/cgame/audio/backend/miniaudio-backend.hpp>
@@ -27,17 +30,19 @@ constexpr std::size_t ONE_SHOT_POOL_SIZE = 24;
 // hard-stopping mid-waveform (Update() has no dt; at 60 fps this is ~100 ms).
 constexpr float THRUST_FADE_FRAMES = 6.f;
 
-constexpr float LASER_GAIN = 0.5f;
 constexpr float HIT_GAIN = 0.85f;
+constexpr float SHIELD_HIT_GAIN = 0.35f;
+constexpr float RESEARCH_GAIN = 0.8f;
 constexpr float THRUST_GAIN = 0.55f;
 
 } // namespace
 
 AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
-                         const GameEventQueue& eventQueue)
+                         const GameEventQueue& eventQueue, const UpgradeCatalog& catalog)
         : m_registry(registry)
         , m_resourceLoader(resourceLoader)
         , m_eventQueue(eventQueue)
+        , m_catalog(catalog)
 {
     m_resourceLoader.OnCreate<AudioClip>().connect(&AudioSystem::HandleClipAdded, this);
     m_resourceLoader.OnDestroy<AudioClip>().connect(&AudioSystem::HandleClipRemoved, this);
@@ -53,9 +58,23 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
     // HandleClipAdded (connected just above) fires synchronously here but
     // no-ops since m_backend doesn't exist yet -- uploaded explicitly below
     // once (if) one does.
-    m_laserClip  = m_resourceLoader.Load<AudioClip>("sounds/laser-1.wav"_id);
     m_thrustClip = m_resourceLoader.Load<AudioClip>("sounds/thrust-1.wav"_id);
     m_hitClip    = m_resourceLoader.Load<AudioClip>("sounds/hit-1.wav"_id);
+    m_shieldClip = m_resourceLoader.Load<AudioClip>("sounds/laser-1.wav"_id);
+    m_researchClip = m_resourceLoader.Load<AudioClip>("sounds/research-1.wav"_id);
+
+    // One clip per distinct sound the weapon table names. Deduplicated: the
+    // whole gatling line shares a file, and loading it once per tier would
+    // upload the same buffer four times.
+    for (const WeaponDef& weapon : m_catalog.Weapons()) {
+        if (weapon.soundId == 0) continue;
+        const auto already = std::find_if(m_weaponClips.begin(), m_weaponClips.end(),
+                                          [&](const ResourcePtr<const AudioClip>& clip) {
+                                              return clip.Id() == weapon.soundId;
+                                          });
+        if (already != m_weaponClips.end()) continue;
+        m_weaponClips.push_back(m_resourceLoader.Load<AudioClip>(weapon.soundId));
+    }
 
     auto miniaudio = std::make_unique<MiniaudioBackend>();
     if (miniaudio->Init()) {
@@ -68,9 +87,11 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
         return;
     }
 
-    HandleClipAdded(*m_laserClip, m_laserClip.Id());
     HandleClipAdded(*m_thrustClip, m_thrustClip.Id());
     HandleClipAdded(*m_hitClip, m_hitClip.Id());
+    HandleClipAdded(*m_shieldClip, m_shieldClip.Id());
+    HandleClipAdded(*m_researchClip, m_researchClip.Id());
+    for (const ResourcePtr<const AudioClip>& clip : m_weaponClips) HandleClipAdded(*clip, clip.Id());
 
     AcquireVoicePool();
 }
@@ -139,7 +160,19 @@ void AudioSystem::Update(const Vector2& cameraPos)
     m_eventCursor = m_eventQueue.ConsumeSince(m_eventCursor, [&](const GameEvent& event) {
         switch (event.type) {
             case GameEventType::BulletFired:
-                PlayOneShotById(m_laserClip.Id(), event.pos, LASER_GAIN);
+                // param is the weapon's id, so a weapon brings its own sound
+                // with it -- nothing here knows one gun from another.
+                if (const WeaponDef* weapon = m_catalog.FindWeapon(event.param)) {
+                    PlayOneShotById(weapon->soundId, event.pos, weapon->soundGain);
+                }
+                break;
+            case GameEventType::ResearchComplete:
+                PlayOneShotById(m_researchClip.Id(), event.pos, RESEARCH_GAIN);
+                break;
+            case GameEventType::ShieldHit:
+                // Quieter and thinner than a hull hit -- the tell is that the
+                // hull did NOT take it.
+                PlayOneShotById(m_shieldClip.Id(), event.pos, SHIELD_HIT_GAIN);
                 break;
             case GameEventType::Impact:
             case GameEventType::LandingCrash:

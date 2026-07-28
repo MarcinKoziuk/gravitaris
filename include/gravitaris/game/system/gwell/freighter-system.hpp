@@ -4,6 +4,7 @@
 
 #include <flecs.h>
 
+#include <gravitaris/game/config/economy-config.hpp>
 #include <gravitaris/game/fwd.hpp>
 
 namespace Gravitaris {
@@ -27,46 +28,21 @@ namespace Gravitaris {
 // StructureAttachmentSystem so a freighter arriving this tick is already
 // under that system's control by the time it runs.
 class FreighterSystem {
-public:
-    // World units/second -- slow, matching gravity-well-1997.md's
-    // "Freighter... moves slowly" annotation.
-    static constexpr double TRANSIT_SPEED = 40.0;
-
-    // World units/second^2 -- ramps up to TRANSIT_SPEED over ~2s from a
-    // standing start rather than snapping to it instantly, so the _thrust
-    // visual (gated on "still below cruise speed", not "still in transit")
-    // only shows while actually accelerating, coasting silent/thrustless
-    // the rest of the trip -- there's no engine noise needed to hold a
-    // constant velocity in vacuum.
-    static constexpr double TRANSIT_ACCELERATION = 20.0;
-
-    // "Close enough" to a planet to stop transiting and start orbiting it,
-    // and the radius that orbit rides at. Past the High Port's own orbit
-    // (StructureLayout::ORBIT_RADIUS_FACTOR x the 120-unit planet radius, so
-    // 240) to keep a freighter's parking orbit off it.
-    static constexpr double ARRIVAL_RADIUS = 440.0;
-
-    // Ticks between cargo unloads (300 == 5s at Game::PHYSICS_DELTA) -- makes
-    // the two-cargo unload read as sequential events rather than an instant
-    // double-drop the moment the freighter arrives.
-    static constexpr std::uint32_t CARGO_UNLOAD_INTERVAL_TICKS = 300;
-
-    // Raw materials the first cargo pod hands to the target planet's
-    // existing Base, if it has one (gravity-well-1997.md's "freighters...
-    // deliver [raw materials] to needy planets" resupply role). Placeholder
-    // magnitude pending playtesting -- roughly a minute of Colony->Base
-    // supply (EconomySystem::SUPPLY_RATE) in one lump.
-    static constexpr float CARGO_ONE_RAW_MATERIALS = 25.f;
-
 private:
     flecs::world& m_registry;
     EntitySpawner& m_entitySpawner;
     PhysicsSystem& m_physicsSystem;
     GameEventQueue& m_eventQueue;
+    const EconomyConfig& m_config;
 
 public:
+    // Cruise speed, the ramp up to it, the arrival radius and the unload
+    // cadence all come from data/economy.toml's [freighter] table. The ramp
+    // exists so the _thrust visual (gated on "still below cruise speed", not
+    // "still in transit") only shows while actually accelerating -- holding a
+    // constant velocity in vacuum needs no engine.
     FreighterSystem(flecs::world& registry, EntitySpawner& entitySpawner, PhysicsSystem& physicsSystem,
-                    GameEventQueue& eventQueue);
+                    GameEventQueue& eventQueue, const EconomyConfig& config);
 
     void Update();
 };

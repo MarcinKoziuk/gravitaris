@@ -4,3 +4,8 @@ scale = 0.05
 density = 1
 restitution = 0.5
 friction = 0.0
+
+# Multiplier on landing damage only (see Body::GetLandingFragility); 1.0 is
+# the stock airframe every other hull is judged against.
+[landing]
+fragility = 1.0

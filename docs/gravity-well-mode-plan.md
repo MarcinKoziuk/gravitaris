@@ -434,18 +434,89 @@ The Lab's research role (`ResearchSystem`), ahead of the upgrades themselves:
   cosmetic, needs no tick agreement. Note a lab therefore does *not* show its
   team colour; team identity for labs has to come from elsewhere (the
   ownership markers, the minimap).
-- Pickup: a same-team ship landed at a lab's own planet, or at that planet's
-  High Port, collects it — clearing the flag and restarting research, and
-  emitting `GameEventType::UpgradeCollected`.
-- First upgrade: **missiles.** `ResearchSystem::MISSILES_PER_UPGRADE` (30)
-  rounds onto the collector's `ShipLoadout::missileAmmo` (capacity
-  `MISSILE_CAPACITY`, 60), replicated per-ship on the wire (v8) for the
-  sidebar's MISSILES readout — count plus one tick per round, wrapping. Fired
-  with Space (`ControlFlags::fireMissile`, wire bit 0x20) at
-  `MISSILE_COOLDOWN_TICKS` cadence: `MISSILE_DAMAGE` and
-  `MISSILE_LIFETIME_SECONDS` on a `Bullet` carrying
-  `models/missiles/missile-0`. Faster guns and shields become further
-  `ShipLoadout` fields.
+- Filling the bar emits `GameEventType::ResearchComplete` from one of the
+  faction's labs (so the chime, `data/sounds/research-1.wav` via
+  `tools/gen-research-wav.py`, has a position). Distinct from
+  `UpgradeCollected`, which fires later, when a ship turns up to spend it.
+- Pickup is a **draft** (2026-07-27): a same-team ship at a lab's own planet is
+  offered three upgrades drawn from the pool; taking one clears the flag,
+  restarts research and emits `GameEventType::UpgradeCollected`.
+  - "At" means *landed* on the planet, or **docked** at that planet's High
+    Port — within `DOCK_RADIUS` and near its velocity. Setting a fighter down
+    on a deck that is itself sweeping along an orbit is far fiddlier than
+    landing on a planet, and failing it reads as the upgrade simply not being
+    collectable at a High Port at all.
+  - Offers live on the collecting ship's `UpgradeDraft` (replicated, wire v9),
+    rolled **once** when it becomes eligible and held until it picks — a
+    reroll per tick would flicker the panel. Weighted, distinct, and drawn
+    only from what that ship can still take (a maxed tier drops out; the
+    missile restock never does). Seeded from `(tick, NetId)` alone, so a
+    replay — and eventually a second peer — rolls the same three (ADR 0001).
+  - The player answers with `1`/`2`/`3` → `InputCommand::upgradePick`
+    (replay v2, protocol v4), a one-shot `Controls::upgradePick` that
+    `InputSystem` clears every tick. An AI takes offer 1 the tick it lands;
+    the roll is weighted, so that is still varied across a match. A pick that
+    resolves to nothing (unknown id, tier maxed since the roll) leaves the
+    bar full rather than burning the upgrade.
+  - HUD: `div#upgrade_draft`, centred over the game view, three cards with
+    name, description and tier — **click a card or press its number**, both of
+    which set the same one-shot `UpgradePick`. The cards are rebuilt whenever
+    the offers change, so their click listeners are re-attached (and the old
+    ones dropped) each rebuild. `CGame::GetUpgradeOffers` resolves ids against
+    the catalog; the panel deliberately follows the **own ship**, not the
+    camera subject — a spectated unit's draft isn't the player's to spend.
+
+### Weapons and the pool (`data/upgrades.toml`, `UpgradeCatalog`)
+
+**Anything that shoots names a weapon.** `[[weapon]]` entries hold cadence,
+damage, speed, lifetime, projectile model, fire sound and (for a missile) its
+homing envelope; `[ship]` and `[turret]` say which one is fitted. That
+collapsed the three surviving copies of the bullet constants —
+`ship-controls-system.cpp`, `ai-pilot-system.cpp`'s `BULLET_SPEED` and
+`structure-defense-system.cpp`'s own trio — into one row each, and it is why
+a gun tier *swaps the fitted weapon* rather than multiplying the stock one:
+you can read what tier 3 fires without doing arithmetic, and a tier is free to
+be slower-firing but harder-hitting, which a scale factor cannot express.
+
+Each `[[upgrade]]` names a `kind` the sim implements plus its magnitudes.
+Adding a weapon, a tier, or retuning a number is a data edit; a genuinely new
+*behavior* is a new `UpgradeKind` and the code reading it.
+`UpgradeCatalog::ResolveStats(UpgradeLevels)` turns a ship's collected tiers
+into the `ShipStats` the sim reads — one function, so server,
+`ClientPrediction`, the AI's shot lead and the HUD cannot drift apart.
+
+`UpgradeScope` exists but only `Ship` is honored: everything is carried by the
+ship that picked it up and lost with it. `Faction` is the hook for permanent
+faction-wide passives — a second `UpgradeLevels` block on `FactionState`,
+folded in at resolve time, not a second code path.
+
+- **`missile_rack`** — the original first upgrade: 30 rounds for the
+  `[ship] missile` weapon (cap 60), the one repeatable entry
+  (`max_level = 0`). Fired with Space (`ControlFlags::fireMissile`, wire bit
+  0x20). Sidebar shows the count plus one tick per round, wrapping.
+- **`autoloader`** (`fire_rate`) — compounding cooldown multiplier on whichever
+  weapon is fitted, floored at 2 ticks. `ClientPrediction` resolves the same
+  stat off the own ship's replicated levels, so the predicted tracer keeps
+  matching the server's.
+- **`heavy_rounds`** (`weapon_tier`) — fits `gatling_1/2/3` in turn. The
+  *weapon's* id rides `GameEventType::BulletFired`'s `param`, so `AudioSystem`
+  looks the weapon up and plays its own `sound` (`data/sounds/gatling-1.wav`,
+  generated by `tools/gen-gatling-wav.py`) — including for a *remote* shooter
+  whose loadout it never sees, and with no code change when a weapon is added.
+  `ShipLoadout` and the wire are unchanged: the level is an index into `tiers`.
+- **`bubble_shield` / `plating_shield`** (`shield`) — a charge buffer in front
+  of the hull. `ShieldSystem` (before `DamageSystem`, so a tick's regen is
+  available to that tick's fire) refills `ShipLoadout::shieldHp` at the
+  emitter's rate after a per-type quiet delay that every hit restarts;
+  `DamageSystem::AbsorbWithShield` spends it against weapon hits only —
+  landing and ram damage bypass it, a shield being a defense against fire and
+  not a cushion. The bubble absorbs a hit whole from a big slow reservoir;
+  plating leaks `1 - absorb_fraction` of every hit however much charge is
+  left, and recharges fast. Taking the other type replaces rather than stacks.
+  Shown as the sidebar's SHIELD bar and a world-space ring
+  (`models/fx/shield-ring`, `CGame::SubmitShieldRings`) that brightens with
+  charge. **Not** modelled yet: the bubble's larger hitbox — its ring is drawn
+  wider, but the Chipmunk shape is unchanged.
 - Guidance (`MissileSystem`, server-only `Missile` component): locks the
   nearest hostile *damageable* — ship or structure, so planets are never
   targets — then turns the missile's velocity toward it at
@@ -464,9 +535,46 @@ The Lab's research role (`ResearchSystem`), ahead of the upgrades themselves:
     snapshot in `CGame::TickNetClient`, so the readout trails by a round
     trip).
   - The debug box spawn moved off Space to `X`.
-- Sim-test `TestResearch`: solo timing, the lab mirror, one-lab pickup via a
-  real landing, two labs beating one, ammo granted on pickup, and held fire
-  spending one round per cooldown.
+- Sim-tests: `TestResearch` (solo timing, the lab mirror, a draft opening on
+  a real landing and staying open unanswered, distinct offers, pickup by a
+  pressed key, two labs beating one, held fire spending one round per
+  cooldown), `TestUpgradeCatalog` (parse, eligibility, weapon-tier resolution,
+  shield stacking vs. swapping, seed-stable distinct offers) and `TestShields`
+  (regen, absorption, the hull untouched under a bubble).
+
+## Tuning data (2026-07-28)
+
+What used to be `static constexpr` blocks now lives in files, so retuning
+costs an app restart rather than a rebuild. Each loader keeps the old
+constants as defaults, so a missing or malformed file degrades to exactly
+today's balance rather than to zero.
+
+| File | Owner | Holds |
+| --- | --- | --- |
+| `data/upgrades.toml` | `UpgradeCatalog` | the weapon table, ship/turret fittings, the research pool |
+| `data/ai-presets.toml` | `AIPresetLibrary` | AI temperaments; a preset overrides only the fields it names |
+| `data/economy.toml` | `EconomyConfig` | colony/production rates, freighter transit, claim dwell, research period |
+| `data/models/**/*.toml` | `Body` | per-model `[physics]`, `[gravity]`, and now `[landing] fragility` |
+
+- **AI presets have no enum.** `AIPersonalityPreset` is gone; presets are keyed
+  by their toml key like weapons and upgrades are, so adding one is a file
+  edit. The server's `--ai-preset`/`spawn` CLI resolves the string through
+  `FindByKey` (its hand-written `ParsePreset` is deleted) and the debug spawn
+  panel iterates `All()`, so both pick a new preset up for free.
+- **`[landing] fragility`** multiplies the landing damage that hull takes —
+  *only* landing, not fire and not rams, which is why it isn't called
+  toughness. The speed thresholds and the damage curve stay global in
+  `DamageSystem::LandingParams`, where the Physics debug tab can already move
+  them live. A freighter is 2.0, an interceptor 1.25, a fighter 1.0.
+- **Deliberately still in code**: scenario layout, `LandingParams` itself, and
+  netcode constants (`INPUT_LEAD_TICKS`, interp delay) — protocol behaviour
+  rather than tuning, where a per-peer file mismatch would be a nasty failure
+  mode.
+- **Shield geometry is next, not here.** Shield *stats* belong to the tier and
+  stay in `data/upgrades.toml`; `CGame::SubmitShieldRings`' `BUBBLE_RADIUS`/
+  `PLATING_RADIUS` and `models/fx/shield-ring` stay hardcoded on purpose, as
+  placeholders for shield outlines authored into each ship's own SVG (the way
+  `Body` already parses hardpoints and `@origin`).
 
 ## Phase 5 — AI opponents (strategy layer)
 
@@ -635,7 +743,7 @@ cgame-side glue in one file, e.g. `src/cgame/ui/hud-model.cpp`).
   not decoration; it's how the original teaches landing.
 - [ ] Opponent status: one swatch per faction, dimmed when defeated
   (Phase 4's flag).
-- [ ] Reserved (empty for now): shields, munition counts.
+- [x] Shields and munition counts (see "Lab research" above).
 - Design freedom: layout/style at implementer's discretion — aim for
   something that fits the vector/CRT look; take the original only as the
   checklist of *what* to show.

@@ -24,6 +24,8 @@
 #include <gravitaris/game/system/ship/ship-controls-system.hpp>
 #include <gravitaris/game/system/combat/bullet-lifetime-system.hpp>
 #include <gravitaris/game/system/combat/damage-system.hpp>
+#include <gravitaris/game/system/combat/shield-system.hpp>
+#include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/system/combat/missile-system.hpp>
 #include <gravitaris/game/system/gwell/faction-system.hpp>
 #include <gravitaris/game/system/ship/landing-state-system.hpp>
@@ -31,7 +33,8 @@
 #include <gravitaris/game/system/combat/death-system.hpp>
 #include <gravitaris/game/system/ship/ai-pilot-system.hpp>
 #include <gravitaris/game/system/ship/ai-strategy-system.hpp>
-#include <gravitaris/game/gnc/ai-personality-presets.hpp>
+#include <gravitaris/game/ai/ai-preset-library.hpp>
+#include <gravitaris/game/config/economy-config.hpp>
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
@@ -42,6 +45,16 @@ protected:
     IFilesystem& m_filesystem;
 
     ResourceLoader m_resourceLoader;
+
+    // The weapon table and research pool (data/upgrades.toml), and the AI
+    // temperaments (data/ai-presets.toml). Declared ahead of the systems
+    // below, several of which hold a reference to the catalog.
+    UpgradeCatalog m_upgradeCatalog;
+
+    AIPresetLibrary m_aiPresets;
+
+    // The economy's rates and the round timers (data/economy.toml).
+    EconomyConfig m_economyConfig;
 
     flecs::world m_registry;
 
@@ -72,6 +85,8 @@ protected:
     BulletLifetimeSystem m_bulletLifetimeSystem;
 
     DamageSystem m_damageSystem;
+
+    ShieldSystem m_shieldSystem;
 
     MissileSystem m_missileSystem;
 
@@ -109,7 +124,7 @@ protected:
     // scenario and fields none until round setup exists.
     struct AIFaction {
         TeamId team = TeamId::Red;
-        AIPersonalityPreset preset = AIPersonalityPreset::Balanced;
+        id_t preset = 0; // an AIPresetLibrary key; 0 means the library's default
         std::optional<flecs::entity> leader;
         int respawnTimer = -1;
     };
@@ -178,6 +193,19 @@ public:
 
     ResourceLoader& GetResourceLoader()
     { return m_resourceLoader; }
+
+    const UpgradeCatalog& GetUpgradeCatalog() const
+    { return m_upgradeCatalog; }
+
+    const AIPresetLibrary& GetAIPresets() const
+    { return m_aiPresets; }
+
+    const EconomyConfig& GetEconomyConfig() const
+    { return m_economyConfig; }
+
+    // The preset `id` names, or the library's default when it names nothing
+    // (an unconfigured faction, or a key the data file no longer has).
+    [[nodiscard]] const AIPreset& ResolveAIPreset(id_t id) const;
 
     std::optional<flecs::entity> GetPlayer()
     { return m_player; }

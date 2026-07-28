@@ -34,7 +34,6 @@
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/input/input-command.hpp>
-#include <gravitaris/game/system/gwell/research-system.hpp>
 
 #include <gravitaris/cgame/cgame.hpp>
 #include <gravitaris/cgame/renderer/glow-post-process.hpp>
@@ -80,6 +79,9 @@ private:
     // Live keyboard action state; FeedInput() turns it into one tick-stamped
     // command per sim tick. The sim never reads the keyboard directly.
     ControlFlags m_currentInput{};
+    // One-shot, cleared once the tick that carries it has been submitted:
+    // which of the Lab's three offers the player just accepted (0 = none).
+    UpgradePick m_upgradePick = 0;
 
     // Record/replay: F5 toggles recording to disk, F6 replays it back, F7 stops.
     ReplayController m_replay;
@@ -196,6 +198,11 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
         m_game->LookAtMapPoint(Magnum::Vector2{nx, ny});
     });
     m_ui.SetRecenterCallback([this] { m_game->FocusCamera(); });
+    // Clicking an offer card goes through the same one-shot the 1/2/3 keys
+    // set, so mouse and keyboard reach the sim by exactly one path.
+    m_ui.SetUpgradePickCallback([this](int slot) {
+        m_upgradePick = static_cast<UpgradePick>(slot);
+    });
 
     // Before Init(), which is where the documents load and are first laid out.
     // The window and its framebuffer already exist by now (the base
@@ -245,7 +252,8 @@ void GravitarisApplication::tickEvent()
                 m_frameTimeAccumulator = 0.0;
                 break;
             }
-            m_game->TickNetClient(m_currentInput);
+            m_game->TickNetClient(m_currentInput, m_upgradePick);
+            m_upgradePick = 0;
             m_frameTimeAccumulator -= Game::PHYSICS_DELTA;
             ++steps;
         }
@@ -305,7 +313,17 @@ void GravitarisApplication::UpdateUi()
     // Every frame, unlike the throttled readout above: a hull bar that lags a
     // quarter second behind the hit that caused it reads as broken.
     m_ui.SetHullFraction(m_game->GetHullFraction().value_or(-1.f));
-    m_ui.SetMissileAmmo(m_game->GetMissileAmmo().value_or(-1), ResearchSystem::MISSILE_CAPACITY);
+    m_ui.SetMissileAmmo(m_game->GetMissileAmmo().value_or(-1), m_game->GetMissileCapacity());
+
+    const CGame::ShieldReadout shield = m_game->GetShieldReadout();
+    m_ui.SetShieldFraction(shield.capacity > 0.f ? shield.charge / shield.capacity : -1.f,
+                           shield.type == ShieldType::Plating ? "plating" : "");
+
+    std::vector<UpgradeOfferView> offers;
+    for (const CGame::UpgradeOffer& offer : m_game->GetUpgradeOffers()) {
+        offers.push_back(UpgradeOfferView{offer.name, offer.description, offer.level, offer.maxLevel});
+    }
+    m_ui.SetUpgradeOffers(offers);
 
     m_ui.SetRecenterVisible(!m_game->IsCameraFollowing());
 
@@ -354,6 +372,7 @@ void GravitarisApplication::FeedInput()
     }
     else {
         cmd.flags = m_currentInput;
+        cmd.upgradePick = m_upgradePick;
         // Autopilot overrides movement but not fire.
         if (std::optional<ControlFlags> autopilot = m_game->ComputeAutopilotControls()) {
             cmd.flags = *autopilot;
@@ -370,6 +389,7 @@ void GravitarisApplication::FeedInput()
     // One-shot actions apply only for the tick they were pressed on.
     // (firePrimary is held; released on key-up.)
     m_currentInput.fireSecondary = false;
+    m_upgradePick = 0;
 }
 
 void GravitarisApplication::ToggleRecording()
@@ -591,6 +611,17 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         case KeyEvent::Key::X:
             m_game->StopSpectating();
             m_currentInput.fireSecondary = true; // one-shot, cleared after the tick
+            break;
+        // Accepting one of the Lab's three offers. Harmless with no draft
+        // open -- ResearchSystem ignores a pick nobody is being offered.
+        case KeyEvent::Key::One:
+            m_upgradePick = 1;
+            break;
+        case KeyEvent::Key::Two:
+            m_upgradePick = 2;
+            break;
+        case KeyEvent::Key::Three:
+            m_upgradePick = 3;
             break;
         default:
             (void)0;

@@ -10,6 +10,7 @@
 #include <gravitaris/game/component/ai-strategy.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
+#include <gravitaris/game/component/upgrade-draft.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/planet.hpp>
@@ -21,6 +22,8 @@
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
 namespace Gravitaris {
+
+static Damageable MakeDamageable(const Body& body);
 
 EntitySpawner::EntitySpawner(flecs::world& registry, ResourceLoader& resourceLoader)
     : m_registry(registry)
@@ -78,16 +81,17 @@ flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position, TeamId
     entity.emplace<Controls>();
     entity.emplace<InputQueue>();
     entity.emplace<Team>(team);
-    entity.emplace<Damageable>();
+    entity.emplace<Damageable>(MakeDamageable(*body));
     entity.emplace<LandingState>();
     entity.emplace<ShipLoadout>();
+    entity.emplace<UpgradeDraft>();
     AssignNetId(entity);
     AddRenderable(entity, modelId);
 
     return entity;
 }
 
-flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, AIPersonalityPreset preset,
+flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, const AIPreset& preset,
                                          Vector2d velocity, double rot, TeamId team)
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
@@ -99,10 +103,11 @@ flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, AIPers
     entity.emplace<InputQueue>();
     entity.emplace<AIPilot>();
     entity.emplace<Team>(team);
-    entity.emplace<Damageable>();
+    entity.emplace<Damageable>(MakeDamageable(*body));
     entity.emplace<LandingState>();
     entity.emplace<ShipLoadout>();
-    ApplyAIPersonalityPreset(entity.get_mut<AIPilot>(), preset);
+    entity.emplace<UpgradeDraft>();
+    AIPresetLibrary::Apply(preset, entity.get_mut<AIPilot>());
     AssignNetId(entity);
     AddRenderable(entity, modelId);
 
@@ -110,11 +115,11 @@ flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, AIPers
 }
 
 flecs::entity EntitySpawner::SpawnAILeader(id_t modelId, Vector2d position, TeamId team,
-                                           AIPersonalityPreset preset, Vector2d velocity, double rot)
+                                           const AIPreset& preset, Vector2d velocity, double rot)
 {
     flecs::entity entity = SpawnAIShip(modelId, position, preset, velocity, rot, team);
     entity.emplace<AIStrategy>();
-    ApplyAIStrategyPreset(entity.get_mut<AIStrategy>(), preset);
+    AIPresetLibrary::ApplyStrategy(preset, entity.get_mut<AIStrategy>());
     return entity;
 }
 
@@ -184,7 +189,7 @@ flecs::entity EntitySpawner::SpawnStructureBase(StructureType type, id_t modelId
     entity.emplace<Transform>(initialPos);
     entity.emplace<RigidBodyDesc>("main"_id, body);
     entity.emplace<Team>(team);
-    entity.emplace<Damageable>();
+    entity.emplace<Damageable>(MakeDamageable(*body));
     entity.emplace<Structure>(Structure{type, 0.f, 0.f});
     if (type == StructureType::Base || type == StructureType::HighPort) {
         entity.emplace<StructureDefense>();
@@ -233,7 +238,7 @@ flecs::entity EntitySpawner::SpawnFreighter(id_t modelId, Vector2d position, Tea
     entity.emplace<Transform>(position);
     entity.emplace<RigidBodyDesc>("main"_id, body, /*sensor=*/false, CollisionClass::Ship);
     entity.emplace<Team>(team);
-    entity.emplace<Damageable>();
+    entity.emplace<Damageable>(MakeDamageable(*body));
     entity.emplace<Controls>();
     entity.emplace<Freighter>(Freighter{targetPlanet.get<NetId>().value, buildOrder, false});
     AssignNetId(entity);
@@ -244,5 +249,14 @@ flecs::entity EntitySpawner::SpawnFreighter(id_t modelId, Vector2d position, Tea
 
 void EntitySpawner::AddRenderable(flecs::entity entity, id_t modelId)
 {}
+
+// Hull with its model's own landing fragility folded in; everything else
+// keeps Damageable's defaults.
+static Damageable MakeDamageable(const Body& body)
+{
+    Damageable damageable;
+    damageable.landingFragility = body.GetLandingFragility();
+    return damageable;
+}
 
 } // namespace Gravitaris

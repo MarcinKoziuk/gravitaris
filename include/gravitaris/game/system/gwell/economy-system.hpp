@@ -2,6 +2,7 @@
 
 #include <flecs.h>
 
+#include <gravitaris/game/config/economy-config.hpp>
 #include <gravitaris/game/fwd.hpp>
 
 namespace Gravitaris {
@@ -20,37 +21,17 @@ namespace Gravitaris {
 // materials-starved planet (one with no Colony of its own) is the
 // original's other freighter role and is deferred; nothing here models it.
 class EconomySystem {
-public:
-    // Materials/tick a Colony produces, and the store cap it produces into.
-    static constexpr float RAW_PRODUCTION_PER_TICK = 0.5f;
-    static constexpr float RAW_CAP = 200.f;
-
-    // Materials/tick a Colony pushes to its own planet's Base and,
-    // independently, its High Port -- two separate draws against the same
-    // Colony store, one per structure, not a combined cap.
-    static constexpr float SUPPLY_RATE = 0.4f;
-
-    // Materials/tick a Base/High Port converts raw -> finished, and the
-    // finished-store cap.
-    static constexpr float CONVERSION_RATE = 0.3f;
-    static constexpr float FINISHED_CAP = 200.f;
-
-    // Finished materials spent to dispatch one freighter.
-    static constexpr float FREIGHTER_COST = 60.f;
-
-    // Finished materials a Base spends on its own Lab then Comm Center
-    // (Phase 4's "self-development" -- one at a time, new-unit rule applies,
-    // same as freighter construction but same-planet and instant, no
-    // freighter trip needed). Placeholder magnitude pending playtesting.
-    static constexpr float SELF_DEVELOPMENT_COST = 40.f;
-
 private:
     flecs::world& m_registry;
     EntitySpawner& m_entitySpawner;
     GameEventQueue& m_eventQueue;
+    const EconomyConfig& m_config;
 
 public:
-    EconomySystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue);
+    // Every rate -- production, supply, conversion, and what a freighter or a
+    // Base's own Lab costs -- comes from data/economy.toml.
+    EconomySystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue,
+                  const EconomyConfig& config);
 
     void Update();
 };

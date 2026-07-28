@@ -53,11 +53,13 @@ flecs::entity FindBase(flecs::world& registry, std::uint32_t planetNetId)
 } // namespace
 
 FreighterSystem::FreighterSystem(flecs::world& registry, EntitySpawner& entitySpawner,
-                                 PhysicsSystem& physicsSystem, GameEventQueue& eventQueue)
+                                 PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
+                                 const EconomyConfig& config)
         : m_registry(registry)
         , m_entitySpawner(entitySpawner)
         , m_physicsSystem(physicsSystem)
         , m_eventQueue(eventQueue)
+        , m_config(config)
 {}
 
 void FreighterSystem::Update()
@@ -86,14 +88,14 @@ void FreighterSystem::Update()
         const Vector2d toPlanet = planetTransf.pos - transf.pos;
         const double distance = toPlanet.length();
 
-        if (distance <= ARRIVAL_RADIUS) {
+        if (distance <= m_config.freighter.arrivalRadius) {
             double centerMass = 0.0;
             if (const GravitySource* source = planet.try_get<GravitySource>()) {
                 centerMass = source->mass * static_cast<double>(source->multiplier);
             }
             const double theta = std::atan2(-toPlanet.y(), -toPlanet.x()); // angle from planet to freighter, now
             arrivals.emplace_back(freighter,
-                                  PlanetOrbitAttachment{state.targetPlanetNetId, centerMass, ARRIVAL_RADIUS, theta, 1.0});
+                                  PlanetOrbitAttachment{state.targetPlanetNetId, centerMass, m_config.freighter.arrivalRadius, theta, 1.0});
             state.arrived = true;
             controls.actionFlags.thrustForward = false;
             return;
@@ -112,27 +114,27 @@ void FreighterSystem::Update()
         // iterations converges well within a tick's positional tolerance.
         Vector2d aimPos = planetTransf.pos;
         if (const Orbit* orbit = planet.try_get<Orbit>(); orbit && orbit->radius > 0.0) {
-            double eta = distance / TRANSIT_SPEED;
+            double eta = distance / m_config.freighter.transitSpeed;
             for (int i = 0; i < 4; ++i) {
                 const double theta = orbit->theta + orbit->angularSpeed * eta;
                 aimPos = orbit->center + Vector2d{std::cos(theta), std::sin(theta)} * orbit->radius;
-                eta = (aimPos - transf.pos).length() / TRANSIT_SPEED;
+                eta = (aimPos - transf.pos).length() / m_config.freighter.transitSpeed;
             }
         }
         else {
-            const double eta = distance / TRANSIT_SPEED;
+            const double eta = distance / m_config.freighter.transitSpeed;
             aimPos = planetTransf.pos + planetTransf.vel * eta;
         }
         const Vector2d toAim = aimPos - transf.pos;
         const double aimDistance = std::max(toAim.length(), 1e-6);
 
-        // Ramps toward TRANSIT_SPEED rather than snapping to it, so there's
+        // Ramps toward cruise rather than snapping to it, so there's
         // an actual accelerating phase for the _thrust visual/audio below to
         // key off of; once at cruise speed it coasts thrustless (currentSpeed
         // reads back last tick's transf.vel, which this same block sets, so
         // it persists across ticks without a separate stored field).
         const double currentSpeed = transf.vel.length();
-        const double speed = std::min(currentSpeed + TRANSIT_ACCELERATION * Game::PHYSICS_DELTA, TRANSIT_SPEED);
+        const double speed = std::min(currentSpeed + m_config.freighter.transitAcceleration * Game::PHYSICS_DELTA, m_config.freighter.transitSpeed);
         const Vector2d vel = (toAim / aimDistance) * speed;
         const Vector2d pos = transf.pos + vel * Game::PHYSICS_DELTA;
         // Nose is local -Y (see ShipControlsSystem::ApplyMovement's thrust
@@ -146,14 +148,14 @@ void FreighterSystem::Update()
         // motion stays SetKinematicMotion's above; a kinematic body ignores
         // ShipControlsSystem's forces. Only lit while still ramping up to
         // cruise speed -- coasting in vacuum needs no visible thrust.
-        controls.actionFlags.thrustForward = speed < TRANSIT_SPEED;
+        controls.actionFlags.thrustForward = speed < m_config.freighter.transitSpeed;
     });
 
     for (flecs::entity freighter : toDestruct) freighter.destruct();
     for (auto& [freighter, attach] : arrivals) freighter.set<PlanetOrbitAttachment>(attach);
 
     // Cargo: an arrived freighter unloads its two pods one at a time, gated
-    // by CARGO_UNLOAD_INTERVAL_TICKS so the two events read as sequential.
+    // by the configured unload interval so the two events read as sequential.
     // Cargo 1 tops up the target's existing Base with raw materials (a
     // no-op if it doesn't have one yet -- e.g. this freighter's own build
     // order IS to build that Base). Cargo 2 resolves the freighter's build
@@ -167,7 +169,7 @@ void FreighterSystem::Update()
         if (!state.arrived || state.cargoRemaining == 0) return;
 
         ++state.ticksSinceUnload;
-        if (state.ticksSinceUnload < CARGO_UNLOAD_INTERVAL_TICKS) return;
+        if (state.ticksSinceUnload < m_config.freighter.cargoUnloadIntervalTicks) return;
         state.ticksSinceUnload = 0;
 
         const flecs::entity planet = m_entitySpawner.EntityForNetId(state.targetPlanetNetId);
@@ -176,8 +178,8 @@ void FreighterSystem::Update()
             if (planet.is_alive()) {
                 if (flecs::entity base = FindBase(m_registry, state.targetPlanetNetId); base.is_alive()) {
                     Structure& baseStructure = base.get_mut<Structure>();
-                    baseStructure.rawMaterials = std::min(baseStructure.rawMaterials + CARGO_ONE_RAW_MATERIALS,
-                                                          EconomySystem::RAW_CAP);
+                    baseStructure.rawMaterials = std::min(baseStructure.rawMaterials + m_config.freighter.cargoOneRawMaterials,
+                                                          m_config.colony.rawCap);
                 }
             }
             state.cargoRemaining = 1;

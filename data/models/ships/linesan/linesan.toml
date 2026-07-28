@@ -4,3 +4,6 @@ scale = 0.1
 density = 1
 restitution = 0.5
 friction = 0.0
+
+[landing]
+fragility = 1.0

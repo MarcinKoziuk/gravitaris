@@ -7,7 +7,7 @@
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/team.hpp>
-#include <gravitaris/game/gnc/ai-personality-presets.hpp>
+#include <gravitaris/game/ai/ai-preset-library.hpp>
 #include <gravitaris/game/util/splitmix.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/scenario/classic-scenario.hpp>
@@ -23,21 +23,22 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_physicsSystem(m_registry)
         , m_orbitSystem(m_registry, m_physicsSystem)
         , m_structureAttachmentSystem(m_registry, *m_entitySpawner, m_physicsSystem)
-        , m_structureDefenseSystem(m_registry, *m_entitySpawner, m_eventQueue)
-        , m_freighterSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue)
-        , m_economySystem(m_registry, *m_entitySpawner, m_eventQueue)
-        , m_researchSystem(m_registry, *m_entitySpawner, m_eventQueue)
+        , m_structureDefenseSystem(m_registry, *m_entitySpawner, m_eventQueue, m_upgradeCatalog)
+        , m_freighterSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue, m_economyConfig)
+        , m_economySystem(m_registry, *m_entitySpawner, m_eventQueue, m_economyConfig)
+        , m_researchSystem(m_registry, *m_entitySpawner, m_eventQueue, m_upgradeCatalog, m_economyConfig)
         , m_inputSystem(m_registry)
-        , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue)
+        , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue, m_upgradeCatalog)
         , m_bulletLifetimeSystem(m_registry)
-        , m_damageSystem(m_registry, m_physicsSystem, m_eventQueue)
-        , m_missileSystem(m_registry, *m_entitySpawner, m_physicsSystem)
+        , m_damageSystem(m_registry, m_physicsSystem, m_eventQueue, m_upgradeCatalog)
+        , m_shieldSystem(m_registry, m_upgradeCatalog)
+        , m_missileSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_upgradeCatalog)
         , m_factionSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_landingStateSystem(m_registry, m_physicsSystem, m_factionSystem)
-        , m_conquestSystem(m_registry, *m_entitySpawner, m_eventQueue, m_factionSystem)
+        , m_conquestSystem(m_registry, *m_entitySpawner, m_eventQueue, m_factionSystem, m_economyConfig)
         , m_deathSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_trajectoryPredictor(m_registry, m_physicsSystem)
-        , m_aiPilotSystem(m_registry, m_physicsSystem, m_trajectoryPredictor)
+        , m_aiPilotSystem(m_registry, m_physicsSystem, m_trajectoryPredictor, m_upgradeCatalog)
         , m_aiStrategySystem(m_registry)
         , m_step(0L)
 {
@@ -51,6 +52,10 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
     // By the time this constructor BODY executes, every member above is fully
     // constructed, so it's safe for Init() to touch m_registry now.
     m_entitySpawner->Init();
+
+    m_upgradeCatalog.Load(m_filesystem);
+    m_aiPresets.Load(m_filesystem);
+    m_economyConfig.Load(m_filesystem);
 }
 
 void Game::BuildWorld()
@@ -78,12 +83,12 @@ void Game::SpawnCombatants(TeamId playerTeam)
     // The opposing complex gets a leader that plays the mode, not just a
     // dogfighter. Per-faction presets are U4's round-setup screen.
     const TeamId aiTeam = playerTeam == TeamId::Blue ? TeamId::Red : TeamId::Blue;
-    m_aiFactions.push_back(AIFaction{aiTeam, AIPersonalityPreset::Balanced});
+    m_aiFactions.push_back(AIFaction{aiTeam, ID("balanced")});
     for (AIFaction& faction : m_aiFactions) {
         if (const std::optional<FactionSystem::SpawnPoint> site =
                     m_factionSystem.SpawnPosition(faction.team)) {
             faction.leader = m_entitySpawner->SpawnAILeader("models/ships/fighter-1"_id, site->pos,
-                                                            faction.team, faction.preset, site->vel,
+                                                            faction.team, ResolveAIPreset(faction.preset), site->vel,
                                                             site->rot);
         }
     }
@@ -158,6 +163,9 @@ void Game::Update()
 
     {
         ScopedPerfTimer timer(m_perfMonitor, "Game Logic");
+        // Before DamageSystem, so this tick's regen is available to this
+        // tick's incoming fire.
+        m_shieldSystem.Update();
         // DamageSystem applies this step's bullet hits and landing impacts, so
         // DeathSystem (next) sees final hp and can explode ships the same tick.
         m_damageSystem.Update();
@@ -171,7 +179,7 @@ void Game::Update()
         m_factionSystem.Update();
         // After FactionSystem: reads the FactionState entities it creates, and
         // this tick's LandingStateSystem flags for upgrade pickup.
-        m_researchSystem.Update();
+        m_researchSystem.Update(m_step);
         // Detect a player death from DeathSystem before any system reads m_player.
         HandlePlayerRespawn();
         HandleAILeaderRespawns();
@@ -224,19 +232,20 @@ void Game::HandleAILeaderRespawns()
         if (const std::optional<FactionSystem::SpawnPoint> spawn =
                     TickRespawn(faction.leader, faction.respawnTimer, faction.team)) {
             faction.leader = m_entitySpawner->SpawnAILeader("models/ships/fighter-1"_id, spawn->pos,
-                                                            faction.team, faction.preset, spawn->vel,
+                                                            faction.team, ResolveAIPreset(faction.preset), spawn->vel,
                                                             spawn->rot);
         }
     }
 }
 
+const AIPreset& Game::ResolveAIPreset(id_t id) const
+{
+    if (const AIPreset* preset = m_aiPresets.Find(id)) return *preset;
+    return m_aiPresets.Default();
+}
+
 void Game::SpawnRandomAIShip()
 {
-    static constexpr AIPersonalityPreset PRESETS[] = {
-            AIPersonalityPreset::Balanced, AIPersonalityPreset::Aggressive, AIPersonalityPreset::Cautious,
-            AIPersonalityPreset::Sniper, AIPersonalityPreset::Reckless,
-    };
-
     // AI ships are Red (see EntitySpawner::SpawnAIShip), so they launch from
     // Red's own site under the same rule a respawn uses -- off its High Port
     // if it still holds one. Only when that faction has nothing left does a
@@ -251,7 +260,7 @@ void Game::SpawnRandomAIShip()
     }
 
     std::uint64_t rng = SplitMix64Seed(m_step, m_randomAIShipSpawnCount++);
-    const AIPersonalityPreset preset = PRESETS[SplitMix64Next(rng) % std::size(PRESETS)];
+    const AIPreset& preset = m_aiPresets.PickRandom(static_cast<std::uint32_t>(SplitMix64Next(rng)));
     m_entitySpawner->SpawnAIShip("models/ships/fighter-1"_id, spawn.pos, preset, spawn.vel, spawn.rot);
 }
 

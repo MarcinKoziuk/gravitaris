@@ -12,6 +12,8 @@ namespace Gravitaris {
 struct InputCommand {
     std::uint64_t tick = 0;
     ControlFlags flags{};
+    // 1..3 accepts that offer of the Lab's draft this tick; 0 = no pick.
+    UpgradePick upgradePick = 0;
 };
 
 // 1-byte packing for replay files and the future wire format. Keep in sync

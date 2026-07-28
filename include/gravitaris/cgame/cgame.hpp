@@ -4,6 +4,7 @@
 #include <chrono>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <Magnum/Math/Vector2.h>
 
@@ -117,6 +118,12 @@ protected:
     // world the mode simulates them in; the view knows which.
     ResourcePtr<const Model> m_teamMarkerModel;
     void SubmitPlanetOwnershipMarkers(const SceneView& view);
+
+    // Draws a ring around every ship carrying a shield, brightening with its
+    // charge, in the emitter type's own color -- the only outward tell that a
+    // hit was absorbed rather than taken.
+    ResourcePtr<const Model> m_shieldRingModel;
+    void SubmitShieldRings(const SceneView& view);
 
     // Unit the camera is following instead of the own ship; empty = not
     // spectating. May live in either world (see CycleSpectate).
@@ -309,6 +316,30 @@ public:
     // (never) picks up from it.
     [[nodiscard]] std::optional<float> GetGravityAccel();
 
+    // The rack's size, so the sidebar knows how many empty ticks to draw.
+    [[nodiscard]] int GetMissileCapacity() const;
+
+    // Shield charge and capacity of that unit, both zero when it carries no
+    // emitter (which blanks the bar rather than drawing an empty one).
+    struct ShieldReadout {
+        float charge = 0.f;
+        float capacity = 0.f;
+        ShieldType type = ShieldType::None;
+    };
+    [[nodiscard]] ShieldReadout GetShieldReadout();
+
+    // The Lab draft the player's own ship is being offered, in panel order --
+    // empty when there is nothing to pick. Only the own ship's: a spectated
+    // unit's draft isn't the player's to spend, so the camera subject is
+    // deliberately not what this follows.
+    struct UpgradeOffer {
+        std::string name;
+        std::string description;
+        std::uint8_t level = 0;    // what the ship holds now
+        std::uint8_t maxLevel = 1; // 0 for a repeatable restock
+    };
+    [[nodiscard]] std::vector<UpgradeOffer> GetUpgradeOffers();
+
     void ToggleCameraFollow() { m_cameraDirector.ToggleCameraFollow(); }
 
     // Spectating: the camera (and everything framed off it) follows another
@@ -421,7 +452,7 @@ public:
     // predicts one more tick of its own movement and sends `flags` to the
     // server. Call from the same fixed-step accumulator loop single-player
     // drives Game::Update() from.
-    void TickNetClient(const ControlFlags& flags);
+    void TickNetClient(const ControlFlags& flags, UpgradePick upgradePick = 0);
 
     // Net debug tab (Phase 4 interpolation tunables + diagnostics).
     [[nodiscard]] float GetInterpDelaySeconds() const { return m_interpDelaySeconds; }

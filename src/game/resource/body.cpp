@@ -64,6 +64,12 @@ ResourcePtr<const Body> Body::Create(id_t id, LoadingContext& context)
         }
     }
 
+    if (const toml::table* landingCfg = cfg["landing"].as_table()) {
+        if (const auto fragility = (*landingCfg)["fragility"].value<float>()) {
+            body->m_landingFragility = *fragility;
+        }
+    }
+
     if (const toml::table* gravityCfg = cfg["gravity"].as_table()) {
         if (const auto isSource = (*gravityCfg)["is_source"].value<bool>()) {
             body->m_gravitySource = *isSource;

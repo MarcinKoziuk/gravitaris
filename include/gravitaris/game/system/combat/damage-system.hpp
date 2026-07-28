@@ -2,6 +2,8 @@
 
 #include <flecs.h>
 
+#include <Magnum/Math/Vector2.h>
+
 #include <gravitaris/game/fwd.hpp>
 
 namespace Gravitaris {
@@ -31,13 +33,21 @@ private:
     flecs::world& m_registry;
     PhysicsSystem& m_physicsSystem;
     GameEventQueue& m_eventQueue;
+    const UpgradeCatalog& m_catalog;
 
     LandingParams m_landingParams;
 
     void ResolveShipRams();
 
+    // Spends `target`'s shield charge (if it carries one) against `damage`
+    // and returns what still reaches the hull. Weapon hits only: a shield is
+    // a defense against fire, not a cushion for flying into a mountain, so
+    // landing and ram damage bypass it.
+    float AbsorbWithShield(flecs::entity target, float damage, const Magnum::Vector2& at);
+
 public:
-    DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue);
+    DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
+                 const UpgradeCatalog& catalog);
 
     LandingParams& GetLandingParams() { return m_landingParams; }
 

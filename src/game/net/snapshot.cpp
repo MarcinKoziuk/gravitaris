@@ -13,6 +13,7 @@
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
+#include <gravitaris/game/component/upgrade-draft.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/input/input-command.hpp>
@@ -23,7 +24,7 @@ namespace Gravitaris {
 
 // Bump on any wire-layout change; ReadSnapshot rejects mismatches outright
 // (no cross-version compatibility until there's a reason to have it).
-static constexpr std::uint8_t SNAPSHOT_VERSION = 8; // v8: +missileAmmo
+static constexpr std::uint8_t SNAPSHOT_VERSION = 9; // v9: +upgrade levels, shield charge, lab draft
 
 // Sanity caps so a garbage buffer can't make ReadSnapshot allocate wildly.
 static constexpr std::uint32_t MAX_ENTITIES = 4096;
@@ -69,6 +70,15 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
         }
         if (const ShipLoadout* loadout = entity.try_get<ShipLoadout>()) {
             state.missileAmmo = loadout->missileAmmo;
+            state.fireRateLevel = loadout->levels.fireRate;
+            state.gunTierLevel = loadout->levels.gunTier;
+            state.shieldLevel = loadout->levels.shield;
+            state.shieldType = loadout->levels.shieldType;
+            state.shieldHp = loadout->shieldHp;
+        }
+        if (const UpgradeDraft* draft = entity.try_get<UpgradeDraft>()) {
+            state.upgradeOffers = draft->offers;
+            state.upgradeDraftAvailable = draft->available;
         }
         if (const GravitySource* source = entity.try_get<GravitySource>()) {
             state.gravityMass = static_cast<float>(source->mass);
@@ -136,6 +146,13 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteU8(e.controlsFlags);
         out.WriteF32(e.hp);
         out.WriteU8(e.missileAmmo);
+        out.WriteU8(e.fireRateLevel);
+        out.WriteU8(e.gunTierLevel);
+        out.WriteU8(e.shieldLevel);
+        out.WriteU8(static_cast<std::uint8_t>(e.shieldType));
+        out.WriteF32(e.shieldHp);
+        for (const id_t offer : e.upgradeOffers) out.WriteU32(offer);
+        out.WriteU8(e.upgradeDraftAvailable ? 1 : 0);
         out.WriteF32(e.gravityMass);
         out.WriteF32(e.gravityMultiplier);
         out.WriteU8(e.isStar ? 1 : 0);
@@ -213,6 +230,13 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.controlsFlags = in.ReadU8();
         e.hp = in.ReadF32();
         e.missileAmmo = in.ReadU8();
+        e.fireRateLevel = in.ReadU8();
+        e.gunTierLevel = in.ReadU8();
+        e.shieldLevel = in.ReadU8();
+        e.shieldType = static_cast<ShieldType>(in.ReadU8());
+        e.shieldHp = in.ReadF32();
+        for (id_t& offer : e.upgradeOffers) offer = in.ReadU32();
+        e.upgradeDraftAvailable = in.ReadU8() != 0;
         e.gravityMass = in.ReadF32();
         e.gravityMultiplier = in.ReadF32();
         e.isStar = in.ReadU8() != 0;

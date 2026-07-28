@@ -8,7 +8,7 @@
 namespace Gravitaris {
 
 static constexpr char          REPLAY_MAGIC[4] = {'G', 'R', 'P', 'L'};
-static constexpr std::uint32_t REPLAY_VERSION  = 1;
+static constexpr std::uint32_t REPLAY_VERSION  = 2; // v2: +upgradePick
 
 template <typename T>
 static void WritePod(std::ostream& os, const T& value)
@@ -44,6 +44,7 @@ bool InputLog::Save(const std::string& path) const
     for (const InputCommand& cmd : m_commands) {
         WritePod(os, cmd.tick);
         WritePod(os, PackControlFlags(cmd.flags));
+        WritePod(os, cmd.upgradePick);
     }
 
     return static_cast<bool>(os);
@@ -71,7 +72,7 @@ bool InputLog::Load(const std::string& path)
     for (std::uint64_t i = 0; i < count; ++i) {
         InputCommand cmd;
         std::uint8_t packed = 0;
-        if (!ReadPod(is, cmd.tick) || !ReadPod(is, packed)) return false;
+        if (!ReadPod(is, cmd.tick) || !ReadPod(is, packed) || !ReadPod(is, cmd.upgradePick)) return false;
         cmd.flags = UnpackControlFlags(packed);
         loaded.push_back(cmd);
     }

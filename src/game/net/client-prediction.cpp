@@ -7,6 +7,7 @@
 #include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/net-id.hpp>
+#include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/transform.hpp>
@@ -17,18 +18,20 @@
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
 #include <gravitaris/game/system/ship/ship-controls-system.hpp>
+#include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/net/client-prediction.hpp>
 
 namespace Gravitaris {
 
 ClientPrediction::ClientPrediction(flecs::world& registry, PhysicsSystem& physicsSystem,
                                    EntitySpawner& entitySpawner, GameEventQueue& eventQueue,
-                                   ResourceLoader& resourceLoader)
+                                   ResourceLoader& resourceLoader, const UpgradeCatalog& catalog)
         : m_registry(registry)
         , m_physicsSystem(physicsSystem)
         , m_entitySpawner(entitySpawner)
         , m_eventQueue(eventQueue)
         , m_resourceLoader(resourceLoader)
+        , m_catalog(catalog)
 {}
 
 bool ClientPrediction::HasOwnShip() const
@@ -224,9 +227,17 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
     m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
     m_physicsSystem.Update();
 
+    // Off the own ship's own replicated loadout, so a collected fire-rate or
+    // weapon tier changes the predicted cadence and the round itself the same
+    // tick the server's does -- otherwise the cosmetic tracer would leave the
+    // rail at a different speed than the shot the server actually fired.
+    const ShipLoadout* ownLoadout = m_ownShip.try_get<ShipLoadout>();
+    const ShipStats stats = m_catalog.ResolveStats(ownLoadout ? ownLoadout->levels : UpgradeLevels{});
+
     if (m_fireCooldown > 0) --m_fireCooldown;
-    if (flags.firePrimary && m_fireCooldown == 0) {
-        m_fireCooldown = ShipControlsSystem::FIRE_COOLDOWN_TICKS;
+    if (flags.firePrimary && m_fireCooldown == 0 && stats.gun) {
+        const WeaponDef& gun = *stats.gun;
+        m_fireCooldown = stats.fireCooldownTicks;
 
         // The bullet this client actually sees. The server's authoritative
         // copy of this same shot never arrives (GatherSnapshot omits a
@@ -245,14 +256,16 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
         // expires on its own; hits/damage stay entirely server-authoritative.
         const auto [pos, vel] =
                 ShipControlsSystem::ComputeBulletSpawn(m_ownShip.get<Transform>(),
-                                                       m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()));
-        const flecs::entity bullet = m_entitySpawner.SpawnBullet(
-                "models/bullets/bullet-0"_id, pos, vel, /*sensor=*/true);
-        bullet.emplace<Bullet>(ShipControlsSystem::BULLET_LIFETIME_SECONDS, m_ownShip.get<Team>().id, 0.f,
+                                                       m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()),
+                                                       gun.speed);
+        const flecs::entity bullet =
+                m_entitySpawner.SpawnBullet(gun.modelId, pos, vel, /*sensor=*/true);
+        bullet.emplace<Bullet>(gun.lifetimeSeconds, m_ownShip.get<Team>().id, 0.f,
                                m_ownShip.get<NetId>().value);
 
         m_eventQueue.Emit(GameEventType::BulletFired, m_ownShip,
-                          Magnum::Vector2{static_cast<float>(pos.x()), static_cast<float>(pos.y())});
+                          Magnum::Vector2{static_cast<float>(pos.x()), static_cast<float>(pos.y())},
+                          gun.id);
     }
 
     m_history.push_back(CaptureTick(tick, flags));

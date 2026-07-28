@@ -1,9 +1,12 @@
+#include <algorithm>
+#include <vector>
+
 #include <imgui.h>
 
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/ai-pilot.hpp>
-#include <gravitaris/game/gnc/ai-personality-presets.hpp>
+#include <gravitaris/game/ai/ai-preset-library.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/gwell/faction-system.hpp>
 
@@ -15,17 +18,11 @@ namespace Gravitaris {
 
 namespace {
 
-constexpr const char* PRESET_NAMES[] = {"Balanced", "Aggressive", "Cautious", "Sniper", "Reckless"};
-constexpr AIPersonalityPreset PRESETS[] = {
-        AIPersonalityPreset::Balanced, AIPersonalityPreset::Aggressive, AIPersonalityPreset::Cautious,
-        AIPersonalityPreset::Sniper, AIPersonalityPreset::Reckless,
-};
-
 // Only for the dropdown-selected preset; the random button uses
 // Game::SpawnRandomAIShip() directly, shared with the J shortcut. Same site
 // rule as that one: Red launches from its own High Port/planet, and only
 // falls back to the player's neighbourhood when it holds nothing.
-void SpawnAI(CGame& game, AIPersonalityPreset preset)
+void SpawnAI(CGame& game, const AIPreset& preset)
 {
     FactionSystem::SpawnPoint spawn;
     spawn.pos = Vector2d{300.0, 200.0};
@@ -47,11 +44,23 @@ void DrawSpawnPanel(CGame& game)
 {
     ImGui::SeparatorText("AI ships");
 
+    // Straight off the loaded library, so a preset added to
+    // data/ai-presets.toml shows up here with no change to this panel.
+    const std::vector<AIPreset>& presets = game.GetAIPresets().All();
     static int presetIndex = 0;
-    ImGui::Combo("Personality", &presetIndex, PRESET_NAMES, IM_ARRAYSIZE(PRESET_NAMES));
+    presetIndex = std::clamp(presetIndex, 0, static_cast<int>(presets.size()) - 1);
+    if (ImGui::BeginCombo("Personality", presets[presetIndex].name.c_str())) {
+        for (int i = 0; i < static_cast<int>(presets.size()); ++i) {
+            if (ImGui::Selectable(presets[i].name.c_str(), i == presetIndex)) presetIndex = i;
+            if (ImGui::IsItemHovered() && !presets[i].description.empty()) {
+                ImGui::SetTooltip("%s", presets[i].description.c_str());
+            }
+        }
+        ImGui::EndCombo();
+    }
 
     if (ImGui::Button("Spawn AI fighter near player")) {
-        SpawnAI(game, PRESETS[presetIndex]);
+        SpawnAI(game, presets[presetIndex]);
     }
 
     if (ImGui::Button("Spawn AI fighter (random personality)")) {

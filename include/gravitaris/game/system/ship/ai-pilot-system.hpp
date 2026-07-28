@@ -20,9 +20,14 @@ private:
 
     TrajectoryPredictor& m_predictor;
 
+    const UpgradeCatalog& m_catalog;
+
 public:
-    AIPilotSystem(flecs::world& registry, PhysicsSystem& physicsSystem,
-                  TrajectoryPredictor& predictor);
+    // `catalog` resolves each pilot's own fitted gun, so a pilot that has
+    // collected a heavier round leads its shots at that round's speed rather
+    // than at the stock one's.
+    AIPilotSystem(flecs::world& registry, PhysicsSystem& physicsSystem, TrajectoryPredictor& predictor,
+                  const UpgradeCatalog& catalog);
 
     ~AIPilotSystem() = default;
 

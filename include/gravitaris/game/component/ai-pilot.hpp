@@ -37,7 +37,7 @@ struct AIOrder {
 };
 
 // Tactical/temperament knobs for one AI pilot -- the tunable "personality"
-// behind presets like Aggressive/Cautious (see gnc/ai-personality-presets.hpp).
+// behind presets like Aggressive/Cautious (see ai/ai-preset-library.hpp).
 // GuidanceParams/FlightControllerParams (also stored per-pilot on AIPilot)
 // cover flight-dynamics tuning; this covers the decision layer above them.
 struct AIPersonality {

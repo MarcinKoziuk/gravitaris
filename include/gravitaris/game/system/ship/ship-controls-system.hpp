@@ -23,19 +23,9 @@ public:
     // ship's available acceleration (force / mass).
     static constexpr double THRUST_FORCE = 140.0;
 
-    // Ticks between shots while firePrimary is held (weapon cadence).
-    // 7 (was 10) is ~50% more bullets/sec (8.6 vs 6).
-    static constexpr std::uint32_t FIRE_COOLDOWN_TICKS = 7;
-
-    static constexpr double BULLET_LIFETIME_SECONDS = 3.0;
-
-    // Missiles (the Lab's first upgrade -- ResearchSystem): slower to leave
-    // the rail than a bullet, but they fly far longer and hit much harder.
-    // Unguided for now; guidance is the next step and will keep these.
-    static constexpr std::uint32_t MISSILE_COOLDOWN_TICKS = 30;
-    static constexpr double MISSILE_LIFETIME_SECONDS = 10.0;
-    static constexpr double MISSILE_MUZZLE_SPEED = 140.0;
-    static constexpr float MISSILE_DAMAGE = 45.f;
+    // Nothing about a projectile is a constant here any more: what a ship
+    // fires is a WeaponDef from data/upgrades.toml, picked by whatever the
+    // ship has collected (UpgradeCatalog::ResolveStats).
 
 private:
     flecs::world& m_registry;
@@ -46,9 +36,12 @@ private:
 
     GameEventQueue& m_eventQueue;
 
+    const UpgradeCatalog& m_catalog;
+
 public:
     explicit ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner,
-                                PhysicsSystem& physicsSystem, GameEventQueue& eventQueue);
+                                PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
+                                const UpgradeCatalog& catalog);
 
     ~ShipControlsSystem() = default;
 
@@ -62,11 +55,14 @@ public:
     // still needs the exact same force/torque the real sim applies.
     static void ApplyMovement(cpBody* body, const ControlFlags& flags);
 
-    // Muzzle position/velocity for a bullet fired right now, from the ship's
-    // first hardpoint. Shared by Update() and client-side prediction (Phase
-    // 6) so the cosmetic bullet spawns exactly where the server's will.
+    // Muzzle position/velocity for a projectile leaving the ship's first
+    // hardpoint at `muzzleSpeed` right now. Shared by Update() and
+    // client-side prediction (Phase 6) so the cosmetic bullet spawns exactly
+    // where the server's will -- which means both sides must resolve the same
+    // muzzle speed for the shooter's gun tier, not just call this the same way.
     static std::pair<Magnum::Vector2d, Magnum::Vector2d> ComputeBulletSpawn(const Transform& transf,
-                                                                             const PhysicsBody& phys);
+                                                                             const PhysicsBody& phys,
+                                                                             double muzzleSpeed);
 };
 
 } // namespace Gravitaris

@@ -13,6 +13,7 @@
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
+#include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/system/combat/missile-system.hpp>
 
 namespace Gravitaris {
@@ -22,10 +23,11 @@ using Magnum::Vector2d;
 static constexpr double HALF_PI = 1.5707963267948966;
 
 MissileSystem::MissileSystem(flecs::world& registry, EntitySpawner& entitySpawner,
-                             PhysicsSystem& physicsSystem)
+                             PhysicsSystem& physicsSystem, const UpgradeCatalog& catalog)
         : m_registry(registry)
         , m_entitySpawner(entitySpawner)
         , m_physicsSystem(physicsSystem)
+        , m_catalog(catalog)
 {}
 
 void MissileSystem::Update()
@@ -44,6 +46,10 @@ void MissileSystem::Update()
     });
 
     m_registry.each([&](Missile& missile, const Bullet& bullet, const Transform& transf, PhysicsRef& ref) {
+        const WeaponDef* weapon = m_catalog.FindWeapon(missile.weaponId);
+        if (!weapon || !weapon->IsGuided()) return; // an unguided round just coasts
+        const WeaponDef::Guidance& guidance = weapon->guidance;
+
         Vector2d targetPos;
         bool haveTarget = false;
 
@@ -86,7 +92,7 @@ void MissileSystem::Update()
         // product picks the shorter way round.
         const double cosAngle = Magnum::Math::clamp(Magnum::Math::dot(heading, desired), -1.0, 1.0);
         const double angle = std::acos(cosAngle);
-        const double maxStep = TURN_RATE * Game::PHYSICS_DELTA;
+        const double maxStep = guidance.turnRate * Game::PHYSICS_DELTA;
         if (angle > maxStep) {
             const double cross = heading.x() * desired.y() - heading.y() * desired.x();
             const double step = std::copysign(maxStep, cross);
@@ -98,7 +104,8 @@ void MissileSystem::Update()
             heading = desired;
         }
 
-        const double newSpeed = std::min(speed + ACCELERATION * Game::PHYSICS_DELTA, TOP_SPEED);
+        const double newSpeed =
+                std::min(speed + guidance.acceleration * Game::PHYSICS_DELTA, guidance.topSpeed);
         const Vector2d vel = heading * newSpeed;
 
         cpBody* body = m_physicsSystem.GetBody(ref).cp.body.get();

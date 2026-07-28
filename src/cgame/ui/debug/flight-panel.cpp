@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <cstdint>
+
 #include <imgui.h>
 
 #include <Magnum/Math/Angle.h>
@@ -106,11 +109,10 @@ void DrawFlightPanel(CGame& game)
                     safeSpeed ? "safe" : "too fast",
                     LandingStateSystem::SAFE_LANDING_SPEED);
         if (landing->landed) {
+            const std::uint32_t claimTicks = game.GetEconomyConfig().conquest.claimTicks;
             ImGui::Text("  on planet NetId %u, %u/%u ticks to claim",
                         landing->landedOnNetId,
-                        landing->landedTicks > ConquestSystem::CLAIM_TICKS
-                                ? ConquestSystem::CLAIM_TICKS : landing->landedTicks,
-                        ConquestSystem::CLAIM_TICKS);
+                        std::min(landing->landedTicks, claimTicks), claimTicks);
         }
     }
 

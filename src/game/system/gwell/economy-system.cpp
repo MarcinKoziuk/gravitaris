@@ -43,10 +43,12 @@ bool HasStructure(flecs::world& registry, std::uint32_t planetNetId, StructureTy
 
 } // namespace
 
-EconomySystem::EconomySystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue)
+EconomySystem::EconomySystem(flecs::world& registry, EntitySpawner& entitySpawner,
+                             GameEventQueue& eventQueue, const EconomyConfig& config)
         : m_registry(registry)
         , m_entitySpawner(entitySpawner)
         , m_eventQueue(eventQueue)
+        , m_config(config)
 {}
 
 void EconomySystem::Update()
@@ -72,28 +74,28 @@ void EconomySystem::Update()
     for (auto& [netId, pe] : byPlanet) {
         if (pe.colony.is_alive()) {
             Structure& colony = pe.colony.get_mut<Structure>();
-            colony.rawMaterials = std::min(colony.rawMaterials + RAW_PRODUCTION_PER_TICK, RAW_CAP);
+            colony.rawMaterials = std::min(colony.rawMaterials + m_config.colony.rawProductionPerTick, m_config.colony.rawCap);
 
             if (pe.base.is_alive()) {
-                const float supplied = std::min(colony.rawMaterials, SUPPLY_RATE);
+                const float supplied = std::min(colony.rawMaterials, m_config.colony.supplyRate);
                 colony.rawMaterials -= supplied;
                 Structure& base = pe.base.get_mut<Structure>();
-                base.rawMaterials = std::min(base.rawMaterials + supplied, RAW_CAP);
+                base.rawMaterials = std::min(base.rawMaterials + supplied, m_config.colony.rawCap);
             }
             if (pe.highPort.is_alive()) {
-                const float supplied = std::min(colony.rawMaterials, SUPPLY_RATE);
+                const float supplied = std::min(colony.rawMaterials, m_config.colony.supplyRate);
                 colony.rawMaterials -= supplied;
                 Structure& highPort = pe.highPort.get_mut<Structure>();
-                highPort.rawMaterials = std::min(highPort.rawMaterials + supplied, RAW_CAP);
+                highPort.rawMaterials = std::min(highPort.rawMaterials + supplied, m_config.colony.rawCap);
             }
         }
 
         for (flecs::entity converter : {pe.base, pe.highPort}) {
             if (!converter.is_alive()) continue;
             Structure& s = converter.get_mut<Structure>();
-            const float converted = std::min(s.rawMaterials, CONVERSION_RATE);
+            const float converted = std::min(s.rawMaterials, m_config.production.conversionRate);
             s.rawMaterials -= converted;
-            s.finishedMaterials = std::min(s.finishedMaterials + converted, FINISHED_CAP);
+            s.finishedMaterials = std::min(s.finishedMaterials + converted, m_config.production.finishedCap);
         }
     }
 
@@ -106,9 +108,9 @@ void EconomySystem::Update()
     for (auto& [netId, pe] : byPlanet) {
         if (pe.base.is_alive()) {
             Structure& base = pe.base.get_mut<Structure>();
-            if (base.finishedMaterials >= SELF_DEVELOPMENT_COST) {
+            if (base.finishedMaterials >= m_config.production.selfDevelopmentCost) {
                 if (!pe.lab.is_alive()) {
-                    base.finishedMaterials -= SELF_DEVELOPMENT_COST;
+                    base.finishedMaterials -= m_config.production.selfDevelopmentCost;
                     const Team& team = pe.base.get<Team>();
                     flecs::entity planet = m_entitySpawner.EntityForNetId(netId);
                     flecs::entity built = m_entitySpawner.SpawnStructure(StructureType::Lab, "models/structures/lab"_id,
@@ -120,7 +122,7 @@ void EconomySystem::Update()
                                       static_cast<std::uint32_t>(StructureType::Lab));
                 }
                 else if (!HasStructure(m_registry, netId, StructureType::CommCenter)) {
-                    base.finishedMaterials -= SELF_DEVELOPMENT_COST;
+                    base.finishedMaterials -= m_config.production.selfDevelopmentCost;
                     const Team& team = pe.base.get<Team>();
                     flecs::entity planet = m_entitySpawner.EntityForNetId(netId);
                     flecs::entity built = m_entitySpawner.SpawnStructure(
@@ -182,7 +184,7 @@ void EconomySystem::Update()
         for (auto [producer, funder] : {std::pair{pe.lab, pe.base}, std::pair{pe.highPort, pe.highPort}}) {
             if (!producer.is_alive() || !funder.is_alive()) continue;
             Structure& funds = funder.get_mut<Structure>();
-            if (funds.finishedMaterials < FREIGHTER_COST) continue;
+            if (funds.finishedMaterials < m_config.production.freighterCost) continue;
 
             const Team& producerTeam = producer.get<Team>();
             const Transform& producerTransf = producer.get<Transform>();
@@ -200,7 +202,7 @@ void EconomySystem::Update()
             }
             if (!nearest) continue;
 
-            funds.finishedMaterials -= FREIGHTER_COST;
+            funds.finishedMaterials -= m_config.production.freighterCost;
             m_entitySpawner.SpawnFreighter("models/ships/freighter-0"_id, producerTransf.pos, producerTeam.id,
                                           nearest->planet, nearest->order);
             alreadyTasked.insert(nearest->netId); // don't let another producer target it too, same tick

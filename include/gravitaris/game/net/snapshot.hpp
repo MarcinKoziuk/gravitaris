@@ -10,6 +10,7 @@
 
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/component/structure.hpp>
+#include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 
@@ -78,9 +79,20 @@ struct EntityState {
     float orbitTheta = 0.f;
     float orbitAngularSpeed = 0.f;
     // Only meaningful for NetEntityType::Structure.
-    // Only meaningful for NetEntityType::Ship: what the sidebar's ammo
-    // readout shows for whichever unit the camera is on.
+    // Only meaningful for NetEntityType::Ship: what the sidebar's readouts
+    // show for whichever unit the camera is on, plus the tiers the shooter's
+    // gun and shield stats are resolved from (UpgradeCatalog::ResolveStats).
     std::uint8_t missileAmmo = 0;
+    std::uint8_t fireRateLevel = 0;
+    std::uint8_t gunTierLevel = 0;
+    std::uint8_t shieldLevel = 0;
+    ShieldType shieldType = ShieldType::None;
+    float shieldHp = 0.f;
+    // The Lab draft this ship is being offered, if any (UpgradeDraft): three
+    // upgrade ids, all zero when there is nothing on the table. The client
+    // resolves them against its own copy of data/upgrades.toml.
+    UpgradeCatalog::Offers upgradeOffers{};
+    bool upgradeDraftAvailable = false;
     StructureType structureType = StructureType::Base;
     float rawMaterials = 0.f;
     float finishedMaterials = 0.f;

@@ -12,6 +12,11 @@ namespace Gravitaris {
 struct Damageable {
     float hp = 100.f;
     float maxHp = 100.f;
+    // The model's own [landing] fragility (Body::GetLandingFragility), copied
+    // here at spawn so DamageSystem doesn't have to walk back to the resource
+    // per impact. Deliberately NOT serialized: damage is resolved server-side
+    // only, so a client never needs it.
+    float landingFragility = 1.f;
 };
 
 } // namespace Gravitaris

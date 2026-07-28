@@ -53,6 +53,7 @@ private:
     flecs::world& m_registry;
     ResourceLoader& m_resourceLoader;
     const GameEventQueue& m_eventQueue;
+    const UpgradeCatalog& m_catalog;
     std::uint32_t m_eventCursor = 0;
 
     std::unique_ptr<IAudioBackend> m_backend;
@@ -68,9 +69,18 @@ private:
     // fires once per resource lifetime, not every time the backend changes).
     // Only three named clips exist today; if/when sounds become dynamically
     // spawned like Models, generalize this into an id_t-keyed map instead.
-    ResourcePtr<const AudioClip> m_laserClip;
     ResourcePtr<const AudioClip> m_thrustClip;
     ResourcePtr<const AudioClip> m_hitClip;
+    // Borrows the stock gun's clip at a lower gain until a shield hit gets
+    // its own.
+    ResourcePtr<const AudioClip> m_shieldClip;
+    // The Lab's chime when a faction's research bar fills.
+    ResourcePtr<const AudioClip> m_researchClip;
+    // One per distinct sound named by a [[weapon]] in data/upgrades.toml.
+    // GameEventType::BulletFired's param is the weapon's id, so a remote
+    // shooter's rounds sound right without this side ever seeing its loadout,
+    // and a new weapon's sound needs no code here.
+    std::vector<ResourcePtr<const AudioClip>> m_weaponClips;
 
     std::vector<VoiceHandle> m_oneShotPool;
     std::size_t m_poolCursor = 0;
@@ -87,7 +97,7 @@ private:
 
 public:
     AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
-                const GameEventQueue& eventQueue);
+                const GameEventQueue& eventQueue, const UpgradeCatalog& catalog);
 
     ~AudioSystem();
 

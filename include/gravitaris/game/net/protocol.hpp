@@ -25,7 +25,7 @@ enum class PacketType : std::uint8_t {
     Pong = 6, // server -> client, immediate echo of Ping's seq
 };
 
-inline constexpr std::uint32_t PROTOCOL_VERSION = 3; // v3: +Ping/Pong (RTT diagnostic)
+inline constexpr std::uint32_t PROTOCOL_VERSION = 4; // v4: +InputCommand::upgradePick
 
 // How many trailing commands ClientInput carries per send -- redundancy
 // instead of reliability (quake3-style): as long as one of the last N sends

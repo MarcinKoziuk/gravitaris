@@ -95,6 +95,10 @@ bool UI::Init()
         m_speedReadout = hud->GetElementById("speed_readout");
         m_headingReadout = hud->GetElementById("heading_readout");
         m_gwellReadout = hud->GetElementById("gwell_readout");
+        m_shieldFill = hud->GetElementById("shield_fill");
+        m_shieldValue = hud->GetElementById("shield_value");
+        m_upgradeDraft = hud->GetElementById("upgrade_draft");
+        m_upgradeOffers = hud->GetElementById("upgrade_offers");
         m_minimap = hud->GetElementById("minimap");
 
         if (m_minimap) {
@@ -253,6 +257,80 @@ void UI::SetHudTelemetry(std::optional<float> speed, std::optional<float> headin
     Assign(m_headingReadout, m_headingText, heading, "%03.0f");
     Assign(m_speedReadout, m_speedText, speed, "%.0f");
     Assign(m_gwellReadout, m_gwellText, gravityAccel, "%.1f");
+}
+
+void UI::SetShieldFraction(float fraction, const std::string& styleClass)
+{
+    if (!m_shieldFill || !m_shieldValue) return;
+
+    // Same whole-percent quantisation the hull bar uses, for the same reason.
+    const float quantised =
+            fraction < 0.f ? -1.f : std::round(std::clamp(fraction, 0.f, 1.f) * 100.f) / 100.f;
+    if (quantised == m_shieldFraction && styleClass == m_shieldStyle) return;
+
+    if (!m_shieldStyle.empty() && m_shieldStyle != styleClass) {
+        m_shieldFill->SetClass(m_shieldStyle, false);
+    }
+    m_shieldFraction = quantised;
+    m_shieldStyle = styleClass;
+    if (!styleClass.empty()) m_shieldFill->SetClass(styleClass, true);
+
+    if (quantised < 0.f) {
+        m_shieldFill->SetProperty("width", "0%");
+        m_shieldValue->SetInnerRML("--");
+        return;
+    }
+
+    const int percent = static_cast<int>(std::lround(quantised * 100.f));
+    m_shieldFill->SetProperty("width", std::to_string(percent) + "%");
+    m_shieldValue->SetInnerRML(std::to_string(percent) + "%");
+}
+
+void UI::SetUpgradeOffers(const std::vector<UpgradeOfferView>& offers)
+{
+    if (!m_upgradeDraft || !m_upgradeOffers) return;
+    if (offers == m_shownOffers) return;
+
+    m_shownOffers = offers;
+    m_upgradeDraft->SetProperty("display", offers.empty() ? "none" : "block");
+    if (offers.empty()) {
+        m_upgradeOffers->SetInnerRML("");
+        return;
+    }
+
+    std::string rml;
+    for (std::size_t i = 0; i < offers.size(); ++i) {
+        const UpgradeOfferView& offer = offers[i];
+        rml += "<div class=\"offer\">";
+        rml += "<div class=\"offer_key\">" + std::to_string(i + 1) + "</div>";
+        rml += "<div class=\"offer_name\">" + offer.name + "</div>";
+        rml += "<div class=\"offer_desc\">" + offer.description + "</div>";
+        // A restock (maxLevel 0) has no tier to report -- taking it twice
+        // just means more rounds.
+        if (offer.maxLevel > 0) {
+            rml += "<div class=\"offer_tier\">Tier " + std::to_string(offer.level + 1) + " / "
+                   + std::to_string(offer.maxLevel) + "</div>";
+        }
+        rml += "</div>";
+    }
+    m_upgradeOffers->SetInnerRML(rml);
+
+    // SetInnerRML destroyed the previous cards, so the click handlers are
+    // attached to the fresh ones -- and the old handler objects dropped -- on
+    // every rebuild.
+    m_offerListeners.clear();
+    for (int i = 0; i < m_upgradeOffers->GetNumChildren(); ++i) {
+        const int slot = i + 1;
+        m_offerListeners.push_back(std::make_unique<FunctionListener>([this, slot](Rml::Event&) {
+            if (m_onUpgradePick) m_onUpgradePick(slot);
+        }));
+        m_upgradeOffers->GetChild(i)->AddEventListener("click", m_offerListeners.back().get());
+    }
+}
+
+void UI::SetUpgradePickCallback(std::function<void(int)> callback)
+{
+    m_onUpgradePick = std::move(callback);
 }
 
 int UI::GetSidebarWidthPx() const

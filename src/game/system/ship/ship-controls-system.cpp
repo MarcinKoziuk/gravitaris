@@ -14,6 +14,7 @@
 #include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
+#include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
 #include <gravitaris/game/system/ship/ship-controls-system.hpp>
 
@@ -21,17 +22,17 @@ namespace Gravitaris {
 
 using Magnum::Vector2d;
 
-static constexpr float BULLET_DAMAGE = 10.f;
-static constexpr double BULLET_MUZZLE_SPEED = 200.0; // matches ai-pilot-system's BULLET_SPEED; 33% slower than the original 300
 static constexpr float BOX_HP = 30.f; // a couple of primary hits or one ram
 static constexpr double HALF_PI = 1.5707963267948966;
 
 ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner,
-                                       PhysicsSystem& physicsSystem, GameEventQueue& eventQueue)
+                                       PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
+                                       const UpgradeCatalog& catalog)
         : m_registry(registry)
         , m_entitySpawner(entitySpawner)
         , m_physicsSystem(physicsSystem)
         , m_eventQueue(eventQueue)
+        , m_catalog(catalog)
 {}
 
 static inline void
@@ -42,7 +43,9 @@ cpBodyApplyTorque(cpBody *body, cpFloat torque)
     cpBodyApplyImpulseAtLocalPoint(body, cpv(0.0, -torque), cpv(-1.0 + c.x, c.y));
 }
 
-std::pair<Vector2d, Vector2d> ShipControlsSystem::ComputeBulletSpawn(const Transform& transf, const PhysicsBody& phys)
+std::pair<Vector2d, Vector2d> ShipControlsSystem::ComputeBulletSpawn(const Transform& transf,
+                                                                    const PhysicsBody& phys,
+                                                                    double muzzleSpeed)
 {
     if (!phys.body->GetHardpoints().empty()) {
         Body::Hardpoint hp = phys.body->GetHardpoints().front();
@@ -57,8 +60,8 @@ std::pair<Vector2d, Vector2d> ShipControlsSystem::ComputeBulletSpawn(const Trans
         pos += transf.pos;
 
         Vector2d vel(
-                BULLET_MUZZLE_SPEED * std::cos(double(transf.rot - Radd(1.5708))),
-                BULLET_MUZZLE_SPEED * std::sin(double(transf.rot - Radd(1.5708)))
+                muzzleSpeed * std::cos(double(transf.rot - Radd(1.5708))),
+                muzzleSpeed * std::sin(double(transf.rot - Radd(1.5708)))
         );
 
         vel += transf.vel;
@@ -96,27 +99,37 @@ void ShipControlsSystem::Update(std::uint64_t step)
 
         ApplyMovement(body, scontrols.actionFlags);
 
+        ShipLoadout* loadout = entity.try_get_mut<ShipLoadout>();
+        const ShipStats stats =
+                m_catalog.ResolveStats(loadout ? loadout->levels : UpgradeLevels{});
+
         if (scontrols.fireCooldown > 0) {
             --scontrols.fireCooldown;
         }
         // firePrimary is held, not one-shot; the cooldown paces the fire rate
         // so holding the button auto-fires at a fixed cadence.
-        if (scontrols.actionFlags.firePrimary && scontrols.fireCooldown == 0) {
-            scontrols.fireCooldown = ShipControlsSystem::FIRE_COOLDOWN_TICKS;
-            std::pair<Vector2d, Vector2d> ret = ShipControlsSystem::ComputeBulletSpawn(transf, phys);
+        if (scontrols.actionFlags.firePrimary && scontrols.fireCooldown == 0 && stats.gun) {
+            const WeaponDef& gun = *stats.gun;
+            scontrols.fireCooldown = stats.fireCooldownTicks;
+            std::pair<Vector2d, Vector2d> ret =
+                    ShipControlsSystem::ComputeBulletSpawn(transf, phys, gun.speed);
 
             const Team* shooterTeam = entity.try_get<Team>();
             const NetId* shooterNetId = entity.try_get<NetId>();
-            flecs::entity bulletEntity = m_entitySpawner.SpawnBullet(
-                    "models/bullets/bullet-0"_id, ret.first, ret.second, /*sensor=*/true);
-            bulletEntity.emplace<Bullet>(ShipControlsSystem::BULLET_LIFETIME_SECONDS,
+            flecs::entity bulletEntity =
+                    m_entitySpawner.SpawnBullet(gun.modelId, ret.first, ret.second, /*sensor=*/true);
+            bulletEntity.emplace<Bullet>(gun.lifetimeSeconds,
                                          shooterTeam ? shooterTeam->id : TeamId::Blue,
-                                         BULLET_DAMAGE,
+                                         gun.damage,
                                          shooterNetId ? shooterNetId->value : 0u);
 
+            // param carries the weapon's id so a listener that never sees the
+            // shooter's loadout -- the audio system on a remote client --
+            // still knows which gun to play.
             m_eventQueue.Emit(GameEventType::BulletFired, entity,
                               Magnum::Vector2{static_cast<float>(ret.first.x()),
-                                              static_cast<float>(ret.first.y())});
+                                              static_cast<float>(ret.first.y())},
+                              gun.id);
         }
         // Missiles: same held-button pacing as the primary, but each shot
         // spends a round off the rack the Lab's upgrade filled (ResearchSystem).
@@ -127,34 +140,39 @@ void ShipControlsSystem::Update(std::uint64_t step)
         if (scontrols.missileCooldown > 0) {
             --scontrols.missileCooldown;
         }
-        ShipLoadout* loadout = entity.try_get_mut<ShipLoadout>();
         if (scontrols.actionFlags.fireMissile && scontrols.missileCooldown == 0 && loadout
-            && loadout->missileAmmo > 0) {
-            scontrols.missileCooldown = ShipControlsSystem::MISSILE_COOLDOWN_TICKS;
+            && loadout->missileAmmo > 0 && stats.missile) {
+            const WeaponDef& round = *stats.missile;
+            scontrols.missileCooldown = stats.missileCooldownTicks;
             --loadout->missileAmmo;
 
-            const Vector2d muzzlePos = ShipControlsSystem::ComputeBulletSpawn(transf, phys).first;
+            const Vector2d muzzlePos =
+                    ShipControlsSystem::ComputeBulletSpawn(transf, phys, round.speed).first;
             const double heading = static_cast<double>(transf.rot) - HALF_PI; // nose is local -Y
             const Vector2d vel =
-                    Vector2d{std::cos(heading), std::sin(heading)} * MISSILE_MUZZLE_SPEED + transf.vel;
+                    Vector2d{std::cos(heading), std::sin(heading)} * round.speed + transf.vel;
 
             const Team* shooterTeam = entity.try_get<Team>();
-            flecs::entity missile = m_entitySpawner.SpawnBullet(
-                    "models/missiles/missile-0"_id, muzzlePos, vel, /*sensor=*/true,
-                    static_cast<double>(transf.rot), Vector2d{1., 1.});
-            missile.emplace<Bullet>(ShipControlsSystem::MISSILE_LIFETIME_SECONDS,
-                                    shooterTeam ? shooterTeam->id : TeamId::Blue, MISSILE_DAMAGE,
+            flecs::entity missile =
+                    m_entitySpawner.SpawnBullet(round.modelId, muzzlePos, vel, /*sensor=*/true,
+                                                static_cast<double>(transf.rot), Vector2d{1., 1.});
+            missile.emplace<Bullet>(round.lifetimeSeconds,
+                                    shooterTeam ? shooterTeam->id : TeamId::Blue, round.damage,
                                     /*ownerNetId=*/0u);
-            missile.emplace<Missile>(); // MissileSystem locks a target on its first tick
+            // MissileSystem locks a target on its first tick, and steers by
+            // this weapon's own guidance envelope.
+            missile.emplace<Missile>(Missile{0u, round.id});
 
             m_eventQueue.Emit(GameEventType::BulletFired, entity,
                               Magnum::Vector2{static_cast<float>(muzzlePos.x()),
-                                              static_cast<float>(muzzlePos.y())});
+                                              static_cast<float>(muzzlePos.y())},
+                              round.id);
         }
 
         if (scontrols.actionFlags.fireSecondary) {
             scontrols.actionFlags.fireSecondary = false;
-            std::pair<Vector2d, Vector2d> ret = ShipControlsSystem::ComputeBulletSpawn(transf, phys);
+            std::pair<Vector2d, Vector2d> ret = ShipControlsSystem::ComputeBulletSpawn(
+                    transf, phys, stats.gun ? stats.gun->speed : 0.);
             flecs::entity box = m_entitySpawner.SpawnBullet("models/doodads/box"_id, ret.first, transf.vel);
             box.emplace<Damageable>(Damageable{BOX_HP, BOX_HP});
 

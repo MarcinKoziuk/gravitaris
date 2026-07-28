@@ -1,0 +1,2 @@
+# Unit radius at scale 1, so the overlay's scale is the ring's world radius.
+scale = 0.02

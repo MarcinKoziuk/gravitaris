@@ -30,6 +30,14 @@ struct Damageable;
 struct NetId;
 struct GravitySource;
 struct Orbit;
+struct ShipLoadout;
+struct UpgradeDraft;
+
+// upgrade
+struct UpgradeDef;
+struct UpgradeLevels;
+struct ShipStats;
+class UpgradeCatalog;
 
 // event
 struct GameEvent;

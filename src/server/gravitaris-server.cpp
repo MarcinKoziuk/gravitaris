@@ -20,7 +20,7 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/fs/filesystem-physfs.hpp>
 #include <gravitaris/game/game.hpp>
-#include <gravitaris/game/gnc/ai-personality-presets.hpp>
+#include <gravitaris/game/ai/ai-preset-library.hpp>
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/net/net-server.hpp>
@@ -80,17 +80,6 @@ private:
 };
 
     // Claude: can we use https://github.com/Neargye/magic_enum for this stuffie?
-std::optional<AIPersonalityPreset> ParsePreset(const std::string& name)
-{
-    if (name == "balanced") return AIPersonalityPreset::Balanced;
-    if (name == "aggressive") return AIPersonalityPreset::Aggressive;
-    if (name == "cautious") return AIPersonalityPreset::Cautious;
-    if (name == "sniper") return AIPersonalityPreset::Sniper;
-    if (name == "reckless") return AIPersonalityPreset::Reckless;
-    return std::nullopt;
-}
-
-    // Claude: can we use https://github.com/Neargye/magic_enum for this stuffie?
 std::optional<TeamId> ParseTeam(const std::string& name)
 {
     if (name == "blue") return TeamId::Blue;
@@ -119,10 +108,15 @@ void HandleCommand(const std::string& line, Game& game, NetServer& server, bool&
         std::string presetName = "balanced";
         iss >> count;
         iss >> presetName;
-        const auto preset = ParsePreset(presetName);
+        // Presets are data (data/ai-presets.toml), so this takes whatever key
+        // the file happens to hold rather than a hardcoded list.
+        const AIPreset* preset = game.GetAIPresets().FindByKey(presetName);
         if (!preset) {
-            std::fprintf(stderr, "spawn: unknown preset '%s' (balanced|aggressive|cautious|sniper|reckless)\n",
-                         presetName.c_str());
+            std::fprintf(stderr, "spawn: unknown preset '%s'; known:", presetName.c_str());
+            for (const AIPreset& known : game.GetAIPresets().All()) {
+                std::fprintf(stderr, " %s", known.key.c_str());
+            }
+            std::fprintf(stderr, "\n");
             return;
         }
         count = std::clamp(count, 1, 100);

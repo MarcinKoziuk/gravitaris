@@ -17,6 +17,11 @@ struct ControlFlags {
     bool fireMissile : 1 = false;
 };
 
+// Which of the Lab's three offers this tick's command accepts: 1..3, or 0 for
+// "no pick". Kept out of ControlFlags because it isn't a held state and needs
+// more than a bit -- see UpgradeDraft.
+using UpgradePick = std::uint8_t;
+
 // Written each tick by InputSystem from the entity's InputQueue, consumed by
 // ShipControlsSystem.
 struct Controls {
@@ -26,6 +31,9 @@ struct Controls {
     // Same, for missiles -- their own cadence, so emptying the rack takes
     // several seconds however hard the button is held.
     std::uint32_t missileCooldown = 0;
+    // One-shot, unlike actionFlags: ResearchSystem clears it the tick it acts
+    // on it, so a held key can't spend two upgrades.
+    UpgradePick upgradePick = 0;
 };
 
 } // namespace Gravitaris

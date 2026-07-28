@@ -37,7 +37,7 @@ struct AIStrategy {
     std::uint32_t decisionCooldown = 0;
     std::uint32_t decisionInterval = 120; // 2s at the fixed tick
     // Ticks a ClaimPlanet goal is held without re-scoring: a claim is a full
-    // descent plus ConquestSystem::CLAIM_TICKS parked, and a leader that
+    // descent plus the configured claim dwell parked, and a leader that
     // re-decides halfway down never finishes one. Bounded so an unreachable
     // planet cannot strand a leader for the round.
     std::uint32_t commitCooldown = 0;

@@ -1,0 +1,145 @@
+# The weapon table, plus the research pool a Lab draws its offers from (see
+# UpgradeCatalog). `kind` selects a rule the sim implements; everything else
+# here is a magnitude.
+#
+# `key` is what the wire, the audio system and the save format address a
+# weapon or upgrade by -- renaming one invalidates any pick in flight, so
+# treat it as an id, not a label.
+
+# ---- weapons ---------------------------------------------------------------
+# Everything that shoots names one of these. A weapon owns its own projectile
+# model and fire sound, so adding a line is a data edit here plus the assets.
+
+[[weapon]]
+key = "autocannon"
+name = "Autocannon"
+cooldown_ticks = 7
+damage = 10.0
+speed = 200.0
+lifetime_seconds = 3.0
+model = "models/bullets/bullet-0"
+sound = "sounds/laser-1.wav"
+sound_gain = 0.5
+
+# The heavy line: an A-10 gatling, written out per tier rather than as a curve.
+# Each tier hits harder and throws flatter, and cycles faster as the feed
+# improves -- any one of them can be tuned without touching the others.
+[[weapon]]
+key = "gatling_1"
+name = "Gatling"
+cooldown_ticks = 6
+damage = 15.0
+speed = 224.0
+lifetime_seconds = 3.0
+model = "models/bullets/bullet-0"
+sound = "sounds/gatling-1.wav"
+sound_gain = 0.7
+
+[[weapon]]
+key = "gatling_2"
+name = "Gatling II"
+cooldown_ticks = 5
+damage = 21.0
+speed = 250.0
+lifetime_seconds = 3.2
+model = "models/bullets/bullet-0"
+sound = "sounds/gatling-1.wav"
+sound_gain = 0.7
+
+[[weapon]]
+key = "gatling_3"
+name = "Gatling III"
+cooldown_ticks = 5
+damage = 30.0
+speed = 280.0
+lifetime_seconds = 3.5
+model = "models/bullets/bullet-0"
+sound = "sounds/gatling-1.wav"
+sound_gain = 0.7
+
+# Missiles are a weapon like any other; the rack upgrade only supplies rounds
+# for it. `guidance` is MissileSystem's homing envelope -- turn_rate is rad/s,
+# 2.5 being ~143 deg/s: tight enough to chase a turning fighter, loose enough
+# to be outrun by cutting hard across it.
+[[weapon]]
+key = "missile_mk1"
+name = "Missile"
+cooldown_ticks = 30
+damage = 45.0
+speed = 140.0
+lifetime_seconds = 10.0
+model = "models/missiles/missile-0"
+sound = "sounds/laser-1.wav"
+guidance = { turn_rate = 2.5, acceleration = 120.0, top_speed = 300.0 }
+
+# ---- fittings --------------------------------------------------------------
+
+# What an unupgraded hull carries.
+[ship]
+gun = "autocannon"
+missile = "missile_mk1"
+missile_capacity = 60
+
+# Base/High Port turrets (StructureDefenseSystem) fire the same round a stock
+# ship does, on their own much slower cadence.
+[turret]
+weapon = "autocannon"
+fire_range = 400.0
+fire_cooldown_ticks = 90
+
+# ---- the research pool -----------------------------------------------------
+
+[[upgrade]]
+key = "missile_rack"
+name = "MISSILE RACK"
+description = "30 guided rounds. Slow off the rail, but they chase."
+kind = "missile_rack"
+max_level = 0 # a restock: always on the table
+weight = 1.4
+per_pickup = 30
+capacity = 60
+
+[[upgrade]]
+key = "autoloader"
+name = "AUTOLOADER"
+description = "Cannon cycles a third faster. Same round, more of them."
+kind = "fire_rate"
+max_level = 3
+weight = 1.0
+cooldown_scale = 0.72
+
+[[upgrade]]
+key = "heavy_rounds"
+name = "HEAVY ROUNDS"
+description = "Depleted-slug ammunition. Hits far harder and flies flatter."
+kind = "weapon_tier"
+max_level = 3
+weight = 1.0
+# One weapon per tier, in order: taking the upgrade fits the next one.
+tiers = ["gatling_1", "gatling_2", "gatling_3"]
+
+[[upgrade]]
+key = "bubble_shield"
+name = "BUBBLE FIELD"
+description = "Wide reservoir, absorbs a hit whole -- but slow to come back."
+kind = "shield"
+shield_type = "bubble"
+max_level = 3
+weight = 0.9
+capacity = 45.0
+regen_per_second = 2.0
+regen_delay_seconds = 3.0
+absorb_fraction = 1.0
+
+[[upgrade]]
+key = "plating_shield"
+name = "FIELD PLATING"
+description = "Hull-hugging. Leaks a quarter of every hit, recharges fast."
+kind = "shield"
+shield_type = "plating"
+max_level = 3
+weight = 0.9
+capacity = 28.0
+regen_per_second = 7.0
+regen_delay_seconds = 1.0
+absorb_fraction = 0.75

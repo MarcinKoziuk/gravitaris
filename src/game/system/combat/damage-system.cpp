@@ -9,7 +9,9 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/event/game-event.hpp>
+#include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
 #include <gravitaris/game/system/combat/damage-system.hpp>
@@ -23,10 +25,12 @@ static constexpr double BULLET_QUERY_RADIUS = 2.0;
 // Landing/ram damage below one hull point is discarded entirely.
 static constexpr float MIN_LANDING_DAMAGE = 1.f;
 
-DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue)
+DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
+                           const UpgradeCatalog& catalog)
         : m_registry(registry)
         , m_physicsSystem(physicsSystem)
         , m_eventQueue(eventQueue)
+        , m_catalog(catalog)
 {}
 
 void DamageSystem::Update()
@@ -47,7 +51,11 @@ void DamageSystem::Update()
         if (over <= 0.0) continue;
 
         const float multiplier = ev.upright ? 1.f : m_landingParams.tippedMultiplier;
-        const float damage = static_cast<float>(over * m_landingParams.damagePerDeltaV) * multiplier;
+        // The thresholds and the curve are global (and live-tunable from the
+        // Physics debug tab); how badly THIS hull takes what comes out of
+        // them is the model's own [landing] fragility.
+        const float damage = static_cast<float>(over * m_landingParams.damagePerDeltaV) * multiplier
+                             * dmg->landingFragility;
 
         // Sub-point scratches aren't worth an hp change, an event, or a line in
         // the log -- a barely-over-threshold touchdown should read as clean.
@@ -56,7 +64,8 @@ void DamageSystem::Update()
         LOG(info) << "[landing] deltaV " << ev.deltaV << (ev.upright ? " upright" : " tipped")
                   << " threshold " << safe << " over " << over
                   << " x perDeltaV " << m_landingParams.damagePerDeltaV
-                  << " x mult " << multiplier << " = " << damage << " damage"
+                  << " x mult " << multiplier << " x fragility " << dmg->landingFragility
+                  << " = " << damage << " damage"
                   << "; hp " << dmg->hp << " -> " << (dmg->hp - damage);
 
         dmg->hp -= damage;
@@ -124,12 +133,19 @@ void DamageSystem::Update()
 
         if (!search.target.is_alive()) return;
 
-        search.target.get_mut<Damageable>().hp -= bullet.damage;
+        const Magnum::Vector2 hitPoint{static_cast<float>(search.targetPoint.x),
+                                       static_cast<float>(search.targetPoint.y)};
+        const float toHull = AbsorbWithShield(search.target, bullet.damage, hitPoint);
 
-        m_eventQueue.Emit(GameEventType::Impact, search.target,
-                          Magnum::Vector2{static_cast<float>(search.targetPoint.x),
-                                          static_cast<float>(search.targetPoint.y)},
-                          static_cast<std::uint32_t>(bullet.damage * 10.f));
+        // A hit stopped entirely by a shield still consumes the round, but
+        // emits no Impact -- the hull took nothing, and the hit flash reads
+        // as hull damage.
+        if (toHull > 0.f) {
+            search.target.get_mut<Damageable>().hp -= toHull;
+
+            m_eventQueue.Emit(GameEventType::Impact, search.target, hitPoint,
+                              static_cast<std::uint32_t>(toHull * 10.f));
+        }
 
         spent.push_back(bulletEnt);
     });
@@ -137,6 +153,28 @@ void DamageSystem::Update()
     for (flecs::entity bulletEnt : spent) {
         bulletEnt.destruct();
     }
+}
+
+float DamageSystem::AbsorbWithShield(flecs::entity target, float damage, const Magnum::Vector2& at)
+{
+    ShipLoadout* loadout = target.try_get_mut<ShipLoadout>();
+    if (!loadout || loadout->shieldHp <= 0.f) return damage;
+
+    const ShipStats stats = m_catalog.ResolveStats(loadout->levels);
+
+    // Plating leaks a fixed share of every hit however much charge is left,
+    // which is what keeps it from being strictly better than the bubble's
+    // bigger but slower reservoir.
+    const float absorbable = damage * stats.shieldAbsorbFraction;
+    const float absorbed = std::min(loadout->shieldHp, absorbable);
+
+    loadout->shieldHp -= absorbed;
+    loadout->shieldRegenDelay = stats.shieldRegenDelayTicks;
+
+    m_eventQueue.Emit(GameEventType::ShieldHit, target, at,
+                      static_cast<std::uint32_t>(absorbed * 10.f));
+
+    return damage - absorbed;
 }
 
 // networking-plan Phase 9's destroy rule. Nothing here destroys an entity

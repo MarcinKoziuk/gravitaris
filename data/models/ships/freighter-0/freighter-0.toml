@@ -4,3 +4,7 @@ scale = 1.0
 kinematic = true
 friction = 5.0
 restitution = 0.3
+
+# A hauler is not built to be flown onto a rock.
+[landing]
+fragility = 2.0

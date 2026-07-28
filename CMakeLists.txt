@@ -583,12 +583,14 @@ add_executable(GravitarisNG
     src/game/gnc/control/flight-controller.cpp
     include/gravitaris/game/gnc/guidance/behaviors.hpp
     src/game/gnc/guidance/behaviors.cpp
-    include/gravitaris/game/gnc/ai-personality-presets.hpp
-    src/game/gnc/ai-personality-presets.cpp
+    include/gravitaris/game/ai/ai-preset-library.hpp
+    src/game/ai/ai-preset-library.cpp
     include/gravitaris/game/system/combat/bullet-lifetime-system.hpp
     src/game/system/combat/bullet-lifetime-system.cpp
     include/gravitaris/game/system/combat/damage-system.hpp
     src/game/system/combat/damage-system.cpp
+    include/gravitaris/game/system/combat/shield-system.hpp
+    src/game/system/combat/shield-system.cpp
     include/gravitaris/game/component/missile.hpp
     include/gravitaris/game/system/combat/missile-system.hpp
     src/game/system/combat/missile-system.cpp
@@ -610,6 +612,12 @@ add_executable(GravitarisNG
     include/gravitaris/game/system/gwell/research-system.hpp
     src/game/system/gwell/research-system.cpp
     include/gravitaris/game/component/ship-loadout.hpp
+    include/gravitaris/game/component/upgrade-draft.hpp
+    include/gravitaris/game/upgrade/upgrade-def.hpp
+    include/gravitaris/game/upgrade/upgrade-catalog.hpp
+    src/game/upgrade/upgrade-catalog.cpp
+    include/gravitaris/game/config/economy-config.hpp
+    src/game/config/economy-config.cpp
     include/gravitaris/game/component/structure.hpp
     include/gravitaris/game/component/planet-attachment.hpp
     include/gravitaris/game/component/freighter.hpp
@@ -873,6 +881,7 @@ add_executable(gravitaris-sim-test
     src/game/system/ship/ship-controls-system.cpp
     src/game/system/combat/bullet-lifetime-system.cpp
     src/game/system/combat/damage-system.cpp
+    src/game/system/combat/shield-system.cpp
     src/game/system/combat/missile-system.cpp
     src/game/system/gwell/faction-system.cpp
     src/game/system/ship/landing-state-system.cpp
@@ -882,13 +891,15 @@ add_executable(gravitaris-sim-test
     src/game/system/gwell/freighter-system.cpp
     src/game/system/gwell/economy-system.cpp
     src/game/system/gwell/research-system.cpp
+    src/game/upgrade/upgrade-catalog.cpp
+    src/game/config/economy-config.cpp
     src/game/system/combat/death-system.cpp
     src/game/system/core/physics-system.cpp
     src/game/system/core/orbit-system.cpp
     src/game/gnc/nav/trajectory-predictor.cpp
     src/game/gnc/control/flight-controller.cpp
     src/game/gnc/guidance/behaviors.cpp
-    src/game/gnc/ai-personality-presets.cpp
+    src/game/ai/ai-preset-library.cpp
     src/game/spawner/entity-spawner.cpp
     src/game/scenario/classic-scenario.cpp
     src/game/scenario/starting-complex.cpp
@@ -974,6 +985,7 @@ if(NOT EMSCRIPTEN)
         src/game/system/ship/ship-controls-system.cpp
         src/game/system/combat/bullet-lifetime-system.cpp
         src/game/system/combat/damage-system.cpp
+        src/game/system/combat/shield-system.cpp
         src/game/system/combat/missile-system.cpp
         src/game/system/gwell/faction-system.cpp
         src/game/system/ship/landing-state-system.cpp
@@ -983,13 +995,15 @@ if(NOT EMSCRIPTEN)
         src/game/system/gwell/freighter-system.cpp
         src/game/system/gwell/economy-system.cpp
         src/game/system/gwell/research-system.cpp
+        src/game/upgrade/upgrade-catalog.cpp
+        src/game/config/economy-config.cpp
         src/game/system/combat/death-system.cpp
         src/game/system/core/physics-system.cpp
         src/game/system/core/orbit-system.cpp
         src/game/gnc/nav/trajectory-predictor.cpp
         src/game/gnc/control/flight-controller.cpp
         src/game/gnc/guidance/behaviors.cpp
-        src/game/gnc/ai-personality-presets.cpp
+        src/game/ai/ai-preset-library.cpp
         src/game/spawner/entity-spawner.cpp
         src/game/scenario/classic-scenario.cpp
         src/game/scenario/starting-complex.cpp

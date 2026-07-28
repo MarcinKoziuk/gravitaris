@@ -119,6 +119,23 @@
 				background-color: #f33;
 			}
 
+			/* Shield charge, on the hull bar's own track. Blanked entirely
+			   (UI::SetShieldFraction with a negative fraction) on a ship
+			   carrying no emitter, so an unshielded fighter's sidebar reads
+			   the way it did before shields existed. Each emitter type gets
+			   its own colour, so a glance says which one is fitted. */
+			div#shield_fill
+			{
+				height: 100%;
+				width: 0%;
+				background-color: #6cf;
+			}
+
+			div#shield_fill.plating
+			{
+				background-color: #fc6;
+			}
+
 			/* One tick per stored missile. A full rack is wider than the
 			   sidebar, so the ticks wrap -- hence a min-height rather than a
 			   fixed one. Written from code (UI::SetMissileAmmo). */
@@ -204,6 +221,106 @@
 				bottom: 16dp;
 				pointer-events: auto;
 			}
+
+			/* The Lab's draft, centred over the game view: three offers, each
+			   either clicked or keyed 1/2/3. Shown only while a ship is
+			   actually being offered something (UI::SetUpgradeOffers). Centred
+			   with the same negative-half-size trick the theme uses elsewhere,
+			   since RCSS has no transform-based centring here. */
+			div#upgrade_draft
+			{
+				position: absolute;
+				left: 50%;
+				top: 50%;
+				width: 660dp;
+				height: 232dp;
+				margin-left: -330dp;
+				margin-top: -116dp;
+				display: none;
+
+				/* The cards take the mouse; the panel around them has to opt
+				   back in first, since div#view_overlay is click-through. */
+				pointer-events: auto;
+			}
+
+			div#upgrade_offers
+			{
+				display: flex;
+				padding: 12dp;
+			}
+
+			/* Only the panel itself wears corner brackets: three bracketed
+			   cards inside a bracketed frame is twelve of them competing for
+			   one glance. The cards carry the hairline alone and let the key
+			   badge do their accenting. */
+			div.offer
+			{
+				flex: 1 1 0;
+				margin: 0dp 6dp;
+				padding: 12dp;
+				box-sizing: border-box;
+
+				background-color: #0cf1;
+				border-width: 1dp;
+				border-color: #0cf6;
+				cursor: pointer;
+				transition: background-color 0.12s cubic-in-out, border-color 0.12s cubic-in-out;
+			}
+
+			div.offer:hover
+			{
+				background-color: #0cf3;
+				border-color: #bff;
+			}
+
+			div.offer:hover div.offer_key
+			{
+				color: #dff;
+				border-color: #dff;
+			}
+
+			/* The key you press, boxed like the button it stands in for. */
+			div.offer_key
+			{
+				display: inline-block;
+				width: 22dp;
+				height: 22dp;
+				line-height: 22dp;
+				margin-bottom: 9dp;
+
+				color: #0cf;
+				font-size: 15dp;
+				font-weight: bold;
+				text-align: center;
+				border-width: 1dp;
+				border-color: #0cf;
+				font-effect: glow(2dp #0cf6);
+			}
+
+			div.offer_name
+			{
+				margin-bottom: 6dp;
+				font-size: 15dp;
+				letter-spacing: 3dp;
+				text-transform: uppercase;
+				color: #eff;
+				font-effect: glow(3dp #0cf8);
+			}
+
+			div.offer_desc
+			{
+				font-size: 13dp;
+				color: #7cc;
+			}
+
+			div.offer_tier
+			{
+				margin-top: 9dp;
+				font-size: 12dp;
+				letter-spacing: 3dp;
+				text-transform: uppercase;
+				color: #588;
+			}
 		</style>
 	</head>
 	<body>
@@ -225,6 +342,16 @@
 					</div>
 					<div class="bar_track">
 						<div id="health_fill"></div>
+					</div>
+				</div>
+
+				<div class="stat">
+					<div class="stat_head">
+						<span>Shield</span>
+						<span id="shield_value" class="stat_value readout">--</span>
+					</div>
+					<div class="bar_track">
+						<div id="shield_fill"></div>
 					</div>
 				</div>
 
@@ -260,6 +387,14 @@
 
 		<div id="view_overlay">
 			<button id="recenter">Focus my ship</button>
+
+			<div id="upgrade_draft" class="frame">
+				<div class="corner tl"/><div class="corner tr"/>
+				<div class="corner bl"/><div class="corner br"/>
+
+				<div class="frame_label">Research complete &mdash; select an upgrade</div>
+				<div id="upgrade_offers"></div>
+			</div>
 		</div>
 	</body>
 </rml>

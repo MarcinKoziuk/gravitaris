@@ -19,11 +19,13 @@
 namespace Gravitaris {
 
 ConquestSystem::ConquestSystem(flecs::world& registry, EntitySpawner& entitySpawner,
-                               GameEventQueue& eventQueue, FactionSystem& factionSystem)
+                               GameEventQueue& eventQueue, FactionSystem& factionSystem,
+                               const EconomyConfig& config)
         : m_registry(registry)
         , m_entitySpawner(entitySpawner)
         , m_eventQueue(eventQueue)
         , m_factionSystem(factionSystem)
+        , m_config(config)
 {}
 
 void ConquestSystem::Update()
@@ -51,7 +53,7 @@ void ConquestSystem::Update()
 
     m_registry.each([&](flecs::entity ship, LandingState& state, Team& shipTeam) {
         // == rather than >= so a ship parked long-term claims exactly once.
-        if (!state.landed || state.landedTicks != CLAIM_TICKS) return;
+        if (!state.landed || state.landedTicks != m_config.conquest.claimTicks) return;
 
         flecs::entity planet = m_entitySpawner.EntityForNetId(state.landedOnNetId);
         if (!planet.is_alive()) return;

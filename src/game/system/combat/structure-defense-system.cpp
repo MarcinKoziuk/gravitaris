@@ -9,6 +9,7 @@
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
+#include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/system/combat/structure-defense-system.hpp>
 
 namespace Gravitaris {
@@ -16,13 +17,6 @@ namespace Gravitaris {
 using Magnum::Vector2d;
 
 static constexpr double PI = 3.14159265358979323846;
-
-// Same value ship weapons use (ship-controls-system.cpp/ai-pilot-system.cpp
-// each keep their own copy too, rather than a shared constant -- established
-// pattern in this codebase).
-static constexpr double BULLET_MUZZLE_SPEED = 200.0;
-static constexpr double BULLET_LIFETIME_SECONDS = 3.0;
-static constexpr float BULLET_DAMAGE = 10.f;
 
     // Claude: we have so many duplicates, please create a math utils: include/gravitaris/game/math-utils.hpp (move PI there too)
 static double WrapToPi(double angle)
@@ -65,14 +59,19 @@ static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Ve
 }
 
 StructureDefenseSystem::StructureDefenseSystem(flecs::world& registry, EntitySpawner& entitySpawner,
-                                               GameEventQueue& eventQueue)
+                                               GameEventQueue& eventQueue, const UpgradeCatalog& catalog)
         : m_registry(registry)
         , m_entitySpawner(entitySpawner)
         , m_eventQueue(eventQueue)
+        , m_catalog(catalog)
 {}
 
 void StructureDefenseSystem::Update()
 {
+    const UpgradeCatalog::Fittings& fittings = m_catalog.Fitted();
+    const WeaponDef* round = m_catalog.FindWeapon(fittings.turretWeapon);
+    if (!round) return; // no [turret] weapon in the catalog: nothing to fire
+
     struct Target {
         Vector2d pos;
         Vector2d vel;
@@ -93,23 +92,24 @@ void StructureDefenseSystem::Update()
             if (target.team == turretTeam.id) continue;
 
             const Vector2d relPos = target.pos - transf.pos;
-            if (relPos.length() > FIRE_RANGE) continue;
+            if (relPos.length() > fittings.turretFireRange) continue;
 
             const Vector2d relVel = target.vel - transf.vel;
-            const std::optional<double> t = SolveInterceptTime(relPos, relVel, BULLET_MUZZLE_SPEED);
+            const std::optional<double> t = SolveInterceptTime(relPos, relVel, round->speed);
             if (!t) continue;
 
             const Vector2d aim = (relPos + relVel * (*t)).normalized();
-            const Vector2d vel = aim * BULLET_MUZZLE_SPEED + transf.vel;
+            const Vector2d vel = aim * round->speed + transf.vel;
 
             const flecs::entity bullet =
-                    m_entitySpawner.SpawnBullet("models/bullets/bullet-0"_id, transf.pos, vel, /*sensor=*/true);
-            bullet.emplace<Bullet>(BULLET_LIFETIME_SECONDS, turretTeam.id, BULLET_DAMAGE);
+                    m_entitySpawner.SpawnBullet(round->modelId, transf.pos, vel, /*sensor=*/true);
+            bullet.emplace<Bullet>(round->lifetimeSeconds, turretTeam.id, round->damage);
 
             m_eventQueue.Emit(GameEventType::BulletFired, turret,
-                              Magnum::Vector2{static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())});
+                              Magnum::Vector2{static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())},
+                              round->id);
 
-            defense.fireCooldown = FIRE_COOLDOWN_TICKS;
+            defense.fireCooldown = fittings.turretFireCooldownTicks;
             break; // one shot per tick per turret
         }
     });

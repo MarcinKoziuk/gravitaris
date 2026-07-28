@@ -16,16 +16,11 @@ namespace Gravitaris {
 // bends the flight through the heading it inherits.
 class MissileSystem {
 public:
-    // Max heading change per second. ~143 deg/s -- tight enough to chase a
-    // turning fighter, loose enough that a missile can be outrun by cutting
-    // hard across it.
-    static constexpr double TURN_RATE = 2.5;
-
-    // Acceleration up to TOP_SPEED, from ShipControlsSystem's launch speed.
-    static constexpr double ACCELERATION = 120.0;
-    static constexpr double TOP_SPEED = 300.0;
-
-    MissileSystem(flecs::world& registry, EntitySpawner& entitySpawner, PhysicsSystem& physicsSystem);
+    // The homing envelope -- turn rate, acceleration, top speed -- belongs to
+    // the WeaponDef that fired the round (data/upgrades.toml), reached through
+    // Missile::weaponId, so two missile types can fly differently.
+    MissileSystem(flecs::world& registry, EntitySpawner& entitySpawner, PhysicsSystem& physicsSystem,
+                  const UpgradeCatalog& catalog);
 
     void Update();
 
@@ -33,6 +28,7 @@ private:
     flecs::world& m_registry;
     EntitySpawner& m_entitySpawner;
     PhysicsSystem& m_physicsSystem;
+    const UpgradeCatalog& m_catalog;
 };
 
 } // namespace Gravitaris

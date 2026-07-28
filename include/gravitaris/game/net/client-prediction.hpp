@@ -103,7 +103,8 @@ public:
     static constexpr std::size_t MAX_HISTORY = 180;
 
     ClientPrediction(flecs::world& registry, PhysicsSystem& physicsSystem, EntitySpawner& entitySpawner,
-                     GameEventQueue& eventQueue, ResourceLoader& resourceLoader);
+                     GameEventQueue& eventQueue, ResourceLoader& resourceLoader,
+                     const UpgradeCatalog& catalog);
 
     // Idempotent: only the first call actually spawns anything. `team`
     // matters for local rendering (team color) -- pass NetClient::
@@ -195,6 +196,7 @@ private:
     EntitySpawner& m_entitySpawner;
     GameEventQueue& m_eventQueue;
     ResourceLoader& m_resourceLoader;
+    const UpgradeCatalog& m_catalog;
 
     flecs::entity m_ownShip;
     std::deque<PredictedTick> m_history;

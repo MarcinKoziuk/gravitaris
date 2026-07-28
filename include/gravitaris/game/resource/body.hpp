@@ -56,6 +56,7 @@ public:
 private:
     cpFloat m_mass;
     cpFloat m_friction;
+    float m_landingFragility = 1.f;
     bool m_kinematic = false;
     bool m_gravitySource = false;
     double m_gravityMultiplier = 1.0;
@@ -83,6 +84,12 @@ public:
 
     [[nodiscard]] cpFloat GetFriction() const
     { return m_friction; }
+
+    // Multiplier on the landing damage this hull takes (DamageSystem) -- not
+    // on fire taken, not on rams. Below 1 is heavier gear that shrugs off a
+    // hard set-down, above 1 is a hull that folds.
+    [[nodiscard]] float GetLandingFragility() const
+    { return m_landingFragility; }
 
     // Kinematic: an immovable body whose motion is driven externally (e.g. by
     // OrbitSystem), unaffected by collisions, forces or gravity.
