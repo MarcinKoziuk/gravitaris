@@ -242,34 +242,52 @@ select selectvalue
 {
     height: 100%;
     padding: 8dp 12dp;
+    padding-right: 34dp;           /* keeps a long option clear of the chevron,
+                                      which is not part of this element */
 }
 
-/* Chevron without a sprite: a square showing only its bottom and right edges
-   is a corner pointing down-right, so turning it 45deg points it straight
-   down.
-
-   Every value here is load-bearing. display: block because selectarrow is
-   instanced as a generic element, and width/height do nothing on the inline
-   default. border-box so the size below is the whole 10dp, borders included.
-   And the margins have to clear the *rotated* extent, not the box: turning a
-   10dp square about its centre sweeps a 14dp diagonal, so 11dp of top margin
-   in a 32dp content box leaves it 8dp..24dp -- inside, with room either side. */
+/* The widget's own arrow element is dropped in favour of div.select_chevron
+   below: WidgetDropDown::OnLayout pins selectarrow itself and sizes it from its
+   own box, so width, height and margins set here don't place it where the
+   design wants it. */
 select selectarrow
 {
-    display: block;
+    display: none;
+}
+
+/* A select and its chevron. Relative so the chevron can pin to the right edge
+   without knowing the dropdown's width. */
+div.select_wrap
+{
+    position: relative;
+}
+
+div.select_wrap select
+{
+    width: 100%;
+}
+
+/* The chevron every dropdown on the web has, drawn without a sprite: a square
+   showing only its bottom and right edges is a corner pointing down-right, so
+   turning it 45deg points it straight down. Decoration -- the click has to
+   reach the select underneath. */
+div.select_chevron
+{
+    position: absolute;
+    top: 12dp;
+    right: 14dp;
     box-sizing: border-box;
-    width: 10dp;
-    height: 10dp;
-    margin: 11dp 14dp;
+    width: 8dp;
+    height: 8dp;
 
     border-bottom-width: 2dp;
     border-right-width: 2dp;
     border-color: #0cf;
     transform: rotate(45deg);
-    transform-origin: center center;
+    pointer-events: none;
 }
 
-select:hover selectarrow
+div.select_wrap:hover div.select_chevron
 {
     border-color: #dff;
 }

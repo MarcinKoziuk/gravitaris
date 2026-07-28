@@ -38,10 +38,9 @@
 			}
 			/* Takes whatever the label leaves, so the row reads as one control
 			   spanning the dialog rather than a small box floating in it. */
-			select#team_select
+			div#team_row div.select_wrap
 			{
 				flex: 1 1 auto;
-				width: auto;
 			}
 			/* Out of the flow, in the window's own bottom-right corner -- so
 			   the copy above it doesn't have to leave room for it. Filled
@@ -73,10 +72,13 @@
 			<!-- Option values are parsed back to TeamId in UI::Init. The world
 			     only builds starting complexes for blue and red so far (see
 			     Game::BuildWorld), so those are the only two offered. -->
-			<select id="team_select">
-				<option value="blue" selected>Blue</option>
-				<option value="red">Red</option>
-			</select>
+			<div class="select_wrap">
+				<select id="team_select">
+					<option value="blue" selected>Blue</option>
+					<option value="red">Red</option>
+				</select>
+				<div class="select_chevron"></div>
+			</div>
 		</div>
 
 		<button id="dismiss_intro">Let's fly!</button>
