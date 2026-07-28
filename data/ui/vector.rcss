@@ -225,7 +225,8 @@ select
     box-sizing: border-box;
     height: 34dp;
 
-    color: #0cf;
+    color: #cff;                   /* the value is data, not an accent: ice like
+                                      the stat readouts, and no cyan glow */
     font-size: 15dp;
     font-weight: bold;
     letter-spacing: 3dp;
@@ -234,9 +235,8 @@ select
 
     background-color: #0cf1;
     border-width: 1dp;
-    border-color: #0cf;
+    border-color: #0cf8;           /* the hull bar's track, same fill and edge */
     cursor: pointer;
-    font-effect: glow(2dp #0cf6);
     transition: background-color 0.12s cubic-in-out, border-color 0.12s cubic-in-out;
 }
 
@@ -316,7 +316,7 @@ select selectbox
 
     background-color: #000000f2;
     border-width: 1dp;
-    border-color: #0cf;
+    border-color: #0cf8;
 }
 
 select selectbox option
@@ -332,8 +332,10 @@ select selectbox option:hover
     color: #dff;
 }
 
+/* The wash marks which one is current; the text stays as neutral as the value
+   it put in the closed box. */
 select selectbox option:checked
 {
     background-color: #0cf1;
-    color: #0cf;
+    color: #cff;
 }
