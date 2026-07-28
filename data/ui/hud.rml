@@ -17,13 +17,9 @@
 
 			/* Fixed-width gameplay-info column down the left edge, itself
 			   invisible: the framed boxes inside it are the visible chrome.
-			   The scene is rendered only to the right of it -- the client reads
-			   this element's laid-out width every frame and insets the game
-			   viewport by it (see UI::GetSidebarWidthPx), so this declaration
-			   is the single source of truth for the split.
-
-			   Column flex layout: the minimap keeps its fixed square, the
-			   panel below takes whatever height is left. */
+			   The client reads this element's laid-out width every frame and
+			   insets the game viewport by it (see UI::GetSidebarWidthPx), so
+			   this declaration is the single source of truth for the split. */
 			div#sidebar
 			{
 				position: absolute;
@@ -32,7 +28,7 @@
 				bottom: 0;
 				width: 370dp;
 				box-sizing: border-box;
-				padding: 10dp;
+				padding: 12dp;
 
 				display: flex;
 				flex-direction: column;
@@ -41,20 +37,18 @@
 				pointer-events: auto;
 			}
 
-			/* The minimap texture is rendered by the engine every frame (see
-			   MinimapRenderer) and projected here via the live-texture bridge.
-			   Everything visual about the panel -- placement, size, frame --
-			   is styled right here in RCSS. Square only as long as the height
-			   matches the sidebar's content width (370 - 2*10). */
-			img#minimap
+			/* Frame around the engine-rendered minimap texture. The frame owns
+			   the hairline and brackets; the img inside is bare. */
+			div#minimap_frame
 			{
 				flex: 0 0 auto;
-				width: 100%;
-				height: 350dp;
-				box-sizing: border-box;
+				height: 346dp;
+			}
 
-				border-width: 1dp;
-				border-color: #0cf;
+			img#minimap
+			{
+				width: 100%;
+				height: 100%;
 				cursor: pointer;
 
 				/* Enables the drag events the click handler also listens on, so
@@ -62,30 +56,119 @@
 				drag: drag;
 			}
 
-			/* Everything that isn't the map: one framed box filling the rest
-			   of the column. */
 			div#info_panel
 			{
 				flex: 1 1 auto;
-				position: relative;
-				box-sizing: border-box;
-				margin-top: 10dp;
-				padding: 10dp;
-
-				border-width: 1dp;
-				border-color: #0cf;
+				margin-top: 12dp;
+				padding: 16dp 14dp;
 			}
 
 			div.stat
 			{
-				margin-bottom: 18dp;
+				margin-bottom: 22dp;
+			}
+
+			div.stat_head
+			{
+				font-size: 14dp;
+				letter-spacing: 4dp;
+				text-transform: uppercase;
+				color: #7cc;
+			}
+
+			/* The number is the thing you glance at, so it outweighs its own
+			   label rather than matching it. */
+			span.stat_value
+			{
+				float: right;
+				font-size: 20dp;
+				letter-spacing: 0dp;
+				color: #eff;
+				font-weight: bold;
+				font-effect: glow(3dp #0cf8);
+			}
+
+			div.bar_track
+			{
+				height: 16dp;
+				margin-top: 7dp;
+				box-sizing: border-box;
+
+				background-color: #0cf1;
+				border-width: 1dp;
+				border-color: #0cf8;
+			}
+
+			/* Width is set from code as a percentage (UI::SetHullFraction);
+			   the colour steps come from the classes it toggles. Starts empty:
+			   before there's a ship to report on, SetHullFraction is a no-op. */
+			div#health_fill
+			{
+				height: 100%;
+				width: 0%;
+				background-color: #0cf;
+				box-shadow: 0 0 10dp #0cf8;
+			}
+
+			div#health_fill.warn
+			{
+				background-color: #fc0;
+				box-shadow: 0 0 10dp #fc08;
+			}
+
+			div#health_fill.critical
+			{
+				background-color: #f33;
+				box-shadow: 0 0 10dp #f338;
+			}
+
+			/* One tick per stored missile. A full rack is wider than the
+			   sidebar, so the ticks wrap -- hence a min-height rather than a
+			   fixed one. Written from code (UI::SetMissileAmmo). */
+			div#missile_ticks
+			{
+				min-height: 18dp;
+				margin-top: 7dp;
+			}
+
+			span.missile_tick
+			{
+				display: inline-block;
+				width: 3dp;
+				height: 18dp;
+				margin-right: 3dp;
+				background-color: #0cf;
+			}
+
+			span.missile_tick.empty
+			{
+				background-color: #0cf3;
+			}
+
+			/* Build identity on top, then the ping with the byline pushed to
+			   the panel's right edge beside it. Both texts come from the frame
+			   loop (see UI::SetHudStatus); the byline is static markup. */
+			div#panel_footer
+			{
+				position: absolute;
+				left: 14dp;
+				right: 14dp;
+				bottom: 12dp;
+
+				font-size: 13dp;
+				color: #588;
+			}
+
+			span#byline
+			{
+				float: right;
+				color: #8bb;
 			}
 
 			/* Covers exactly the rendered game view, so anything anchored to
 			   the view's own corners uses plain offsets from here instead of
 			   repeating the sidebar's width. Click-through except where a
-			   child opts back in. The left offset is the one place that has to
-			   track div#sidebar's width. */
+			   child opts back in. */
 			div#view_overlay
 			{
 				position: absolute;
@@ -103,104 +186,23 @@
 				bottom: 16dp;
 				pointer-events: auto;
 			}
-
-			div.stat_head
-			{
-				font-size: 15dp;
-				color: #7cc;
-			}
-
-			span.stat_value
-			{
-				float: right;
-				color: #cff;
-				font-weight: bold;
-			}
-
-			div.bar_track
-			{
-				height: 18dp;
-				margin-top: 5dp;
-				box-sizing: border-box;
-
-				background-color: #0cf1;
-				border-width: 1dp;
-				border-color: #0cf;
-			}
-
-			/* Width is set from code as a percentage (UI::SetHullFraction);
-			   the colour steps come from the classes it toggles. Starts empty:
-			   before there's a ship to report on, SetHullFraction is a no-op. */
-			div#health_fill
-			{
-				height: 100%;
-				width: 0%;
-				background-color: #0cfc;
-			}
-
-			div#health_fill.warn
-			{
-				background-color: #fc0c;
-			}
-
-			div#health_fill.critical
-			{
-				background-color: #f33c;
-			}
-
-			/* One tick per stored missile, starting where the hull's bar sits
-			   in the stat above. A full rack is wider than the sidebar, so the
-			   ticks wrap -- hence a min-height rather than a fixed one. The
-			   ticks themselves are written from code (UI::SetMissileAmmo). */
-			div#missile_ticks
-			{
-				min-height: 18dp;
-				margin-top: 5dp;
-			}
-
-			span.missile_tick
-			{
-				display: inline-block;
-				width: 2dp;
-				height: 18dp;
-				margin-right: 3dp;
-				background-color: #0cfc;
-			}
-
-			span.missile_tick.empty
-			{
-				background-color: #0cf3;
-			}
-
-			/* Build identity on top, then the ping with the byline pushed to
-			   the panel's right edge beside it. Both texts come from the frame
-			   loop (see UI::SetHudStatus); the byline is static markup. */
-			div#panel_footer
-			{
-				position: absolute;
-				left: 0;
-				right: 0;
-				bottom: 0;
-
-				font-size: 14dp;
-				color: #8ff;
-			}
-
-			span#byline
-			{
-				float: right;
-				color: #cff;
-			}
 		</style>
 	</head>
 	<body>
 		<div id="sidebar">
-			<img id="minimap" src="live://minimap"/>
+			<div id="minimap_frame" class="frame">
+				<img id="minimap" src="live://minimap"/>
+				<div class="corner tl"/><div class="corner tr"/>
+				<div class="corner bl"/><div class="corner br"/>
+			</div>
 
-			<div id="info_panel">
+			<div id="info_panel" class="frame">
+				<div class="corner tl"/><div class="corner tr"/>
+				<div class="corner bl"/><div class="corner br"/>
+
 				<div class="stat">
 					<div class="stat_head">
-						<span>HULL</span>
+						<span>Hull</span>
 						<span id="health_value" class="stat_value">--</span>
 					</div>
 					<div class="bar_track">
@@ -210,7 +212,7 @@
 
 				<div class="stat">
 					<div class="stat_head">
-						<span>MISSILES</span>
+						<span>Missiles</span>
 						<span id="missile_value" class="stat_value">--</span>
 					</div>
 					<div id="missile_ticks"></div>
@@ -227,7 +229,7 @@
 		</div>
 
 		<div id="view_overlay">
-			<button id="recenter">FOCUS MY SHIP</button>
+			<button id="recenter">Focus my ship</button>
 		</div>
 	</body>
 </rml>
