@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,13 @@ private:
     Rml::Element* m_missileValue = nullptr;
     int m_missileAmmo = -2; // no valid count, not even "no subject" (-1)
 
+    Rml::Element* m_speedReadout = nullptr;
+    Rml::Element* m_headingReadout = nullptr;
+    Rml::Element* m_gwellReadout = nullptr;
+    std::string m_speedText;
+    std::string m_headingText;
+    std::string m_gwellText;
+
     int m_width = 1280;
     int m_height = 720;
 
@@ -110,6 +118,13 @@ public:
     // with the rest of `capacity` drawn empty. Negative blanks the row.
     // Unchanged values are ignored, so calling it every frame is fine.
     void SetMissileAmmo(int ammo, int capacity);
+
+    // Sidebar telemetry row: speed in world units/s, heading as a 0..360
+    // bearing, and gravity field strength in units/s^2. An empty optional
+    // blanks that cell. Repeated identical text is ignored, so calling it every
+    // frame is fine.
+    void SetHudTelemetry(std::optional<float> speed, std::optional<float> heading,
+                         std::optional<float> gravityAccel);
 
     // Fired when the intro dialog's OK is clicked, with the side the player
     // picked. Set before Init(), which is what shows the dialog.

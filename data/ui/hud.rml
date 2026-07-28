@@ -142,6 +142,34 @@
 				background-color: #0cf3;
 			}
 
+			/* Secondary telemetry: three short columns under a rule, quiet
+			   enough that hull and missiles stay the loudest things here. */
+			div#telemetry
+			{
+				display: flex;
+				padding-top: 14dp;
+				border-top-width: 1dp;
+				border-top-color: #0cf3;
+			}
+
+			div.telemetry_cell
+			{
+				flex: 1 1 auto;
+			}
+
+			div.telemetry_cell div.k
+			{
+				font-size: 11dp;
+				letter-spacing: 3dp;
+				color: #588;
+			}
+
+			div.telemetry_cell div.v
+			{
+				font-size: 16dp;
+				color: #cff;
+			}
+
 			/* Build identity on top, then the ping with the byline pushed to
 			   the panel's right edge beside it. Both texts come from the frame
 			   loop (see UI::SetHudStatus); the byline is static markup. */
@@ -213,6 +241,21 @@
 						<span id="missile_value" class="stat_value readout">--</span>
 					</div>
 					<div id="missile_ticks"></div>
+				</div>
+
+				<div id="telemetry">
+					<div class="telemetry_cell">
+						<div class="k">SPD</div>
+						<div class="v readout" id="speed_readout">--</div>
+					</div>
+					<div class="telemetry_cell">
+						<div class="k">HDG</div>
+						<div class="v readout" id="heading_readout">--</div>
+					</div>
+					<div class="telemetry_cell">
+						<div class="k">G</div>
+						<div class="v readout" id="gwell_readout">--</div>
+					</div>
 				</div>
 
 				<div id="panel_footer">

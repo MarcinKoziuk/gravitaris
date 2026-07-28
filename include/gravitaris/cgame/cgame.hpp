@@ -294,6 +294,21 @@ public:
     // (nothing to show, as opposed to an empty one).
     [[nodiscard]] std::optional<int> GetMissileAmmo();
 
+    // Speed in world units/s.
+    [[nodiscard]] std::optional<float> GetSpeed();
+
+    // Facing as a compass bearing, 0..360 degrees, 0 = world +Y and growing
+    // clockwise -- which is what the minimap and the off-screen arrows already
+    // draw, not flecs' or Chipmunk's counter-clockwise-from-+X convention.
+    [[nodiscard]] std::optional<float> GetHeading();
+
+    // Strength of the gravity field at that unit's position, in world
+    // units/s^2 -- the same sum PhysicsSystem::ApplyGravity builds, with the
+    // target mass divided back out. Reported for any subject, so spectating a
+    // kinematic body shows the field it sits in rather than the acceleration it
+    // (never) picks up from it.
+    [[nodiscard]] std::optional<float> GetGravityAccel();
+
     void ToggleCameraFollow() { m_cameraDirector.ToggleCameraFollow(); }
 
     // Spectating: the camera (and everything framed off it) follows another

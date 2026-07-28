@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include <RmlUi/Core.h>
 #include <RmlUi/Debugger.h>
@@ -14,6 +15,9 @@ namespace Gravitaris {
 
 static constexpr float HULL_WARN_FRACTION = 0.5f;
 static constexpr float HULL_CRITICAL_FRACTION = 0.25f;
+
+static void Assign(Rml::Element* element, std::string& cached, std::optional<float> value,
+                   const char* format);
 
 namespace {
 
@@ -83,6 +87,9 @@ bool UI::Init()
         m_healthValue = hud->GetElementById("health_value");
         m_missileTicks = hud->GetElementById("missile_ticks");
         m_missileValue = hud->GetElementById("missile_value");
+        m_speedReadout = hud->GetElementById("speed_readout");
+        m_headingReadout = hud->GetElementById("heading_readout");
+        m_gwellReadout = hud->GetElementById("gwell_readout");
         m_minimap = hud->GetElementById("minimap");
 
         if (m_minimap) {
@@ -232,6 +239,18 @@ void UI::SetMissileAmmo(int ammo, int capacity)
     m_missileTicks->SetInnerRML(ticks);
 }
 
+void UI::SetHudTelemetry(std::optional<float> speed, std::optional<float> heading,
+                         std::optional<float> gravityAccel)
+{
+    // Zero-padded so a turning ship doesn't shuffle the neighbouring cells
+    // sideways as it crosses 100 and 10. Wrapped after rounding, not before:
+    // 359.7 has to come out as 000 rather than a fourth digit.
+    if (heading) heading = std::fmod(std::round(*heading), 360.f);
+    Assign(m_headingReadout, m_headingText, heading, "%03.0f");
+    Assign(m_speedReadout, m_speedText, speed, "%.0f");
+    Assign(m_gwellReadout, m_gwellText, gravityAccel, "%.1f");
+}
+
 int UI::GetSidebarWidthPx() const
 {
     return m_sidebar ? static_cast<int>(m_sidebar->GetOffsetWidth()) : 0;
@@ -271,6 +290,25 @@ void UI::SelectIntroTeam(TeamId team)
     m_introTeam = team;
     if (m_teamBlueButton) m_teamBlueButton->SetClass("selected", team == TeamId::Blue);
     if (m_teamRedButton) m_teamRedButton->SetClass("selected", team == TeamId::Red);
+}
+
+// Writes a formatted number into a readout, or "--" for an empty one, skipping
+// the SetInnerRML reflow when the text hasn't moved.
+static void Assign(Rml::Element* element, std::string& cached, std::optional<float> value,
+                   const char* format)
+{
+    if (!element) return;
+
+    std::string text = "--";
+    if (value) {
+        char buffer[32];
+        std::snprintf(buffer, sizeof(buffer), format, *value);
+        text = buffer;
+    }
+
+    if (text == cached) return;
+    cached = std::move(text);
+    element->SetInnerRML(cached);
 }
 
 void UI::HandleMinimapPoint(Rml::Event& event)

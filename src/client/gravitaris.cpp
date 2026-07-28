@@ -306,9 +306,9 @@ void GravitarisApplication::UpdateUi()
     m_ui.Update();
 }
 
-// Build identity, plus the measured round-trip when connected to a server.
-// Throttled: the text changes at most a few times a second, and SetInnerRML
-// reflows the element.
+// Build identity, the measured round-trip when connected to a server, and the
+// telemetry row. Throttled: SetInnerRML reflows the element, and the telemetry
+// numbers would otherwise change -- and so reflow -- every frame in flight.
 void GravitarisApplication::RefreshHudReadout()
 {
     static constexpr double REFRESH_INTERVAL = 0.25;
@@ -327,6 +327,7 @@ void GravitarisApplication::RefreshHudReadout()
     }
 
     m_ui.SetHudStatus(BuildInfoString(), pingText);
+    m_ui.SetHudTelemetry(m_game->GetSpeed(), m_game->GetHeading(), m_game->GetGravityAccel());
 }
 
 // One command for the tick Update() is about to run: keyboard, autopilot and

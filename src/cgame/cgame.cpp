@@ -8,9 +8,11 @@
 #include <gravitaris/game/logging.hpp>
 
 #include <Magnum/Math/Matrix3.h>
+#include <Magnum/Math/Functions.h>
 
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/component/transform.hpp>
+#include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
@@ -99,6 +101,57 @@ std::optional<int> CGame::GetMissileAmmo()
     if (!loadout) return std::nullopt; // a structure/planet being spectated has no rack
 
     return static_cast<int>(loadout->missileAmmo);
+}
+
+std::optional<float> CGame::GetSpeed()
+{
+    const std::optional<flecs::entity> subject = CameraSubject();
+    if (!subject) return std::nullopt;
+
+    const Transform* transf = subject->try_get<Transform>();
+    if (!transf) return std::nullopt;
+
+    return static_cast<float>(transf->vel.length());
+}
+
+std::optional<float> CGame::GetHeading()
+{
+    const std::optional<flecs::entity> subject = CameraSubject();
+    if (!subject) return std::nullopt;
+
+    const Transform* transf = subject->try_get<Transform>();
+    if (!transf) return std::nullopt;
+
+    // Ships thrust along their local -Y (see ShipControlsSystem::ApplyMovement),
+    // so that -- not local +X -- is the nose.
+    const Vector2d forward{Magnum::Math::sin(transf->rot), -Magnum::Math::cos(transf->rot)};
+
+    // atan2(x, y), not (y, x): measured clockwise from world +Y.
+    const Magnum::Degd bearing{Radd{std::atan2(forward.x(), forward.y())}};
+    const double degrees = double(bearing);
+    return static_cast<float>(degrees < 0.0 ? degrees + 360.0 : degrees);
+}
+
+std::optional<float> CGame::GetGravityAccel()
+{
+    const std::optional<flecs::entity> subject = CameraSubject();
+    if (!subject) return std::nullopt;
+
+    const Transform* transf = subject->try_get<Transform>();
+    if (!transf) return std::nullopt;
+
+    const double strength = PhysicsSystem::GRAVITY_CONSTANT * GetGravityMultiplier();
+    const Vector2d pos = transf->pos;
+
+    Vector2d accel;
+    CurrentSceneView().Each([&](flecs::entity, const GravitySource& gs, const Transform& srcTransf) {
+        const Vector2d d = srcTransf.pos - pos;
+        const double dist2 = d.dot();
+        if (dist2 < 1e-6) return; // the subject itself, or something sitting on it
+        accel += d * (strength * gs.mass * gs.multiplier / (dist2 * std::sqrt(dist2)));
+    });
+
+    return static_cast<float>(accel.length());
 }
 
 void CGame::CycleSpectate(int direction)
