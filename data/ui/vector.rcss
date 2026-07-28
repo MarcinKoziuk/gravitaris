@@ -1,7 +1,12 @@
-/* Vector-display UI theme: thin cyan lines on near-black, no sprites, so it
-   matches the game's glowing-vector aesthetic. The UI is drawn outside the
-   postprocess pass, so the font-effect glow below is what carries the look --
-   nothing here picks up the scene's bloom or CRT scanlines. */
+/* Vector-display UI theme -- "Vector Chamfer" pass.
+   Thin cyan lines on near-black, no sprites, so it matches the game's
+   glowing-vector aesthetic. The UI is drawn outside the postprocess pass, so
+   the font-effect glow below is what carries the look.
+
+   Chamfered corners are faked with bracket elements (div.corner) rather than
+   a 9-slice sprite: RCSS has no clip-path, and brackets keep the theme
+   sprite-free the way the rest of this file is. A framed box gets them by
+   nesting four div.corner children -- see hud.rml. */
 
 body
 {
@@ -11,6 +16,47 @@ body
     font-size: 17dp;
     color: #8ff;
 }
+
+/* ---- framed box + corner brackets -------------------------------------- */
+
+/* A box that draws its own hairline and hosts four corner brackets. Frames
+   are relative so the brackets can pin to their corners. */
+div.frame
+{
+    position: relative;
+    box-sizing: border-box;
+    border-width: 1dp;
+    border-color: #0cf6;          /* the hairline reads quieter than the
+                                     brackets, which do the accenting */
+    background-color: #0008;
+}
+
+div.corner
+{
+    position: absolute;
+    width: 9dp;
+    height: 9dp;
+    border-color: #0cf;
+}
+
+div.corner.tl { top: -1dp;    left: -1dp;  border-top-width: 2dp; border-left-width: 2dp; }
+div.corner.tr { top: -1dp;    right: -1dp; border-top-width: 2dp; border-right-width: 2dp; }
+div.corner.bl { bottom: -1dp; left: -1dp;  border-bottom-width: 2dp; border-left-width: 2dp; }
+div.corner.br { bottom: -1dp; right: -1dp; border-bottom-width: 2dp; border-right-width: 2dp; }
+
+/* Small caps strip that labels a frame, sitting on its top edge. */
+div.frame_label
+{
+    padding: 5dp 9dp;
+    font-size: 12dp;
+    letter-spacing: 3dp;
+    color: #7cc;
+    background-color: #0cf1;
+    border-bottom-width: 1dp;
+    border-bottom-color: #0cf4;
+}
+
+/* ---- windows ------------------------------------------------------------ */
 
 body.window
 {
@@ -22,13 +68,13 @@ body.window
     min-height: 90dp;
     max-height: 700dp;
 
-    background-color: #000000ec;   /* black, slightly translucent */
-    border-width: 2dp;
+    background-color: #000000f2;
+    border-width: 1dp;
     border-color: #0cf;
+    box-shadow: 0 0 40dp #0cf4;    /* the window's own bloom, since the UI
+                                      pass doesn't get the scene's */
 }
 
-/* Title bar: a labelled strip with a cyan underline; the <handle> inside it
-   (see template) is what makes the window draggable. */
 div#title_bar
 {
     z-index: 1;
@@ -40,7 +86,7 @@ div#title_bar
     height: 33dp;
     text-align: left;
 
-    background-color: #0cf2;       /* faint cyan wash */
+    background-color: #0cf2;
     border-bottom-width: 1dp;
     border-bottom-color: #0cf;
 }
@@ -53,19 +99,22 @@ div#title_bar div#icon
 div#title_bar span#title
 {
     display: block;
-    padding: 5dp 10dp;
+    padding: 5dp 12dp;
 
     color: #cff;
-    font-size: 18dp;
+    font-size: 17dp;
     font-weight: bold;
-    font-effect: glow(2dp #0cf8);
+    letter-spacing: 5dp;           /* wide tracking is the theme's display
+                                      voice -- titles and section labels only */
+    text-transform: uppercase;
+    font-effect: glow(3dp #0cfa);
 }
 
 div#window
 {
     width: auto;
     height: 100%;
-    padding: 12dp 14dp;
+    padding: 14dp 18dp;
 }
 
 div#content
@@ -74,22 +123,26 @@ div#content
     width: auto;
     height: 100%;
     overflow: hidden auto;
-    text-align: center;
+    text-align: left;              /* was centred; left-aligned copy sits
+                                      better under a left-aligned title */
     color: #9ff;
 }
 
-/* Outlined cyan button: transparent fill, inverts on press. */
+/* ---- buttons ------------------------------------------------------------ */
+
 button
 {
     display: inline-block;
     box-sizing: border-box;
 
-    padding: 8dp 22dp;
+    padding: 9dp 22dp;
     margin: 4dp;
 
     color: #0cf;
-    font-size: 17dp;
+    font-size: 16dp;
     font-weight: bold;
+    letter-spacing: 3dp;
+    text-transform: uppercase;
     text-align: center;
     tab-index: auto;
 
@@ -98,6 +151,7 @@ button
     border-color: #0cf;
     cursor: pointer;
     font-effect: glow(2dp #0cf6);
+    transition: background-color 0.12s cubic-in-out, border-color 0.12s cubic-in-out;
 }
 
 button:hover
@@ -110,7 +164,7 @@ button:hover
 button:active
 {
     background-color: #0cf;
-    color: #012;                   /* inverted: dark text on cyan fill */
+    color: #012;
     font-effect: none;
 }
 
