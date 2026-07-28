@@ -77,14 +77,14 @@
 			}
 
 			/* The number is the thing you glance at, so it outweighs its own
-			   label rather than matching it. */
+			   label rather than matching it -- size, brightness and glow do
+			   that here, since the mono face .readout brings has no bold. */
 			span.stat_value
 			{
 				float: right;
 				font-size: 20dp;
 				letter-spacing: 0dp;
 				color: #eff;
-				font-weight: bold;
 				font-effect: glow(3dp #0cf8);
 			}
 
@@ -200,7 +200,7 @@
 				<div class="stat">
 					<div class="stat_head">
 						<span>Hull</span>
-						<span id="health_value" class="stat_value">--</span>
+						<span id="health_value" class="stat_value readout">--</span>
 					</div>
 					<div class="bar_track">
 						<div id="health_fill"></div>
@@ -210,15 +210,15 @@
 				<div class="stat">
 					<div class="stat_head">
 						<span>Missiles</span>
-						<span id="missile_value" class="stat_value">--</span>
+						<span id="missile_value" class="stat_value readout">--</span>
 					</div>
 					<div id="missile_ticks"></div>
 				</div>
 
 				<div id="panel_footer">
-					<div id="status_readout"></div>
+					<div id="status_readout" class="readout"></div>
 					<div>
-						<span id="ping_readout"></span>
+						<span id="ping_readout" class="readout"></span>
 						<span id="byline">by Marcin Koziuk</span>
 					</div>
 				</div>

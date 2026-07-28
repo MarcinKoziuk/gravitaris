@@ -61,6 +61,13 @@ bool UI::Init()
     // window/framebuffer is up.
     m_context = Rml::CreateContext("default", Rml::Vector2i(m_width, m_height));
 
+    // Chakra Petch carries the chamfered-vector look and is the theme's base
+    // face; Share Tech Mono is for readouts only, where proportional digits
+    // would shift the layout as the values change. Lato stays loaded as the
+    // fallback for anything neither covers.
+    Rml::LoadFontFace("ui/ChakraPetch-Regular.ttf");
+    Rml::LoadFontFace("ui/ChakraPetch-Bold.ttf");
+    Rml::LoadFontFace("ui/ShareTechMono-Regular.ttf");
     Rml::LoadFontFace("ui/LatoLatin-Regular.ttf");
     Rml::LoadFontFace("ui/LatoLatin-Bold.ttf");
     Rml::LoadFontFace("ui/LatoLatin-BoldItalic.ttf");

@@ -1,5 +1,33 @@
-The RmlUi samples include fonts that are separately licensed. They are listed
-below along with their licenses.
+The UI fonts are separately licensed. They are listed below along with their
+licenses. All three are under the SIL Open Font License, Version 1.1, a single
+copy of which follows the notices.
+
+-----------------------------------------------------------
+-----------------------------------------------------------
+---    Chakra Petch                                     ---
+---    https://fonts.google.com/specimen/Chakra+Petch   ---
+---                                                     ---
+---    ChakraPetch-Regular.ttf                          ---
+---    ChakraPetch-Bold.ttf                             ---
+-----------------------------------------------------------
+-----------------------------------------------------------
+
+Copyright 2018 The Chakra Petch Project Authors
+(https://github.com/m4rc1e/Chakra-Petch.git)
+
+
+-----------------------------------------------------------
+-----------------------------------------------------------
+---    Share Tech Mono                                  ---
+---    https://fonts.google.com/specimen/Share+Tech+Mono ---
+---                                                     ---
+---    ShareTechMono-Regular.ttf                        ---
+-----------------------------------------------------------
+-----------------------------------------------------------
+
+Copyright (c) 2012, Carrois Type Design, Ralph du Carrois
+(post@carrois.com www.carrois.com), with Reserved Font Name 'Share'
+
 
 -----------------------------------------------------------
 -----------------------------------------------------------

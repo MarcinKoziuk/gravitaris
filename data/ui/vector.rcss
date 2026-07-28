@@ -16,11 +16,20 @@
 
 body
 {
-    font-family: LatoLatin;
+    font-family: Chakra Petch;
     font-weight: normal;
     font-style: normal;
     font-size: 17dp;
     color: #8ff;
+}
+
+/* Readouts the frame loop rewrites. Mono so a changing value never reflows the
+   line it sits on, and Share Tech Mono has no bold face -- asking for one here
+   only makes RmlUi pick the regular anyway. */
+.readout
+{
+    font-family: Share Tech Mono;
+    font-weight: normal;
 }
 
 /* ---- framed box + corner brackets -------------------------------------- */
