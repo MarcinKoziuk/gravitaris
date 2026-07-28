@@ -5,66 +5,45 @@
 		<style>
 			/* Everything here is one step up from the shared theme's sizes --
 			   this is the first thing the player reads. */
-			/* margin: auto centres the document in the context. */
 			body
 			{
-				width: 520dp;
-				height: 200dp;
+				width: 560dp;
+				height: 236dp;
 				margin: auto;
 
-				font-size: 20dp;
+				font-size: 19dp;
 			}
 			div#title_bar span#title
 			{
-				font-size: 22dp;
-			}
-			button
-			{
-				font-size: 20dp;
-			}
-			/* Out of the flow, in the window's own bottom-right corner -- so
-			   the copy above it doesn't have to leave room for it. Filled
-			   rather than outlined: it's the confirm action, and the side
-			   buttons next to it are the only other things competing for the
-			   eye. */
-			button#dismiss_intro
-			{
-				position: absolute;
-				right: 14dp;
-				bottom: 12dp;
-				margin: 0;
-
-				background-color: #0cf;
-				color: #012;
-				font-effect: none;
-			}
-			button#dismiss_intro:hover
-			{
-				background-color: #bff;
-				border-color: #fff;
-				color: #012;
+				font-size: 19dp;
+				letter-spacing: 7dp;
 			}
 			p
 			{
 				margin-bottom: 12dp;
+				color: #bee;
 			}
 			div#team_row
 			{
-				margin-top: 20dp;
+				margin-top: 22dp;
 			}
 			div#team_row p
 			{
-				margin-bottom: 6dp;
-				font-size: 14dp;
-				letter-spacing: 2dp;
-				color: #7cc;
+				margin-bottom: 8dp;
+				font-size: 12dp;
+				letter-spacing: 5dp;
+				color: #588;
 			}
 			/* Matched pair: without a floor the two boxes differ in width just
 			   because their labels do, which reads as two unrelated buttons
 			   rather than one either/or choice. */
 			button#team_blue, button#team_red
 			{
-				min-width: 120dp;
+				min-width: 150dp;
+				margin-left: 0;
+				margin-right: 12dp;
+				padding-top: 12dp;
+				padding-bottom: 12dp;
 			}
 			/* Team buttons carry their side's colour on the border so the
 			   choice is readable without reading the label; the selected one
@@ -74,24 +53,51 @@
 				color: #6af;
 				border-color: #6af;
 				background-color: #6af1;
+				font-effect: glow(2dp #6af6);
 			}
 			button#team_blue.selected
 			{
 				background-color: #6af;
 				color: #012;
 				font-effect: none;
+				box-shadow: 0 0 22dp #6af8;
 			}
 			button#team_red
 			{
 				color: #f66;
 				border-color: #f66;
 				background-color: #f661;
+				font-effect: glow(2dp #f666);
 			}
 			button#team_red.selected
 			{
 				background-color: #f66;
 				color: #210;
 				font-effect: none;
+				box-shadow: 0 0 22dp #f668;
+			}
+			/* Out of the flow, in the window's own bottom-right corner -- so
+			   the copy above it doesn't have to leave room for it. Filled
+			   rather than outlined: it's the confirm action. */
+			button#dismiss_intro
+			{
+				position: absolute;
+				right: 18dp;
+				bottom: 14dp;
+				margin: 0;
+				padding-top: 12dp;
+				padding-bottom: 12dp;
+
+				background-color: #0cf;
+				color: #012;
+				font-effect: none;
+				box-shadow: 0 0 26dp #0cf8;
+			}
+			button#dismiss_intro:hover
+			{
+				background-color: #bff;
+				border-color: #fff;
+				color: #012;
 			}
 		</style>
 	</head>
@@ -100,8 +106,8 @@
 
 		<div id="team_row">
 			<p>PICK YOUR SIDE</p>
-			<button id="team_blue">BLUE</button>
-			<button id="team_red">RED</button>
+			<button id="team_blue">Blue</button>
+			<button id="team_red">Red</button>
 		</div>
 
 		<button id="dismiss_intro">Let's fly!</button>
