@@ -115,19 +115,20 @@ div#title_bar
     height: 33dp;
     text-align: left;
 
-    background-color: #0cf1;
+    background-color: #0cf2;
     border-width: 1dp;
-    border-color: #0cf6;
+    border-color: #0cf4;
 }
 
 /* The live window, marked from code (UI::RefreshActiveDocument) because RCSS
-   can't see which document holds focus: the title box comes up to full strength
-   on all four edges and its wash deepens. Nothing else about the window
-   changes. */
+   can't see which document holds focus. The box brightens and its wash deepens,
+   but neither goes to full strength -- against near-black the frames' hairline
+   range is already legible, and the corner brackets stay the loudest cyan in
+   the theme. Nothing else about the window changes. */
 body.window.active div#title_bar
 {
-    background-color: #0cf3;
-    border-color: #0cf;
+    background-color: #0cf4;
+    border-color: #0cf8;
 }
 
 div#title_bar div#icon
