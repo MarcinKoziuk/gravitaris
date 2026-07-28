@@ -90,8 +90,8 @@ body.window
 
     background-color: #000000f2;
     border-width: 1dp;
-    border-color: #0cf6;           /* the frames' hairline, not a full-strength
-                                      cyan -- the brackets do the accenting */
+    border-color: #0cf6;           /* the frames' quiet hairline, active or not
+                                      -- the title box carries the state */
 }
 
 /* Above the title bar (1) and content (2), so a bracket isn't cut in half by
@@ -101,22 +101,34 @@ body.window div.corner
     z-index: 3;
 }
 
+/* A boxed strip rather than an underlined one: all four edges, inset 4dp from
+   the window so its own outline reads separately from the window's. The inset
+   is what body.window's 41dp top padding is made of -- 4 + 33 + 4. */
 div#title_bar
 {
     z-index: 1;
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
+    top: 4dp;
+    left: 4dp;
+    right: 4dp;
 
+    box-sizing: border-box;
     height: 33dp;
     text-align: left;
 
-    background-color: #0cf2;
-    border-bottom-width: 1dp;
-    border-bottom-color: #0cf;     /* full strength, unlike the window's own
-                                      hairline edge: this rule under the title
-                                      is what marks the dialog as the live one */
+    background-color: #0cf1;
+    border-width: 1dp;
+    border-color: #0cf6;
+}
+
+/* The live window, marked from code (UI::RefreshActiveDocument) because RCSS
+   can't see which document holds focus: the title box comes up to full strength
+   on all four edges and its wash deepens. Nothing else about the window
+   changes. */
+body.window.active div#title_bar
+{
+    background-color: #0cf3;
+    border-color: #0cf;
 }
 
 div#title_bar div#icon

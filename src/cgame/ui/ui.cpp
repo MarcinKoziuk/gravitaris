@@ -348,6 +348,24 @@ void UI::ToggleDebugger()
 void UI::Update()
 {
     m_context->Update();
+
+    RefreshActiveDocument();
+}
+
+void UI::RefreshActiveDocument()
+{
+    // The focused element is usually a control inside the document rather than
+    // the document itself, so ask it which document it belongs to.
+    Rml::Element* focused = m_context->GetFocusElement();
+    Rml::ElementDocument* active = focused ? focused->GetOwnerDocument() : nullptr;
+
+    if (active == m_activeDocument) return;
+    m_activeDocument = active;
+
+    for (int i = 0; i < m_context->GetNumDocuments(); ++i) {
+        Rml::ElementDocument* document = m_context->GetDocument(i);
+        document->SetClass("active", document == active);
+    }
 }
 
 void UI::Render()

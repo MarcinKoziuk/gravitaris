@@ -72,6 +72,10 @@ private:
     std::string m_headingText;
     std::string m_gwellText;
 
+    // Whichever document owns focus; compared against so the class is only
+    // rewritten when focus actually moves between documents.
+    Rml::ElementDocument* m_activeDocument = nullptr;
+
     int m_width = 1280;
     int m_height = 720;
     float m_dpRatio = 1.f;
@@ -79,6 +83,12 @@ private:
     // Attaches `handler` to `element`, keeping the listener alive in
     // m_listeners for as long as this UI exists.
     void Listen(Rml::Element& element, const char* event, std::function<void(Rml::Event&)> handler);
+
+    // Marks the document holding focus with class "active", so the theme can
+    // tell a live window from a backgrounded one. Can't be done in RCSS: :focus
+    // lands on the focused element only, never its ancestors, so it leaves the
+    // body as soon as a control inside the window takes focus.
+    void RefreshActiveDocument();
 
     // Shared by the minimap's mousedown and drag events: both just report
     // where the cursor currently is on the panel.
