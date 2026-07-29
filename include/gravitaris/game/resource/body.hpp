@@ -27,6 +27,13 @@ using Magnum::Matrix4d;
 
 class Body : public IResource {
 public:
+    // Forward thrust force (local -Y) of a hull that doesn't name its own in
+    // [physics] thrust. A hull that can land has to be able to lift off
+    // again, so this sits above the ~155 units/s^2 surface gravity of a
+    // standard planet rather than on a round number: below it a ship on the
+    // deck cannot leave, whoever is flying it.
+    static constexpr cpFloat DEFAULT_THRUST = 220.0;
+
     struct CircleShape {
         TVector2<cpFloat> pos;
         cpFloat radius;
@@ -56,6 +63,7 @@ public:
 private:
     cpFloat m_mass;
     cpFloat m_friction;
+    cpFloat m_thrust = DEFAULT_THRUST;
     float m_landingFragility = 1.f;
     bool m_kinematic = false;
     bool m_gravitySource = false;
@@ -84,6 +92,12 @@ public:
 
     [[nodiscard]] cpFloat GetFriction() const
     { return m_friction; }
+
+    // Force the single rear thruster delivers (ShipControlsSystem::
+    // ApplyMovement); divided by the live mass it is the acceleration
+    // guidance plans against.
+    [[nodiscard]] cpFloat GetThrust() const
+    { return m_thrust; }
 
     // Multiplier on the landing damage this hull takes (DamageSystem) -- not
     // on fire taken, not on rams. Below 1 is heavier gear that shrugs off a

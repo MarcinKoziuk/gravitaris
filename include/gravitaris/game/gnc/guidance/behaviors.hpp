@@ -12,7 +12,7 @@ namespace Gravitaris {
 // resulting velocity error, so behaviors stay simple.
 struct GuidanceParams {
     double maxSpeed = 80.0;      // combat cruise cap (units/s)
-    double accel = 140.0;        // available thrust acceleration (units/s^2)
+    double accel = 220.0;        // available thrust acceleration (units/s^2)
 
     // Cap for crossings that end in an arrival (GotoPoint, LandOnBody), well
     // above maxSpeed: both solve the fastest speed they can still brake from,
@@ -83,14 +83,21 @@ Magnum::Math::Vector2<double> FleeThreat(const Transform& ship,
                                          const Magnum::Math::Vector2<double>& threatVel,
                                          const GuidanceParams& params);
 
-// Climb radially away from `center` until beyond `safeRadius`, preserving
-// tangential motion. Returns the current velocity (no correction) when
-// already safe. Solved in the body's frame, so climbing off something that
-// is itself moving fast (a station on its orbit) asks for a climb rather
-// than for the world-space brake maxSpeed would otherwise clamp it to.
+// Climb radially away from `center`, preserving tangential motion. Solved in
+// the body's frame, so climbing off something that is itself moving fast (a
+// station on its orbit) asks for a climb rather than for the world-space
+// brake maxSpeed would otherwise clamp it to.
+//
+// Unconditional: *when* to climb is the caller's decision, and both callers
+// (AIPilotSystem's Evade and Depart, each with its own hysteresis) make it on
+// more than current distance. An earlier "already outside the safe radius, no
+// correction needed" early-out here meant a pilot evading a well its
+// *predicted* path runs into -- but which it is still outside of -- spent
+// that whole window commanding nothing, coasting into the impact the
+// prediction had seen coming.
 Magnum::Math::Vector2<double> EvadeBody(const Transform& ship,
                                         const Magnum::Math::Vector2<double>& center,
                                         const Magnum::Math::Vector2<double>& centerVel,
-                                        double safeRadius, const GuidanceParams& params);
+                                        const GuidanceParams& params);
 
 } // namespace Gravitaris

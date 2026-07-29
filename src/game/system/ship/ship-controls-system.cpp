@@ -73,7 +73,7 @@ std::pair<Vector2d, Vector2d> ShipControlsSystem::ComputeBulletSpawn(const Trans
     }
 }
 
-void ShipControlsSystem::ApplyMovement(cpBody* body, const ControlFlags& flags)
+void ShipControlsSystem::ApplyMovement(cpBody* body, const ControlFlags& flags, double thrust)
 {
     cpFloat ang = cpBodyGetAngularVelocity(body);
     const cpFloat maxAng = 15.0;
@@ -87,7 +87,7 @@ void ShipControlsSystem::ApplyMovement(cpBody* body, const ControlFlags& flags)
         cpBodyApplyTorque(body, -20.0);
     }
     if (flags.thrustForward) {
-        cpBodyApplyForceAtLocalPoint(body, cpv(0, -ShipControlsSystem::THRUST_FORCE), cpv(0, 0));
+        cpBodyApplyForceAtLocalPoint(body, cpv(0, -thrust), cpv(0, 0));
     }
 }
 
@@ -97,7 +97,7 @@ void ShipControlsSystem::Update(std::uint64_t step)
         PhysicsBody& phys = m_physicsSystem.GetBody(ref);
         cpBody* body = phys.cp.body.get();
 
-        ApplyMovement(body, scontrols.actionFlags);
+        ApplyMovement(body, scontrols.actionFlags, phys.body->GetThrust());
 
         ShipLoadout* loadout = entity.try_get_mut<ShipLoadout>();
         const ShipStats stats =

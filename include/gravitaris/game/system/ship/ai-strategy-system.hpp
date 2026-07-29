@@ -2,6 +2,8 @@
 
 #include <flecs.h>
 
+#include <gravitaris/game/fwd.hpp>
+
 namespace Gravitaris {
 
 // The strategy layer of docs/ai-ships.md's GNC table (Phase 5 of
@@ -14,8 +16,13 @@ namespace Gravitaris {
 class AIStrategySystem {
     flecs::world& m_registry;
 
+    // Only for the live gravity multiplier, which no component carries: a
+    // claim is a landing, and a landing is only an option on a body whose
+    // surface gravity the hull can actually out-thrust.
+    PhysicsSystem& m_physicsSystem;
+
 public:
-    explicit AIStrategySystem(flecs::world& registry);
+    AIStrategySystem(flecs::world& registry, PhysicsSystem& physicsSystem);
 
     void Update();
 };

@@ -9,6 +9,7 @@
 #include <gravitaris/game/component/ai-strategy.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/freighter.hpp>
+#include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/planet.hpp>
@@ -16,6 +17,7 @@
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/transform.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
 #include <gravitaris/game/system/ship/ai-strategy-system.hpp>
 
 namespace Gravitaris {
@@ -43,6 +45,11 @@ static constexpr double GOAL_SWITCH_MARGIN = 1.2;
 // look at a planet halves its appeal rather than duplicating the trip.
 static constexpr double CROWDING_SHARE = 1.0;
 
+// Margin a hull's thrust acceleration must clear a body's surface gravity by
+// before landing there is an option at all: below 1 the ship cannot lift off
+// again, and right at 1 it cannot lift off in any useful time.
+static constexpr double LIFTOFF_THRUST_MARGIN = 1.15;
+
 // Upper bound on how long a claim is held without re-scoring (60s at the
 // fixed tick) -- long enough for a descent from across a star system.
 static constexpr std::uint32_t CLAIM_COMMIT_TICKS = 3600;
@@ -55,6 +62,7 @@ struct PlanetInfo {
     Vector2d pos;
     TeamId team = TeamId::None;
     bool claimable = false; // suns have no Orbit and cannot be landed on
+    double surfaceGravity = 0.0;
     int structureCount = 0;
     double totalHp = 0.0;
     flecs::entity weakestStructure;
@@ -91,8 +99,9 @@ AIOrder OrderFor(AIGoal goal, flecs::entity subject)
 
 } // namespace
 
-AIStrategySystem::AIStrategySystem(flecs::world& registry)
+AIStrategySystem::AIStrategySystem(flecs::world& registry, PhysicsSystem& physicsSystem)
         : m_registry(registry)
+        , m_physicsSystem(physicsSystem)
 {}
 
 void AIStrategySystem::Update()
@@ -103,9 +112,17 @@ void AIStrategySystem::Update()
     std::vector<PlanetInfo> planets;
     ankerl::unordered_dense::map<std::uint32_t, std::size_t> planetByNetId;
 
-    m_registry.each([&](flecs::entity ent, const Transform& transf, const Planet&, const Team& team,
-                        const NetId& netId) {
-        planets.push_back(PlanetInfo{ent, netId.value, transf.pos, team.id, ent.has<Orbit>()});
+    const double gravityMultiplier = m_physicsSystem.GetGravityMultiplier();
+    m_registry.each([&](flecs::entity ent, const Transform& transf, const Planet& planet,
+                        const Team& team, const NetId& netId) {
+        double surfaceGravity = 0.0;
+        const double radius = planet.radius * transf.scale.x();
+        if (const GravitySource* gs = ent.try_get<GravitySource>(); gs && radius > 0.0) {
+            surfaceGravity = PhysicsSystem::GRAVITY_CONSTANT * gs->mass * gs->multiplier
+                    * gravityMultiplier / (radius * radius);
+        }
+        planets.push_back(PlanetInfo{ent, netId.value, transf.pos, team.id, ent.has<Orbit>(),
+                                     surfaceGravity});
     });
     std::sort(planets.begin(), planets.end(),
               [](const PlanetInfo& a, const PlanetInfo& b) { return a.netId < b.netId; });
@@ -246,8 +263,13 @@ void AIStrategySystem::Update()
             const double dist = (planet.pos - transf.pos).length();
 
             if (planet.team == TeamId::None && planet.structureCount == 0) {
-                consider(AIGoal::ClaimPlanet, planet.entity,
-                         weights.claim * Proximity(dist, EXPANSION_SCALE));
+                // A claim this hull could never lift off from again is not a
+                // claim, it is a ship parked forever -- LandOnBody's own
+                // braking floor would otherwise fly the descent regardless.
+                if (planet.surfaceGravity * LIFTOFF_THRUST_MARGIN < pilot.guidance.accel) {
+                    consider(AIGoal::ClaimPlanet, planet.entity,
+                             weights.claim * Proximity(dist, EXPANSION_SCALE));
+                }
             }
             else if (planet.team != myTeam.id && planet.structureCount > 0) {
                 // Attacking the weakest complex is the point of the goal:

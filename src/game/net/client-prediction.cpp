@@ -221,8 +221,8 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
     // always somewhat older tick) -- see SyncCollisionProxies/EvaluateOrbit.
     SyncCollisionProxies(snapshotEntities, ownShipNetId, snapshotBaseTick, tick);
 
-    cpBody* body = m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()).cp.body.get();
-    ShipControlsSystem::ApplyMovement(body, flags);
+    PhysicsBody& phys = m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>());
+    ShipControlsSystem::ApplyMovement(phys.cp.body.get(), flags, phys.body->GetThrust());
 
     m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
     m_physicsSystem.Update();
@@ -305,7 +305,8 @@ std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t author
     // actually being corrected -- worse the faster the ship was moving.
     const Magnum::Vector2d preCorrectionNowPos = m_history.back().pos;
 
-    cpBody* body = m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()).cp.body.get();
+    PhysicsBody& phys = m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>());
+    cpBody* body = phys.cp.body.get();
     cpBodySetPosition(body, cpv(authoritativePos.x(), authoritativePos.y()));
     cpBodySetAngle(body, static_cast<cpFloat>(authoritative.rot));
     cpBodySetVelocity(body, cpv(authoritative.vel.x(), authoritative.vel.y()));
@@ -327,7 +328,7 @@ std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t author
         // tradeoffs the class doc comment already accepts.
         SyncCollisionProxies(snapshotEntities, ownShipNetId, authoritativeTick, pending.tick);
         m_ownShip.get_mut<Controls>().actionFlags = pending.flags;
-        ShipControlsSystem::ApplyMovement(body, pending.flags);
+        ShipControlsSystem::ApplyMovement(body, pending.flags, phys.body->GetThrust());
         m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
         m_physicsSystem.Update();
         m_history.push_back(CaptureTick(pending.tick, pending.flags));

@@ -110,9 +110,14 @@ Vector2d LandOnBody(const Transform& ship, const Vector2d& center, const Vector2
     }
 
     // Only the thrust left over from holding the ship up can bleed off
-    // descent speed. The floor covers thrust <= local gravity, where no
-    // approach speed is actually stoppable.
-    const double gravity = PhysicsSystem::GRAVITY_CONSTANT * effectiveMass / (dist * dist);
+    // descent speed, and the margin has to be the one available at the
+    // *bottom* of the descent: gravity grows the whole way down, so a solve
+    // against the local figure plans a stopping distance the ship no longer
+    // has once it gets there -- from high up that is the difference between a
+    // touchdown and a crater. The floor covers thrust <= surface gravity,
+    // where no approach speed is stoppable at all.
+    const double gravity =
+            PhysicsSystem::GRAVITY_CONSTANT * effectiveMass / (surfaceRadius * surfaceRadius);
     const double brake = std::max(params.accel - gravity, 1.0);
 
     // altitude = v*flipTime + (v^2 - touchdown^2)/(2*brake), solved for v.
@@ -137,11 +142,11 @@ Vector2d FleeThreat(const Transform& ship, const Vector2d& threatPos, const Vect
 }
 
 Vector2d EvadeBody(const Transform& ship, const Vector2d& center, const Vector2d& centerVel,
-                   double safeRadius, const GuidanceParams& params)
+                   const GuidanceParams& params)
 {
     const Vector2d r = ship.pos - center;
     const double dist = r.length();
-    if (dist >= safeRadius || dist < 1e-6) {
+    if (dist < 1e-6) {
         return ship.vel;
     }
 

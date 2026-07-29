@@ -67,7 +67,10 @@ static constexpr double SHIP_LANDING_CLEARANCE = 12.0;
 static constexpr double DEPARTURE_CLEARANCE = 260.0;
 
 // Hysteresis on that radius, so a course that dips back inside doesn't flap
-// the pilot between departing and flying it (same idea as evadeMargin).
+// the pilot between departing and flying it (same idea as evadeMargin). The
+// climb runs for as long as this state does -- EvadeBody commands
+// unconditionally, so the band is flown under power rather than coasted
+// through, which is the only way a slow climb clears it at all.
 static constexpr double DEPARTURE_MARGIN = 1.25;
 
 // Padding on a body's radius when testing whether a shot would hit it, so a
@@ -271,8 +274,8 @@ void AIPilotSystem::Update(std::uint64_t step)
                 pilot.decisionCooldown = personality.decisionInterval;
             }
 
-            pilot.guidance.accel = ShipControlsSystem::THRUST_FORCE
-                    / cpBodyGetMass(m_physicsSystem.GetBody(ref).cp.body.get());
+            const PhysicsBody& phys = m_physicsSystem.GetBody(ref);
+            pilot.guidance.accel = phys.body->GetThrust() / cpBodyGetMass(phys.cp.body.get());
 
             // A Patrol order circles the body it names (the faction's own
             // planet); with no order, the dominant well.
@@ -366,7 +369,12 @@ void AIPilotSystem::Update(std::uint64_t step)
                 pilot.behavior = AIBehavior::Depart;
             }
             else if (departing) {
+                // Clear of it. The behavior itself is only re-picked on the
+                // decision cadence, and Depart with a dead site commands
+                // nothing at all, so hand control back the same way Evade's
+                // hysteresis does rather than coasting until the next one.
                 pilot.departureSite = flecs::entity();
+                pilot.decisionCooldown = 0;
             }
         }
 
@@ -377,8 +385,17 @@ void AIPilotSystem::Update(std::uint64_t step)
         // tick means the moment the ship's actual velocity starts curving
         // into danger, it's caught within a tick instead of up to
         // decisionInterval ticks late.
+        //
+        // A descent onto the well is the plan, not a hazard: LandOnBody owns
+        // its own braked approach envelope, and a reflex that fires on
+        // "predicted to reach the surface" fights it into a hover just short
+        // of touchdown. Only the body being landed on is exempt -- anything
+        // else on the way down is still a well to evade.
+        const bool landingHere = pilot.behavior == AIBehavior::Land && well
+                && pilot.order.subject == well->entity;
+
         bool predictedDanger = false;
-        if (well) {
+        if (well && !landingHere) {
             const std::vector<Vector2d> path =
                     m_predictor.Predict(ent, personality.dangerLookaheadSteps, Game::PHYSICS_DELTA);
             for (const Vector2d& p : path) {
@@ -421,8 +438,7 @@ void AIPilotSystem::Update(std::uint64_t step)
         switch (pilot.behavior) {
             case AIBehavior::Evade:
                 if (well) {
-                    desiredVel = EvadeBody(transf, well->pos, well->vel,
-                                           evadeRadius * personality.evadeMargin, pilot.guidance);
+                    desiredVel = EvadeBody(transf, well->pos, well->vel, pilot.guidance);
                 }
                 break;
             case AIBehavior::Intercept:
@@ -479,8 +495,7 @@ void AIPilotSystem::Update(std::uint64_t step)
             case AIBehavior::Depart:
                 if (pilot.departureSite.is_alive()) {
                     const Transform& site = pilot.departureSite.get<Transform>();
-                    desiredVel = EvadeBody(transf, site.pos, site.vel,
-                                           DepartureRadius(pilot.departureSite), pilot.guidance);
+                    desiredVel = EvadeBody(transf, site.pos, site.vel, pilot.guidance);
                 }
                 break;
             case AIBehavior::Land:

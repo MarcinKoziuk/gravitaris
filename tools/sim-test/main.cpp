@@ -33,6 +33,7 @@
 #include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/freighter.hpp>
+#include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/component/structure.hpp>
@@ -1644,6 +1645,142 @@ void TestFactionDefeatAndWin()
     fs.Shutdown();
 }
 
+// A hull that can land has to be able to leave again: thrust is per-hull
+// (Body::GetThrust) precisely so it can be held above the surface gravity of
+// anything landable, and the AI's departure climb and its strategy layer both
+// depend on that holding.
+void TestTakeoff()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    // A standing start off the deck: set down first (the same gentle upright
+    // drop TestLandingAndClaiming uses), then hold full throttle with the nose
+    // already radial and climb.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity planet = spawner.SpawnOrbitingPlanet("models/planets/simple"_id,
+                                                          Vector2d{0., 0.}, 1e-9, 800., 1.0, 0.0);
+        const Vector2d center = planet.get<Transform>().pos;
+        const double radius = planet.get<Planet>().radius * planet.get<Transform>().scale.x();
+
+        flecs::entity ship = spawner.SpawnPlayer("models/ships/fighter-1"_id,
+                                                 center + Vector2d{0., radius + 15.});
+        cpBody* body = game.GetPhysicsSystem().GetBody(ship.get<PhysicsRef>()).cp.body.get();
+        cpBodySetAngle(body, CP_PI); // legs (local +Y) down, so the nose is radial
+        cpBodySetVelocity(body, cpv(0., -8.));
+
+        for (int tick = 0; tick < 240 && ship.is_alive(); ++tick) game.Update();
+        Require(ship.is_alive() && ship.get<LandingState>().landed,
+                "takeoff: the ship is standing on the planet (setup check)");
+
+        const double restRadius = (ship.get<Transform>().pos - center).length();
+        for (int tick = 0; tick < 240 && ship.is_alive(); ++tick) {
+            ControlFlags flags{};
+            flags.thrustForward = true;
+            ship.get_mut<InputQueue>().Push(InputCommand{game.GetStep(), flags});
+            game.Update();
+        }
+        Require(ship.is_alive(), "takeoff: the ship survives its own launch");
+        Require((ship.get<Transform>().pos - center).length() - restRadius > 100.,
+                "takeoff: full throttle off the surface actually climbs");
+    }
+
+    // The AI's own launch, end to end: a pilot parked on a planet with its
+    // business elsewhere departs, and gets clear rather than settling into a
+    // hover or flapping in the hysteresis band.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity planet = spawner.SpawnOrbitingPlanet("models/planets/simple"_id,
+                                                           Vector2d{0., 0.}, 1e-9, 800., 1.0, 0.0);
+        const Vector2d center = planet.get<Transform>().pos;
+        const double radius = planet.get<Planet>().radius * planet.get<Transform>().scale.x();
+
+        flecs::entity ship = spawner.SpawnAIShip("models/ships/fighter-1"_id,
+                                                 center + Vector2d{0., radius + 13.},
+                                                 game.GetAIPresets().Default(), Vector2d{}, CP_PI);
+        // Far enough that no part of this is the pilot merely drifting: the
+        // enemy is its objective, and the objective is not on this rock.
+        spawner.SpawnPlayer("models/ships/fighter-1"_id, center + Vector2d{40000., 0.});
+
+        bool sawDepart = false;
+        double best = 0.;
+        for (int tick = 0; tick < 900 && ship.is_alive(); ++tick) {
+            game.Update();
+            if (!ship.is_alive()) break;
+            if (ship.get<AIPilot>().behavior == AIBehavior::Depart) sawDepart = true;
+            best = std::max(best, (ship.get<Transform>().pos - center).length() - radius);
+        }
+        Require(ship.is_alive(), "takeoff: the AI survives its own launch");
+        Require(sawDepart, "takeoff: a pilot with business elsewhere departs the body it sits on");
+        Require(best > 400., "takeoff: the departure climb gets clear of the body");
+        Require(ship.get<AIPilot>().behavior != AIBehavior::Depart,
+                "takeoff: departure ends once clear instead of latching");
+    }
+
+    // The other half of the same rule, and the reason a claim is reachable at
+    // all: a leader ordered onto a planet flies the whole braked descent from
+    // a standing start well outside it and sets down gently enough to keep the
+    // hull -- the well-avoidance reflex must not fight the landing it was
+    // ordered to make, and the descent must be solved against the gravity
+    // waiting at the bottom rather than the gravity it starts in.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity planet = spawner.SpawnOrbitingPlanet("models/planets/simple"_id,
+                                                           Vector2d{0., 0.}, 1e-9, 800., 1.0, 0.0);
+        const Vector2d center = planet.get<Transform>().pos;
+        flecs::entity leader = spawner.SpawnAILeader("models/ships/fighter-1"_id,
+                                                     center + Vector2d{0., 2500.}, TeamId::Red,
+                                                     game.GetAIPresets().Default());
+        const float hp = leader.get<Damageable>().hp;
+
+        bool claimed = false;
+        for (int tick = 0; tick < 2400 && leader.is_alive() && !claimed; ++tick) {
+            game.Update();
+            claimed = planet.get<Team>().id == TeamId::Red;
+        }
+        Require(leader.is_alive(), "takeoff: the descending leader survives its own landing");
+        Require(claimed, "takeoff: a leader ordered onto a planet actually lands and claims it");
+        Require(leader.get<Damageable>().hp >= hp,
+                "takeoff: the descent costs the hull nothing");
+    }
+
+    // The strategy layer's side of the same rule: a rock nobody could lift
+    // off again is not a claim worth ordering, however close and unowned.
+    const auto ordersALanding = [&](double gravityMultiplier) {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity planet = spawner.SpawnOrbitingPlanet("models/planets/simple"_id,
+                                                           Vector2d{0., 0.}, 1e-9, 800., 1.0, 0.0);
+        planet.get_mut<GravitySource>().multiplier *= gravityMultiplier;
+        const Vector2d center = planet.get<Transform>().pos;
+
+        flecs::entity leader = spawner.SpawnAILeader("models/ships/fighter-1"_id,
+                                                     center + Vector2d{0., 1200.}, TeamId::Red,
+                                                     game.GetAIPresets().Default());
+        bool landOrdered = false;
+        for (int tick = 0; tick < 30 && leader.is_alive() && !landOrdered; ++tick) {
+            game.Update();
+            if (leader.is_alive()) {
+                landOrdered = leader.get<AIPilot>().order.kind == AIOrderKind::Land;
+            }
+        }
+        return landOrdered;
+    };
+
+    Require(ordersALanding(1.0), "takeoff: a leader still claims a planet it can lift off from");
+    Require(!ordersALanding(20.0),
+            "takeoff: no leader is sent to land on a body its hull cannot out-thrust");
+
+    fs.Shutdown();
+}
+
 // Phase 5 tactics (docs/ai-ships.md): weapon discipline, jinking under fire,
 // breaking off when hurt, and one leader per objective.
 //
@@ -2363,6 +2500,7 @@ int main()
     TestResearch();
     TestFactionDefeatAndWin();
     TestOwnBulletSuppression();
+    TestTakeoff();
     TestAITactics();
     TestWebRtcRoundtrip();
     TestWebRtcSignalingRoundtrip();

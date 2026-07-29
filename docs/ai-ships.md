@@ -312,6 +312,40 @@ retreat seen today is one of these two accidents. (Deliberate retreat exists
 as of 2026-07-28 — see the phase-5 status above. There is still nothing to
 retreat *to*: no repair mechanic, so Flee is disengagement, not a trip home.)
 
+*Thrust vs. gravity, and two silent guidance layers (2026-07-29), fixing "AI
+ships are stuck on Depart".* The pilots were flying it correctly; nothing
+could take off. Thrust was a global 140 against a standard planet's 155–162
+units/s² of surface gravity, i.e. a thrust/weight of 0.9: a landed ship at
+full throttle straight up did not move at all, measured over 15 s, player or
+AI. Thrust is now the hull's own (`[physics] thrust` → `Body::GetThrust`,
+default 220 for ~1.4 surface T/W) rather than `ShipControlsSystem::
+THRUST_FORCE`, `AIStrategySystem` refuses a `Land` order on a body whose
+surface gravity the hull cannot out-thrust (with a margin), and
+`gravitaris-sim-test`'s `TestTakeoff` pins all of it.
+
+Two guidance-level defects surfaced on the way, both of the same shape — a
+layer that had *selected* a behavior while the behavior commanded nothing:
+
+- `EvadeBody` returned "no correction" whenever the ship was still outside
+  the safe radius, but the danger check that selects Evade fires off the
+  *predicted* path. A pilot heading into a well therefore spent the entire
+  window between prediction and arrival coasting under no guidance at all,
+  building speed, and hit at 245–436 units/s. The early-out is gone: Evade
+  and Depart each own their own hysteresis and decide when to climb, so the
+  climb is now unconditional (and Depart flies its hysteresis band under
+  power instead of coasting back into it).
+- With Evade actually commanding a climb, it then fought the landing it had
+  been ordered to make — a descent onto the well reads as danger every tick —
+  and hovered a few tens of units short of touchdown forever. The reflex is
+  now exempt for the body being landed on, and only that body.
+- `LandOnBody` solved its flip-and-burn descent against *local* gravity,
+  which grows the whole way down, so from altitude it planned a stopping
+  distance it no longer had on arrival. It uses the surface figure now.
+
+Together those turn a scripted descent from 2500 units (dead every time
+before, at either thrust value) into a 0.3 units/s touchdown with no hull
+damage and a claimed planet.
+
 **Phase 6 — strategy layer.** `AIStrategy` per slice-components (build/attack
 decisions) issuing goals to pilots. Separate cadence (every ~1 s, not every
 tick). Design when slice-one economy exists.

@@ -19,9 +19,9 @@ struct PhysicsBody;
 
 class ShipControlsSystem {
 public:
-    // Forward thrust force (local -Y). Public so guidance can derive the
-    // ship's available acceleration (force / mass).
-    static constexpr double THRUST_FORCE = 140.0;
+    // Nothing about the airframe is a constant here any more either: thrust
+    // is the hull's own (Body::GetThrust), so guidance derives its available
+    // acceleration as that force over the ship's live mass.
 
     // Nothing about a projectile is a constant here any more: what a ship
     // fires is a WeaponDef from data/upgrades.toml, picked by whatever the
@@ -53,7 +53,7 @@ public:
     // movement without also predicting weapon fire (which would need
     // client-assigned NetIds to reconcile against the server's -- Phase 6)
     // still needs the exact same force/torque the real sim applies.
-    static void ApplyMovement(cpBody* body, const ControlFlags& flags);
+    static void ApplyMovement(cpBody* body, const ControlFlags& flags, double thrust);
 
     // Muzzle position/velocity for a projectile leaving the ship's first
     // hardpoint at `muzzleSpeed` right now. Shared by Update() and

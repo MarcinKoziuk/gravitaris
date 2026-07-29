@@ -3,6 +3,8 @@ scale = 0.1
 
 [physics]
 density = 1
+# Overpowered for its mass: it leaves a planet in a hurry.
+thrust = 260
 restitution = 0.5
 friction = 0.0
 

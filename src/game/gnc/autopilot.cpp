@@ -37,8 +37,8 @@ void Autopilot::SetMode(AutopilotMode mode, std::optional<flecs::entity> player)
         if (!transform) return;
         const PhysicsRef* ref = player->try_get<PhysicsRef>();
         if (ref) {
-            const double mass = cpBodyGetMass(m_physicsSystem.GetBody(*ref).cp.body.get());
-            m_guidanceParams.accel = ShipControlsSystem::THRUST_FORCE / mass;
+            const PhysicsBody& phys = m_physicsSystem.GetBody(*ref);
+            m_guidanceParams.accel = phys.body->GetThrust() / cpBodyGetMass(phys.cp.body.get());
         }
     }
 

@@ -84,8 +84,8 @@ public:
     // Runtime-tunable ship-against-ship rule (networking-plan Phase 9). Real
     // values want playtesting, hence the debug panel rather than constants.
     // Defaults are calibrated against this game's actual speed scale, not
-    // guessed: a fighter masses 1.0 and thrusts at ShipControlsSystem::
-    // THRUST_FORCE, i.e. it gains 140 units/s for every second of burn, and
+    // guessed: a fighter masses 1.0 and thrusts at Body::DEFAULT_THRUST,
+    // i.e. it gains 220 units/s for every second of burn, and
     // DamageSystem already treats a 90-unit/s touchdown as a *safe* landing.
     // A number that sounds fast in the abstract is reached here in a fraction
     // of a second of thrust.
@@ -99,7 +99,7 @@ public:
         // as a force before the next step rather than inside the solver: an
         // impulse in the contact solve is exactly the thing prediction can't
         // reconcile, which is what Phase 9 exists to remove. Kept well under
-        // THRUST_FORCE so a ship can always fly against it.
+        // a hull's thrust so a ship can always fly against it.
         double separationAccel = 60.0;
         // Ram momentum (lighter ship's mass x closing speed) past which both
         // ships die outright, however tough either is.
