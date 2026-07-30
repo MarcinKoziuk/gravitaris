@@ -22,4 +22,12 @@ struct Team {
     TeamId id = TeamId::Blue;
 };
 
+// The colours a round hands out, in order: faction i of a round is
+// FACTION_ROSTER[i]. Shared by sector generation, the server's auto-assign
+// and the setup screen so the three can't disagree about who faction 2 is.
+// None is deliberately absent -- it is the ownerless team, not a side.
+inline constexpr TeamId FACTION_ROSTER[] = {
+    TeamId::Blue, TeamId::Red, TeamId::Green, TeamId::Yellow, TeamId::Magenta, TeamId::Cyan,
+};
+
 } // namespace Gravitaris

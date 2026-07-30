@@ -688,6 +688,11 @@ gaps are the known netcode ones plus team assignment:
 
 ## Phase 6 — Sector generation (deliberately late)
 
+**Superseded by `sector-generation-plan.md`** (2026-07-29), which expands
+this phase into its own increment: generation plus a fairness pass, a
+parametrized faction count defaulting to 4, and U4's setup screen. The
+sketch below is kept as the original intent; work from the other doc.
+
 Goal: replace the fixed two-sun arena with a deterministic, parametrized
 sector once the mode is proven on the known layout.
 
@@ -764,7 +769,8 @@ cgame-side glue in one file, e.g. `src/cgame/ui/hud-model.cpp`).
 ### U4 — Round flow + main menu (later, but eventually required)
 
 - [ ] Round setup screen: seed + per-AI personality preset (the original's
-  Opponents dialog); RmlUi.
+  Opponents dialog); RmlUi. Planned in `sector-generation-plan.md` S6, which
+  grows the existing intro dialog rather than adding a document.
 - [ ] Round-over screen on `RoundOver` (win/lose + restart).
 - [ ] Eventually a proper main menu (new round / settings / quit) — out of
   slice scope, tracked here so it isn't forgotten.
