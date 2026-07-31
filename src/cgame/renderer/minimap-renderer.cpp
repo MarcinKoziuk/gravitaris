@@ -140,6 +140,32 @@ MinimapRenderer::MinimapRenderer(IFilesystem& filesystem)
           .setInstanceCount(1);
 }
 
+void MinimapRenderer::FitToSector(const SceneView& view, const Vector2& mapCenter)
+{
+    // A little air so the outermost orbit isn't drawn flush against the
+    // panel edge.
+    static constexpr float MARGIN = 1.08f;
+
+    float reach = 0.f;
+    view.Each([&](flecs::entity entity, const Transform& t, const Planet& planet) {
+        const float bodyRadius = planet.radius * static_cast<float>(t.scale.x());
+
+        // An orbiting body's furthest reach is its orbit's, not wherever it
+        // happens to be this tick -- otherwise the fit would pulse as the
+        // planet swings toward and away from the map center.
+        if (const Orbit* orbit = entity.try_get<Orbit>()) {
+            const Vector2 center{static_cast<float>(orbit->center.x()), static_cast<float>(orbit->center.y())};
+            reach = std::max(reach, (center - mapCenter).length() + static_cast<float>(orbit->radius) + bodyRadius);
+        }
+        else {
+            const Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
+            reach = std::max(reach, (pos - mapCenter).length() + bodyRadius);
+        }
+    });
+
+    m_params.worldRadius = std::max(m_params.worldRadius, reach * MARGIN);
+}
+
 void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, const Vector2& subjectPos,
                              const Vector2& viewCenter, const Vector2& viewHalfExtent)
 {
@@ -148,6 +174,8 @@ void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, co
                  .bind();
 
     if (!m_params.enabled) return; // blank panel
+
+    if (m_params.autoFit) FitToSector(view, mapCenter);
 
     const float worldRadius = std::max(m_params.worldRadius, 1.f);
     // Minimap px per world unit; fixed-px icon sizes convert through this.

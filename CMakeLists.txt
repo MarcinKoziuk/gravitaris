@@ -661,6 +661,8 @@ add_executable(GravitarisNG
     src/game/scenario/classic-scenario.cpp
     include/gravitaris/game/scenario/starting-complex.hpp
     src/game/scenario/starting-complex.cpp
+    include/gravitaris/game/scenario/sector-scenario.hpp
+    src/game/scenario/sector-scenario.cpp
     include/gravitaris/cgame/spawner/centity-spawner.hpp
     src/cgame/spawner/centity-spawner.cpp
     include/gravitaris/cgame/fwd.hpp
@@ -906,6 +908,7 @@ add_executable(gravitaris-sim-test
     src/game/spawner/entity-spawner.cpp
     src/game/scenario/classic-scenario.cpp
     src/game/scenario/starting-complex.cpp
+    src/game/scenario/sector-scenario.cpp
     src/game/net/snapshot.cpp
     src/game/net/loopback-transport.cpp
     src/game/net/protocol.cpp
@@ -1011,6 +1014,7 @@ if(NOT EMSCRIPTEN)
         src/game/spawner/entity-spawner.cpp
         src/game/scenario/classic-scenario.cpp
         src/game/scenario/starting-complex.cpp
+        src/game/scenario/sector-scenario.cpp
         src/game/net/snapshot.cpp
         src/game/net/protocol.cpp
         src/game/net/net-server.cpp

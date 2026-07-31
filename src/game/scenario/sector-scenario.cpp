@@ -13,6 +13,8 @@
 
 namespace Gravitaris {
 
+static constexpr double PI = 3.14159265358979323846;
+
 // Scale reference throughout is the classic arena (classic-scenario.cpp):
 // two suns 22400 apart, planets on orbits of 4000..9600.
 
@@ -72,7 +74,7 @@ double Distance(Vector2d a, Vector2d b)
 // draws bunch up in the middle).
 Vector2d RandomPointInDisc(std::uint64_t& stream, double radius)
 {
-    const double angle = SplitMix64NextUnit(stream) * 2. * M_PI;
+    const double angle = SplitMix64NextUnit(stream) * 2. * PI;
     const double r = radius * std::sqrt(SplitMix64NextUnit(stream));
     return Vector2d{std::cos(angle), std::sin(angle)} * r;
 }
@@ -123,7 +125,7 @@ void PlacePlanets(SectorPlan& plan, std::uint64_t& stream, const SectorParams& p
             planet.orbitRadius = MIN_ORBIT_RADIUS + ORBIT_SPACING * slot
                                  + (SplitMix64NextUnit(stream) * 2. - 1.) * ORBIT_JITTER;
             planet.direction = (SplitMix64Next(stream) & 1ull) ? 1. : -1.;
-            planet.phase = SplitMix64NextUnit(stream) * 2. * M_PI;
+            planet.phase = SplitMix64NextUnit(stream) * 2. * PI;
             planet.pos = plan.stars[star]
                          + Vector2d{std::cos(planet.phase), std::sin(planet.phase)} * planet.orbitRadius;
 

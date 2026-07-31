@@ -120,8 +120,7 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             if (hello.requestedTeam != TeamId::None) {
                 it->second.team = hello.requestedTeam;
             } else {
-                it->second.team = AUTO_ASSIGN_ROSTER[m_nextAutoAssign % (sizeof(AUTO_ASSIGN_ROSTER)
-                                                                        / sizeof(AUTO_ASSIGN_ROSTER[0]))];
+                it->second.team = m_autoAssignRoster[m_nextAutoAssign % m_autoAssignRoster.size()];
                 ++m_nextAutoAssign;
             }
 

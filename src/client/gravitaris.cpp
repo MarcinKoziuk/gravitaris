@@ -187,7 +187,7 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
         // player picked -- so the dialog sits over the real solar system
         // rather than an empty void. Multiplayer's world arrives from the
         // server instead, once connected.
-        m_game->BuildWorld();
+        m_game->BuildWorld(SectorParams{});
     }
 
     m_ui.RegisterLiveTexture("minimap", m_game->GetMinimapRenderer().TextureId(),

@@ -61,9 +61,13 @@ void DrawHudPanel(CGame& game)
     ImGui::SetItemTooltip("Blank panel when off; hide/restyle the panel itself in ui/hud.rml.");
 
     ImGui::BeginDisabled(!minimap.enabled);
+    ImGui::Checkbox("Auto-fit", &minimap.autoFit);
+    ImGui::SetItemTooltip("Grow the radius to cover the whole sector. Clear it to set one by hand.");
+    ImGui::BeginDisabled(minimap.autoFit);
     ImGui::SetNextItemWidth(220.f);
-    ImGui::DragFloat("World radius", &minimap.worldRadius, 25.f, 500.f, 30000.f, "%.0f");
+    ImGui::DragFloat("World radius", &minimap.worldRadius, 25.f, 500.f, 60000.f, "%.0f");
     ImGui::SetItemTooltip("World units from the map center to the map edge. Default 12000.");
+    ImGui::EndDisabled();
     ImGui::SetNextItemWidth(220.f);
     ImGui::DragFloat("Ship dot (px)", &minimap.shipDotPx, 0.1f, 1.f, 12.f, "%.1f");
     ImGui::SetItemTooltip("Ship dot radius in minimap texture pixels. Default 6.");

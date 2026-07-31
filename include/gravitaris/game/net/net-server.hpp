@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #include <ankerl/unordered_dense.h>
 
@@ -67,12 +68,14 @@ class NetServer {
     };
     ankerl::unordered_dense::map<PeerId, PeerState> m_peers;
 
-    // Round-robins unrequested peers across a small default roster so two
-    // players connecting with no team preference get a free versus match
-    // (the common playtest case) rather than everyone landing on Blue.
-    // Co-op (same team) or anything else is still available by requesting a
-    // team explicitly (ClientHelloPacket::requestedTeam) or via SetPeerTeam.
-    static constexpr TeamId AUTO_ASSIGN_ROSTER[] = {TeamId::Blue, TeamId::Red};
+    // Round-robins unrequested peers across the sides this round actually
+    // fields, so players connecting with no team preference spread out over
+    // them rather than everyone landing on Blue. Defaults to the two-side
+    // case; a server that generated a wider sector calls SetAutoAssignRoster
+    // with Game::GetRoster(). Co-op (same team) or anything else is still
+    // available by requesting a team explicitly
+    // (ClientHelloPacket::requestedTeam) or via SetPeerTeam.
+    std::vector<TeamId> m_autoAssignRoster{TeamId::Blue, TeamId::Red};
     std::size_t m_nextAutoAssign = 0;
 
     // Dead-man timeout: if a welcomed peer hasn't landed a fresh command in
@@ -118,6 +121,13 @@ public:
     // caller decides the cadence (every tick, or every Nth for a lower
     // snapshot rate than the sim's own tick rate).
     void BroadcastSnapshot(std::uint64_t currentTick);
+
+    // The sides unrequested peers are spread across. Ignored if empty, so a
+    // caller can't accidentally leave the server with nowhere to put a peer.
+    void SetAutoAssignRoster(const std::vector<TeamId>& roster)
+    {
+        if (!roster.empty()) m_autoAssignRoster = roster;
+    }
 
     [[nodiscard]] std::size_t PeerCount() const { return m_peers.size(); }
 

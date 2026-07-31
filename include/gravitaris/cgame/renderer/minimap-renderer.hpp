@@ -40,6 +40,13 @@ public:
     struct Params {
         bool enabled = true;
         float worldRadius = 24000.f; // world units from the map center to the map edge
+        // Rewrites worldRadius each frame to whatever actually fits the
+        // sector's bodies -- a generated sector's size is a function of its
+        // seed, so no fixed radius suits every round. Derived from orbit
+        // parameters rather than live positions, so it doesn't breathe as
+        // planets travel. Clear it to take manual control from the debug
+        // panel (the last fitted value stays put as the starting point).
+        bool autoFit = true;
         float shipDotPx = 6.f;      // ship dot radius, minimap texture px
         float playerDotPx = 3.f;    // player marker dot radius, minimap texture px
         float planetMinPx = 4.f;    // floor for a planet ring that'd map below this
@@ -58,6 +65,11 @@ private:
     Magnum::GL::Buffer m_instanceBuffer;
 
     Params m_params;
+
+    // Grows m_params.worldRadius to cover every celestial's furthest reach
+    // from `mapCenter`. Never shrinks within a round -- a body destroyed or
+    // not yet replicated shouldn't snap the whole map to a new scale.
+    void FitToSector(const SceneView& view, const Vector2& mapCenter);
 
 public:
     explicit MinimapRenderer(IFilesystem& filesystem);

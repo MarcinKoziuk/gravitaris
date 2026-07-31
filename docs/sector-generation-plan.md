@@ -145,13 +145,13 @@ with four developed complexes and three AI leaders in the field.
 
 ## S4 — Roster widening (multiplayer + console)
 
-- [ ] `NetServer::AUTO_ASSIGN_ROSTER`
-  (`include/gravitaris/game/net/net-server.hpp:75`) is currently a static
-  `{Blue, Red}`. Drive it from the round's roster so peers round-robin
-  across all four sides.
-- [ ] Team-name parsing covers the whole roster in both places that hold a
-  blue/red-only copy: `gravitaris-server.cpp:90` and
-  `src/cgame/ui/ui.cpp:375`.
+- [x] `NetServer`'s auto-assign roster was a static `{Blue, Red}`; it is now
+  a `m_autoAssignRoster` member fed by `SetAutoAssignRoster`, which
+  `gravitaris-server` calls with `Game::GetRoster()`.
+- [ ] Team-name parsing: **only one copy needed widening** —
+  `gravitaris-server.cpp`'s `ParseTeam` already covered all six colours. The
+  blue/red-only copy is `src/cgame/ui/ui.cpp:375`, and it is really part of
+  S6 (the dropdown it parses is the one S6 rebuilds from the roster).
 
 Done when: four clients joining a server land on four different factions,
 each at its own starting complex.
@@ -175,6 +175,17 @@ Goal: the seed and the round's shape are chosen in the UI, not recompiled.
 The intro dialog already exists and already carries a side-picker
 (`data/ui/main.rml`, `UI::SetIntroConfirmCallback`), so this grows that
 dialog rather than building a new document.
+
+**Ordering problem to solve first** (found during S3): the client builds the
+world *before* showing the dialog, so the dialog sits over the real solar
+system instead of a void (`src/client/gravitaris.cpp`, `BuildWorld` then
+`SetIntroConfirmCallback`). Once the seed comes *from* the dialog that no
+longer works. Three ways out, decide before writing the RML: build a
+throwaway backdrop sector and rebuild on confirm (needs a world teardown
+path that doesn't exist yet); show the dialog over an empty starfield; or
+keep the backdrop and let the dialog only pick a side, moving seed selection
+to a separate pre-round screen. Currently the client passes a default
+`SectorParams{}` and the dialog is unchanged.
 
 - [ ] Callback carries a `RoundSetup { TeamId team; std::uint32_t seed; int
   factionCount; std::string aiPreset; }` instead of a bare `TeamId`.

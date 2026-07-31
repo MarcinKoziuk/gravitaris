@@ -26,8 +26,7 @@
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/net/net-server.hpp>
 #include <gravitaris/game/net/webrtc-server-transport.hpp>
-#include <gravitaris/game/scenario/classic-scenario.hpp>
-#include <gravitaris/game/scenario/starting-complex.hpp>
+#include <gravitaris/game/scenario/sector-scenario.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/gravitaris.hpp>
 
@@ -201,12 +200,24 @@ int main(int argc, char** argv)
 {
     HasEnteredMain = true;
 
-    // gravitaris-server [port] [bind-address]; an empty bind address listens
-    // on every interface.
+    // gravitaris-server [port] [bind-address] [--seed N] [--factions N]
+    // [--stars N]; an empty bind address listens on every interface.
     std::uint16_t port = 17890;
     std::string bindAddress;
-    if (argc > 1) port = static_cast<std::uint16_t>(std::atoi(argv[1]));
-    if (argc > 2) bindAddress = argv[2];
+    SectorParams sectorParams;
+
+    int positional = 0;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        const auto value = [&]() -> long { return (i + 1 < argc) ? std::atol(argv[++i]) : 0L; };
+
+        if (arg == "--seed") sectorParams.seed = static_cast<std::uint32_t>(value());
+        else if (arg == "--factions") sectorParams.factionCount = static_cast<int>(value());
+        else if (arg == "--stars") sectorParams.stars = static_cast<int>(value());
+        else if (positional++ == 0) port = static_cast<std::uint16_t>(std::atoi(arg.c_str()));
+        else bindAddress = arg;
+    }
+    sectorParams.Sanitize();
 
     FilesystemPhysFS fs;
     if (!fs.Init()) {
@@ -215,26 +226,26 @@ int main(int argc, char** argv)
     }
 
     // No local player: Game::Start() would spawn one nobody controls or
-    // replicates meaningfully. BuildClassicScenario alone gives the solar
-    // system (planets, AI ships) without it -- players arrive entirely
-    // through NetServer's ClientHello handling.
+    // replicates meaningfully. BuildWorld alone gives the solar system
+    // (planets, complexes) without it -- players arrive entirely through
+    // NetServer's ClientHello handling.
     Game game(fs);
-    const ClassicScenarioHomes homes = BuildClassicScenario(game.GetEntitySpawner());
-    // One developed complex per side, a sun apart (docs/gravity-well-mode-plan.md
-    // Phase 2) -- per-faction starting planets are Phase 6's job.
-    BuildStartingComplex(game.GetEntitySpawner(), homes.blue, TeamId::Blue);
-    BuildStartingComplex(game.GetEntitySpawner(), homes.red, TeamId::Red);
-    game.SettleScenario();
+    game.BuildWorld(sectorParams);
 
-    // Without this the strategy layer has nothing to iterate: AIStrategy only
-    // ever lands on a faction leader, and Start() -- the single-player path
-    // that fields one -- is exactly what this target skips. Red by default
-    // because console-spawned fodder is Red; `ai <color>` adds more.
-    game.AddAIFaction(TeamId::Red, ID("balanced"));
+    // Every side gets a leader up front: the server can't know which teams
+    // humans will join, and a faction is a team rather than one pilot, so a
+    // joining player flies alongside its leader rather than replacing it.
+    // Without any of these the strategy layer has nothing to iterate --
+    // AIStrategy only ever lands on a faction leader, and Start(), the
+    // single-player path that fields one, is exactly what this target skips.
+    for (TeamId team : game.GetRoster()) {
+        game.AddAIFaction(team, ID("balanced"));
+    }
 
     WebRtcServerTransport transport(port, DefaultIceServers(), bindAddress);
     NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
                      transport);
+    server.SetAutoAssignRoster(game.GetRoster());
 
     LOG(info) << "gravitaris-server: listening on ws://" << (bindAddress.empty() ? "0.0.0.0" : bindAddress)
               << ":" << port;

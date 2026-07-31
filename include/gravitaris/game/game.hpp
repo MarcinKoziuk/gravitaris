@@ -36,6 +36,7 @@
 #include <gravitaris/game/ai/ai-preset-library.hpp>
 #include <gravitaris/game/config/economy-config.hpp>
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
+#include <gravitaris/game/scenario/sector-scenario.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
 namespace Gravitaris {
@@ -130,6 +131,10 @@ protected:
     };
     std::vector<AIFaction> m_aiFactions;
 
+    std::vector<TeamId> m_roster;
+
+    double m_sectorExtent = 0.;
+
     // Deterministic per-(tick, spawn) seed for SpawnRandomAIShip's preset pick
     // (ADR 0001: no std::rand -- it mutates sim state, so it must be
     // reproducible under replay). Incremented per call so repeated presses
@@ -163,13 +168,18 @@ public:
 
     Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner);
 
-    // Builds the scenario -- celestials plus a developed complex per side --
-    // with no combatants in it, so a client can render the world while the
-    // player is still picking a side.
-    void BuildWorld();
+    // Builds a generated sector (docs/sector-generation-plan.md) -- celestials
+    // plus a developed complex per faction -- with no combatants in it, so a
+    // client can render the world while the player is still picking a side.
+    void BuildWorld(const SectorParams& params);
 
-    // Spawns the player on `playerTeam` and an AI faction on the opposing
-    // side. Call after BuildWorld().
+    // The fixed two-sun blue-vs-red arena. Kept alongside generation as the
+    // known-good layout sim-test's proofs run on, so a failing test means the
+    // rule under test broke rather than the seed having moved a planet.
+    void BuildClassicWorld();
+
+    // Spawns the player on `playerTeam` and an AI faction on every other side
+    // this round fields. Call after one of the BuildWorld calls above.
     void SpawnCombatants(TeamId playerTeam);
 
     // Fields a leader for `team` -- the ship that plays the mode rather than
@@ -179,8 +189,16 @@ public:
     // builds its own scenario instead of calling Start().
     void AddAIFaction(TeamId team, id_t preset = 0);
 
-    // BuildWorld() + SpawnCombatants(TeamId::Blue).
+    // BuildClassicWorld() + SpawnCombatants(TeamId::Blue).
     void Start();
+
+    // The sides this round fields, in FACTION_ROSTER order -- set by whichever
+    // BuildWorld call ran. Faction i started at the i'th generated home.
+    [[nodiscard]] const std::vector<TeamId>& GetRoster() const { return m_roster; }
+
+    // World radius covering every celestial, for callers that have to frame
+    // the whole sector (the minimap). Zero until a world is built.
+    [[nodiscard]] double GetSectorExtent() const { return m_sectorExtent; }
 
     // Places every rail-driven body -- orbiting planets, then the structures
     // riding them -- at its real position and velocity. A freshly spawned

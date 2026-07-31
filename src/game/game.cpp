@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -58,14 +59,34 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
     m_economyConfig.Load(m_filesystem);
 }
 
-void Game::BuildWorld()
+void Game::BuildWorld(const SectorParams& params)
+{
+    SectorParams sanitized = params;
+    sanitized.Sanitize();
+
+    const SectorLayout layout = BuildSectorScenario(*m_entitySpawner, sanitized);
+    m_sectorExtent = layout.extent;
+
+    // Faction i of the roster starts at the i'th home the generator picked,
+    // so a seed always hands the same side the same planet.
+    m_roster.assign(FACTION_ROSTER, FACTION_ROSTER + sanitized.factionCount);
+    for (std::size_t i = 0; i < m_roster.size(); ++i) {
+        BuildStartingComplex(*m_entitySpawner, layout.homes[i], m_roster[i]);
+    }
+
+    SettleScenario();
+}
+
+void Game::BuildClassicWorld()
 {
     const ClassicScenarioHomes homes = BuildClassicScenario(*m_entitySpawner);
     // One developed complex per side, a sun apart (docs/gravity-well-mode-plan.md
-    // Phase 2) -- per-faction starting planets are Phase 6's job (sector
-    // generation).
+    // Phase 2).
     BuildStartingComplex(*m_entitySpawner, homes.blue, TeamId::Blue);
     BuildStartingComplex(*m_entitySpawner, homes.red, TeamId::Red);
+
+    m_roster = {TeamId::Blue, TeamId::Red};
+    m_sectorExtent = CLASSIC_SECTOR_EXTENT;
 
     SettleScenario();
 }
@@ -80,9 +101,12 @@ void Game::SpawnCombatants(TeamId playerTeam)
     m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, spawn.pos, playerTeam,
                                             spawn.vel, spawn.rot);
 
-    // The opposing complex gets a leader that plays the mode, not just a
-    // dogfighter. Per-faction presets are U4's round-setup screen.
-    AddAIFaction(playerTeam == TeamId::Blue ? TeamId::Red : TeamId::Blue, ID("balanced"));
+    // Every complex the player isn't flying for gets a leader that plays the
+    // mode, not just a dogfighter. Per-faction presets are U4's round-setup
+    // screen.
+    for (TeamId team : m_roster) {
+        if (team != playerTeam) AddAIFaction(team, ID("balanced"));
+    }
 }
 
 void Game::AddAIFaction(TeamId team, id_t preset)
@@ -99,7 +123,7 @@ void Game::AddAIFaction(TeamId team, id_t preset)
 
 void Game::Start()
 {
-    BuildWorld();
+    BuildClassicWorld();
     SpawnCombatants(TeamId::Blue);
 }
 

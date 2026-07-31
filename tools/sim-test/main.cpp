@@ -16,7 +16,9 @@
 #include <cstdint>
 #include <cstring>
 #include <thread>
+#include <vector>
 
+#include <ankerl/unordered_dense.h>
 #include <chipmunk/chipmunk.h>
 
 #include <gravitaris/game/fs/filesystem-physfs.hpp>
@@ -1583,6 +1585,106 @@ void TestResearch()
     fs.Shutdown();
 }
 
+// docs/sector-generation-plan.md S1/S2: generation is a pure function of the
+// seed, respects its bounds, and hands every faction a home of its own.
+void TestSectorGeneration()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    // Star/planet positions and the home assignment, in spawn order -- the
+    // whole layout as a comparable value.
+    const auto describe = [](Game& game) {
+        std::vector<double> out;
+        game.GetRegistry().each([&](const Transform& t, const Planet&) {
+            out.push_back(t.pos.x());
+            out.push_back(t.pos.y());
+        });
+        std::sort(out.begin(), out.end());
+        return out;
+    };
+
+    SectorParams params;
+    params.seed = 12345;
+    params.factionCount = 4;
+    params.stars = 5;
+
+    Game first(fs);
+    first.BuildWorld(params);
+    const std::vector<double> firstLayout = describe(first);
+
+    Game again(fs);
+    again.BuildWorld(params);
+    Require(describe(again) == firstLayout, "sector: the same seed builds the same layout");
+
+    Game other(fs);
+    SectorParams otherParams = params;
+    otherParams.seed = 999;
+    other.BuildWorld(otherParams);
+    Require(describe(other) != firstLayout, "sector: a different seed builds a different layout");
+
+    // Bounds: `stars` suns, and every sun carrying between min and max
+    // planets. Suns are the celestials without an Orbit.
+    std::size_t stars = 0, planets = 0;
+    ankerl::unordered_dense::map<double, int> perStar;
+    first.GetRegistry().each([&](flecs::entity entity, const Transform& t, const Planet&) {
+        if (const Orbit* orbit = entity.try_get<Orbit>()) {
+            ++planets;
+            // Orbit centers are exact copies of the star position they were
+            // generated from, so this groups planets by their sun without
+            // needing a parent reference.
+            ++perStar[orbit->center.x()];
+        }
+        else {
+            ++stars;
+            (void)t;
+        }
+    });
+    Require(stars == static_cast<std::size_t>(params.stars), "sector: star count matches the parameter");
+    Require(perStar.size() == stars, "sector: every star carries at least one planet");
+    for (const auto& [centerX, count] : perStar) {
+        (void)centerX;
+        Require(count >= params.minPlanetsPerStar && count <= params.maxPlanetsPerStar,
+                "sector: per-star planet count is within bounds");
+    }
+    Require(planets >= perStar.size(), "sector: planets were generated");
+
+    // One home per faction, each with its own developed complex, no two on
+    // the same sun.
+    Require(first.GetRoster().size() == static_cast<std::size_t>(params.factionCount),
+            "sector: the roster fields one side per faction");
+
+    ankerl::unordered_dense::set<double> homeStars;
+    std::size_t homes = 0;
+    for (TeamId team : first.GetRoster()) {
+        flecs::entity home;
+        first.GetRegistry().each([&](flecs::entity entity, const Team& t, const Planet&, const Orbit& orbit) {
+            if (t.id != team || home.is_alive()) return;
+            home = entity;
+            homeStars.insert(orbit.center.x());
+        });
+        Require(home.is_alive(), "sector: every faction owns a home planet");
+        ++homes;
+
+        // BuildStartingComplex hands out all five structure types; finding
+        // the Base is enough to prove the complex went up at this team's home
+        // rather than the roster merely naming a side.
+        bool hasBase = false;
+        first.GetRegistry().each([&](const Structure& s, const Team& t) {
+            if (s.type == StructureType::Base && t.id == team) hasBase = true;
+        });
+        Require(hasBase, "sector: every faction's home carries a starting complex");
+    }
+    Require(homeStars.size() == homes, "sector: no two factions start at the same sun");
+
+    Require(first.GetSectorExtent() > 0., "sector: a real extent is reported for the minimap");
+
+    fs.Shutdown();
+}
+
 // Phase 4's defeat/win rules (FactionSystem): a faction with zero colonies
 // AND zero freighters is defeated; a round is won once every claimed planet
 // belongs to one team. Both are sticky, edge-triggered GameEvents.
@@ -2499,6 +2601,7 @@ int main()
     TestShields();
     TestResearch();
     TestFactionDefeatAndWin();
+    TestSectorGeneration();
     TestOwnBulletSuppression();
     TestTakeoff();
     TestAITactics();
