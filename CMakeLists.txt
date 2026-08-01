@@ -678,8 +678,11 @@ add_executable(GravitarisNG
     include/gravitaris/cgame/renderer/starfield-renderer.hpp
     src/cgame/renderer/starfield-renderer.cpp
     include/gravitaris/cgame/renderer/gl-safe-upload.hpp
+    src/cgame/renderer/detail/line2-batch.hpp
     include/gravitaris/cgame/renderer/minimap-renderer.hpp
     src/cgame/renderer/minimap-renderer.cpp
+    include/gravitaris/cgame/renderer/compass-renderer.hpp
+    src/cgame/renderer/compass-renderer.cpp
     include/gravitaris/cgame/camera.hpp
     include/gravitaris/cgame/camera-director.hpp
     src/cgame/camera-director.cpp

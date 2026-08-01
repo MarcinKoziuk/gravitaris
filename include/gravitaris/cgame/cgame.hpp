@@ -31,6 +31,7 @@
 #include <gravitaris/cgame/renderer/model-renderer2.hpp>
 #include <gravitaris/cgame/renderer/starfield-renderer.hpp>
 #include <gravitaris/cgame/renderer/minimap-renderer.hpp>
+#include <gravitaris/cgame/renderer/compass-renderer.hpp>
 #include <gravitaris/cgame/audio/audio-system.hpp>
 #include <gravitaris/cgame/fx/hit-flash-system.hpp>
 #include <gravitaris/cgame/hud/indicator-renderer.hpp>
@@ -65,6 +66,7 @@ protected:
 
     StarfieldRenderer m_starfieldRenderer;
     MinimapRenderer m_minimapRenderer;
+    CompassRenderer m_compassRenderer;
     AudioSystem m_audioSystem;
     HitFlashSystem m_hitFlashSystem;
     CameraDirector m_cameraDirector;
@@ -133,6 +135,15 @@ protected:
     // single-player and multiplayer differ in exactly this and nothing else,
     // as far as the camera and HUD are concerned (see SceneView).
     [[nodiscard]] SceneView CurrentSceneView();
+
+    // Gravity field at a world point: the same sum PhysicsSystem::ApplyGravity
+    // builds, with the target mass divided back out. Read by the HUD readout,
+    // the compass needle and the camera's trajectory look-ahead.
+    [[nodiscard]] Magnum::Vector2d GravityAt(const Magnum::Vector2d& pos);
+
+    // GravityAt evaluated at the camera subject, in the float vector the
+    // renderers and the camera director speak. Zero when there is no subject.
+    [[nodiscard]] Magnum::Vector2 SubjectGravity();
 
     // Constructed in ConnectToServer once m_netClient exists (RemoteEventApplier
     // needs a live NetClient&) -- always populated by the time ApplyRemoteEvents
@@ -246,11 +257,16 @@ public:
 
     StarfieldRenderer& GetStarfieldRenderer() { return m_starfieldRenderer; }
     MinimapRenderer& GetMinimapRenderer() { return m_minimapRenderer; }
+    CompassRenderer& GetCompassRenderer() { return m_compassRenderer; }
 
     // Renders the minimap into its offscreen texture. Runs its own
     // framebuffer pass, so the app calls it before the glow pass claims the
     // scene target (not from within Render()).
     void RenderMinimap();
+
+    // Same contract as RenderMinimap: its own framebuffer pass, run before the
+    // glow pass claims the scene target.
+    void RenderCompass();
 
     // The solar system is laid out symmetrically around the origin (see
     // Game::BuildWorld), so that's the map's center -- static, not
@@ -304,16 +320,11 @@ public:
     // Speed in world units/s.
     [[nodiscard]] std::optional<float> GetSpeed();
 
-    // Facing as a compass bearing, 0..360 degrees, 0 = world +Y and growing
-    // clockwise -- which is what the minimap and the off-screen arrows already
-    // draw, not flecs' or Chipmunk's counter-clockwise-from-+X convention.
-    [[nodiscard]] std::optional<float> GetHeading();
-
-    // Strength of the gravity field at that unit's position, in world
-    // units/s^2 -- the same sum PhysicsSystem::ApplyGravity builds, with the
-    // target mass divided back out. Reported for any subject, so spectating a
-    // kinematic body shows the field it sits in rather than the acceleration it
-    // (never) picks up from it.
+    // Strength of the gravity field at that unit's position, in multiples of
+    // one planet's surface pull (see SURFACE_GRAVITY) -- the same sum
+    // PhysicsSystem::ApplyGravity builds, with the target mass divided back
+    // out. Reported for any subject, so spectating a kinematic body shows the
+    // field it sits in rather than the acceleration it (never) picks up from it.
     [[nodiscard]] std::optional<float> GetGravityAccel();
 
     // The rack's size, so the sidebar knows how many empty ticks to draw.

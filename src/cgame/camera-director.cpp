@@ -144,13 +144,18 @@ std::optional<Magnum::Vector2> CameraDirector::SelectFramedEnemy(const Magnum::V
 
 void CameraDirector::Update(const SceneView& view, std::optional<flecs::entity> player,
                             const Magnum::Vector2& viewportSize, float dtSeconds,
-                            std::optional<Magnum::Vector2> positionOverride)
+                            std::optional<Magnum::Vector2> positionOverride,
+                            const Magnum::Vector2& gravityAccel)
 {
     if (!m_cameraFollow) {
         // Free-look (see LookAt): nothing steers position or the dynamic zoom,
         // but the wheel must still work, so keep easing toward the manual
         // target -- or hold where we are when the player hasn't scrolled.
         SmoothZoom(m_manualZoomActive ? m_manualZoom : m_cameraZoom, dtSeconds);
+        // Relax the look-ahead while parked, so re-focusing doesn't re-apply
+        // a lead left over from whatever the ship was doing when free-look
+        // began -- that one is stale by however long the player spent looking.
+        m_leadOffset *= std::exp(-dtSeconds / std::max(m_params.leadTau, 1e-3f));
         return;
     }
     if (!player) return;
@@ -247,12 +252,36 @@ void CameraDirector::Update(const SceneView& view, std::optional<flecs::entity> 
     }
     const Magnum::Vector2& enemyOffset = m_framedEnemyOffset;
 
-    // --- Position target: bias toward the enemy when framing, and shrink the
-    //     dead zone so the pair is actually tracked rather than drifting. ---
-    const Magnum::Vector2 posTarget = playerPos + enemyOffset * (m_params.framingBias * m_framingAmount);
-    const float deadZoneFraction =
-            DEAD_ZONE_FRACTION + (DEAD_ZONE_FRACTION_FRAMING - DEAD_ZONE_FRACTION) * m_framingAmount;
+    // --- Look-ahead: lead along the predicted trajectory (see CameraParams). ---
+    // Capped in screen terms, not world ones -- the same world-space lead is a
+    // shove across the view when zoomed in and nothing at all when zoomed out.
     const Magnum::Vector2 halfExtent = viewportSize / (2.f * m_cameraZoom);
+    const float maxLead = std::min(halfExtent.x(), halfExtent.y()) * m_params.leadMaxFraction;
+
+    Magnum::Vector2 leadGoal{0.f, 0.f};
+    if (m_params.lookAhead) {
+        const float t = m_params.leadTime;
+        leadGoal = playerVel * t + gravityAccel * (0.5f * t * t);
+
+        const float leadLength = leadGoal.length();
+        if (leadLength > maxLead) leadGoal *= maxLead / leadLength;
+
+        // Enemy framing owns the pan while it's engaged: two offsets pulling
+        // the same target in different directions just cancel into a jitter.
+        leadGoal *= 1.f - m_framingAmount;
+    }
+    const float leadAlpha = 1.f - std::exp(-dtSeconds / std::max(m_params.leadTau, 1e-3f));
+    m_leadOffset += (leadGoal - m_leadOffset) * leadAlpha;
+    const float leadAmount = std::clamp(m_leadOffset.length() / std::max(maxLead, 1e-3f), 0.f, 1.f);
+
+    // --- Position target: bias toward the enemy when framing, lead along the
+    //     trajectory otherwise, and shrink the dead zone so whichever is
+    //     engaged is actually tracked rather than drifting inside it. ---
+    const Magnum::Vector2 posTarget =
+            playerPos + enemyOffset * (m_params.framingBias * m_framingAmount) + m_leadOffset;
+    float deadZoneFraction =
+            DEAD_ZONE_FRACTION + (DEAD_ZONE_FRACTION_FRAMING - DEAD_ZONE_FRACTION) * m_framingAmount;
+    deadZoneFraction += (DEAD_ZONE_FRACTION_LEAD - deadZoneFraction) * leadAmount;
     m_camera.FollowWithDeadZone(posTarget, halfExtent * deadZoneFraction);
 
     // --- Zoom target. ---
@@ -261,8 +290,10 @@ void CameraDirector::Update(const SceneView& view, std::optional<flecs::entity> 
         // Wheel override: hold exactly at the user's zoom until they fly.
         zoomTarget = m_manualZoom;
     } else if (m_params.dynamicZoom) {
-        // Faster -> zoomed out. Monotone, smooth, bounded.
-        zoomTarget = m_params.maxZoom / (1.f + speed / m_params.speedFalloff);
+        // Faster -> zoomed out. Monotone, smooth, and bounded below by
+        // cruiseZoom rather than decaying toward nothing (see CameraParams).
+        const float cruise = std::min(m_params.cruiseZoom, m_params.maxZoom);
+        zoomTarget = cruise + (m_params.maxZoom - cruise) / (1.f + speed / m_params.speedFalloff);
 
         // Zoom out further if needed to fit every nearby enemy alongside the
         // player (m_framedReach covers the farthest in-range one), fading the

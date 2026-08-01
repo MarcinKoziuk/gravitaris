@@ -32,6 +32,17 @@ namespace Gravitaris {
 
 namespace {
 
+// One planet's worth of pull, in world units/s^2 -- the unit the G readout
+// reports in, so standing on a planet reads 1 rather than a bare 184 that
+// means nothing without knowing the gravity constant. Derived from the
+// standard planet (data/models/planets/simple) at the default gravity
+// multiplier: GRAVITY_CONSTANT * 3.3 * (mass 100000 * multiplier 0.4) /
+// radius^2, radius = the svg's 299.5 at scale 0.4. Retuning that planet or the
+// default multiplier means retuning this, or the readout stops meaning "one
+// planet". The live multiplier deliberately isn't divided back out: cranking
+// gravity to 3x should read 3g.
+constexpr float SURFACE_GRAVITY = 184.f;
+
 // How far behind the estimated server tick remote entities render (see
 // CGame::m_interpDelaySeconds) -- smooths jitter at the cost of latency.
 // Fractional throughout, and fed by the smoothed clock rather than the
@@ -51,6 +62,7 @@ CGame::CGame(IFilesystem &filesystem)
     , m_snapshotApplier(m_mirrorWorld, m_resourceLoader)
     , m_starfieldRenderer(filesystem)
     , m_minimapRenderer(filesystem)
+    , m_compassRenderer(filesystem, m_modelRenderer2)
     , m_audioSystem(m_registry, m_resourceLoader, m_eventQueue, m_upgradeCatalog)
     , m_hitFlashSystem(m_registry, m_eventQueue, *m_entitySpawner)
     , m_cameraDirector(Defaults::cameraZoom)
@@ -117,22 +129,28 @@ std::optional<float> CGame::GetSpeed()
     return static_cast<float>(transf->vel.length());
 }
 
-std::optional<float> CGame::GetHeading()
+Vector2d CGame::GravityAt(const Vector2d& pos)
+{
+    const double strength = PhysicsSystem::GRAVITY_CONSTANT * GetGravityMultiplier();
+
+    Vector2d accel;
+    CurrentSceneView().Each([&](flecs::entity, const GravitySource& gs, const Transform& srcTransf) {
+        const Vector2d d = srcTransf.pos - pos;
+        const double dist2 = d.dot();
+        if (dist2 < 1e-6) return; // the subject itself, or something sitting on it
+        accel += d * (strength * gs.mass * gs.multiplier / (dist2 * std::sqrt(dist2)));
+    });
+    return accel;
+}
+
+Magnum::Vector2 CGame::SubjectGravity()
 {
     const std::optional<flecs::entity> subject = CameraSubject();
-    if (!subject) return std::nullopt;
+    const Transform* transf = subject ? subject->try_get<Transform>() : nullptr;
+    if (!transf) return {};
 
-    const Transform* transf = subject->try_get<Transform>();
-    if (!transf) return std::nullopt;
-
-    // Ships thrust along their local -Y (see ShipControlsSystem::ApplyMovement),
-    // so that -- not local +X -- is the nose.
-    const Vector2d forward{Magnum::Math::sin(transf->rot), -Magnum::Math::cos(transf->rot)};
-
-    // atan2(x, y), not (y, x): measured clockwise from world +Y.
-    const Magnum::Degd bearing{Radd{std::atan2(forward.x(), forward.y())}};
-    const double degrees = double(bearing);
-    return static_cast<float>(degrees < 0.0 ? degrees + 360.0 : degrees);
+    const Vector2d accel = GravityAt(transf->pos);
+    return Magnum::Vector2{static_cast<float>(accel.x()), static_cast<float>(accel.y())};
 }
 
 std::optional<float> CGame::GetGravityAccel()
@@ -143,18 +161,7 @@ std::optional<float> CGame::GetGravityAccel()
     const Transform* transf = subject->try_get<Transform>();
     if (!transf) return std::nullopt;
 
-    const double strength = PhysicsSystem::GRAVITY_CONSTANT * GetGravityMultiplier();
-    const Vector2d pos = transf->pos;
-
-    Vector2d accel;
-    CurrentSceneView().Each([&](flecs::entity, const GravitySource& gs, const Transform& srcTransf) {
-        const Vector2d d = srcTransf.pos - pos;
-        const double dist2 = d.dot();
-        if (dist2 < 1e-6) return; // the subject itself, or something sitting on it
-        accel += d * (strength * gs.mass * gs.multiplier / (dist2 * std::sqrt(dist2)));
-    });
-
-    return static_cast<float>(accel.length());
+    return static_cast<float>(GravityAt(transf->pos).length()) / SURFACE_GRAVITY;
 }
 
 int CGame::GetMissileCapacity() const
@@ -291,6 +298,31 @@ void CGame::RenderMinimap()
     // show up exactly like single-player's real registry entities do.
     const SceneView view = CurrentSceneView();
     m_minimapRenderer.Render(view, MinimapCenter(), subjectPos, camera.GetPosition(), viewHalfExtent);
+}
+
+void CGame::RenderCompass()
+{
+    CompassRenderer::Subject reading;
+    reading.gravity = SubjectGravity();
+
+    const std::optional<flecs::entity> subject = CameraSubject();
+    const Transform* transform = subject ? subject->try_get<Transform>() : nullptr;
+    const Renderable* renderable = subject ? subject->try_get<Renderable>() : nullptr;
+
+    if (transform) {
+        reading.rot = Magnum::Rad{static_cast<float>(double(transform->rot))};
+        reading.velocity = Magnum::Vector2{static_cast<float>(transform->vel.x()),
+                                           static_cast<float>(transform->vel.y())};
+    }
+    if (renderable && renderable->model) {
+        reading.model = renderable->model.Get();
+        reading.modelId = renderable->model.Id();
+    }
+    if (const Team* team = subject ? subject->try_get<Team>() : nullptr) {
+        reading.teamColor = Magnum::Vector3{TeamColor(team->id)};
+    }
+
+    m_compassRenderer.Render(reading);
 }
 
 void CGame::LookAtMapPoint(const Magnum::Vector2& normalized)
@@ -510,7 +542,8 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
     // The smoothed-position override belongs to the own predicted ship alone;
     // a spectated unit's Transform is never reconciled, so it needs none.
     m_cameraDirector.Update(view, CameraSubject(), m_viewportSize, dtSeconds,
-                            IsSpectating() ? std::nullopt : std::optional<Magnum::Vector2>(smoothedPlayerPos));
+                            IsSpectating() ? std::nullopt : std::optional<Magnum::Vector2>(smoothedPlayerPos),
+                            SubjectGravity());
     Camera& camera = m_cameraDirector.GetCamera();
 
     // Decays HitFlash on both worlds; ApplyRemoteEvents above is what sets
@@ -594,7 +627,7 @@ void CGame::Render(double delta)
     }
 
     const SceneView view = CurrentSceneView();
-    m_cameraDirector.Update(view, CameraSubject(), m_viewportSize, dtSeconds);
+    m_cameraDirector.Update(view, CameraSubject(), m_viewportSize, dtSeconds, std::nullopt, SubjectGravity());
     m_hitFlashSystem.Update(dtSeconds);
 
     const Camera& camera = m_cameraDirector.GetCamera();

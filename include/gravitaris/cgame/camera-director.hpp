@@ -25,11 +25,13 @@ public:
     // Tunables for the camera director (exposed in the Camera debug tab).
     struct CameraParams {
         bool dynamicZoom = true;
-        // Both halved when the celestial bodies doubled in size: the whole
-        // speed-driven curve is maxZoom/(1 + speed/speedFalloff), so scaling
-        // the ends keeps the same amount of world on screen as before.
-        float minZoom = 0.25f;      // most zoomed-out (fast / framing) end
+        // The speed curve runs from maxZoom at rest down toward cruiseZoom,
+        // which it approaches but never crosses. That floor is the speed
+        // term's alone, which is what lets minZoom stay wide enough for the
+        // planet/enemy fits below without a fast ship shrinking to a speck.
+        float minZoom = 0.25f;      // hard clamp -- only the zoom-out-to-fit paths reach this far
         float maxZoom = 2.5f;       // most zoomed-in (at rest) end
+        float cruiseZoom = 0.6f;    // asymptote of the speed curve: as small as speed alone makes the ship
         float speedFalloff = 220.f; // world units/sec at which zoom noticeably backs off
         float zoomTau = 2.f;        // zoom smoothing time constant (s), for the dynamic (speed/framing) target
         float manualZoomTau = 0.25f;// zoom smoothing time constant (s), for a wheel-driven target -- snappier
@@ -61,6 +63,16 @@ public:
         // speed/framing zoom-out only at point-blank range.
         float closeZoomRange = 320.f;    // enemy distance under which the zoom-in ramps
         float closeZoomFraction = 0.7f;  // fraction of maxZoom reached at contact (not 1 = "not fully")
+
+        // Look-ahead: lead the follow target along the ship's predicted path,
+        // so the screen fills with where it is going instead of where it has
+        // been. Second order (pos + v*t + a*t^2/2) rather than straight-line
+        // velocity: at speed near a gravity well the path is an arc, and a
+        // linear lead points off it exactly when the view matters most.
+        bool lookAhead = true;
+        float leadTime = 1.1f;         // seconds of trajectory to lead by
+        float leadMaxFraction = 0.55f; // cap on the lead, as a fraction of the visible half-extent
+        float leadTau = 0.7f;          // smoothing (s) for the lead vector -- a turn must not swing the view
     };
 
 private:
@@ -73,9 +85,12 @@ private:
     // Dead-zone half-size as a fraction of the visible half-extent: the ship
     // roams the central (2*fraction) of the view before the camera follows.
     // Shrinks toward FRAMING while an enemy is being framed so the view tracks
-    // the pair instead of letting it drift in the dead zone.
+    // the pair instead of letting it drift in the dead zone, and toward LEAD
+    // as look-ahead engages -- a dead zone wider than the lead would simply
+    // swallow it, leaving the ship centred and the lead invisible.
     static constexpr float DEAD_ZONE_FRACTION = 0.35f;
     static constexpr float DEAD_ZONE_FRACTION_FRAMING = 0.08f;
+    static constexpr float DEAD_ZONE_FRACTION_LEAD = 0.12f;
 
     // Camera director state (see Update). m_cameraZoom is the smoothed zoom
     // actually applied to the camera each frame. The wheel writes m_manualZoom
@@ -128,6 +143,12 @@ private:
     // same way m_framingAmount is, so both blend in/out without snapping.
     float m_planetFramingAmount = 0.f;
     float m_closeZoomAmount = 0.f;
+
+    // Eased look-ahead offset (world units) added to the follow target. Eased
+    // for the same reason m_framedEnemyOffset is: the raw trajectory lead
+    // reverses the instant the player flips to retro-thrust, and feeding that
+    // straight to FollowWithDeadZone would whip the view across the ship.
+    Magnum::Vector2 m_leadOffset{0.f, 0.f};
 
     // A rival enemy must be closer than (this * current target's distance)
     // to steal the framing. Exit hysteresis: the current target is kept
@@ -200,8 +221,15 @@ public:
     // easily mistaken for) network lag in synced enemy/planet data. The
     // caller is expected to pass an already-smoothed position instead (see
     // CGame::m_visualCorrectionOffset).
+    //
+    // `gravityAccel` is the gravity field at the player, in world units/s^2 --
+    // the second-order term of the look-ahead lead. The caller supplies it
+    // because summing it means knowing the gravity constant and multiplier,
+    // which are the sim's business, not the camera's (see CGame::GravityAt).
+    // Zero is a safe value: the lead degrades to plain straight-line velocity.
     void Update(const SceneView& view, std::optional<flecs::entity> player, const Magnum::Vector2& viewportSize,
-               float dtSeconds, std::optional<Magnum::Vector2> positionOverride = std::nullopt);
+               float dtSeconds, std::optional<Magnum::Vector2> positionOverride = std::nullopt,
+               const Magnum::Vector2& gravityAccel = {});
 };
 
 } // namespace Gravitaris

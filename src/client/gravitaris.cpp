@@ -200,6 +200,8 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
 
     m_ui.RegisterLiveTexture("minimap", m_game->GetMinimapRenderer().TextureId(),
                              MinimapRenderer::TextureSize().x(), MinimapRenderer::TextureSize().y());
+    m_ui.RegisterLiveTexture("compass", m_game->GetCompassRenderer().TextureId(),
+                             CompassRenderer::TextureSize().x(), CompassRenderer::TextureSize().y());
 
     m_ui.SetIntroConfirmCallback([this](TeamId team) { StartSession(team); });
     // Reseeding only makes sense for a world this process owns; a connected
@@ -396,7 +398,7 @@ void GravitarisApplication::RefreshHudReadout()
     }
 
     m_ui.SetHudStatus(BuildInfoString(), pingText);
-    m_ui.SetHudTelemetry(m_game->GetSpeed(), m_game->GetHeading(), m_game->GetGravityAccel());
+    m_ui.SetHudTelemetry(m_game->GetSpeed(), m_game->GetGravityAccel());
 }
 
 // One command for the tick Update() is about to run: keyboard, autopilot and
@@ -492,6 +494,7 @@ void GravitarisApplication::drawEvent()
     {
         ScopedPerfTimer timer(perf, "Minimap");
         m_game->RenderMinimap();
+        m_game->RenderCompass();
     }
 
     // Game renders into the glow pass's offscreen target, not the screen,

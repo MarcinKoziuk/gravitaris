@@ -88,6 +88,42 @@ void DrawHudPanel(CGame& game)
     ImGui::Checkbox("Show view rectangle", &minimap.showViewRect);
     ImGui::SetItemTooltip("Outline the main camera's visible extent on the map.");
     ImGui::EndDisabled();
+
+    CompassRenderer::Params& compass = game.GetCompassRenderer().GetParams();
+
+    ImGui::SeparatorText("Compass");
+    ImGui::Checkbox("Compass enabled", &compass.enabled);
+    ImGui::SetItemTooltip("Blank panel when off; hide/restyle the panel itself in ui/hud.rml.");
+
+    ImGui::BeginDisabled(!compass.enabled);
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Ship fit", &compass.shipFit, 0.2f, 0.95f, "%.2f");
+    ImGui::SetItemTooltip("Ship's bounding radius in the dial's -1..1 space; the ring sits at 0.8. "
+                          "Default 0.6.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Stroke width", &compass.lineWidth, 1.f, 12.f, "%.1f");
+    ImGui::SetItemTooltip("Stroke width in texture pixels, before the panel downsamples the 128px dial to "
+                          "its on-screen size (~3x). Default 5.");
+
+    ImGui::Checkbox("Velocity marker", &compass.showVelocity);
+    ImGui::SetItemTooltip("Amber dot on the ring showing which way the ship is actually travelling, as "
+                          "opposed to which way it points.");
+    ImGui::BeginDisabled(!compass.showVelocity);
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Min speed", &compass.minSpeed, 0.5f, 0.f, 200.f, "%.0f");
+    ImGui::SetItemTooltip("Speed below which the velocity marker is dropped -- the direction of a near-zero "
+                          "vector is noise. Default 8.");
+    ImGui::EndDisabled();
+
+    ImGui::Checkbox("Gravity marker", &compass.showGravity);
+    ImGui::SetItemTooltip("Red dot on the ring showing which way the field pulls -- 'down', for a sector "
+                          "that has no one down. Off by default.");
+    ImGui::BeginDisabled(!compass.showGravity);
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Min gravity", &compass.minGravity, 0.05f, 0.f, 20.f, "%.2f");
+    ImGui::SetItemTooltip("Field strength below which the gravity marker is dropped. Default 0.4.");
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
 }
 
 } // namespace Gravitaris

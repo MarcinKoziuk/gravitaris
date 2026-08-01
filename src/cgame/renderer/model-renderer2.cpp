@@ -307,6 +307,38 @@ void ModelRenderer2::SubmitOverlay(id_t modelId, const Matrix3& transform, const
     m_overlayScratch[modelId].push_back(InstanceData{transform, color, flash});
 }
 
+void ModelRenderer2::RenderStandalone(id_t modelId, const Matrix3& transform, const Matrix3& viewProjection,
+                                      const Vector2& viewportSizePx, float lineWidthPx,
+                                      const Vector3& teamColor)
+{
+    const auto bakedGroupsIt = m_baked.find(modelId);
+    if (bakedGroupsIt == m_baked.end()) return;
+    const auto bakedIt = bakedGroupsIt->second.find(OVERLAY_TAG);
+    if (bakedIt == bakedGroupsIt->second.end()) return;
+    BakedGroup& baked = bakedIt->second;
+
+    // Shares the group's instance buffer with RenderTag above. Safe because
+    // both upload immediately before their own draw -- neither leaves state
+    // the other reads.
+    const InstanceData instance{transform, teamColor, 0.f};
+    if (unsigned long ex = SafeUpload(baked.instanceBuffer, &instance, sizeof(instance))) {
+        LOG(error) << "[MR2] standalone instance upload raised exception 0x" << std::hex << ex
+                   << " for model " << modelId;
+        return;
+    }
+
+    GL::Renderer::enable(GL::Renderer::Feature::Blending);
+    GL::Renderer::setBlendFunction(GL::Renderer::BlendFunction::SourceAlpha,
+                                    GL::Renderer::BlendFunction::OneMinusSourceAlpha);
+
+    m_shader.setViewportSize(viewportSizePx)
+            .setViewProjection(viewProjection)
+            .setWidth(lineWidthPx);
+
+    baked.mesh.setInstanceCount(1);
+    m_shader.draw(baked.mesh);
+}
+
 void ModelRenderer2::RenderTag(id_t tag, const std::function<bool(flecs::entity)>& filter)
 {
     for (auto& [modelId, instances] : m_instanceScratch) instances.clear();

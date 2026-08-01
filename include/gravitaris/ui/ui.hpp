@@ -87,10 +87,8 @@ private:
     int m_missileAmmo = -2; // no valid count, not even "no subject" (-1)
 
     Rml::Element* m_speedReadout = nullptr;
-    Rml::Element* m_headingReadout = nullptr;
     Rml::Element* m_gwellReadout = nullptr;
     std::string m_speedText;
-    std::string m_headingText;
     std::string m_gwellText;
 
     // Whichever document owns focus; compared against so the class is only
@@ -166,12 +164,12 @@ public:
     // Unchanged values are ignored, so calling it every frame is fine.
     void SetMissileAmmo(int ammo, int capacity);
 
-    // Sidebar telemetry row: speed in world units/s, heading as a 0..360
-    // bearing, and gravity field strength in units/s^2. An empty optional
-    // blanks that cell. Repeated identical text is ignored, so calling it every
-    // frame is fine.
-    void SetHudTelemetry(std::optional<float> speed, std::optional<float> heading,
-                         std::optional<float> gravityAccel);
+    // Sidebar telemetry row: speed in world units/s and gravity field strength
+    // in multiples of a planet's surface pull. Heading has no cell of its own
+    // -- the compass dial between the two is the heading readout. An empty
+    // optional blanks that cell. Repeated identical text is ignored, so calling
+    // it every frame is fine.
+    void SetHudTelemetry(std::optional<float> speed, std::optional<float> gravityAccel);
 
     // Shield charge, 0..1. `styleClass` is an RCSS class toggled on the bar
     // to colour it per emitter type ("" for the default) -- a class name

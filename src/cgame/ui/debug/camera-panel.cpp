@@ -25,10 +25,15 @@ void DrawCameraPanel(CGame& game)
     ImGui::BeginDisabled(!params.dynamicZoom);
     ImGui::SetNextItemWidth(220.f);
     ImGui::DragFloatRange2("Zoom range", &params.minZoom, &params.maxZoom, 0.01f, 0.1f, 10.f, "%.2f");
-    ImGui::SetItemTooltip("min = fastest / framing (most zoomed out), max = at rest (most zoomed in). Default 0.5-5.");
+    ImGui::SetItemTooltip("min = hard clamp, reached only by the planet/enemy zoom-out-to-fit; max = at rest "
+                          "(most zoomed in). Speed alone stops at Cruise zoom below. Default 0.25-2.5.");
     ImGui::SetNextItemWidth(220.f);
     ImGui::DragFloat("Speed falloff", &params.speedFalloff, 1.f, 20.f, 420.f, "%.0f");
     ImGui::SetItemTooltip("World units/sec at which the zoom noticeably backs off. Default 220.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Cruise zoom", &params.cruiseZoom, 0.1f, 2.f, "%.2f");
+    ImGui::SetItemTooltip("Floor of the speed curve -- however fast you fly, speed alone won't zoom out past "
+                          "this. Lower = tinier ship at speed. Default 0.6.");
     ImGui::EndDisabled();
 
     ImGui::SetNextItemWidth(220.f);
@@ -44,6 +49,24 @@ void DrawCameraPanel(CGame& game)
     ImGui::SetNextItemWidth(220.f);
     ImGui::SliderFloat("Wheel hold (s)", &params.manualHold, 0.f, 10.f, "%.1f");
     ImGui::SetItemTooltip("Grace period after a wheel nudge before flying the ship cancels the manual zoom. Default 5.");
+
+    ImGui::SeparatorText("Look-ahead");
+    ImGui::Checkbox("Lead along trajectory", &params.lookAhead);
+    ImGui::SetItemTooltip("Offset the view along the ship's predicted path (velocity plus gravity), so the "
+                          "screen shows what's coming rather than what's behind.");
+    ImGui::BeginDisabled(!params.lookAhead);
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Lead time (s)", &params.leadTime, 0.f, 4.f, "%.2f");
+    ImGui::SetItemTooltip("Seconds of trajectory to lead by. Default 1.1.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Lead cap", &params.leadMaxFraction, 0.f, 0.9f, "%.2f");
+    ImGui::SetItemTooltip("Cap on the lead, as a fraction of the visible half-extent -- 0.5 puts the ship on "
+                          "the trailing edge at full lead. Default 0.55.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Lead smoothing (s)", &params.leadTau, 0.05f, 2.4f, "%.2f");
+    ImGui::SetItemTooltip("Time constant for easing the lead vector. Low values let a turn swing the view. "
+                          "Default 0.7.");
+    ImGui::EndDisabled();
 
     ImGui::SeparatorText("Enemy framing");
     ImGui::Checkbox("Frame nearby enemy", &params.enemyFraming);

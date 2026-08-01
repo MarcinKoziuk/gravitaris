@@ -164,6 +164,8 @@
 			div#telemetry
 			{
 				display: flex;
+				align-items: center;    /* the dial is taller than the text
+				                           cells; centre them against it */
 				padding-top: 14dp;
 				border-top-width: 1dp;
 				border-top-color: #0cf3;
@@ -185,6 +187,17 @@
 			{
 				font-size: 16dp;
 				color: #cff;
+			}
+
+			/* The heading gauge, standing in for the HDG number it replaced,
+			   between SPD and G. Square, so the ring stays a circle; a little
+			   taller than the text cells either side, and no more. */
+			img#compass
+			{
+				display: block;
+				width: 44dp;
+				height: 44dp;
+				margin: 0 auto;
 			}
 
 			/* Build identity on top, the ping under it. Both come from the
@@ -369,8 +382,7 @@
 						<div class="v readout" id="speed_readout">--</div>
 					</div>
 					<div class="telemetry_cell">
-						<div class="k">HDG</div>
-						<div class="v readout" id="heading_readout">--</div>
+						<img id="compass" src="live://compass"/>
 					</div>
 					<div class="telemetry_cell">
 						<div class="k">G</div>

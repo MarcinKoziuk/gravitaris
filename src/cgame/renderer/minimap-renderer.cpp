@@ -21,9 +21,17 @@
 #include <gravitaris/cgame/renderer/gl-safe-upload.hpp>
 #include <gravitaris/cgame/renderer/minimap-renderer.hpp>
 
+#include "detail/line2-batch.hpp"
+
 namespace Gravitaris {
 
 using namespace Magnum;
+
+using Line2Batch::LineVertex;
+using Line2Batch::InstanceData;
+using Line2Batch::EmitBillboard;
+using Line2Batch::EmitSegment;
+using Line2Batch::PRIM_RING;
 
 namespace {
 
@@ -47,56 +55,6 @@ const Vector3 PLAYER_COLOR{1.f, 1.f, 1.f};
 // "commerce is neutral" rule (docs/gravity-well-1997.md), and it keeps the
 // map's team colors meaning "combat" at a glance.
 const Vector3 FREIGHTER_COLOR{0.45f, 0.5f, 0.55f};
-
-// Must match Line2Shader's vertex layout (same contract as ModelRenderer2's
-// baked geometry; the shader doesn't care that this one is rebuilt per frame).
-struct LineVertex {
-    Vector2 pointA;
-    Vector2 pointB;
-    Vector2 pointC;
-    Vector4 param; // xyz weights, w = type (0 segment, 2 ring, 4 disc fill)
-    Vector3 color;
-    float teamWeight;
-};
-
-// Matches Line2Shader's per-instance layout; the minimap draws exactly one
-// identity instance (colors are baked per vertex instead).
-struct InstanceData {
-    Matrix3 transform;
-    Vector3 teamColor;
-    float flash;
-};
-
-constexpr float PRIM_SEGMENT = 0.f;
-constexpr float PRIM_RING = 2.f;
-constexpr float PRIM_DISC = 4.f;
-
-constexpr Vector2 CIRCLE_QUAD[] = {
-        {-1.f, -1.f}, {1.f, -1.f}, {1.f, 1.f},
-        {-1.f, -1.f}, {1.f, 1.f},  {-1.f, 1.f},
-};
-
-constexpr Vector2 SEGMENT_WEIGHTS[] = {
-        {0.f, -0.5f}, {1.f, -0.5f}, {1.f, 0.5f},
-        {0.f, -0.5f}, {1.f, 0.5f},  {0.f, 0.5f},
-};
-
-void EmitBillboard(std::vector<LineVertex>& out, const Vector2& center, float radius,
-                   const Vector3& color, float prim)
-{
-    const Vector2 radiusCarrier{radius, 0.f};
-    for (const Vector2& corner : CIRCLE_QUAD) {
-        out.push_back(LineVertex{center, radiusCarrier, Vector2{},
-                                 Vector4{corner.x(), corner.y(), 0.f, prim}, color, 0.f});
-    }
-}
-
-void EmitSegment(std::vector<LineVertex>& out, const Vector2& a, const Vector2& b, const Vector3& color)
-{
-    for (const Vector2& w : SEGMENT_WEIGHTS) {
-        out.push_back(LineVertex{a, b, Vector2{}, Vector4{w.x(), w.y(), 0.f, PRIM_SEGMENT}, color, 0.f});
-    }
-}
 
 // A point-down outline triangle of circumradius `radius`. Built from three
 // segments rather than a new shader primitive: Line2Shader only knows
