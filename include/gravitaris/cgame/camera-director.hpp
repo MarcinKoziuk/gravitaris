@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <optional>
 
 #include <flecs.h>
@@ -174,6 +175,19 @@ public:
     void LookAt(const Magnum::Vector2& position)
     {
         m_camera.SetPosition(position);
+        m_cameraFollow = false;
+    }
+
+    // Parks the camera showing a whole region at once -- the setup screen's
+    // view of the sector it just generated, where there is no subject to
+    // follow yet. Like LookAt, this leaves the director idle, so the framing
+    // holds until FocusSubject() re-engages it.
+    void FrameRegion(const Magnum::Vector2& center, float radius, const Magnum::Vector2& viewportSize)
+    {
+        const float span = std::min(viewportSize.x(), viewportSize.y());
+        m_cameraZoom = span / (2.f * std::max(radius, 1.f));
+        m_camera.SetZoom(m_cameraZoom);
+        m_camera.SetPosition(center);
         m_cameraFollow = false;
     }
 

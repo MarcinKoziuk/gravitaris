@@ -243,6 +243,11 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
                                 ? m_game->GetRoster()
                                 : std::vector<TeamId>(std::begin(FACTION_ROSTER), std::end(FACTION_ROSTER)));
 
+    // Show the sector the dialog is about to send the player into. Without
+    // this the camera sits at the origin at flying zoom, where a generated
+    // sector has nothing to see -- the dialog would float over empty space.
+    if (m_connectUrl.empty()) m_game->FrameSector();
+
     m_glow = std::make_unique<GlowPostProcess>(m_filesystem);
 
     // Dev overlay (hidden until F1). UI size in logical points; framebuffer
@@ -342,12 +347,17 @@ void GravitarisApplication::ApplySectorSeed(std::uint32_t seed)
 
     m_ui.SetSeedDisplay(m_sectorParams.seed);
     m_ui.SetTeamOptions(m_game->GetRoster());
+    m_game->FrameSector();
 }
 
 void GravitarisApplication::StartSession(TeamId team)
 {
     if (m_connectUrl.empty()) m_game->SpawnCombatants(team);
     else m_game->ConnectToServer(m_connectUrl, team);
+
+    // Hand the camera back to the director: the sector-wide framing was for
+    // the dialog, and there is a ship to follow now.
+    m_game->FocusCamera();
 }
 
 void GravitarisApplication::UpdateUi()

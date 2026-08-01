@@ -5,6 +5,7 @@
 #include <string>
 
 #include <RmlUi/Core.h>
+#include <RmlUi/Core/Elements/ElementFormControlSelect.h>
 #include <RmlUi/Debugger.h>
 
 #include <gravitaris/ui/ui.hpp>
@@ -385,20 +386,21 @@ void UI::SetTeamOptions(const std::vector<TeamId>& teams)
 {
     if (!m_document || teams.empty()) return;
 
-    Rml::Element* select = m_document->GetElementById("team_select");
+    // Must go through the select's own API: it keeps an option list beside
+    // the DOM, so SetInnerRML adds to it rather than replacing it and the
+    // roster stacks up on every rebuild.
+    auto* select = rmlui_dynamic_cast<Rml::ElementFormControlSelect*>(m_document->GetElementById("team_select"));
     if (!select) return;
 
     // The picked side has to stay valid: a roster that no longer offers it
     // would leave m_introTeam naming a faction with no complex to launch from.
     if (std::find(teams.begin(), teams.end(), m_introTeam) == teams.end()) m_introTeam = teams.front();
 
-    Rml::String options;
+    select->RemoveAll();
     for (TeamId team : teams) {
-        const char* value = TeamOptionValue(team);
-        options += Rml::CreateString("<option value=\"%s\"%s>%s</option>", value,
-                                     team == m_introTeam ? " selected" : "", TeamLabel(team));
+        const int index = select->Add(TeamLabel(team), TeamOptionValue(team));
+        if (team == m_introTeam) select->SetSelection(index);
     }
-    select->SetInnerRML(options);
 }
 
 void UI::SetMinimapClickCallback(std::function<void(float, float)> callback)

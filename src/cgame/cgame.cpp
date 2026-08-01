@@ -292,6 +292,18 @@ void CGame::LookAtMapPoint(const Magnum::Vector2& normalized)
     m_cameraDirector.LookAt(MinimapCenter() + normalized * worldRadius);
 }
 
+void CGame::FrameSector()
+{
+    // A little wider than the extent so the outermost orbit isn't drawn
+    // flush against the screen edge.
+    static constexpr float MARGIN = 1.1f;
+
+    const float extent = static_cast<float>(GetSectorExtent());
+    if (extent <= 0.f) return;
+
+    m_cameraDirector.FrameRegion(MinimapCenter(), extent * MARGIN, m_viewportSize);
+}
+
 void CGame::ConnectToServer(const std::string& wsUrl, TeamId requestedTeam)
 {
     m_netTransport = std::make_unique<WebRtcTransport>(WebRtcTransport::Role::Offerer);
