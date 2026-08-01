@@ -38,6 +38,11 @@ static const char* TeamLabel(TeamId team);
 static void Assign(Rml::Element* element, std::string& cached, std::optional<float> value,
                    const char* format);
 
+// Markup-safe rendering of text somebody typed: SetInnerRML parses what it is
+// given, so an unescaped '<' from another player is markup running inside the
+// HUD.
+static std::string EscapeRml(const std::string& text);
+
 namespace {
 
 // Routes one element's event to a std::function, so the handlers can live as
@@ -114,6 +119,10 @@ bool UI::Init()
         m_shieldFill = hud->GetElementById("shield_fill");
         m_shieldValue = hud->GetElementById("shield_value");
         m_shieldSegments = hud->GetElementById("shield_segments");
+        m_chatLog = hud->GetElementById("chat_log");
+        m_chatInput = hud->GetElementById("chat_input");
+        m_researchFill = hud->GetElementById("research_fill");
+        m_researchValue = hud->GetElementById("research_value");
         m_upgradeDraft = hud->GetElementById("upgrade_draft");
         m_upgradeOffers = hud->GetElementById("upgrade_offers");
         m_minimap = hud->GetElementById("minimap");
@@ -368,6 +377,58 @@ void UI::SetShieldSegments(const std::vector<float>& charges)
     m_shieldSegments->SetInnerRML(markup);
 }
 
+void UI::SetChatLog(const std::vector<ChatLineView>& lines)
+{
+    if (!m_chatLog) return;
+    if (lines == m_shownChat) return;
+
+    m_shownChat = lines;
+
+    std::string markup;
+    for (const ChatLineView& line : lines) {
+        markup += "<div class=\"chat_line\"><span class=\"chat_sender\" style=\"color: "
+                  + line.senderColor + ";\">" + EscapeRml(line.sender) + "</span> "
+                  + EscapeRml(line.text) + "</div>";
+    }
+    m_chatLog->SetInnerRML(markup);
+}
+
+void UI::SetChatInput(bool active, const std::string& text)
+{
+    if (!m_chatInput) return;
+    if (active == m_chatInputActive && text == m_shownChatInput) return;
+
+    m_chatInputActive = active;
+    m_shownChatInput = text;
+
+    m_chatInput->SetClass("active", active);
+    m_chatInput->SetInnerRML(active ? "say: " + EscapeRml(text) + "_" : "");
+}
+
+void UI::SetResearchReadout(float fraction, const std::string& text)
+{
+    if (!m_researchFill || !m_researchValue) return;
+
+    const float quantised =
+            fraction < 0.f ? -1.f : std::round(std::clamp(fraction, 0.f, 1.f) * 100.f) / 100.f;
+    if (quantised == m_researchFraction && text == m_researchText) return;
+
+    m_researchFraction = quantised;
+    m_researchText = text;
+
+    if (quantised < 0.f) {
+        m_researchFill->SetProperty("width", "0%");
+        m_researchFill->SetClass("ready", false);
+        m_researchValue->SetInnerRML("--");
+        return;
+    }
+
+    const int percent = static_cast<int>(std::lround(quantised * 100.f));
+    m_researchFill->SetProperty("width", std::to_string(percent) + "%");
+    m_researchFill->SetClass("ready", quantised >= 1.f);
+    m_researchValue->SetInnerRML(text);
+}
+
 void UI::SetUpgradeOffers(const std::vector<UpgradeOfferView>& offers)
 {
     if (!m_upgradeDraft || !m_upgradeOffers) return;
@@ -547,6 +608,21 @@ static void Assign(Rml::Element* element, std::string& cached, std::optional<flo
     if (text == cached) return;
     cached = std::move(text);
     element->SetInnerRML(cached);
+}
+
+static std::string EscapeRml(const std::string& text)
+{
+    std::string out;
+    out.reserve(text.size());
+    for (const char c : text) {
+        switch (c) {
+            case '&': out += "&amp;"; break;
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            default: out += c;
+        }
+    }
+    return out;
 }
 
 void UI::HandleMinimapPoint(Rml::Event& event)

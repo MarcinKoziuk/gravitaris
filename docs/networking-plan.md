@@ -2231,6 +2231,33 @@ Worth knowing for tuning, not fixed here: `CGame` applies a 0.667 weight
 multiplier to the *player* ship only, and toughness is `mass x hp` — so at
 equal health a player is ranked weaker than any AI ship and loses the ram.
 
+## Text chat (2026-08-01, protocol v5)
+
+Two packets, both reliable: `ChatSend {text}` client→server and
+`ChatMessage {sender, team, text}` server→every welcomed peer. Global for now;
+a team channel is a flag on `ChatSend` and a filter in
+`NetServer::BroadcastChat`.
+
+Deliberately *not* sim state — chat carries no tick, emits no `GameEvent`, and
+never enters a snapshot or a replay. It is client↔server messaging that happens
+to travel on the same transport, which is why the blip is played by
+`AudioSystem::PlayChatBlip()` directly rather than off the event queue.
+
+The sender's own line is **not** echoed locally: it comes back off the server
+like everyone else's, so every peer sees one order and attribution is the
+server's (from `ClientHello`'s name) rather than a claim in the packet.
+Single-player has no server, so `CGame::SubmitChat` appends the line itself
+there — the one place the two paths differ. Length is capped at
+`MAX_CHAT_TEXT` by the composer, by the writer, and again by the server, and
+`ui/`'s log escapes what it renders (`SetInnerRML` parses markup, so an
+unescaped `<` from another player would run inside the HUD).
+
+Composition lives in `GravitarisApplication` (`m_chatActive`), not in an RmlUi
+text field: while it's up, *every* key goes to the draft and none reach the
+ship — a property of that switch rather than of whichever element holds UI
+focus. Opening it clears the held movement flags, since the key-ups land while
+chat owns the keyboard.
+
 ## Invariants checklist (apply to EVERY gameplay PR from now on)
 
 - No wall-clock, no `std::rand`, no iteration-order dependence in `game/`.

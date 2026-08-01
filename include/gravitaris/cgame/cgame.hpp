@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <deque>
 #include <optional>
 #include <string>
 #include <utility>
@@ -114,6 +115,13 @@ protected:
 
     void ReconcileOwnShipIfNeeded();
 
+    // Moves whatever the server sent into m_chatLog and drops expired lines.
+    // Called from Render, so chat keeps flowing on both the net-client and
+    // single-player paths.
+    void DrainChat();
+
+    void PushChatLine(std::string sender, TeamId team, std::string text);
+
     // Draws a filled team-colored square at the center of every owned planet
     // (Team != None) in `world`, via `renderer`'s overlay path -- immediate
     // conquest feedback, matching the original's claimed-planet marker (see
@@ -127,6 +135,26 @@ protected:
     // up, how bright, and in what color are questions about a ship's loadout,
     // so the style callbacks live here rather than in the renderer.
     [[nodiscard]] std::vector<ModelRenderer2::ExtraPass> ShieldPasses();
+
+public:
+    // Text chat, global for now (a team channel is a flag on the wire and a
+    // filter server-side; see ChatSendPacket). Every line the HUD shows comes
+    // from the server in multiplayer -- including your own, so nobody sees a
+    // different order than anybody else -- and locally in single-player.
+    struct ChatLine {
+        std::string sender;
+        TeamId team = TeamId::None;
+        std::string text;
+    };
+
+protected:
+    static constexpr std::size_t CHAT_LOG_LINES = 6;
+    static constexpr float CHAT_LINE_LIFETIME = 14.f;
+    struct TimedChatLine {
+        ChatLine line;
+        float arrivedAt = 0.f; // m_renderTimeSeconds, so it ages on wall clock
+    };
+    std::deque<TimedChatLine> m_chatLog;
 
     // Unit the camera is following instead of the own ship; empty = not
     // spectating. May live in either world (see CycleSpectate).
@@ -360,6 +388,27 @@ public:
         std::uint8_t maxLevel = 1; // 0 for a repeatable restock
     };
     [[nodiscard]] std::vector<UpgradeOffer> GetUpgradeOffers();
+
+    // The player faction's research bar, read off its Labs (FactionState is
+    // server-only; ResearchSystem mirrors the pooled state onto each Lab).
+    // Empty when that side holds no lab at all -- a stalled bar and no lab to
+    // advance it are different things, and the sidebar says so.
+    struct ResearchReadout {
+        float progress = 0.f;        // 0..1
+        float secondsRemaining = 0.f;
+        int labs = 0;
+        bool ready = false; // an upgrade is waiting to be collected
+    };
+    [[nodiscard]] std::optional<ResearchReadout> GetResearchReadout();
+
+    // Sends a composed line. Blank (or whitespace-only) input is ignored, so
+    // pressing enter twice costs nothing.
+    void SubmitChat(const std::string& text);
+
+    // The lines still worth drawing, oldest first: the newest CHAT_LOG_LINES,
+    // each until it ages out (chat is an overlay on the game view, not a
+    // window, so it has to get out of the way on its own).
+    [[nodiscard]] std::vector<ChatLine> GetChatLog() const;
 
     void ToggleCameraFollow() { m_cameraDirector.ToggleCameraFollow(); }
 

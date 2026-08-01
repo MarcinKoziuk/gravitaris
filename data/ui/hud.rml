@@ -166,7 +166,45 @@
 				height: 100%;
 			}
 
-			/* One tick per stored missile. A full rack is wider than the
+			/* Faction state rather than ship state, so it sits at the foot of
+			   the panel under its own rule instead of among the hull/shield/
+			   missile rows -- and there will be more of it than the research
+			   bar. Pinned above the footer, not flowed, so what it holds
+			   doesn't push the telemetry row around. */
+			div#base_info
+			{
+				position: absolute;
+				left: 14dp;
+				right: 14dp;
+				bottom: 56dp;
+
+				padding-top: 14dp;
+				border-top-width: 1dp;
+				border-top-color: #0cf3;
+			}
+
+			div#base_info div.stat
+			{
+				margin-bottom: 0;
+			}
+
+			/* The faction's pooled research bar (UI::SetResearchReadout), on
+			   the same track the hull and shield use. Blanked with no lab to
+			   advance it; the "ready" colour marks an upgrade waiting to be
+			   collected rather than one still being worked on. */
+			div#research_fill
+			{
+				height: 100%;
+				width: 0%;
+				background-color: #8af;
+			}
+
+			div#research_fill.ready
+			{
+				background-color: #fc0;
+			}
+
+				/* One tick per stored missile. A full rack is wider than the
 			   sidebar, so the ticks wrap -- hence a min-height rather than a
 			   fixed one. Written from code (UI::SetMissileAmmo). */
 			div#missile_ticks
@@ -255,6 +293,46 @@
 				top: 0;
 				bottom: 0;
 				pointer-events: none;
+			}
+
+			/* Chat sits above the recenter button in the view's bottom-left
+			   corner: the log fades line by line (CGame::GetChatLog) and the
+			   compose row appears under it only while a line is being typed.
+			   Click-through -- nothing here is clickable, and it must never
+			   take the mouse away from the game view. */
+			div#chat
+			{
+				position: absolute;
+				left: 16dp;
+				bottom: 60dp;
+				width: 640dp;
+			}
+
+			div.chat_line
+			{
+				font-size: 15dp;
+				color: #cff;
+				font-effect: glow(2dp #0cf6);
+			}
+
+			span.chat_sender
+			{
+				font-weight: bold;
+			}
+
+			/* Hidden until UI::SetChatInput marks it active, so the row takes
+			   no space while nobody is typing. */
+			div#chat_input
+			{
+				display: none;
+				margin-top: 6dp;
+				font-size: 15dp;
+				color: #ffa;
+			}
+
+			div#chat_input.active
+			{
+				display: block;
 			}
 
 			button#recenter
@@ -421,6 +499,18 @@
 					</div>
 				</div>
 
+				<div id="base_info">
+					<div class="stat">
+						<div class="stat_head">
+							<span>Research</span>
+							<span id="research_value" class="stat_value readout">--</span>
+						</div>
+						<div class="bar_track">
+							<div id="research_fill"></div>
+						</div>
+					</div>
+				</div>
+
 				<div id="panel_footer">
 					<div id="status_readout" class="readout"></div>
 					<div id="ping_readout" class="readout"></div>
@@ -429,6 +519,11 @@
 		</div>
 
 		<div id="view_overlay">
+			<div id="chat">
+				<div id="chat_log"></div>
+				<div id="chat_input" class="readout"></div>
+			</div>
+
 			<button id="recenter">Focus my ship</button>
 
 			<div id="upgrade_draft" class="frame">

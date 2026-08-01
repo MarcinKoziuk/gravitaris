@@ -77,11 +77,17 @@ private:
     ResourcePtr<const AudioClip> m_platingClip;
     // The Lab's chime when a faction's research bar fills.
     ResourcePtr<const AudioClip> m_researchClip;
+    // A received chat line. Not a sim event -- see PlayChatBlip.
+    ResourcePtr<const AudioClip> m_chatClip;
     // One per distinct sound named by a [[weapon]] in data/upgrades.toml.
     // GameEventType::BulletFired's param is the weapon's id, so a remote
     // shooter's rounds sound right without this side ever seeing its loadout,
     // and a new weapon's sound needs no code here.
     std::vector<ResourcePtr<const AudioClip>> m_weaponClips;
+
+    // Where Update() last put the listener; PlayChatBlip's own position, so a
+    // UI sound doesn't pan or attenuate.
+    Vector2 m_listenerPos{0.f, 0.f};
 
     std::vector<VoiceHandle> m_oneShotPool;
     std::size_t m_poolCursor = 0;
@@ -109,6 +115,12 @@ public:
     // hit flashes trigger, thruster loops start/stop/move. Call once per
     // rendered frame.
     void Update(const Vector2& cameraPos);
+
+    // A chat line arrived. Played at the listener, so it sits centred and at
+    // full gain wherever the camera happens to be -- chat is UI, not something
+    // that happened somewhere in the world. Called directly rather than driven
+    // off the event queue: chat is not sim state and never replays.
+    void PlayChatBlip();
 };
 
 } // namespace Gravitaris

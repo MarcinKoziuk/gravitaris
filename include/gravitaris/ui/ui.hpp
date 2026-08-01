@@ -37,6 +37,20 @@ struct UpgradeOfferView {
     }
 };
 
+// One chat line as the HUD needs it: the name already resolved, and the colour
+// to draw it in as a literal CSS value -- ui/ knows nothing about teams beyond
+// the dropdown, so the caller does that lookup.
+struct ChatLineView {
+    std::string sender;
+    std::string text;
+    std::string senderColor = "#cff";
+
+    bool operator==(const ChatLineView& other) const
+    {
+        return sender == other.sender && text == other.text && senderColor == other.senderColor;
+    }
+};
+
 class SystemInterface;
 class FileInterface;
 class RenderInterfaceGL3;
@@ -104,6 +118,17 @@ private:
     // Last drawn per-plate charges, quantised as they are written, so the
     // markup is only rebuilt when a block actually changes shade.
     std::vector<int> m_shownSegments;
+
+    Rml::Element* m_researchFill = nullptr;
+    Rml::Element* m_researchValue = nullptr;
+    float m_researchFraction = -2.f;
+    std::string m_researchText;
+
+    Rml::Element* m_chatLog = nullptr;
+    Rml::Element* m_chatInput = nullptr;
+    std::vector<ChatLineView> m_shownChat;
+    std::string m_shownChatInput;
+    bool m_chatInputActive = false;
 
     Rml::Element* m_upgradeDraft = nullptr;
     Rml::Element* m_upgradeOffers = nullptr;
@@ -187,6 +212,22 @@ public:
     // a burned-through side reads as a gap. An empty list restores the plain
     // continuous bar SetShieldFraction drives, which is what a bubble wants.
     void SetShieldSegments(const std::vector<float>& charges);
+
+    // The faction's research bar, 0..1, with `text` the countdown beside it --
+    // this layer formats no times, the same way it holds no game state. A
+    // negative fraction blanks the row (no lab). The bar takes a "ready" class
+    // at full, so a waiting upgrade reads differently from a filling bar.
+    // Unchanged values are ignored, so calling it every frame is fine.
+    void SetResearchReadout(float fraction, const std::string& text);
+
+    // Chat lines over the game view, oldest first; an empty list clears the
+    // log. Only rebuilt when the contents actually change, so calling it every
+    // frame is fine.
+    void SetChatLog(const std::vector<ChatLineView>& lines);
+
+    // The line being composed, shown under the log while `active`. The caret
+    // is this layer's own decoration -- pass the text alone.
+    void SetChatInput(bool active, const std::string& text);
 
     // The Lab's offers, in 1/2/3 order; an empty list hides the panel. Only
     // rebuilt when the contents actually change, so calling it every frame is

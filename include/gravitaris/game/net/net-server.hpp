@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <ankerl/unordered_dense.h>
@@ -10,6 +11,8 @@
 #include <gravitaris/game/net/transport.hpp>
 
 namespace Gravitaris {
+
+struct ChatMessagePacket;
 
 // Server side of Protocol v1 (docs/networking-plan.md 3.3/3.4): owns no Game
 // itself (the caller does, and drives its tick loop) -- this only wires a
@@ -61,6 +64,10 @@ class NetServer {
         // yet). Set to RESPAWN_DELAY_TICKS the first tick `ship` is found
         // dead; counts down in HandleRespawns.
         int respawnTimer = -1;
+        // Whatever ClientHello called itself, used to attribute this peer's
+        // chat. Empty names fall back to "player <peer>" at broadcast time
+        // rather than here, so the fallback can't be mistaken for a real one.
+        std::string name;
         // This peer's team, chosen once at ClientHello (from an explicit
         // request, or auto-assigned) and kept across every respawn -- a
         // fresh ship after death must not silently switch sides.
@@ -95,6 +102,12 @@ class NetServer {
 
     void HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t size, std::uint64_t currentTick);
     void HandleDisconnect(PeerId peer);
+
+    // Reliable, to every welcomed peer including the sender -- a chat line
+    // nobody can be sure arrived is worse than no chat at all, and echoing the
+    // sender from here is what makes their own line and everyone else's share
+    // one order.
+    void BroadcastChat(const ChatMessagePacket& message);
 
     // Spawns a fresh ship (and re-welcomes the peer with its new NetId) for
     // any welcomed peer whose ship isn't alive, after RESPAWN_DELAY_TICKS.

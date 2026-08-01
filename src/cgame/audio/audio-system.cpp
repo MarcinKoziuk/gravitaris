@@ -33,6 +33,7 @@ constexpr float THRUST_FADE_FRAMES = 6.f;
 constexpr float HIT_GAIN = 0.85f;
 constexpr float SHIELD_HIT_GAIN = 0.35f;
 constexpr float RESEARCH_GAIN = 0.8f;
+constexpr float CHAT_GAIN = 0.6f;
 constexpr float THRUST_GAIN = 0.55f;
 
 } // namespace
@@ -66,6 +67,7 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
     m_bubbleClip = m_resourceLoader.Load<AudioClip>("sounds/shield-bubble-1.wav"_id);
     m_platingClip = m_resourceLoader.Load<AudioClip>("sounds/shield-plating-1.wav"_id);
     m_researchClip = m_resourceLoader.Load<AudioClip>("sounds/research-1.wav"_id);
+    m_chatClip = m_resourceLoader.Load<AudioClip>("sounds/chat-1.wav"_id);
 
     // One clip per distinct sound the weapon table names. Deduplicated: the
     // whole gatling line shares a file, and loading it once per tier would
@@ -96,6 +98,7 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
     HandleClipAdded(*m_bubbleClip, m_bubbleClip.Id());
     HandleClipAdded(*m_platingClip, m_platingClip.Id());
     HandleClipAdded(*m_researchClip, m_researchClip.Id());
+    HandleClipAdded(*m_chatClip, m_chatClip.Id());
     for (const ResourcePtr<const AudioClip>& clip : m_weaponClips) HandleClipAdded(*clip, clip.Id());
 
     AcquireVoicePool();
@@ -152,10 +155,17 @@ void AudioSystem::PlayOneShotById(id_t clipId, const Vector2& pos, float gain)
     m_backend->PlayOneShot(m_oneShotPool[chosen], it->second, pos, gain);
 }
 
+void AudioSystem::PlayChatBlip()
+{
+    if (!m_enabled) return;
+    PlayOneShotById(m_chatClip.Id(), m_listenerPos, CHAT_GAIN);
+}
+
 void AudioSystem::Update(const Vector2& cameraPos)
 {
     if (!m_enabled) return;
 
+    m_listenerPos = cameraPos;
     m_backend->SetListenerPosition(cameraPos, LISTENER_HEIGHT);
 
     // One-shots straight off the sim's event stream. Frag shrapnel is

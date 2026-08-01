@@ -6,11 +6,13 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/input/input-command.hpp>
+#include <gravitaris/game/net/protocol.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 #include <gravitaris/game/net/transport.hpp>
 
@@ -138,6 +140,12 @@ class NetClient {
     // Keeping this as a real member sidesteps the trap entirely.
     std::optional<SnapshotData> m_latestSnapshot;
 
+    // Chat lines received since the caller last drained them. Bounded like
+    // every other receive buffer here: a client that stops draining (paused
+    // in a debugger, say) must not grow this without limit.
+    static constexpr std::size_t CHAT_INBOX_CAPACITY = 32;
+    std::deque<ChatMessagePacket> m_chatInbox;
+
 public:
     NetClient(INetTransport& transport, std::string name);
 
@@ -195,6 +203,15 @@ public:
     // local shows the result any sooner. No-ops before the handshake
     // completes (there's no ship to control yet).
     void SendInput(std::uint64_t tick, const ControlFlags& flags, UpgradePick upgradePick = 0);
+
+    // Sends one composed chat line, reliably. No-op before the handshake
+    // completes -- the server can't attribute a line to a peer it hasn't
+    // welcomed, so it would drop it anyway.
+    void SendChat(const std::string& text);
+
+    // Everything received since the last call, oldest first; the caller owns
+    // them from here (this is what keeps the inbox from growing).
+    [[nodiscard]] std::vector<ChatMessagePacket> TakeChatMessages();
 
     // Default/fallback lead (see GetInputLeadTicks) -- 8 (133ms @ 60Hz).
     //

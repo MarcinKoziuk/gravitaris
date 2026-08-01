@@ -1688,6 +1688,8 @@ void TestSectorGeneration()
         Require(hasBase, "sector: every faction's home carries a starting complex");
     }
     Require(homeStars.size() == homes, "sector: no two factions start at the same sun");
+    Require(stars - homeStars.size() >= static_cast<std::size_t>(SectorParams::MIN_FREE_STARS),
+            "sector: at least one sun is left unclaimed");
 
     Require(first.GetSectorExtent() > 0., "sector: a real extent is reported for the minimap");
 
@@ -2300,6 +2302,30 @@ void TestNetRoundtrip(Game& game)
     const Controls& controls = shipEntity.get<Controls>();
     Require(!controls.actionFlags.thrustForward,
             "net: input dead-man timeout zeroed a silent peer's held thrust");
+
+    // Chat: the sender's own line comes back off the server attributed and
+    // truncated by it, not echoed locally (see ChatSendPacket).
+    client.SendChat(std::string(MAX_CHAT_TEXT + 20, 'x'));
+    for (int i = 0; i < 3; ++i) {
+        server.IngestInput(game.GetStep());
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+    }
+    const std::vector<ChatMessagePacket> chat = client.TakeChatMessages();
+    Require(chat.size() == 1, "chat: one line sent comes back exactly once");
+    Require(chat[0].sender == "sim-test-client", "chat: the server attributes the line to its peer");
+    Require(chat[0].text.size() == MAX_CHAT_TEXT, "chat: an overlong line is truncated on the wire");
+    Require(client.TakeChatMessages().empty(), "chat: draining the inbox empties it");
+
+    client.SendChat("");
+    for (int i = 0; i < 3; ++i) {
+        server.IngestInput(game.GetStep());
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+    }
+    Require(client.TakeChatMessages().empty(), "chat: an empty line is never broadcast");
 }
 
 // docs/networking-plan.md's known-gap fix: a peer whose ship dies must not

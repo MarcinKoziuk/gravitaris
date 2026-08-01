@@ -23,9 +23,11 @@ enum class PacketType : std::uint8_t {
     Snapshot = 4,
     Ping = 5, // client -> server, diagnostic RTT probe (NetClient::GetLastPingMs)
     Pong = 6, // server -> client, immediate echo of Ping's seq
+    ChatSend = 7,    // client -> server, one composed line
+    ChatMessage = 8, // server -> clients, that line attributed to its sender
 };
 
-inline constexpr std::uint32_t PROTOCOL_VERSION = 4; // v4: +InputCommand::upgradePick
+inline constexpr std::uint32_t PROTOCOL_VERSION = 5; // v5: +chat
 
 // How many trailing commands ClientInput carries per send -- redundancy
 // instead of reliability (quake3-style): as long as one of the last N sends
@@ -84,6 +86,25 @@ struct PongPacket {
     std::uint32_t seq = 0;
 };
 
+// Longest line a client may send, in bytes. Enforced on both ends: the sender
+// stops accepting keystrokes there, and the server truncates whatever arrives
+// regardless of what sent it.
+inline constexpr std::size_t MAX_CHAT_TEXT = 160;
+
+// Chat goes through the server even for the sender's own line, so every peer
+// sees the same text in the same order and attribution is the server's to
+// make rather than a claim in the packet. Global for now; a team-only channel
+// is a flag here and a filter in the broadcast (see NetServer's ChatSend case).
+struct ChatSendPacket {
+    std::string text;
+};
+
+struct ChatMessagePacket {
+    std::string sender;
+    TeamId team = TeamId::None; // colours the name; None for a server notice
+    std::string text;
+};
+
 void WriteClientHello(const ClientHelloPacket& packet, ByteWriter& out);
 bool ReadClientHelloBody(ByteReader& in, ClientHelloPacket& out); // type byte already consumed
 
@@ -98,6 +119,12 @@ bool ReadPingBody(ByteReader& in, PingPacket& out);
 
 void WritePong(const PongPacket& packet, ByteWriter& out);
 bool ReadPongBody(ByteReader& in, PongPacket& out);
+
+void WriteChatSend(const ChatSendPacket& packet, ByteWriter& out);
+bool ReadChatSendBody(ByteReader& in, ChatSendPacket& out);
+
+void WriteChatMessage(const ChatMessagePacket& packet, ByteWriter& out);
+bool ReadChatMessageBody(ByteReader& in, ChatMessagePacket& out);
 
 // Combined convenience: PacketType::Snapshot + SerializeSnapshot(snapshot).
 void WriteSnapshotPacket(const SnapshotData& snapshot, ByteWriter& out);

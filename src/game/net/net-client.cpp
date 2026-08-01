@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <cmath>
+#include <iterator>
+#include <utility>
 
 #include <gravitaris/game/net/byte-stream.hpp>
 #include <gravitaris/game/net/protocol.hpp>
@@ -96,9 +98,18 @@ void NetClient::Update()
                         m_pendingPings.erase(pendingIt);
                         break;
                     }
+                    case PacketType::ChatMessage: {
+                        ChatMessagePacket chat;
+                        if (!ReadChatMessageBody(reader, chat)) break;
+                        if (chat.text.empty()) break;
+                        m_chatInbox.push_back(std::move(chat));
+                        while (m_chatInbox.size() > CHAT_INBOX_CAPACITY) m_chatInbox.pop_front();
+                        break;
+                    }
                     case PacketType::ClientHello:
                     case PacketType::ClientInput:
                     case PacketType::Ping:
+                    case PacketType::ChatSend:
                         break; // client never receives these
                 }
                 break;
@@ -247,6 +258,26 @@ void NetClient::SendInput(std::uint64_t tick, const ControlFlags& flags, Upgrade
     ByteWriter writer;
     WriteClientInput(packet, writer);
     m_transport.Send(SERVER_PEER, 0, writer.Data(), writer.Size(), false);
+}
+
+void NetClient::SendChat(const std::string& text)
+{
+    if (!m_welcomed || text.empty()) return;
+
+    ChatSendPacket packet;
+    packet.text = text;
+
+    ByteWriter writer;
+    WriteChatSend(packet, writer);
+    m_transport.Send(SERVER_PEER, 0, writer.Data(), writer.Size(), true);
+}
+
+std::vector<ChatMessagePacket> NetClient::TakeChatMessages()
+{
+    std::vector<ChatMessagePacket> out(std::make_move_iterator(m_chatInbox.begin()),
+                                      std::make_move_iterator(m_chatInbox.end()));
+    m_chatInbox.clear();
+    return out;
 }
 
 } // namespace Gravitaris

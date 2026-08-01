@@ -5,6 +5,7 @@
 #include <memory>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <string>
 #include <string_view>
 
@@ -36,6 +37,7 @@
 #include <gravitaris/game/input/input-command.hpp>
 
 #include <gravitaris/cgame/cgame.hpp>
+#include <gravitaris/cgame/team-color.hpp>
 #include <gravitaris/cgame/renderer/glow-post-process.hpp>
 
 #include <gravitaris/ui/ui.hpp>
@@ -86,6 +88,21 @@ private:
     // Record/replay: F5 toggles recording to disk, F6 replays it back, F7 stops.
     ReplayController m_replay;
 
+    // Chat composition. Deliberately not an RmlUi text field: while this is
+    // true every key goes here and none of them reach the ship, which is a
+    // property of this switch rather than of who happens to hold UI focus.
+    // Enter opens and sends, escape abandons.
+    bool m_chatActive = false;
+    std::string m_chatDraft;
+    // Chat is only useful once the round is running, and the intro dialog owns
+    // enter until then.
+    bool m_sessionStarted = false;
+
+    // True if the key was consumed by chat composition.
+    bool HandleChatKey(KeyEvent& event);
+    void OpenChat();
+    void CloseChat();
+
     // Wall-clock time of the last HUD readout refresh; see RefreshHudReadout.
     double m_lastHudReadoutTime = 0.;
 
@@ -110,6 +127,7 @@ private:
     void StopReplay();
     void UpdateUi();
     void RefreshHudReadout();
+    void RefreshResearchReadout();
 
     void tickEvent() override;
     void drawEvent() override;
@@ -355,6 +373,7 @@ void GravitarisApplication::StartSession(TeamId team)
 {
     if (m_connectUrl.empty()) m_game->SpawnCombatants(team);
     else m_game->ConnectToServer(m_connectUrl, team);
+    m_sessionStarted = true;
 }
 
 void GravitarisApplication::UpdateUi()
@@ -376,6 +395,18 @@ void GravitarisApplication::UpdateUi()
         offers.push_back(UpgradeOfferView{offer.name, offer.description, offer.level, offer.maxLevel});
     }
     m_ui.SetUpgradeOffers(offers);
+
+    std::vector<ChatLineView> chat;
+    for (const CGame::ChatLine& line : m_game->GetChatLog()) {
+        const Magnum::Color3 color = TeamColor(line.team);
+        char hex[16];
+        std::snprintf(hex, sizeof(hex), "#%02x%02x%02x", static_cast<int>(std::lround(color.r() * 255.f)),
+                      static_cast<int>(std::lround(color.g() * 255.f)),
+                      static_cast<int>(std::lround(color.b() * 255.f)));
+        chat.push_back(ChatLineView{line.sender + ":", line.text, hex});
+    }
+    m_ui.SetChatLog(chat);
+    m_ui.SetChatInput(m_chatActive, m_chatDraft);
 
     m_ui.SetRecenterVisible(!m_game->IsCameraFollowing());
 
@@ -405,6 +436,33 @@ void GravitarisApplication::RefreshHudReadout()
 
     m_ui.SetHudStatus(BuildInfoString(), pingText);
     m_ui.SetHudTelemetry(m_game->GetSpeed(), m_game->GetGravityAccel());
+    RefreshResearchReadout();
+}
+
+// The Lab countdown in the sidebar: how long the faction's labs still need,
+// counted down as m:ss. Shares RefreshHudReadout's throttle -- a second is
+// the resolution shown, so a per-frame rewrite would only cost reflows.
+void GravitarisApplication::RefreshResearchReadout()
+{
+    const std::optional<CGame::ResearchReadout> research = m_game->GetResearchReadout();
+    if (!research) {
+        m_ui.SetResearchReadout(-1.f, "");
+        return;
+    }
+
+    std::string text = "ready";
+    if (!research->ready) {
+        // Rounded up, so a bar that hasn't finished never reads 0:00.
+        const int seconds = static_cast<int>(std::ceil(research->secondsRemaining));
+        char buffer[16];
+        std::snprintf(buffer, sizeof(buffer), "%d:%02d", seconds / 60, seconds % 60);
+        text = buffer;
+    }
+    // Two labs research twice as fast; the sidebar says why the countdown
+    // moves faster than the wall clock.
+    if (research->labs > 1) text += " x" + std::to_string(research->labs);
+
+    m_ui.SetResearchReadout(research->progress, text);
 }
 
 // One command for the tick Update() is about to run: keyboard, autopilot and
@@ -576,6 +634,13 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         return;
     }
 
+    // Before every gameplay key, including the debug ones: while a line is
+    // being composed the keyboard belongs to it entirely.
+    if (HandleChatKey(event)) {
+        event.setAccepted();
+        return;
+    }
+
     constexpr float LINE_WIDTH_STEP = 0.5f;
     switch (event.key()) {
         case KeyEvent::Key::NumAdd:
@@ -681,9 +746,65 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
     }
 }
 
+// Enter opens the compose row and sends it; escape abandons it. Returns true
+// for every key that chat consumed, which is all of them while composing --
+// typing "kill" must not fire the autopilot's K.
+bool GravitarisApplication::HandleChatKey(KeyEvent& event)
+{
+    const bool enter = event.key() == KeyEvent::Key::Enter || event.key() == KeyEvent::Key::NumEnter;
+
+    if (!m_chatActive) {
+        if (!enter || !m_sessionStarted) return false;
+        OpenChat();
+        return true;
+    }
+
+    switch (event.key()) {
+        case KeyEvent::Key::Esc:
+            CloseChat();
+            return true;
+        case KeyEvent::Key::Backspace:
+            if (!m_chatDraft.empty()) m_chatDraft.pop_back();
+            return true;
+        default:
+            break;
+    }
+
+    if (enter) {
+        m_game->SubmitChat(m_chatDraft);
+        CloseChat();
+    }
+    return true;
+}
+
+void GravitarisApplication::OpenChat()
+{
+    m_chatActive = true;
+    m_chatDraft.clear();
+    startTextInput();
+
+    // Held movement keys would otherwise stay latched for as long as the line
+    // takes to type, since their key-up lands while chat owns the keyboard.
+    m_currentInput = ControlFlags{};
+}
+
+void GravitarisApplication::CloseChat()
+{
+    m_chatActive = false;
+    m_chatDraft.clear();
+    // The debug overlay wants text input for its own fields; only take it back
+    // when nothing else is using it.
+    if (!m_debugUi->IsVisible()) stopTextInput();
+}
+
 void GravitarisApplication::keyReleaseEvent(Magnum::Platform::Sdl2Application::KeyEvent& event)
 {
     if (m_debugUi->HandleKeyRelease(event)) {
+        event.setAccepted();
+        return;
+    }
+
+    if (m_chatActive) {
         event.setAccepted();
         return;
     }
@@ -713,6 +834,15 @@ void GravitarisApplication::keyReleaseEvent(Magnum::Platform::Sdl2Application::K
 
 void GravitarisApplication::textInputEvent(TextInputEvent& event)
 {
+    if (m_chatActive) {
+        for (const char c : event.text()) {
+            if (m_chatDraft.size() >= MAX_CHAT_TEXT) break;
+            m_chatDraft.push_back(c);
+        }
+        event.setAccepted();
+        return;
+    }
+
     if (m_debugUi->HandleTextInput(event)) {
         event.setAccepted();
     }

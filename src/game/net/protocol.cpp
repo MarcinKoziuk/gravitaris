@@ -122,6 +122,36 @@ bool ReadPongBody(ByteReader& in, PongPacket& out)
     return in.Ok();
 }
 
+void WriteChatSend(const ChatSendPacket& packet, ByteWriter& out)
+{
+    out.WriteU8(static_cast<std::uint8_t>(PacketType::ChatSend));
+    WriteString(packet.text.substr(0, MAX_CHAT_TEXT), out);
+}
+
+bool ReadChatSendBody(ByteReader& in, ChatSendPacket& out)
+{
+    ReadString(in, out.text);
+    out.text = out.text.substr(0, MAX_CHAT_TEXT);
+    return in.Ok();
+}
+
+void WriteChatMessage(const ChatMessagePacket& packet, ByteWriter& out)
+{
+    out.WriteU8(static_cast<std::uint8_t>(PacketType::ChatMessage));
+    WriteString(packet.sender, out);
+    out.WriteU8(static_cast<std::uint8_t>(packet.team));
+    WriteString(packet.text.substr(0, MAX_CHAT_TEXT), out);
+}
+
+bool ReadChatMessageBody(ByteReader& in, ChatMessagePacket& out)
+{
+    ReadString(in, out.sender);
+    out.team = static_cast<TeamId>(in.ReadU8());
+    ReadString(in, out.text);
+    out.text = out.text.substr(0, MAX_CHAT_TEXT);
+    return in.Ok();
+}
+
 void WriteSnapshotPacket(const SnapshotData& snapshot, ByteWriter& out)
 {
     out.WriteU8(static_cast<std::uint8_t>(PacketType::Snapshot));

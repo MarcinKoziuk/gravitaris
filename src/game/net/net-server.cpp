@@ -117,6 +117,8 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             // own doc comment); auto-assign round-robins a small default
             // roster so two players with no setup UI to pick a side still
             // get a versus match instead of stacking on Blue.
+            it->second.name = hello.name;
+
             if (hello.requestedTeam != TeamId::None) {
                 it->second.team = hello.requestedTeam;
             } else {
@@ -207,10 +209,37 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             m_transport.Send(peer, 0, writer.Data(), writer.Size(), false);
             break;
         }
+        case PacketType::ChatSend: {
+            ChatSendPacket chat;
+            if (!ReadChatSendBody(reader, chat)) return;
+            if (chat.text.empty()) return;
+
+            const auto it = m_peers.find(peer);
+            if (it == m_peers.end() || !it->second.welcomed) return;
+
+            ChatMessagePacket message;
+            message.sender = it->second.name.empty() ? "player " + std::to_string(peer) : it->second.name;
+            message.team = it->second.team;
+            message.text = chat.text;
+            BroadcastChat(message);
+            LOG(info) << "chat: " << message.sender << ": " << message.text;
+            break;
+        }
         case PacketType::ServerWelcome:
         case PacketType::Snapshot:
         case PacketType::Pong:
+        case PacketType::ChatMessage:
             break; // server never receives these
+    }
+}
+
+void NetServer::BroadcastChat(const ChatMessagePacket& message)
+{
+    ByteWriter writer;
+    WriteChatMessage(message, writer);
+    for (const auto& [peer, state] : m_peers) {
+        if (!state.welcomed) continue;
+        m_transport.Send(peer, 0, writer.Data(), writer.Size(), true);
     }
 }
 

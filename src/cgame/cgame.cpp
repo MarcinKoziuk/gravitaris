@@ -215,6 +215,84 @@ std::vector<CGame::UpgradeOffer> CGame::GetUpgradeOffers()
     return offers;
 }
 
+std::optional<CGame::ResearchReadout> CGame::GetResearchReadout()
+{
+    const std::optional<flecs::entity> player = GetPlayer();
+    if (!player) return std::nullopt;
+    const Team* playerTeam = player->try_get<Team>();
+    if (!playerTeam || playerTeam->id == TeamId::None) return std::nullopt;
+
+    ResearchReadout readout;
+    CurrentSceneView().Each([&](const Structure& structure, const Team& team) {
+        if (structure.type != StructureType::Lab || team.id != playerTeam->id) return;
+        ++readout.labs;
+        // Every lab of a faction carries the same pooled copy, so the last one
+        // seen is as good as any.
+        readout.progress = std::clamp(structure.researchProgress, 0.f, 1.f);
+        readout.ready = structure.upgradeReady;
+    });
+    if (readout.labs == 0) return std::nullopt;
+
+    // The bar advances once per lab per tick (ResearchSystem), so building a
+    // second lab halves the wait -- which is the whole reason to show a time
+    // rather than just the bar.
+    readout.secondsRemaining = static_cast<float>((1. - readout.progress)
+                                                  * GetEconomyConfig().research.secondsPerUpgrade
+                                                  / static_cast<double>(readout.labs));
+    return readout;
+}
+
+void CGame::SubmitChat(const std::string& text)
+{
+    const std::size_t begin = text.find_first_not_of(" \t");
+    if (begin == std::string::npos) return;
+    const std::string trimmed = text.substr(begin, text.find_last_not_of(" \t") - begin + 1);
+
+    if (m_netClient) {
+        // Nothing local: the line comes back from the server like everyone
+        // else's, which is also what proves it was actually sent.
+        m_netClient->SendChat(trimmed);
+        return;
+    }
+
+    const std::optional<flecs::entity> player = GetPlayer();
+    const Team* team = player ? player->try_get<Team>() : nullptr;
+    PushChatLine("you", team ? team->id : TeamId::None, trimmed);
+}
+
+std::vector<CGame::ChatLine> CGame::GetChatLog() const
+{
+    std::vector<ChatLine> out;
+    out.reserve(m_chatLog.size());
+    for (const TimedChatLine& timed : m_chatLog) {
+        if (m_renderTimeSeconds - timed.arrivedAt > CHAT_LINE_LIFETIME) continue;
+        out.push_back(timed.line);
+    }
+    return out;
+}
+
+void CGame::DrainChat()
+{
+    if (m_netClient) {
+        for (ChatMessagePacket& message : m_netClient->TakeChatMessages()) {
+            PushChatLine(std::move(message.sender), message.team, std::move(message.text));
+        }
+    }
+
+    while (!m_chatLog.empty() && m_renderTimeSeconds - m_chatLog.front().arrivedAt > CHAT_LINE_LIFETIME) {
+        m_chatLog.pop_front();
+    }
+}
+
+void CGame::PushChatLine(std::string sender, TeamId team, std::string text)
+{
+    m_chatLog.push_back(TimedChatLine{ChatLine{std::move(sender), team, std::move(text)},
+                                      m_renderTimeSeconds});
+    while (m_chatLog.size() > CHAT_LOG_LINES) m_chatLog.pop_front();
+
+    m_audioSystem.PlayChatBlip();
+}
+
 void CGame::CycleSpectate(int direction)
 {
     // NetId order, so the roster reads the same however flecs happens to
@@ -690,6 +768,8 @@ void CGame::Render(double delta)
     m_renderTimeSeconds += dtSeconds;
     m_modelRenderer2.SetTime(m_renderTimeSeconds);
     m_mirrorRenderer2.SetTime(m_renderTimeSeconds);
+
+    DrainChat();
 
     if (m_netClient) {
         RenderNetClient(dtSeconds, delta);
