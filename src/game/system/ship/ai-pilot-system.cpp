@@ -223,7 +223,8 @@ void AIPilotSystem::Update(std::uint64_t step)
         // has already weighed a structure or freighter against the nearest
         // enemy fighter, and the proximity rule below would only undo that.
         const bool ordered = pilot.order.kind != AIOrderKind::None && pilot.order.subject.is_alive();
-        if (ordered && pilot.order.kind == AIOrderKind::Attack) {
+        const bool orderedAttack = ordered && pilot.order.kind == AIOrderKind::Attack;
+        if (orderedAttack) {
             pilot.target = pilot.order.subject;
         }
         // Re-picked on the decision cadence, not only when the current target
@@ -288,8 +289,13 @@ void AIPilotSystem::Update(std::uint64_t step)
             if (ordered && pilot.order.kind == AIOrderKind::Land) {
                 pilot.behavior = AIBehavior::Land;
             }
+            // An ordered attack ignores engageRange. That range is how a pilot
+            // picks a dogfight opponent out of whatever is nearby; applying it
+            // to a named subject leaves a leader holding an attack goal while
+            // it patrols a well thousands of units away from it.
             else if (!hurt && targetTransf
-                     && (targetTransf->pos - transf.pos).length() < personality.engageRange) {
+                     && (orderedAttack
+                         || (targetTransf->pos - transf.pos).length() < personality.engageRange)) {
                 pilot.behavior = AIBehavior::Intercept;
             }
             else if (patrolBody) {

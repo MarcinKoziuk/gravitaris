@@ -286,6 +286,16 @@ look inert in an MP session, none of them tactical:
   solved like `GotoPoint`'s arrival speed with `maxSpeed` rather than zero as
   the arrival target. The lead point dead-reckons off that same figure.
 
+*Ordered attacks vs. engageRange (2026-07-28, from a live session showing a
+Red leader parked at goal `InterceptFreighter` doing nothing).* The tactical
+pick gated its `Intercept` branch on `engageRange` even when an `AIOrder`
+named the subject outright, so a leader ordered onto a freighter or an enemy
+complex further off than 6000 units fell through to the `Orbit` patrol branch
+and circled a well while still reporting the goal. `engageRange` is how a
+pilot picks a dogfight opponent out of whatever is nearby; an ordered attack
+now ignores it. Covered by `TestAITactics` (the raid case, which reproduced
+the stall before the fix).
+
 The throttle dwell was *not* a factor: `urgentFactor` abandons a coast above
 9 u/s of velocity error, which holds for any transit.
 

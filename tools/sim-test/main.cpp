@@ -2098,6 +2098,45 @@ void TestAITactics()
                 "ai tactics: the wing covers the leader's claim instead of doubling up on it");
     }
 
+    // An order names its subject outright, and the pilot has to actually go
+    // there. engageRange is the heuristic for picking a dogfight opponent out
+    // of the air; letting it gate an ordered attack too leaves a leader
+    // reading "InterceptFreighter" while it patrols a well thousands of units
+    // from the freighter, which is what a live session showed.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity planet = spawner.SpawnOrbitingPlanet("models/planets/simple"_id,
+                                                           Vector2d{14000., 0.}, 1e-9, 1., 1.0, 0.0);
+        planet.set<Team>(Team{TeamId::Blue});
+        flecs::entity freighter = spawner.SpawnFreighter("models/ships/freighter-0"_id,
+                                                         Vector2d{9000., 0.}, TeamId::Blue, planet,
+                                                         BuildOrder::Base);
+
+        flecs::entity leader = spawner.SpawnAILeader("models/ships/fighter-1"_id, Vector2d{0., 0.},
+                                                     TeamId::Red, game.GetAIPresets().Default());
+        // Only the raid is on the table, so the goal under test is the one it
+        // picks; the freighter starts well outside the default engageRange.
+        leader.get_mut<AIStrategy>().weights = AIStrategyWeights{0., 0., 0., 1., 0.};
+        AIPersonality& raider = leader.get_mut<AIPilot>().personality;
+        raider.dangerLookaheadSteps = 0;
+        raider.fleeHealthFraction = 0.0;
+
+        const auto gap = [&] {
+            return (freighter.get<Transform>().pos - leader.get<Transform>().pos).length();
+        };
+        const double before = gap();
+        Require(before > raider.engageRange,
+                "ai tactics: the raid starts outside engage range (setup check)");
+
+        for (int tick = 0; tick < 600 && freighter.is_alive(); ++tick) game.Update();
+
+        Require(leader.get<AIStrategy>().goal == AIGoal::InterceptFreighter,
+                "ai tactics: the raid is the goal it holds (setup check)");
+        Require(!freighter.is_alive() || gap() < before - 1000.0,
+                "ai tactics: an ordered attack closes on its subject from outside engage range");
+    }
+
     fs.Shutdown();
 }
 
