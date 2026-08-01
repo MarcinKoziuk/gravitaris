@@ -16,17 +16,23 @@ namespace Gravitaris {
 struct SectorParams {
     std::uint32_t seed = 0;
     int factionCount = 4;
-    int stars = 4;
+    // Two more than the factions by default, so a round opens with a couple of
+    // whole solar systems nobody starts in -- somewhere to expand that isn't
+    // already someone's back yard, and the planets they carry are what makes
+    // the majority of the sector unclaimed at the start.
+    int stars = 6;
     int minPlanetsPerStar = 1;
     int maxPlanetsPerStar = 3;
 
     static constexpr int MIN_FACTIONS = 2;
     static constexpr int MAX_FACTIONS = 6; // the usable TeamId colours
     static constexpr int MIN_STARS = 2;
-    static constexpr int MAX_STARS = 6;
+    static constexpr int MAX_STARS = 8;
+    // No round has every sun occupied, however few stars it was asked for.
+    static constexpr int MIN_FREE_STARS = 1;
 
-    // Clamps every field into range and raises `stars` to `factionCount` --
-    // homes never share a star, so there must be at least one star each.
+    // Clamps every field into range and raises `stars` past `factionCount` --
+    // homes never share a star, and MIN_FREE_STARS of them stay unclaimed.
     void Sanitize();
 };
 

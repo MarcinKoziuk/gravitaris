@@ -244,9 +244,11 @@ void SectorParams::Sanitize()
 {
     factionCount = std::clamp(factionCount, MIN_FACTIONS, MAX_FACTIONS);
     stars = std::clamp(stars, MIN_STARS, MAX_STARS);
-    // One star per faction at minimum: PickHomes never puts two homes on the
-    // same sun.
-    stars = std::max(stars, factionCount);
+    // One star per faction at minimum -- PickHomes never puts two homes on the
+    // same sun -- plus the ones no faction gets, which fall out of the count
+    // alone: with more stars than homes, whichever PickHomes leaves untaken
+    // are the free systems.
+    stars = std::max(stars, factionCount + MIN_FREE_STARS);
 
     minPlanetsPerStar = std::max(1, minPlanetsPerStar);
     maxPlanetsPerStar = std::max(minPlanetsPerStar, maxPlanetsPerStar);

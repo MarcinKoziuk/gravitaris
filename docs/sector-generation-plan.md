@@ -85,6 +85,12 @@ nothing else in the game aware of it yet.
   };
   ```
 
+  Retuned 2026-08-01: `stars = 6` with 4 factions, `MAX_STARS = 8`, and
+  `Sanitize()` raising `stars` to `factionCount + MIN_FREE_STARS`. Homes are
+  one per sun, so the surplus suns are free systems by construction — nowhere
+  anyone starts, and about twice the unclaimed planets the 4-star default
+  left. The `sqrt(starCount)` radius keeps the extra suns from crowding.
+
 - [ ] `src/game/scenario/sector-scenario.cpp`:
   `BuildSectorScenario(EntitySpawner&, const SectorParams&) -> SectorLayout`.
   Star placement by rejection sampling inside the sector disc against the
