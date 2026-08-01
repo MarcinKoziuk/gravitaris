@@ -10,6 +10,7 @@
 #include <memory>
 
 #include "shape-common.hpp"
+#include "casteljau.hpp"
 
 namespace Gravitaris {
 
@@ -112,6 +113,30 @@ bool IsCircleGeometry(const NSVGpath* path, CircleInfo* outInfo)
     }
 
     return true;
+}
+
+std::vector<Vector2d> PathToPolyline(const NSVGpath* path, const Matrix4d& transform)
+{
+    std::vector<Vector2d> points;
+
+    // Per segment, not one Casteljau call over every control point at once:
+    // CasteljauRaw only ever looks at curve[0..3], so handing it a whole
+    // multi-segment path silently discards everything past the first cubic.
+    for (int i = 0; i < path->npts - 1; i += 3) {
+        const float* p = &path->pts[i * 2];
+        const std::vector<Vector2d> segment{
+                {p[0], p[1]}, {p[2], p[3]}, {p[4], p[5]}, {p[6], p[7]}};
+
+        for (const Vector2d& pt : Casteljau(segment, transform, false)) {
+            if (points.empty() || points.back() != pt) points.push_back(pt);
+        }
+    }
+
+    if (path->closed && points.size() > 1 && points.front() == points.back()) {
+        points.pop_back();
+    }
+
+    return points;
 }
 
 Matrix4d GetTransformMatrix(const ShapeFiles& mf)

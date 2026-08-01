@@ -24,6 +24,7 @@
 namespace Gravitaris {
 
 static Damageable MakeDamageable(const Body& body);
+static ShipLoadout MakeShipLoadout(const Body& body);
 
 EntitySpawner::EntitySpawner(flecs::world& registry, ResourceLoader& resourceLoader)
     : m_registry(registry)
@@ -83,7 +84,7 @@ flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position, TeamId
     entity.emplace<Team>(team);
     entity.emplace<Damageable>(MakeDamageable(*body));
     entity.emplace<LandingState>();
-    entity.emplace<ShipLoadout>();
+    entity.emplace<ShipLoadout>(MakeShipLoadout(*body));
     entity.emplace<UpgradeDraft>();
     AssignNetId(entity);
     AddRenderable(entity, modelId);
@@ -105,7 +106,7 @@ flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, const 
     entity.emplace<Team>(team);
     entity.emplace<Damageable>(MakeDamageable(*body));
     entity.emplace<LandingState>();
-    entity.emplace<ShipLoadout>();
+    entity.emplace<ShipLoadout>(MakeShipLoadout(*body));
     entity.emplace<UpgradeDraft>();
     AIPresetLibrary::Apply(preset, entity.get_mut<AIPilot>());
     AssignNetId(entity);
@@ -257,6 +258,16 @@ static Damageable MakeDamageable(const Body& body)
     Damageable damageable;
     damageable.landingFragility = body.GetLandingFragility();
     return damageable;
+}
+
+// Empty loadout, but already sized to this hull's ablative plating, so
+// ShieldSystem and DamageSystem never have to walk back to the resource to
+// learn how many plates the ship has.
+static ShipLoadout MakeShipLoadout(const Body& body)
+{
+    ShipLoadout loadout;
+    loadout.plateCount = static_cast<std::uint8_t>(body.GetPlates().size());
+    return loadout;
 }
 
 } // namespace Gravitaris

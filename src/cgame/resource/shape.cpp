@@ -7,6 +7,7 @@
 
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/cgame/resource/shape.hpp>
+#include <gravitaris/cgame/team-color.hpp>
 
 #include "game/resource/detail/shape-common.hpp"
 #include "game/resource/detail/casteljau.hpp"
@@ -47,6 +48,11 @@ ResourcePtr<const Shape> Shape::Create(id_t id, LoadingContext& context)
 
     NSVGimage& svg = *shapeFiles->svg;
 
+    // Runs across shapes, not within one, because a plate index has to mean
+    // the same path to the renderer as it does to Body::GetPlates -- which
+    // walks the same SVG paths in the same order.
+    std::size_t plateIndex = 0;
+
     for (const NSVGshape* svgShape = svg.shapes; svgShape != nullptr; svgShape = svgShape->next) {
         const char* group = svgShape->groupLabel;
 
@@ -54,20 +60,35 @@ ResourcePtr<const Shape> Shape::Create(id_t id, LoadingContext& context)
             continue;
         }
 
-        shape->AddPaths(svgShape, transform, ID(group));
+        const bool plating = std::strcmp(group, PLATING_GROUP_LABEL) == 0;
+        shape->AddPaths(svgShape, transform, ID(group), group[0] == FX_LABEL_PREFIX,
+                        plating ? &plateIndex : nullptr);
     }
 
     return shape;
 }
 
-void Shape::AddPaths(const NSVGshape* shape, const Matrix4d& transform, id_t group)
+id_t PlatingTag(std::size_t index)
+{
+    const std::string label = std::string(PLATING_GROUP_LABEL) + std::to_string(index);
+    return ID(label.c_str());
+}
+
+void Shape::AddPaths(const NSVGshape* shape, const Matrix4d& transform, id_t group, bool fxLayer,
+                     std::size_t* plateIndex)
 {
     Shape::Style style;
     style.thickness = shape->strokeWidth;
     style.color = Color4(0.f, 0.f, 1.f, 1.f);
     style.color.w() = shape->opacity;
 
-    if (shape->stroke.type == NSVG_PAINT_COLOR) {
+    // A '+' layer is drawn in whatever color the game decides for it that
+    // frame (team color, hit glow, per-plate charge), so its authored stroke
+    // is discarded here rather than being kept in sync by hand in Inkscape.
+    if (fxLayer) {
+        style.color = Color4(TEAM_COLOR_PLACEHOLDER, style.color.w());
+    }
+    else if (shape->stroke.type == NSVG_PAINT_COLOR) {
         const unsigned currentColor = shape->stroke.color;
         if (currentColor != 0xff000000 && currentColor != 0xffffffff) {
             style.color = Hex3ToNormalizedColor4(shape->stroke.color, style.color.w());
@@ -81,7 +102,17 @@ void Shape::AddPaths(const NSVGshape* shape, const Matrix4d& transform, id_t gro
         style.hasFill = true;
     }
 
-    const auto paths = ShapeToPaths(shape, style, transform, group);
+    auto paths = ShapeToPaths(shape, style, transform, group);
+
+    // Each plate becomes its own group, so the renderer can hand it its own
+    // instance color -- that is what lets one plate light while its neighbour
+    // stays dark, without any per-plate machinery in the shader.
+    if (plateIndex != nullptr) {
+        for (Shape::Path& path : paths) {
+            path.group = PlatingTag((*plateIndex)++);
+        }
+    }
+
     m_paths.insert(m_paths.end(), paths.begin(), paths.end());
 }
 

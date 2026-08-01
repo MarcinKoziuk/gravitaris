@@ -73,7 +73,8 @@ private:
     ResourcePtr<const AudioClip> m_hitClip;
     // Borrows the stock gun's clip at a lower gain until a shield hit gets
     // its own.
-    ResourcePtr<const AudioClip> m_shieldClip;
+    ResourcePtr<const AudioClip> m_bubbleClip;
+    ResourcePtr<const AudioClip> m_platingClip;
     // The Lab's chime when a faction's research bar fills.
     ResourcePtr<const AudioClip> m_researchClip;
     // One per distinct sound named by a [[weapon]] in data/upgrades.toml.

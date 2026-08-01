@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -88,6 +89,15 @@ struct EntityState {
     std::uint8_t shieldLevel = 0;
     ShieldType shieldType = ShieldType::None;
     float shieldHp = 0.f;
+    // Ablative plate charge, only the ship's live plates (shieldHp is their
+    // sum). The client shades each plate by its own charge, so a ship burned
+    // through on one side reads that way to everyone, not just the server.
+    // Sent raw rather than quantised while snapshots are still full-state: a
+    // byte per plate wants a shared per-plate capacity, which means handing
+    // GatherSnapshot the upgrade catalog, and that trade is only worth making
+    // once these are actually delta-compressed.
+    std::uint8_t plateCount = 0;
+    std::array<float, MAX_SHIELD_PLATES> plates{};
     // The Lab draft this ship is being offered, if any (UpgradeDraft): three
     // upgrade ids, all zero when there is nothing on the table. The client
     // resolves them against its own copy of data/upgrades.toml.

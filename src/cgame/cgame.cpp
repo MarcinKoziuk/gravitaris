@@ -24,6 +24,7 @@
 
 #include <gravitaris/cgame/fx/hit-flash-system.hpp>
 #include <gravitaris/cgame/team-color.hpp>
+#include <gravitaris/cgame/component/shield-flash.hpp>
 
 #include <gravitaris/cgame/spawner/centity-spawner.hpp>
 #include <gravitaris/cgame/cgame.hpp>
@@ -36,12 +37,12 @@ namespace {
 // reports in, so standing on a planet reads 1 rather than a bare 184 that
 // means nothing without knowing the gravity constant. Derived from the
 // standard planet (data/models/planets/simple) at the default gravity
-// multiplier: GRAVITY_CONSTANT * 3.3 * (mass 100000 * multiplier 0.4) /
+// multiplier: GRAVITY_CONSTANT * 3.5 * (mass 100000 * multiplier 0.4) /
 // radius^2, radius = the svg's 299.5 at scale 0.4. Retuning that planet or the
 // default multiplier means retuning this, or the readout stops meaning "one
 // planet". The live multiplier deliberately isn't divided back out: cranking
 // gravity to 3x should read 3g.
-constexpr float SURFACE_GRAVITY = 184.f;
+constexpr float SURFACE_GRAVITY = 195.f;
 
 // How far behind the estimated server tick remote entities render (see
 // CGame::m_interpDelaySeconds) -- smooths jitter at the cost of latency.
@@ -81,7 +82,9 @@ CGame::CGame(IFilesystem &filesystem)
     // their own constructors above) so both m_modelRenderer2 and
     // m_mirrorRenderer2 bake it for SubmitPlanetOwnershipMarkers.
     m_teamMarkerModel = m_resourceLoader.Load<Model>("models/ui/team-marker"_id);
-    m_shieldRingModel = m_resourceLoader.Load<Model>("models/fx/shield-ring"_id);
+
+    m_modelRenderer2.SetExtraPasses(ShieldPasses());
+    m_mirrorRenderer2.SetExtraPasses(ShieldPasses());
 }
 
 SceneView CGame::CurrentSceneView()
@@ -178,7 +181,17 @@ CGame::ShieldReadout CGame::GetShieldReadout()
     if (!loadout) return {};
 
     const ShipStats stats = m_upgradeCatalog.ResolveStats(loadout->levels);
-    return ShieldReadout{loadout->shieldHp, stats.shieldCapacity, loadout->levels.shieldType};
+
+    std::vector<float> segments;
+    if (IsPlated(*loadout)) {
+        const float capacity = PerPlate(*loadout, stats.shieldCapacity);
+        for (std::uint8_t i = 0; capacity > 0.f && i < loadout->plateCount; ++i) {
+            segments.push_back(std::clamp(loadout->plates[i] / capacity, 0.f, 1.f));
+        }
+    }
+
+    return ShieldReadout{loadout->shieldHp, stats.shieldCapacity, loadout->levels.shieldType,
+                         std::move(segments)};
 }
 
 std::vector<CGame::UpgradeOffer> CGame::GetUpgradeOffers()
@@ -243,36 +256,81 @@ void CGame::SubmitPlanetOwnershipMarkers(const SceneView& view)
     });
 }
 
-void CGame::SubmitShieldRings(const SceneView& view)
+std::vector<ModelRenderer2::ExtraPass> CGame::ShieldPasses()
 {
-    if (!view.overlays) return;
+    // How far a shield's own color is lifted off the flat team color. A red
+    // ship's field reads pink, a blue one's ice-blue -- still unmistakably
+    // that team's, but plainly not hull.
+    static constexpr float TEAM_LIFT = 0.45f;
 
-    // Comfortably outside a fighter's hull. A bubble sits wider than plating
-    // does -- the original reason a bubble is meant to cost you hitbox, which
-    // the physics shape doesn't reflect yet.
-    static constexpr float PLATING_RADIUS = 26.f;
-    static constexpr float BUBBLE_RADIUS = 34.f;
+    // A nearly spent shield is a faint outline, a full one is bright -- the
+    // same reading the sidebar's bar gives, without looking away.
+    static constexpr float FLOOR = 0.3f;
 
-    view.Each([&](const Transform& t, const ShipLoadout& loadout) {
-        if (loadout.levels.shieldType == ShieldType::None || loadout.shieldHp <= 0.f) return;
+    // At rest a shield is a ghost over the hull rather than a second outline
+    // competing with it; a strike drives it to fully opaque (see the shader).
+    static constexpr float REST_OPACITY = 0.25f;
 
-        const ShipStats stats = m_upgradeCatalog.ResolveStats(loadout.levels);
-        if (stats.shieldCapacity <= 0.f) return;
+    // `charge` 0..1, `glow` 0..1; fills in the color, opacity and strike
+    // bearing every shield pass shares, and refuses the entity outright when
+    // there is nothing left to draw.
+    const auto shade = [](const ShieldFlash* flash, ModelRenderer2::InstanceStyle& style,
+                          float charge, float glow) {
+        if (charge <= 0.f) return false;
 
-        const bool bubble = loadout.levels.shieldType == ShieldType::Bubble;
-        const float radius = bubble ? BUBBLE_RADIUS : PLATING_RADIUS;
-        const float charge = std::clamp(loadout.shieldHp / stats.shieldCapacity, 0.f, 1.f);
+        style.color = Magnum::Math::lerp(style.color, Magnum::Vector3{1.f, 1.f, 1.f}, TEAM_LIFT)
+                      * (FLOOR + (1.f - FLOOR) * std::min(charge, 1.f));
+        style.flash = 0.f; // the hull's flash is not the shield's
 
-        const Magnum::Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
-        const Matrix3 transform = Matrix3::translation(pos) * Matrix3::scaling({radius, radius});
+        const Magnum::Vector2 dir = flash ? flash->dir : Magnum::Vector2{0.f, -1.f};
+        style.shieldFx = Magnum::Vector4{dir.x(), dir.y(), glow, REST_OPACITY};
+        return true;
+    };
 
-        // A nearly-spent shield is a faint outline, a full one is bright --
-        // the same reading the sidebar's bar gives, without looking away.
-        const Magnum::Color3 tint = bubble ? Magnum::Color3{0.35f, 0.8f, 1.f}
-                                           : Magnum::Color3{1.f, 0.8f, 0.35f};
-        view.overlays->SubmitOverlay(m_shieldRingModel.Id(), transform,
-                                     Magnum::Vector3{tint * (0.25f + 0.75f * charge)});
-    });
+    std::vector<ModelRenderer2::ExtraPass> passes;
+
+    passes.push_back(ModelRenderer2::ExtraPass{
+            SHIELD_TAG,
+            [this, shade](flecs::entity entity, ModelRenderer2::InstanceStyle& style) {
+                const ShipLoadout* loadout = entity.try_get<ShipLoadout>();
+                if (!loadout || loadout->levels.shieldType != ShieldType::Bubble) return false;
+
+                const ShipStats stats = m_upgradeCatalog.ResolveStats(loadout->levels);
+                if (stats.shieldCapacity <= 0.f) return false;
+
+                const ShieldFlash* flash = entity.try_get<ShieldFlash>();
+                return shade(flash, style, loadout->shieldHp / stats.shieldCapacity,
+                             flash ? flash->amount : 0.f);
+            },
+            ShieldGlow::Directional});
+
+    for (std::size_t plate = 0; plate < MAX_SHIELD_PLATES; ++plate) {
+        passes.push_back(ModelRenderer2::ExtraPass{
+                PlatingTag(plate),
+                [this, shade, plate](flecs::entity entity, ModelRenderer2::InstanceStyle& style) {
+                    const ShipLoadout* loadout = entity.try_get<ShipLoadout>();
+                    if (!loadout || !IsPlated(*loadout) || plate >= loadout->plateCount) return false;
+
+                    const ShipStats stats = m_upgradeCatalog.ResolveStats(loadout->levels);
+                    const float capacity = PerPlate(*loadout, stats.shieldCapacity);
+                    if (capacity <= 0.f) return false;
+
+                    // Whole-plate, not a bearing falloff: the sim resolved the
+                    // hit against one specific plate, so that plate lights and
+                    // its neighbours do not. A plate with no charge left is
+                    // already refused below and stays dark.
+                    const ShieldFlash* flash = entity.try_get<ShieldFlash>();
+                    const bool struck = flash && flash->plate == static_cast<std::int8_t>(plate);
+
+                    // Each plate reads its own charge, so a ship burned
+                    // through on one side shows it.
+                    return shade(flash, style, loadout->plates[plate] / capacity,
+                                 struck ? flash->amount : 0.f);
+                },
+                ShieldGlow::Flat});
+    }
+
+    return passes;
 }
 
 void CGame::RenderMinimap()
@@ -409,6 +467,8 @@ void CGame::TickNetClient(const ControlFlags& flags, UpgradePick upgradePick)
                     loadout->levels.shield = state.shieldLevel;
                     loadout->levels.shieldType = state.shieldType;
                     loadout->shieldHp = state.shieldHp;
+                    loadout->plateCount = state.plateCount;
+                    loadout->plates = state.plates;
                 }
                 if (UpgradeDraft* draft = player->try_get_mut<UpgradeDraft>()) {
                     draft->offers = state.upgradeOffers;
@@ -566,7 +626,6 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
     m_starfieldRenderer.Render();
 
     SubmitPlanetOwnershipMarkers(view);
-    SubmitShieldRings(view);
     m_indicatorRenderer.Update(view, CameraSubject(), camera.GetPosition(), camera.GetZoom(), m_viewportSize,
                                m_pixelScale);
     m_mirrorRenderer2.SetZoom(camera.GetZoom());
@@ -575,30 +634,41 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
     m_mirrorRenderer2.SetZoomWidthFactor(m_zoomWidthFactor);
     m_mirrorRenderer2.Render(0.0);
 
-    // Own ship: real local sim, drawn through the same renderer/world
-    // single-player uses -- m_registry holds nothing else in this mode.
+    // Own ship plus the locally predicted cosmetic bullets -- real local sim,
+    // drawn through the same renderer/world single-player uses.
     // ModelRenderer2::Render draws Transform::pos directly with no
     // interpolation of its own (its `delta` parameter is unused -- unlike a
     // typical fixed-tick renderer, there's no prevPos/pos blend here at
-    // all), so a reconciliation snap would make the ship itself visibly
-    // teleport even though the camera above already glides past it via
-    // `smoothedPlayerPos`. Draw at that same smoothed position instead: save
-    // the real Transform::pos, overwrite it just for this one render call,
-    // then restore it immediately after -- the actual simulated state (what
-    // the next predicted tick builds on) is never touched, only one frame's
-    // worth of what gets drawn.
+    // all), so every one of them needs the same sub-tick treatment
+    // `smoothedPlayerPos` gives the camera above: draw at the interpolated
+    // position by saving the real Transform::pos, overwriting it just for
+    // this one render call, then restoring it immediately after -- the
+    // actual simulated state (what the next predicted tick builds on) is
+    // never touched, only one frame's worth of what gets drawn. Only
+    // Renderable entities are touched; the collision/gravity proxies
+    // ClientPrediction keeps in this world are driven kinematically and
+    // aren't drawn.
     m_modelRenderer2.SetZoom(camera.GetZoom());
     m_modelRenderer2.SetCameraPosition(camera.GetPosition());
     m_modelRenderer2.SetLineWidth(m_lineWidthPixels);
     m_modelRenderer2.SetZoomWidthFactor(m_zoomWidthFactor);
-    if (const std::optional<flecs::entity> player = GetPlayer()) {
-        Transform& t = player->get_mut<Transform>();
-        const Vector2d realPos = t.pos;
-        t.pos = Vector2d{smoothedPlayerPos};
-        m_modelRenderer2.Render(0.0);
-        t.pos = realPos;
-    } else {
-        m_modelRenderer2.Render(0.0);
+
+    const double frac = std::clamp(tickFraction, 0.0, 1.0);
+    const std::optional<flecs::entity> player = GetPlayer();
+    m_renderPosRestore.clear();
+    m_registry.each([&](flecs::entity entity, Transform& t, const Renderable&) {
+        m_renderPosRestore.emplace_back(entity, t.pos);
+        // The reconciliation offset in `smoothedPlayerPos` belongs to the own
+        // ship alone -- a bullet is never reconciled, it's spawned from
+        // already-corrected state.
+        t.pos = (player && entity == *player) ? Vector2d{smoothedPlayerPos}
+                                              : t.prevPos + (t.pos - t.prevPos) * frac;
+    });
+
+    m_modelRenderer2.Render(0.0);
+
+    for (const auto& [entity, pos] : m_renderPosRestore) {
+        if (entity.is_alive()) entity.get_mut<Transform>().pos = pos;
     }
 }
 
@@ -648,7 +718,6 @@ void CGame::Render(double delta)
         m_indicatorRenderer.Update(view, CameraSubject(), camera.GetPosition(), camera.GetZoom(), m_viewportSize,
                                    m_pixelScale);
         SubmitPlanetOwnershipMarkers(view);
-        SubmitShieldRings(view);
     }
 
     {

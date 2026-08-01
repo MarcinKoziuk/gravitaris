@@ -3,6 +3,7 @@
 #include <gravitaris/game/net/snapshot.hpp>
 
 #include <gravitaris/cgame/component/hit-flash.hpp>
+#include <gravitaris/cgame/fx/hit-flash-system.hpp>
 #include <gravitaris/cgame/net/remote-event-applier.hpp>
 
 namespace Gravitaris {
@@ -42,12 +43,19 @@ void RemoteEventApplier::Apply(const std::function<flecs::entity(std::uint32_t)>
                 LOG(info) << "research: you collected an upgrade (nothing applied yet)";
             }
 
-            if (event.type != GameEventType::Impact && event.type != GameEventType::LandingCrash) continue;
+            const bool hull = event.type == GameEventType::Impact
+                              || event.type == GameEventType::LandingCrash;
+            const bool shield = event.type == GameEventType::ShieldHit
+                                || event.type == GameEventType::PlatingHit;
+            if (!hull && !shield) continue;
 
             const flecs::entity target = resolveHitTarget(event.sourceNetId);
             if (!target.is_alive()) continue; // e.g. the hit killed it this tick
 
-            if (HitFlash* flash = target.try_get_mut<HitFlash>()) {
+            if (shield) {
+                HitFlashSystem::ApplyShieldHit(target, event.pos, HitFlashSystem::PlateOf(event));
+            }
+            else if (HitFlash* flash = target.try_get_mut<HitFlash>()) {
                 flash->amount = 1.f;
             }
         }

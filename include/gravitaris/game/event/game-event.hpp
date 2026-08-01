@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 
@@ -25,9 +26,34 @@ enum class GameEventType : std::uint8_t {
     FactionDefeated, // source = none, pos = unused, param = the defeated TeamId
     RoundOver,       // source = none, pos = unused, param = the winning TeamId
     UpgradeCollected, // source = the collecting ship, pos = its position, param = its TeamId
-    ShieldHit,        // source = the shielded ship, pos = hit point, param = absorbed*10
+    ShieldHit,        // source = the shielded ship, pos = hit point, param = absorbed*10 (bubble)
+    // An ablative plate took it instead of the bubble. Its own type rather
+    // than a flag on ShieldHit because the two sound different, and the only
+    // thing that hears them (AudioSystem) cannot resolve the source entity:
+    // replicated events arrive with no source attached (RemoteEventApplier).
+    // param = plate index << 16 | absorbed*10.
+    PlatingHit,
     ResearchComplete, // source = a lab of the faction, pos = its position, param = its TeamId
 };
+
+// PlatingHit packs which plate was struck into the low/high halves of `param`
+// alongside the usual absorbed*10. A replicated event carries no source
+// entity, so the plate index cannot be recovered any other way -- and without
+// it the client can only guess which plate to light.
+inline std::uint32_t PackPlatingHit(std::uint8_t plate, std::uint32_t absorbedX10)
+{
+    return (static_cast<std::uint32_t>(plate) << 16) | std::min(absorbedX10, 0xFFFFu);
+}
+
+inline std::uint8_t PlatingHitPlate(std::uint32_t param)
+{
+    return static_cast<std::uint8_t>(param >> 16);
+}
+
+inline std::uint32_t PlatingHitAbsorbed(std::uint32_t param)
+{
+    return param & 0xFFFFu;
+}
 
 struct GameEvent {
     std::uint32_t seq = 0; // globally monotonic, assigned by the queue; 0 = never

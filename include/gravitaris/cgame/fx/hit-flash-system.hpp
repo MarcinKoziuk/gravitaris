@@ -4,6 +4,8 @@
 
 #include <flecs.h>
 
+#include <Magnum/Math/Vector2.h>
+
 #include <gravitaris/game/fwd.hpp>
 
 namespace Gravitaris {
@@ -32,6 +34,16 @@ public:
     // set directly by CGame from replicated events instead) can still decay
     // them the same way Update() does for m_registry.
     static void Decay(flecs::world& world, float dtSeconds);
+
+    // Lights `entity`'s ShieldFlash for a hit at `worldPos`, recording the
+    // bearing in the ship's own frame and which plate took it
+    // (ShieldFlash::BUBBLE if the bubble did). Public and static for the same
+    // reason Decay is: the net-client mirror world's shield hits arrive
+    // through RemoteEventApplier rather than through a local GameEventQueue.
+    static void ApplyShieldHit(flecs::entity entity, const Magnum::Vector2& worldPos, std::int8_t plate);
+
+    // The plate a ShieldHit/PlatingHit event names, unpacked from its param.
+    [[nodiscard]] static std::int8_t PlateOf(const GameEvent& event);
 };
 
 } // namespace Gravitaris

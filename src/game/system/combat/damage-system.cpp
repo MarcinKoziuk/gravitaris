@@ -25,6 +25,8 @@ static constexpr double BULLET_QUERY_RADIUS = 2.0;
 // Landing/ram damage below one hull point is discarded entirely.
 static constexpr float MIN_LANDING_DAMAGE = 1.f;
 
+static bool ShieldElementLive(flecs::entity ent, std::uint8_t element);
+
 DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
                            const UpgradeCatalog& catalog)
         : m_registry(registry)
@@ -112,6 +114,7 @@ void DamageSystem::Update()
             flecs::entity target;
             cpVect targetPoint{};
             cpFloat targetAlpha = 0.f;
+            std::optional<std::uint8_t> targetElement;
         } search{this, bulletEnt, bullet.team};
 
         cpSpaceSegmentQuery(space, from, to, BULLET_QUERY_RADIUS, filter,
@@ -124,10 +127,21 @@ void DamageSystem::Update()
             if (entTeam && entTeam->id == s->team) return; // no friendly fire
 
             if (!ent.try_get<Damageable>()) return; // a planet: shots pass through it
+
+            // A spent plate or a dropped bubble is ignored outright rather
+            // than recorded as a hit that absorbs nothing, so the shot carries
+            // on to whatever is behind it. That -- plus nearest-alpha-wins
+            // below -- is the whole gap rule: a round threading the space
+            // between two plates simply never meets a shield shape, and the
+            // hull polygon behind them is what it lands on.
+            const std::optional<std::uint8_t> element = s->self->ShieldElementFor(ent, shape);
+            if (element && !ShieldElementLive(ent, *element)) return;
+
             if (!s->target.is_alive() || alpha < s->targetAlpha) {
                 s->target = ent;
                 s->targetPoint = point;
                 s->targetAlpha = alpha;
+                s->targetElement = element;
             }
         }, &search);
 
@@ -135,7 +149,7 @@ void DamageSystem::Update()
 
         const Magnum::Vector2 hitPoint{static_cast<float>(search.targetPoint.x),
                                        static_cast<float>(search.targetPoint.y)};
-        const float toHull = AbsorbWithShield(search.target, bullet.damage, hitPoint);
+        const float toHull = AbsorbWithShield(search.target, bullet.damage, hitPoint, search.targetElement);
 
         // A hit stopped entirely by a shield still consumes the round, but
         // emits no Impact -- the hull took nothing, and the hit flash reads
@@ -155,10 +169,21 @@ void DamageSystem::Update()
     }
 }
 
-float DamageSystem::AbsorbWithShield(flecs::entity target, float damage, const Magnum::Vector2& at)
+float DamageSystem::AbsorbWithShield(flecs::entity target, float damage, const Magnum::Vector2& at,
+                                     std::optional<std::uint8_t> element)
 {
     ShipLoadout* loadout = target.try_get_mut<ShipLoadout>();
     if (!loadout || loadout->shieldHp <= 0.f) return damage;
+
+    // No shield shape was struck. On a hull that authors shield geometry that
+    // means the round found a real gap and the hull eats it; on one that
+    // doesn't (structures, and any model not yet drawn a '+shield' layer) the
+    // emitter falls back to the pooled behaviour it had before the geometry
+    // existed, so collecting a shield is never a dead pickup.
+    if (!element) {
+        if (HasShieldGeometry(target)) return damage;
+        element = PhysicsBody::SHIELD_BUBBLE;
+    }
 
     const ShipStats stats = m_catalog.ResolveStats(loadout->levels);
 
@@ -166,15 +191,59 @@ float DamageSystem::AbsorbWithShield(flecs::entity target, float damage, const M
     // which is what keeps it from being strictly better than the bubble's
     // bigger but slower reservoir.
     const float absorbable = damage * stats.shieldAbsorbFraction;
-    const float absorbed = std::min(loadout->shieldHp, absorbable);
+    float absorbed;
 
-    loadout->shieldHp -= absorbed;
-    loadout->shieldRegenDelay = stats.shieldRegenDelayTicks;
+    if (*element == PhysicsBody::SHIELD_BUBBLE) {
+        absorbed = std::min(loadout->shieldHp, absorbable);
+        loadout->shieldHp -= absorbed;
+        loadout->shieldRegenDelay = stats.shieldRegenDelayTicks;
 
-    m_eventQueue.Emit(GameEventType::ShieldHit, target, at,
-                      static_cast<std::uint32_t>(absorbed * 10.f));
+        m_eventQueue.Emit(GameEventType::ShieldHit, target, at,
+                          static_cast<std::uint32_t>(absorbed * 10.f));
+    }
+    else {
+        // Only the struck plate pays, and only it goes quiet -- the far side
+        // of the ship keeps its charge and keeps regenerating.
+        float& plate = loadout->plates[*element];
+        absorbed = std::min(plate, absorbable);
+        plate -= absorbed;
+        loadout->plateRegenDelay[*element] = stats.shieldRegenDelayTicks;
+        // ShieldSystem re-sums this next tick; keeping it honest now matters
+        // for a second round landing in the same one.
+        loadout->shieldHp = std::max(0.f, loadout->shieldHp - absorbed);
+
+        m_eventQueue.Emit(GameEventType::PlatingHit, target, at,
+                          PackPlatingHit(*element, static_cast<std::uint32_t>(absorbed * 10.f)));
+    }
 
     return damage - absorbed;
+}
+
+std::optional<std::uint8_t> DamageSystem::ShieldElementFor(flecs::entity ent, const cpShape* shape)
+{
+    const PhysicsRef* ref = ent.try_get<PhysicsRef>();
+    if (!ref) return std::nullopt;
+    return m_physicsSystem.GetBody(*ref).ShieldElementOf(shape);
+}
+
+bool DamageSystem::HasShieldGeometry(flecs::entity ent)
+{
+    const PhysicsRef* ref = ent.try_get<PhysicsRef>();
+    return ref && !m_physicsSystem.GetBody(*ref).shieldShapes.empty();
+}
+
+// A shield element stops a shot only while it is the emitter the ship is
+// actually carrying and still has charge to spend against it.
+static bool ShieldElementLive(flecs::entity ent, std::uint8_t element)
+{
+    const ShipLoadout* loadout = ent.try_get<ShipLoadout>();
+    if (!loadout) return false;
+
+    if (element == PhysicsBody::SHIELD_BUBBLE) {
+        return loadout->levels.shieldType == ShieldType::Bubble && loadout->shieldHp > 0.f;
+    }
+
+    return IsPlated(*loadout) && element < loadout->plateCount && loadout->plates[element] > 0.f;
 }
 
 // networking-plan Phase 9's destroy rule. Nothing here destroys an entity

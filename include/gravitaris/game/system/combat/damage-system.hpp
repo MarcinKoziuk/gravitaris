@@ -1,10 +1,15 @@
 #pragma once
 
+#include <cstdint>
+#include <optional>
+
 #include <flecs.h>
 
 #include <Magnum/Math/Vector2.h>
 
 #include <gravitaris/game/fwd.hpp>
+
+struct cpShape;
 
 namespace Gravitaris {
 
@@ -42,8 +47,18 @@ private:
     // Spends `target`'s shield charge (if it carries one) against `damage`
     // and returns what still reaches the hull. Weapon hits only: a shield is
     // a defense against fire, not a cushion for flying into a mountain, so
-    // landing and ram damage bypass it.
-    float AbsorbWithShield(flecs::entity target, float damage, const Magnum::Vector2& at);
+    // landing and ram damage bypass it. `element` is the shield shape the
+    // query actually struck (PhysicsBody::SHIELD_BUBBLE, or a plate index),
+    // or nullopt when the round reached bare hull.
+    float AbsorbWithShield(flecs::entity target, float damage, const Magnum::Vector2& at,
+                           std::optional<std::uint8_t> element);
+
+    // Which of `ent`'s shield shapes `shape` is, or nullopt for plain hull.
+    [[nodiscard]] std::optional<std::uint8_t> ShieldElementFor(flecs::entity ent, const cpShape* shape);
+
+    // Whether `ent`'s model authors any shield geometry at all -- what tells a
+    // round through a gap apart from a hull that simply has no plates drawn.
+    [[nodiscard]] bool HasShieldGeometry(flecs::entity ent);
 
 public:
     DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,

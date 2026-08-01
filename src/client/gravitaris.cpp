@@ -369,6 +369,7 @@ void GravitarisApplication::UpdateUi()
     const CGame::ShieldReadout shield = m_game->GetShieldReadout();
     m_ui.SetShieldFraction(shield.capacity > 0.f ? shield.charge / shield.capacity : -1.f,
                            shield.type == ShieldType::Plating ? "plating" : "");
+    m_ui.SetShieldSegments(shield.segments);
 
     std::vector<UpgradeOfferView> offers;
     for (const CGame::UpgradeOffer& offer : m_game->GetUpgradeOffers()) {
@@ -794,7 +795,11 @@ static double GetTime()
 static Application::Configuration CreateConfiguration(const Application::Arguments&)
 {
     Application::Configuration conf;
-#ifdef CORRADE_TARGET_WINDOWS
+#ifdef CORRADE_TARGET_EMSCRIPTEN
+    // Leave the size unset: Sdl2Application then takes the canvas' CSS size
+    // (times devicePixelRatio) instead of hardcoding a backing store the page
+    // layout knows nothing about. The page sizes the canvas to the viewport.
+#elif defined(CORRADE_TARGET_WINDOWS)
     // Force 1:1 scaling so the window/framebuffer is always exactly the
     // requested 1920x1080, regardless of the display's scaling setting.
     // Windows' virtual DPI scaling would otherwise inflate the real pixel

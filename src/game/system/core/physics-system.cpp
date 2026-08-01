@@ -7,6 +7,7 @@
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
+#include <gravitaris/game/resource/body.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
 
 namespace Gravitaris {
@@ -16,6 +17,12 @@ static const cpTransform tzero = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f };
 // A body counts as landing "upright" if its legs (local +Y) point within
 // this cosine of the contact direction; below it the landing is a tip-over.
 static constexpr cpFloat UPRIGHT_DOT_THRESHOLD = 0.82; // ~35 degrees
+
+// Half-thickness of an ablative plate's collision segment, in model units
+// before the entity's scale. Wide enough that a plate stops the shots that
+// visually strike it, narrow enough that the gaps between plates stay real
+// gaps -- shots through those are meant to reach the hull.
+static constexpr cpFloat PLATE_THICKNESS = 0.6;
 
 PhysicsSystem::PhysicsSystem(flecs::world& registry)
     : m_registry(registry)
@@ -234,6 +241,10 @@ void PhysicsSystem::ForEachTouching(const PhysicsRef& ref, void (*fn)(flecs::ent
         auto* it = static_cast<Iter*>(data);
         cpShape *shapeA, *shapeB;
         cpArbiterGetShapes(arb, &shapeA, &shapeB);
+        // A shield sensor overlapping something is not the hull resting on it:
+        // without this a ship whose bubble merely grazed a planet would read
+        // as landed.
+        if (cpShapeGetSensor(shapeA) || cpShapeGetSensor(shapeB)) return;
         // cpBodyEachArbiter presents the arbiter with the iterated body as A.
         flecs::entity touched = it->self->GetEntityForShape(shapeB);
         if (touched.is_alive()) it->fn(touched, it->ctx);
@@ -322,10 +333,47 @@ void PhysicsSystem::InitBody(PhysicsBody& slot, const Transform& transf)
         cpSpaceAddShape(space, shape);
     }
 
+    InitShieldShapes(slot, transf);
+
     cpBodySetAngle(body, cpFloat(transf.rot));
     cpBodySetPosition(body, cpv(transf.pos.x(), transf.pos.y()));
 
     cpBodySetVelocity(body, cpVect(transf.vel));
+}
+
+void PhysicsSystem::InitShieldShapes(PhysicsBody& slot, const Transform& transf)
+{
+    const Body& bodyResource = *slot.body;
+    cpSpace* space = m_spaces.at(slot.spaceId).get();
+    cpBody* body = slot.cp.body.get();
+
+    const auto add = [&](cpShape* shape, std::uint8_t plate) {
+        // Sensor: it reports overlaps but resolves none, so it can never push
+        // the hull around, reach postSolve, or be mistaken for a landing.
+        cpShapeSetSensor(shape, cpTrue);
+        slot.shieldShapes.push_back(PhysicsBody::ShieldShape{shape, plate});
+        slot.cp.shapes.emplace_back(cpShapeUniquePtr(shape));
+        cpSpaceAddShape(space, shape);
+    };
+
+    const std::vector<TVector2<cpFloat>>& outline = bodyResource.GetShieldOutline();
+    if (outline.size() >= 3) {
+        cpTransform trans = cpTransformScale(transf.scale.x(), transf.scale.y());
+        add(cpPolyShapeNew(body, static_cast<int>(outline.size()),
+                           reinterpret_cast<const cpVect*>(outline.data()), trans, 0.0),
+            PhysicsBody::SHIELD_BUBBLE);
+    }
+
+    const std::vector<Body::Plate>& plates = bodyResource.GetPlates();
+    for (std::size_t i = 0; i < plates.size(); ++i) {
+        const Body::Plate& plate = plates[i];
+        for (std::size_t j = 0; j + 1 < plate.size(); ++j) {
+            const cpVect a = cpVect(plate[j] * transf.scale);
+            const cpVect b = cpVect(plate[j + 1] * transf.scale);
+            add(cpSegmentShapeNew(body, a, b, PLATE_THICKNESS * transf.scale.x()),
+                static_cast<std::uint8_t>(i));
+        }
+    }
 }
 
 void PhysicsSystem::HandleBodyAdded(flecs::entity ent, const RigidBodyDesc& desc)
@@ -348,7 +396,11 @@ void PhysicsSystem::HandleBodyAdded(flecs::entity ent, const RigidBodyDesc& desc
     for (auto& shapePtr : slot.cp.shapes) {
         cpShape* shape = shapePtr.get();
         cpShapeSetUserData(shape, reinterpret_cast<void*>(static_cast<std::uintptr_t>(ent.id())));
-        if (desc.collisionClass == CollisionClass::Ship) {
+        // A shield sensor deliberately keeps the default collision type: as a
+        // ship shape it would drive PreSolveShipPair, so two ships whose
+        // bubbles merely brushed would separate and register a ram.
+        const bool shield = slot.ShieldElementOf(shape).has_value();
+        if (desc.collisionClass == CollisionClass::Ship && !shield) {
             cpShapeSetCollisionType(shape, SHIP_COLLISION_TYPE);
         }
         if (desc.sensor) {
@@ -382,6 +434,7 @@ void PhysicsSystem::HandleBodyRemoved(const PhysicsRef& ref)
 
     // Individual teardown: the space stays alive, so the deleters' per-object
     // cpSpaceRemove* is required here.
+    slot.shieldShapes.clear();
     slot.cp.shapes.clear();
     slot.cp.body.reset();
     slot.cp.space.reset();
@@ -402,6 +455,7 @@ void PhysicsSystem::UnloadSpace(id_t spaceId)
         for (auto& shape : slot.cp.shapes) {
             cpShapeFree(shape.release());
         }
+        slot.shieldShapes.clear();
         slot.cp.shapes.clear();
         cpBodyFree(slot.cp.body.release());
         slot.cp.space.reset();

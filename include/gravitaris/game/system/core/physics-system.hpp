@@ -34,6 +34,36 @@ struct PhysicsBody {
         std::vector<cpShapeUniquePtr> shapes;
     } cp;
 
+    // Plate index meaning "the bubble", which is one element rather than an
+    // indexed array of them.
+    static constexpr std::uint8_t SHIELD_BUBBLE = 0xFF;
+
+    // The shapes in cp.shapes that are shield rather than hull -- the bubble
+    // outline, and one entry per *segment* of each ablative plate (so a
+    // three-point plate contributes two). All are sensors: they exist to be
+    // found by DamageSystem's weapon query and nothing else, and they are
+    // added after the mass/moment sum so carrying a shield never changes how
+    // the hull flies.
+    //
+    // A side vector rather than a shape->role map: these are non-owning
+    // pointers into cp.shapes, and keeping them in the same struct means they
+    // cannot outlive it, so a recycled Chipmunk allocation can never be
+    // mistaken for a live plate.
+    struct ShieldShape {
+        cpShape* shape;
+        std::uint8_t plate; // index into ShipLoadout::plates, or SHIELD_BUBBLE
+    };
+    std::vector<ShieldShape> shieldShapes;
+
+    // Which shield element `shape` is, or nullopt when it's plain hull.
+    [[nodiscard]] std::optional<std::uint8_t> ShieldElementOf(const cpShape* shape) const
+    {
+        for (const ShieldShape& s : shieldShapes) {
+            if (s.shape == shape) return s.plate;
+        }
+        return std::nullopt;
+    }
+
     [[nodiscard]] bool IsAlive() const { return cp.body != nullptr; }
 };
 
@@ -165,7 +195,7 @@ private:
     flecs::observer m_bodyAddedObserver;
     flecs::observer m_bodyRemovedObserver;
 
-    float m_gravityMultiplier = 3.3f; // this game's tuned default; 1 = GRAVITY_CONSTANT unmodified
+    float m_gravityMultiplier = 3.5f; // this game's tuned default; 1 = GRAVITY_CONSTANT unmodified
 
     void InitSpace(id_t spaceId);
 
@@ -186,6 +216,11 @@ private:
     void ApplyShipSeparation();
 
     void InitBody(PhysicsBody& slot, const Transform& transf);
+
+    // The bubble and plate sensors, built from the model's '+shield'/'+plating'
+    // layers. Called at the end of InitBody, after the mass and moment are
+    // set, so they contribute neither.
+    void InitShieldShapes(PhysicsBody& slot, const Transform& transf);
 
     std::uint32_t Allocate();
 

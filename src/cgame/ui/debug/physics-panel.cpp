@@ -17,7 +17,7 @@ void DrawPhysicsPanel(CGame& game)
     if (ImGui::SliderFloat("Gravity multiplier", &gravity, 0.f, 8.f, "%.2f")) {
         game.SetGravityMultiplier(gravity);
     }
-    ImGui::SetItemTooltip("Scales every planet's pull on every body. Applied live, every tick. Default 3.3.");
+    ImGui::SetItemTooltip("Scales every planet's pull on every body. Applied live, every tick. Default 3.5.");
     if (ImGui::Button("Reset##gravity")) {
         game.SetGravityMultiplier(3.3f);
     }

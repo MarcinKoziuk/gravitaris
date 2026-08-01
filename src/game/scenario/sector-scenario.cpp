@@ -17,24 +17,30 @@ namespace Gravitaris {
 // Scale reference throughout is the classic arena (classic-scenario.cpp):
 // two suns 22400 apart, planets on orbits of 4000..9600.
 
+// Planets sit this much further out from their sun than the arena puts them.
+// Every other distance below is scaled by it too, so the sector keeps the
+// arena's proportions rather than growing systems into each other: the gap
+// between neighbouring stars' outermost orbits stays what it was.
+static constexpr double SECTOR_SCALE = 4. / 3.;
+
 // Two stars this far apart still leave a comfortable gap between their
 // outermost orbits, so no planet is ever ambiguous about which sun it
 // belongs to.
-static constexpr double MIN_STAR_SEPARATION = 22400.;
+static constexpr double MIN_STAR_SEPARATION = 22400. * SECTOR_SCALE;
 
 // The sector disc grows with the square root of the star count, so adding
 // stars adds space rather than crowding: 4 stars land near the classic
 // arena's own half-width.
-static constexpr double SECTOR_RADIUS_PER_SQRT_STAR = 11200.;
+static constexpr double SECTOR_RADIUS_PER_SQRT_STAR = 11200. * SECTOR_SCALE;
 
-static constexpr double MIN_ORBIT_RADIUS = 4000.;
-static constexpr double ORBIT_SPACING = 2800.;
-static constexpr double ORBIT_JITTER = 600.;
+static constexpr double MIN_ORBIT_RADIUS = 4000. * SECTOR_SCALE;
+static constexpr double ORBIT_SPACING = 2800. * SECTOR_SCALE;
+static constexpr double ORBIT_JITTER = 600. * SECTOR_SCALE;
 
 // How far a faction looks for room to grow, when the fairness pass asks
 // whether it has any. A bit over one star's outermost orbit, so a home's
 // neighbourhood is its own system plus whatever sits just beyond it.
-static constexpr double EXPANSION_RADIUS = 14000.;
+static constexpr double EXPANSION_RADIUS = 14000. * SECTOR_SCALE;
 
 // Bounded so generation always terminates in the same number of steps for a
 // given seed -- an unbounded "keep trying until it fits" loop would make the

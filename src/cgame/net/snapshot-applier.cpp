@@ -213,6 +213,8 @@ static void ApplyLoadout(flecs::entity entity, const EntityState& state)
         loadout->levels.shield = state.shieldLevel;
         loadout->levels.shieldType = state.shieldType;
         loadout->shieldHp = state.shieldHp;
+        loadout->plateCount = state.plateCount;
+        loadout->plates = state.plates;
     }
     if (UpgradeDraft* draft = entity.try_get_mut<UpgradeDraft>()) {
         draft->offers = state.upgradeOffers;

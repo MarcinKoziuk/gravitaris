@@ -309,6 +309,8 @@ bool UpgradeCatalog::Apply(const UpgradeDef& def, ShipLoadout& loadout) const
             levels.shieldType = def.shield.type;
             levels.shield = 1;
             loadout.shieldHp = 0.f; // charges up from empty
+            loadout.plates = {};
+            loadout.plateRegenDelay = {};
         }
         else {
             ++levels.shield;

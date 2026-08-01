@@ -53,16 +53,19 @@ Line2Shader::Line2Shader(IFilesystem& fileSystem)
     bindAttributeLocation(Line2Shader::InstanceTransform::Location, "instanceTransform");
     bindAttributeLocation(Line2Shader::InstanceTeamColor::Location, "instanceTeamColor");
     bindAttributeLocation(Line2Shader::InstanceFlash::Location, "instanceFlash");
+    bindAttributeLocation(Line2Shader::InstanceShieldFx::Location, "instanceShieldFx");
 
     link();
 
     u_width = uniformLocation("width");
     u_viewportSize = uniformLocation("viewportSize");
     u_viewProjection = uniformLocation("viewProjection");
+    u_shieldGlow = uniformLocation("shieldGlow");
 
     setWidth(1.f);
     setViewportSize(Vector2{1280.f, 720.f});
     setViewProjection(Matrix3{});
+    setShieldGlow(ShieldGlow::None);
 }
 
 Line2Shader& Line2Shader::setWidth(Magnum::Float widthPixels)
@@ -80,6 +83,12 @@ Line2Shader& Line2Shader::setViewportSize(const Vector2& size)
 Line2Shader& Line2Shader::setViewProjection(const Matrix3& matrix)
 {
     setUniform(u_viewProjection, matrix);
+    return *this;
+}
+
+Line2Shader& Line2Shader::setShieldGlow(ShieldGlow mode)
+{
+    setUniform(u_shieldGlow, static_cast<Magnum::Float>(mode));
     return *this;
 }
 

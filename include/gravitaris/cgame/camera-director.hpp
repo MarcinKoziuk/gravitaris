@@ -73,6 +73,15 @@ public:
         float leadTime = 1.1f;         // seconds of trajectory to lead by
         float leadMaxFraction = 0.55f; // cap on the lead, as a fraction of the visible half-extent
         float leadTau = 0.7f;          // smoothing (s) for the lead vector -- a turn must not swing the view
+        // Speed at which look-ahead starts, and the speed by which it is fully
+        // engaged. Below the first there is none at all: the lead's gravity
+        // term is large near a planet even at a standstill, so without this the
+        // view is shoved around by a trajectory the player isn't flying yet --
+        // and since engaging the lead also tightens the dead zone, that reads
+        // as the ship and the view both sliding at once. Ramped rather than
+        // switched, or crossing the threshold is itself a lurch.
+        float leadMinSpeed = 60.f;
+        float leadFullSpeed = 300.f;
     };
 
 private:

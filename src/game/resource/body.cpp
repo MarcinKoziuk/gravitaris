@@ -30,7 +30,9 @@ std::size_t Body::CalculateSize() const
 {
     return sizeof(*this)
            + PodContainerSize(m_circleShapes)
-           + PodContainerContainerSize(m_polygonShapes);
+           + PodContainerContainerSize(m_polygonShapes)
+           + PodContainerSize(m_shieldOutline)
+           + PodContainerContainerSize(m_plates);
 }
 
 ResourcePtr<const Body> Body::Placeholder()
@@ -97,6 +99,17 @@ ResourcePtr<const Body> Body::Create(id_t id, LoadingContext& context)
         else if (std::strcmp(group, HARDPOINTS_GROUP_LABEL) == 0) {
             body->AddHardpoint(shape, transform);
         }
+        else if (std::strcmp(group, SHIELD_GROUP_LABEL) == 0) {
+            body->AddShieldOutline(shape, transform);
+        }
+        else if (std::strcmp(group, PLATING_GROUP_LABEL) == 0) {
+            body->AddPlates(shape, transform);
+        }
+    }
+
+    if (!body->m_shieldOutline.empty() || !body->m_plates.empty()) {
+        LOG(info) << "body " << path << ": shield outline " << body->m_shieldOutline.size()
+                  << " pts, " << body->m_plates.size() << " ablative plates";
     }
 
     return body;
@@ -132,6 +145,52 @@ const Body::Hardpoint* Body::FindHardpoint(const char* name) const
         if (hardpoint.name == name) return &hardpoint;
     }
     return nullptr;
+}
+
+void Body::AddShieldOutline(const NSVGshape* shape, const Matrix4d& transform)
+{
+    if (!m_shieldOutline.empty()) {
+        LOG(warning) << "Model authors more than one " << SHIELD_GROUP_LABEL
+                     << " path (" << shape->id << "); only the first is used";
+        return;
+    }
+
+    const std::vector<Vector2d> outline = PathToPolyline(shape->paths, transform);
+    if (outline.size() < 3) {
+        LOG(error) << SHIELD_GROUP_LABEL << " path " << shape->id << " has less than 3 points";
+        return;
+    }
+
+    // Even stride rather than a curvature-aware simplification: the bubble is
+    // authored as a smooth convex loop, so every point is as good as any other
+    // to keep, and dropping the rest is what keeps the hitbox polygon small.
+    const std::size_t stride = (outline.size() + SHIELD_HULL_POINTS - 1) / SHIELD_HULL_POINTS;
+    for (std::size_t i = 0; i < outline.size(); i += stride) {
+        m_shieldOutline.emplace_back(outline[i]);
+    }
+}
+
+void Body::AddPlates(const NSVGshape* shape, const Matrix4d& transform)
+{
+    for (const NSVGpath* path = shape->paths; path != nullptr; path = path->next) {
+        if (m_plates.size() >= MAX_SHIELD_PLATES) {
+            LOG(warning) << "Model authors more than " << MAX_SHIELD_PLATES << " "
+                         << PLATING_GROUP_LABEL << " paths; the rest are ignored";
+            return;
+        }
+
+        Plate plate;
+        for (const Vector2d& pt : PathToPolyline(path, transform)) {
+            plate.emplace_back(pt);
+        }
+
+        if (plate.size() < 2) {
+            LOG(error) << PLATING_GROUP_LABEL << " path " << shape->id << " has less than 2 points";
+            continue;
+        }
+
+        m_plates.push_back(std::move(plate));
+    }
 }
 
 void Body::AddShape(const NSVGshape* shape, const Matrix4d& transform)

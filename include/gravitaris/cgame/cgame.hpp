@@ -4,6 +4,7 @@
 #include <chrono>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <Magnum/Math/Vector2.h>
@@ -121,11 +122,11 @@ protected:
     ResourcePtr<const Model> m_teamMarkerModel;
     void SubmitPlanetOwnershipMarkers(const SceneView& view);
 
-    // Draws a ring around every ship carrying a shield, brightening with its
-    // charge, in the emitter type's own color -- the only outward tell that a
-    // hit was absorbed rather than taken.
-    ResourcePtr<const Model> m_shieldRingModel;
-    void SubmitShieldRings(const SceneView& view);
+    // The shield passes both renderers draw after their standard ones: the
+    // model's own '+shield' bubble, or one pass per '+plating' plate. Which is
+    // up, how bright, and in what color are questions about a ship's loadout,
+    // so the style callbacks live here rather than in the renderer.
+    [[nodiscard]] std::vector<ModelRenderer2::ExtraPass> ShieldPasses();
 
     // Unit the camera is following instead of the own ship; empty = not
     // spectating. May live in either world (see CycleSpectate).
@@ -169,10 +170,14 @@ protected:
     std::uint64_t m_lastEstimatedServerTick = 0;
     double m_lastRenderTick = 0.0;
 
+    // Real Transform::pos of everything RenderNetClient temporarily moves to
+    // its sub-tick rendered position, restored right after the draw.
+    std::vector<std::pair<flecs::entity, Magnum::Vector2d>> m_renderPosRestore;
+
     // `tickFraction` is the fixed-step accumulator's leftover, 0..1 (the
     // same `delta` Render takes) -- how far past the last predicted tick
-    // this frame actually is. The own ship is rendered that far between its
-    // last two predicted positions; see RenderNetClient's own comment.
+    // this frame actually is. Locally simulated renderables are drawn that
+    // far between their last two predicted positions; see RenderNetClient.
     void RenderNetClient(float dtSeconds, double tickFraction);
 
     Magnum::Vector2 m_viewportSize{1280.f, 720.f};
@@ -219,7 +224,7 @@ public:
         // solar system's gravity wells, and lifting off a planet by hand
         // needs it. Headless Games (sim-test) never apply this, so their
         // determinism is unaffected by the value.
-        static constexpr float shipWeight = 0.534f;
+        static constexpr float shipWeight = 0.75f;
     };
 
     static constexpr float MIN_LINE_WIDTH = 0.5f;
@@ -336,6 +341,11 @@ public:
         float charge = 0.f;
         float capacity = 0.f;
         ShieldType type = ShieldType::None;
+        // Per-plate charge, each 0..1 of that plate's own capacity, in the
+        // model's plate order. Empty for a bubble (or a plated hull with no
+        // '+plating' authored), which is what tells the sidebar to draw one
+        // continuous bar instead of a divided one.
+        std::vector<float> segments;
     };
     [[nodiscard]] ShieldReadout GetShieldReadout();
 

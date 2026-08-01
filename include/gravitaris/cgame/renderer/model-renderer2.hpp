@@ -12,6 +12,7 @@
 #include <Magnum/GL/Buffer.h>
 #include <Magnum/Math/Matrix3.h>
 #include <Magnum/Math/Vector2.h>
+#include <Magnum/Math/Vector4.h>
 
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
@@ -42,6 +43,32 @@ using Magnum::Vector3;
 // Kept alongside ModelRenderer/SimpleModelRenderer for comparison; remove
 // those once this is validated.
 class ModelRenderer2 {
+public:
+    // Per-entity overrides for one tagged pass, seeded with what the default
+    // sweep would have drawn. Returning false skips the entity entirely, which
+    // is how a pass draws only the ships that currently have that thing --
+    // a lit shield, a burning thruster.
+    struct InstanceStyle {
+        Vector3 color;      // the entity's team color
+        float flash = 0.f;  // the entity's HitFlash
+        // (bearing x, bearing y, glow amount, resting opacity) of a shield
+        // strike, the bearing in the ship's own frame. Only a pass whose
+        // ShieldGlow is not None reads it.
+        Magnum::Vector4 shieldFx{};
+    };
+
+    using InstanceStyleFn = std::function<bool(flecs::entity, InstanceStyle&)>;
+
+    // One extra tagged pass, drawn after the standard ones. The shield and
+    // plating groups arrive this way rather than being named here: which of
+    // them is up, how bright, and in what color are all questions about a
+    // ship's loadout, which this renderer has no business knowing.
+    struct ExtraPass {
+        id_t tag;
+        InstanceStyleFn style;
+        ShieldGlow shieldGlow = ShieldGlow::None;
+    };
+
 private:
     // Per (model, tag) cached mesh. instanceBuffer is refilled per frame.
     // debugFacetedMesh: same group baked without circle special-casing, for
@@ -55,11 +82,12 @@ private:
     };
 
     // Matches Line2Shader's per-instance layout (Matrix3 transform + team
-    // color + hit-flash amount).
+    // color + hit-flash amount + shield strike).
     struct InstanceData {
         Matrix3 transform;
         Vector3 teamColor;
         float flash;
+        Magnum::Vector4 shieldFx;
     };
 
     flecs::world& m_registry;
@@ -67,6 +95,10 @@ private:
     Line2Shader m_shader;
 
     std::unordered_map<id_t, std::unordered_map<id_t, BakedGroup>> m_baked;
+    // How many loaded models carry each tag. A pass whose tag nothing has --
+    // most of the sixteen plate passes, on a fleet of hulls with no plating
+    // authored -- skips its registry sweep entirely.
+    std::unordered_map<id_t, int> m_tagRefCount;
     std::unordered_map<id_t, std::vector<InstanceData>> m_instanceScratch;
 
     // (Model::GetRenderOrder, model id), kept sorted as models come and go.
@@ -98,7 +130,9 @@ private:
 
     [[nodiscard]] Matrix3 ViewProjection() const;
 
-    void RenderTag(id_t tag, const std::function<bool(flecs::entity)>& filter);
+    std::vector<ExtraPass> m_extraPasses;
+
+    void RenderTag(id_t tag, const InstanceStyleFn& style);
 
 public:
     ModelRenderer2(flecs::world& registry, IFilesystem& filesystem, ResourceLoader& resourceLoader);
@@ -119,6 +153,10 @@ public:
     // their own (a Lab's ready flash). Render()'s `delta` can't stand in for
     // it: callers pass a fixed-step interpolation fraction there, or 0.
     void SetTime(float seconds) { m_timeSeconds = seconds; }
+
+    // Installed once at startup, not per frame -- these are as fixed a part of
+    // the draw as the standard passes are.
+    void SetExtraPasses(std::vector<ExtraPass> passes) { m_extraPasses = std::move(passes); }
 
     void SetDebugForceFacetedCircles(bool force) { m_debugForceFacetedCircles = force; }
     [[nodiscard]] bool GetDebugForceFacetedCircles() const { return m_debugForceFacetedCircles; }

@@ -19,6 +19,18 @@ namespace Gravitaris {
 static constexpr float HULL_WARN_FRACTION = 0.5f;
 static constexpr float HULL_CRITICAL_FRACTION = 0.25f;
 
+// Distinct shades a plating block is drawn in. Coarse on purpose: this is the
+// change gate for rebuilding the row, and a plate regenerating continuously
+// would otherwise rewrite it every frame for steps nobody can see.
+static constexpr float SHIELD_SHADES = 12.f;
+
+// Width of the divider between plating blocks, as a share of the whole track.
+static constexpr float SEGMENT_GAP_PERCENT = 2.f;
+
+// Shade a fully spent plate keeps, so it stays a visible dark slot rather than
+// disappearing into the track -- the gap is the reading.
+static constexpr float SEGMENT_FLOOR = 0.18f;
+
 static std::optional<TeamId> TeamIdFromOption(const Rml::String& value);
 static const char* TeamOptionValue(TeamId team);
 static const char* TeamLabel(TeamId team);
@@ -101,6 +113,7 @@ bool UI::Init()
         m_gwellReadout = hud->GetElementById("gwell_readout");
         m_shieldFill = hud->GetElementById("shield_fill");
         m_shieldValue = hud->GetElementById("shield_value");
+        m_shieldSegments = hud->GetElementById("shield_segments");
         m_upgradeDraft = hud->GetElementById("upgrade_draft");
         m_upgradeOffers = hud->GetElementById("upgrade_offers");
         m_minimap = hud->GetElementById("minimap");
@@ -304,6 +317,57 @@ void UI::SetShieldFraction(float fraction, const std::string& styleClass)
     m_shieldValue->SetInnerRML(std::to_string(percent) + "%");
 }
 
+void UI::SetShieldSegments(const std::vector<float>& charges)
+{
+    if (!m_shieldSegments || !m_shieldFill) return;
+
+    // Shade steps, not raw floats: a plate regenerating continuously would
+    // otherwise rewrite the markup every frame for changes nobody can see.
+    std::vector<int> steps;
+    steps.reserve(charges.size());
+    for (const float charge : charges) {
+        steps.push_back(static_cast<int>(std::lround(std::clamp(charge, 0.f, 1.f) * SHIELD_SHADES)));
+    }
+    if (steps == m_shownSegments) return;
+    m_shownSegments = steps;
+
+    // A bubble (or any hull with no plates) falls back to the continuous bar.
+    // display, not visibility: both live in the same track, and a hidden-but-
+    // laid-out fill still takes its own 14dp of a 14dp content box, which
+    // pushes the blocks out through the track's bottom border.
+    m_shieldSegments->SetClass("shown", !steps.empty());
+    m_shieldFill->SetProperty("display", steps.empty() ? "block" : "none");
+    if (steps.empty()) {
+        m_shieldSegments->SetInnerRML("");
+        return;
+    }
+
+    // Percentages throughout rather than dp gaps, so the blocks divide the
+    // track exactly however many plates the hull carries.
+    const auto count = static_cast<float>(steps.size());
+    const float gap = steps.size() > 1 ? SEGMENT_GAP_PERCENT : 0.f;
+    const float width = (100.f - gap * (count - 1.f)) / count;
+
+    std::string markup;
+    for (std::size_t i = 0; i < steps.size(); ++i) {
+        // A spent plate stays visible as a dark slot -- the gap in
+        // [xxxx---xxxxxx] is the point, and an absent block would just make
+        // the bar shorter.
+        const float charge = static_cast<float>(steps[i]) / SHIELD_SHADES;
+        const int level = static_cast<int>(std::lround((SEGMENT_FLOOR + (1.f - SEGMENT_FLOOR) * charge) * 255.f));
+
+        char block[256];
+        std::snprintf(block, sizeof(block),
+                      "<span style=\"width: %.4f%%; margin-left: %.4f%%; "
+                      "background-color: rgba(%d, %d, %d, 255);\"></span>",
+                      width, i == 0 ? 0.f : gap,
+                      level, static_cast<int>(std::lround(level * 0.80f)),
+                      static_cast<int>(std::lround(level * 0.40f)));
+        markup += block;
+    }
+    m_shieldSegments->SetInnerRML(markup);
+}
+
 void UI::SetUpgradeOffers(const std::vector<UpgradeOfferView>& offers)
 {
     if (!m_upgradeDraft || !m_upgradeOffers) return;
@@ -433,7 +497,7 @@ static const char* TeamOptionValue(TeamId team)
     switch (team) {
     case TeamId::Blue: return "blue";
     case TeamId::Red: return "red";
-    case TeamId::Green: return "green";
+    case TeamId::Violet: return "violet";
     case TeamId::Yellow: return "yellow";
     case TeamId::Magenta: return "magenta";
     case TeamId::Cyan: return "cyan";
@@ -449,7 +513,7 @@ static const char* TeamLabel(TeamId team)
     switch (team) {
     case TeamId::Blue: return "Blue";
     case TeamId::Red: return "Red";
-    case TeamId::Green: return "Green";
+    case TeamId::Violet: return "Violet";
     case TeamId::Yellow: return "Yellow";
     case TeamId::Magenta: return "Magenta";
     case TeamId::Cyan: return "Cyan";

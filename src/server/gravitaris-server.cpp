@@ -84,7 +84,7 @@ std::optional<TeamId> ParseTeam(const std::string& name)
 {
     if (name == "blue") return TeamId::Blue;
     if (name == "red") return TeamId::Red;
-    if (name == "green") return TeamId::Green;
+    if (name == "violet") return TeamId::Violet;
     if (name == "yellow") return TeamId::Yellow;
     if (name == "magenta") return TeamId::Magenta;
     if (name == "cyan") return TeamId::Cyan;

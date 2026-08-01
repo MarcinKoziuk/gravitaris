@@ -59,6 +59,12 @@ enum class ShieldType : std::uint8_t {
     Plating, // hull-hugging, leaks part of every hit, recharges fast
 };
 
+// Fixed width of everything indexed by ablative plate: ShipLoadout's per-plate
+// charge, its wire form, and the renderer's per-instance charge word. A model
+// authoring more '+plating' paths than this is clamped at load (Body::AddPlates),
+// so the index a hit reports always addresses all three.
+inline constexpr std::size_t MAX_SHIELD_PLATES = 16;
+
 // Where a collected upgrade lands. Only Ship is honored today -- everything
 // is carried by the ship that picked it up and lost with it. Faction is the
 // hook for permanent faction-wide passives (a researched tech every future

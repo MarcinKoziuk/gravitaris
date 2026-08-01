@@ -65,7 +65,11 @@ private:
 
     static ResourcePtr<const Shape> placeholder;
 
-    void AddPaths(const NSVGshape* shape, const Matrix4d& transform, id_t group);
+    // `plateIndex`, when given, is a running count of ablative plates: each
+    // path this call emits takes PlatingTag() of the next index rather than
+    // the shared group tag.
+    void AddPaths(const NSVGshape* shape, const Matrix4d& transform, id_t group, bool fxLayer = false,
+                  std::size_t* plateIndex = nullptr);
 
 public:
     ~Shape() override = default;
@@ -93,5 +97,13 @@ public:
 };
 
 [[nodiscard]] std::size_t CalculateSize(const Shape::Path& path);
+
+// Group tag of one ablative plate. Indices match Body::GetPlates(): both walk
+// the '+plating' layer's paths in SVG document order, which is what lets the
+// plate a hit was resolved against be the plate that lights up.
+[[nodiscard]] id_t PlatingTag(std::size_t index);
+
+// Group tag of the bubble shield's outline.
+inline constexpr id_t SHIELD_TAG = IDC("+shield");
 
 } // namespace Gravitaris

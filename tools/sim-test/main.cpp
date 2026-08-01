@@ -827,13 +827,22 @@ void TestLandingAndClaiming()
     // Per-hull fragility: two identical airframes dropped identically, one of
     // them twice as fragile, take damage in that ratio. Overridden on the
     // component rather than by flying a different model, so nothing but the
-    // multiplier differs between the two. Speed chosen so neither dies -- a
-    // clamp at zero hp would hide the ratio.
+    // multiplier differs between the two.
+    //
+    // The probes are given hp far past anything the drop can cost them rather
+    // than the drop being tuned gentle enough not to kill them: a clamp at
+    // zero hp would hide the ratio, and calibrating the drop speed against it
+    // made this a tripwire for the gravity default instead of a test of
+    // fragility -- the fall gains speed under gravity, so retuning that
+    // constant either killed the fragile probe or stopped hurting either.
     const auto dropAndMeasure = [&](double planetY, float fragility) {
         spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., planetY}, 1e-9, 800., 1.0, 0.0);
         flecs::entity faller = spawner.SpawnPlayer("models/ships/fighter-1"_id,
                                                    Vector2d{800., planetY + planetRadius + 60.});
-        faller.get_mut<Damageable>().landingFragility = fragility;
+        Damageable& hull = faller.get_mut<Damageable>();
+        hull.landingFragility = fragility;
+        hull.maxHp = 1e6f;
+        hull.hp = 1e6f;
         cpBody* body = game.GetPhysicsSystem().GetBody(faller.get<PhysicsRef>()).cp.body.get();
         cpBodySetAngle(body, CP_PI);
         cpBodySetVelocity(body, cpv(0., -110.));
@@ -2416,13 +2425,17 @@ void TestTeamAssignment(Game& game)
     // (Base+Lab or High Port+Space Dock) before a fighter respawns at all --
     // without this, Cyan legitimately has nowhere to respawn (same as any
     // other faction that owns nothing), and the assertions below would never
-    // fire.
+    // fire. The Colony is part of that minimum too: a planet is only a
+    // respawn site once it carries both a Base and a Colony, so a bare claim
+    // (or a half-built complex) is not somewhere to come back to.
     flecs::entity cyanPlanet = game.GetEntitySpawner().SpawnOrbitingPlanet(
             "models/planets/simple"_id, Magnum::Vector2d{900., 900.}, 1e-9, 2000., 1.0, 0.0);
     cyanPlanet.set<Team>(Team{TeamId::Cyan});
     flecs::entity cyanBase = game.GetEntitySpawner().SpawnStructure(
             StructureType::Base, "models/structures/base"_id, cyanPlanet, TeamId::Cyan);
     game.GetEntitySpawner().SpawnStructure(StructureType::Lab, "models/structures/lab"_id, cyanPlanet, TeamId::Cyan);
+    game.GetEntitySpawner().SpawnStructure(StructureType::Colony, "models/structures/colony"_id, cyanPlanet,
+                                           TeamId::Cyan);
     cyanBase.get_mut<Structure>().finishedMaterials = 1000.f;
 
     // Kill A's ship and confirm the respawned one keeps the reassigned team
@@ -2435,6 +2448,10 @@ void TestTeamAssignment(Game& game)
         client.Update();
     }
     const flecs::entity respawned = game.GetEntitySpawner().EntityForNetId(client.GetYourShipNetId());
+    // Checked before the reads below rather than left to crash on them: a
+    // respawn that never happened hands back a dead entity, and dereferencing
+    // that segfaults instead of reporting which expectation broke.
+    Require(respawned.is_alive(), "team: the respawned ship exists (test setup check)");
     Require(respawned != shipA, "team: the ship actually respawned (test setup check)");
     Require(respawned.get<Team>().id == TeamId::Cyan, "team: a respawn keeps the reassigned team, not the original");
     Require(client.GetYourTeam() == TeamId::Cyan, "team: the client's own re-welcome reflects the kept team too");

@@ -104,8 +104,14 @@ void MissileSystem::Update()
             heading = desired;
         }
 
-        const double newSpeed =
-                std::min(speed + guidance.acceleration * Game::PHYSICS_DELTA, guidance.topSpeed);
+        // top_speed is what the motor can reach on its own, not a speed limit
+        // the airframe is held to: a missile launched from a fast ship keeps
+        // the velocity it inherited (nothing in space bleeds it off), and only
+        // accelerates while it is still under its own top speed. Clamping
+        // outright made a launch visibly brake to top_speed on its first tick,
+        // which read as the missile not inheriting ship velocity at all.
+        const double newSpeed = std::max(
+                speed, std::min(speed + guidance.acceleration * Game::PHYSICS_DELTA, guidance.topSpeed));
         const Vector2d vel = heading * newSpeed;
 
         cpBody* body = m_physicsSystem.GetBody(ref).cp.body.get();

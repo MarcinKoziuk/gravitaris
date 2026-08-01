@@ -60,7 +60,11 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
     // once (if) one does.
     m_thrustClip = m_resourceLoader.Load<AudioClip>("sounds/thrust-1.wav"_id);
     m_hitClip    = m_resourceLoader.Load<AudioClip>("sounds/hit-1.wav"_id);
-    m_shieldClip = m_resourceLoader.Load<AudioClip>("sounds/laser-1.wav"_id);
+    // Two clips, not one: a bubble absorbing a round and a metal plate
+    // taking one are different events to the player, and the shield type is
+    // not recoverable here (a replicated event carries no source entity).
+    m_bubbleClip = m_resourceLoader.Load<AudioClip>("sounds/shield-bubble-1.wav"_id);
+    m_platingClip = m_resourceLoader.Load<AudioClip>("sounds/shield-plating-1.wav"_id);
     m_researchClip = m_resourceLoader.Load<AudioClip>("sounds/research-1.wav"_id);
 
     // One clip per distinct sound the weapon table names. Deduplicated: the
@@ -89,7 +93,8 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
 
     HandleClipAdded(*m_thrustClip, m_thrustClip.Id());
     HandleClipAdded(*m_hitClip, m_hitClip.Id());
-    HandleClipAdded(*m_shieldClip, m_shieldClip.Id());
+    HandleClipAdded(*m_bubbleClip, m_bubbleClip.Id());
+    HandleClipAdded(*m_platingClip, m_platingClip.Id());
     HandleClipAdded(*m_researchClip, m_researchClip.Id());
     for (const ResourcePtr<const AudioClip>& clip : m_weaponClips) HandleClipAdded(*clip, clip.Id());
 
@@ -172,7 +177,10 @@ void AudioSystem::Update(const Vector2& cameraPos)
             case GameEventType::ShieldHit:
                 // Quieter and thinner than a hull hit -- the tell is that the
                 // hull did NOT take it.
-                PlayOneShotById(m_shieldClip.Id(), event.pos, SHIELD_HIT_GAIN);
+                PlayOneShotById(m_bubbleClip.Id(), event.pos, SHIELD_HIT_GAIN);
+                break;
+            case GameEventType::PlatingHit:
+                PlayOneShotById(m_platingClip.Id(), event.pos, SHIELD_HIT_GAIN);
                 break;
             case GameEventType::Impact:
             case GameEventType::LandingCrash:

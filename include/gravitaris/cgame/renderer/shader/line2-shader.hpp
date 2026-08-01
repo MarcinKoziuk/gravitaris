@@ -18,11 +18,20 @@ using Magnum::Vector4;
 // Shader for the baked (cached) line renderer. Line expansion happens per
 // vertex from adjacency baked at load time; per-entity transforms are supplied
 // as instanced attributes so N ships of the same model are one instanced draw.
+// How a pass lights its stroke from the per-instance shield strike, and
+// whether that strike drives its opacity at all.
+enum class ShieldGlow {
+    None,        // ordinary geometry: fully opaque, no glow
+    Directional, // bubble: brightest where the outline faces the strike
+    Flat,        // plating: the whole struck plate lights evenly
+};
+
 class Line2Shader : public Magnum::GL::AbstractShaderProgram {
 protected:
     Magnum::Int u_width;
     Magnum::Int u_viewportSize;
     Magnum::Int u_viewProjection;
+    Magnum::Int u_shieldGlow;
 
 public:
     // Per-vertex (static, baked once per model). teamWeight is 1 for strokes
@@ -39,6 +48,10 @@ public:
     typedef Magnum::GL::Attribute<6, Matrix3> InstanceTransform;
     typedef Magnum::GL::Attribute<9, Vector3> InstanceTeamColor;
     typedef Magnum::GL::Attribute<10, Magnum::Float> InstanceFlash;
+    // (bearing x, bearing y, glow amount, resting opacity) of a shield strike,
+    // the bearing in the ship's own frame. Read only by a pass whose
+    // ShieldGlow is not None; zero on every other.
+    typedef Magnum::GL::Attribute<11, Vector4> InstanceShieldFx;
 
     explicit Line2Shader(IFilesystem& fileSystem);
 
@@ -47,6 +60,11 @@ public:
     Line2Shader& setWidth(Magnum::Float widthPixels);
     Line2Shader& setViewportSize(const Vector2& size);
     Line2Shader& setViewProjection(const Matrix3& matrix);
+
+    // Selects how this pass reads InstanceShieldFx. Anything but None also
+    // hands the pass its opacity from that attribute's w, driven to fully
+    // opaque where the strike lands.
+    Line2Shader& setShieldGlow(ShieldGlow mode);
 };
 
 } // namespace Gravitaris

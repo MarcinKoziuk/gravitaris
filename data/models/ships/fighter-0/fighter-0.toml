@@ -6,7 +6,7 @@ density = 1
 # enough to leave the ground it landed on, with margin for a heavier rock.
 thrust = 220
 # Top speed the thruster alone can reach; gravity can still slingshot past it.
-max_speed = 200
+max_speed = 400
 restitution = 0.5
 friction = 0.0
 

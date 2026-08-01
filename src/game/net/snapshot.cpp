@@ -24,7 +24,7 @@ namespace Gravitaris {
 
 // Bump on any wire-layout change; ReadSnapshot rejects mismatches outright
 // (no cross-version compatibility until there's a reason to have it).
-static constexpr std::uint8_t SNAPSHOT_VERSION = 9; // v9: +upgrade levels, shield charge, lab draft
+static constexpr std::uint8_t SNAPSHOT_VERSION = 10; // v10: +per-plate ablative charge
 
 // Sanity caps so a garbage buffer can't make ReadSnapshot allocate wildly.
 static constexpr std::uint32_t MAX_ENTITIES = 4096;
@@ -75,6 +75,8 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             state.shieldLevel = loadout->levels.shield;
             state.shieldType = loadout->levels.shieldType;
             state.shieldHp = loadout->shieldHp;
+            state.plateCount = loadout->plateCount;
+            state.plates = loadout->plates;
         }
         if (const UpgradeDraft* draft = entity.try_get<UpgradeDraft>()) {
             state.upgradeOffers = draft->offers;
@@ -151,6 +153,8 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteU8(e.shieldLevel);
         out.WriteU8(static_cast<std::uint8_t>(e.shieldType));
         out.WriteF32(e.shieldHp);
+        out.WriteU8(e.plateCount);
+        for (std::uint8_t i = 0; i < e.plateCount; ++i) out.WriteF32(e.plates[i]);
         for (const id_t offer : e.upgradeOffers) out.WriteU32(offer);
         out.WriteU8(e.upgradeDraftAvailable ? 1 : 0);
         out.WriteF32(e.gravityMass);
@@ -235,6 +239,14 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.shieldLevel = in.ReadU8();
         e.shieldType = static_cast<ShieldType>(in.ReadU8());
         e.shieldHp = in.ReadF32();
+        // Every float the sender wrote is consumed even if the count is
+        // implausible; stopping early would desync the rest of the stream.
+        const std::uint8_t sentPlates = in.ReadU8();
+        e.plateCount = std::min<std::uint8_t>(sentPlates, MAX_SHIELD_PLATES);
+        for (std::uint8_t i = 0; i < sentPlates; ++i) {
+            const float charge = in.ReadF32();
+            if (i < MAX_SHIELD_PLATES) e.plates[i] = charge;
+        }
         for (id_t& offer : e.upgradeOffers) offer = in.ReadU32();
         e.upgradeDraftAvailable = in.ReadU8() != 0;
         e.gravityMass = in.ReadF32();

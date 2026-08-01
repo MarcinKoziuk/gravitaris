@@ -61,13 +61,26 @@ std::optional<FactionSystem::SpawnPoint> FactionSystem::SpawnPosition(TeamId tea
     flecs::entity factionEntity = GetOrCreate(team);
     const FactionState& state = factionEntity.get<FactionState>();
 
-    // Site: last friendly landing site if it's still alive and friendly...
+    // A planet is only somewhere to come back to once the faction has built
+    // there: the Base is the pad, the Colony is the reason anyone is on the
+    // rock at all. Merely holding a claim isn't enough -- a bare planet has
+    // nothing to respawn out of, so it is skipped and the search falls through
+    // to somewhere that does. Stations are exempt: a High Port IS the
+    // infrastructure.
+    const auto canHost = [&](flecs::entity planet) {
+        const NetId* netId = planet.try_get<NetId>();
+        return netId
+               && HasFriendlyStructure(m_registry, netId->value, StructureType::Base, team)
+               && HasFriendlyStructure(m_registry, netId->value, StructureType::Colony, team);
+    };
+
+    // Site: last friendly landing site if it's still alive, friendly and built up...
     flecs::entity site;
     if (state.lastLandingSiteNetId != 0) {
         flecs::entity candidate = m_entitySpawner.EntityForNetId(state.lastLandingSiteNetId);
         if (candidate.is_alive()) {
             const Team* candidateTeam = candidate.try_get<Team>();
-            if (candidateTeam && candidateTeam->id == team) site = candidate;
+            if (candidateTeam && candidateTeam->id == team && canHost(candidate)) site = candidate;
         }
     }
     // ...else any remaining friendly High Port -- launching from the station
@@ -78,10 +91,10 @@ std::optional<FactionSystem::SpawnPoint> FactionSystem::SpawnPosition(TeamId tea
             site = e;
         });
     }
-    // ...else any remaining friendly planet.
+    // ...else any remaining friendly planet that has been built up.
     if (!site.is_alive()) {
         m_registry.each([&](flecs::entity e, const Planet&, const Team& t) {
-            if (site.is_alive() || t.id != team) return;
+            if (site.is_alive() || t.id != team || !canHost(e)) return;
             site = e;
         });
     }

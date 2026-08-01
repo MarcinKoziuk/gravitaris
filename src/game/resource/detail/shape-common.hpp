@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include <toml++/toml.h>
 #include <nanosvg/nanosvg.h>
@@ -15,10 +16,20 @@ using Magnum::Matrix4d;
 using Magnum::Color3;
 using Magnum::Color4;
 
+// '@' layers are sim-only: the renderer skips them entirely.
 static const char GROUP_LABEL_PREFIX = '@';
 static const char ORIGIN_GROUP_LABEL[] = "@origin";
 static const char BODY_GROUP_LABEL[] = "@body";
 static const char HARDPOINTS_GROUP_LABEL[] = "@hardpoints";
+
+// '+' layers are consumed by BOTH sides -- the sim builds collision from them
+// and the renderer bakes them -- but they are drawn only while game state asks
+// for it, and their authored stroke color is ignored (decided in code, see
+// Shape::AddPaths). A ship carries at most one of these at a time today, chosen
+// by ShipLoadout::levels.shieldType.
+static const char FX_LABEL_PREFIX = '+';
+static const char SHIELD_GROUP_LABEL[] = "+shield";
+static const char PLATING_GROUP_LABEL[] = "+plating";
 
 struct NSVGimage_deleter {
     void operator()(NSVGimage* p) { nsvgDelete(p); }
@@ -52,6 +63,10 @@ struct CircleInfo {
 // which also requires the shape to have exactly one path) so it can be used
 // while iterating individual paths in a possibly multi-path shape.
 bool IsCircleGeometry(const NSVGpath* path, CircleInfo* outInfo = nullptr);
+
+// One SVG path flattened to a transformed polyline, subdividing each cubic
+// segment on its own. A closed path does not repeat its first point at the end.
+std::vector<Vector2d> PathToPolyline(const NSVGpath* path, const Matrix4d& transform);
 
 Matrix4d GetTransformMatrix(const ShapeFiles& mf);
 

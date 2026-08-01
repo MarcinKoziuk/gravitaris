@@ -7,6 +7,8 @@
 
 namespace Gravitaris {
 
+static void RegenPlates(ShipLoadout& loadout, const ShipStats& stats);
+
 ShieldSystem::ShieldSystem(flecs::world& registry, const UpgradeCatalog& catalog)
         : m_registry(registry)
         , m_catalog(catalog)
@@ -23,6 +25,13 @@ void ShieldSystem::Update()
         if (stats.shieldCapacity <= 0.f) {
             loadout.shieldHp = 0.f;
             loadout.shieldRegenDelay = 0;
+            loadout.plates = {};
+            loadout.plateRegenDelay = {};
+            return;
+        }
+
+        if (IsPlated(loadout)) {
+            RegenPlates(loadout, stats);
             return;
         }
 
@@ -35,6 +44,26 @@ void ShieldSystem::Update()
                                     loadout.shieldHp + stats.shieldRegenPerSecond
                                             * static_cast<float>(Game::PHYSICS_DELTA));
     });
+}
+
+static void RegenPlates(ShipLoadout& loadout, const ShipStats& stats)
+{
+    const float plateCapacity = PerPlate(loadout, stats.shieldCapacity);
+    const float plateRegen = PerPlate(loadout, stats.shieldRegenPerSecond)
+                             * static_cast<float>(Game::PHYSICS_DELTA);
+
+    float total = 0.f;
+    for (std::uint8_t i = 0; i < loadout.plateCount; ++i) {
+        if (loadout.plateRegenDelay[i] > 0) {
+            --loadout.plateRegenDelay[i];
+        }
+        else {
+            loadout.plates[i] = std::min(plateCapacity, loadout.plates[i] + plateRegen);
+        }
+        total += loadout.plates[i];
+    }
+
+    loadout.shieldHp = total;
 }
 
 } // namespace Gravitaris

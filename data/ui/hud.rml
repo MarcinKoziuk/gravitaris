@@ -136,6 +136,36 @@
 				background-color: #fc6;
 			}
 
+			/* Ablative plating reads as one block per plate rather than as a
+			   single bar: each plate spends and recharges on its own, so a
+			   ship burned through on one side shows a gap where a continuous
+			   bar would just read as "some charge left". Written from code
+			   (UI::SetShieldSegments), which also sets each block's colour
+			   from that plate's own charge. Hidden, and the plain fill shown
+			   instead, for a bubble. */
+			div#shield_segments
+			{
+				display: none;
+				height: 100%;
+				width: 100%;
+			}
+
+			div#shield_segments.shown
+			{
+				display: block;
+			}
+
+			/* vertical-align, or the blocks sit on the line's baseline and the
+			   descender space under it makes the row taller than the track's
+			   content box -- which shows up as the blocks overhanging its
+			   bottom border. */
+			div#shield_segments span
+			{
+				display: inline-block;
+				vertical-align: top;
+				height: 100%;
+			}
+
 			/* One tick per stored missile. A full rack is wider than the
 			   sidebar, so the ticks wrap -- hence a min-height rather than a
 			   fixed one. Written from code (UI::SetMissileAmmo). */
@@ -365,6 +395,7 @@
 					</div>
 					<div class="bar_track">
 						<div id="shield_fill"></div>
+						<div id="shield_segments"></div>
 					</div>
 				</div>
 

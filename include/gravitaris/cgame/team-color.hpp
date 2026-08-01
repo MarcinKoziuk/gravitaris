@@ -19,7 +19,7 @@ inline Magnum::Color3 TeamColor(TeamId id)
     switch (id) {
         case TeamId::Blue:    return {0.12f, 0.30f, 1.00f};
         case TeamId::Red:     return {1.00f, 0.15f, 0.15f};
-        case TeamId::Green:   return {0.20f, 1.00f, 0.25f};
+        case TeamId::Violet:  return {0.62f, 0.28f, 1.00f};
         case TeamId::Yellow:  return {1.00f, 0.80f, 0.10f};
         case TeamId::Magenta: return {1.00f, 0.20f, 0.85f};
         case TeamId::Cyan:    return {0.15f, 0.90f, 1.00f};

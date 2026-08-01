@@ -11,7 +11,7 @@ namespace Gravitaris {
 enum class TeamId : std::uint8_t {
     Blue,
     Red,
-    Green,
+    Violet,
     Yellow,
     Magenta,
     Cyan,
@@ -27,7 +27,7 @@ struct Team {
 // and the setup screen so the three can't disagree about who faction 2 is.
 // None is deliberately absent -- it is the ownerless team, not a side.
 inline constexpr TeamId FACTION_ROSTER[] = {
-    TeamId::Blue, TeamId::Red, TeamId::Green, TeamId::Yellow, TeamId::Magenta, TeamId::Cyan,
+    TeamId::Blue, TeamId::Red, TeamId::Violet, TeamId::Yellow, TeamId::Magenta, TeamId::Cyan,
 };
 
 } // namespace Gravitaris

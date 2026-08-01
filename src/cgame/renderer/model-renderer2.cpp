@@ -248,7 +248,8 @@ void ModelRenderer2::HandleModelAdded(const Model& model, const id_t id)
                 .addVertexBufferInstanced(baked.instanceBuffer, 1, 0,
                                           Line2Shader::InstanceTransform{},
                                           Line2Shader::InstanceTeamColor{},
-                                          Line2Shader::InstanceFlash{});
+                                          Line2Shader::InstanceFlash{},
+                                          Line2Shader::InstanceShieldFx{});
 
         const bool hasCircle = std::any_of(group.lineStrips.begin(), group.lineStrips.end(),
                                             [](const Model::VertexLineStrip& strip) { return strip.circle.has_value(); });
@@ -278,6 +279,7 @@ void ModelRenderer2::HandleModelAdded(const Model& model, const id_t id)
         }
 
         groups.emplace(tag, std::move(baked));
+        ++m_tagRefCount[tag];
     }
 
     const auto entry = std::make_pair(model.GetRenderOrder(), id);
@@ -286,6 +288,9 @@ void ModelRenderer2::HandleModelAdded(const Model& model, const id_t id)
 
 void ModelRenderer2::HandleModelRemoved(const Model& model, const id_t id)
 {
+    if (const auto it = m_baked.find(id); it != m_baked.end()) {
+        for (const auto& [tag, baked] : it->second) --m_tagRefCount[tag];
+    }
     m_baked.erase(id);
 
     const auto entry = std::make_pair(model.GetRenderOrder(), id);
@@ -304,7 +309,7 @@ Matrix3 ModelRenderer2::ViewProjection() const
 
 void ModelRenderer2::SubmitOverlay(id_t modelId, const Matrix3& transform, const Vector3& color, float flash)
 {
-    m_overlayScratch[modelId].push_back(InstanceData{transform, color, flash});
+    m_overlayScratch[modelId].push_back(InstanceData{transform, color, flash, {}});
 }
 
 void ModelRenderer2::RenderStandalone(id_t modelId, const Matrix3& transform, const Matrix3& viewProjection,
@@ -320,7 +325,7 @@ void ModelRenderer2::RenderStandalone(id_t modelId, const Matrix3& transform, co
     // Shares the group's instance buffer with RenderTag above. Safe because
     // both upload immediately before their own draw -- neither leaves state
     // the other reads.
-    const InstanceData instance{transform, teamColor, 0.f};
+    const InstanceData instance{transform, teamColor, 0.f, {}};
     if (unsigned long ex = SafeUpload(baked.instanceBuffer, &instance, sizeof(instance))) {
         LOG(error) << "[MR2] standalone instance upload raised exception 0x" << std::hex << ex
                    << " for model " << modelId;
@@ -339,13 +344,14 @@ void ModelRenderer2::RenderStandalone(id_t modelId, const Matrix3& transform, co
     m_shader.draw(baked.mesh);
 }
 
-void ModelRenderer2::RenderTag(id_t tag, const std::function<bool(flecs::entity)>& filter)
+void ModelRenderer2::RenderTag(id_t tag, const InstanceStyleFn& style)
 {
+    const auto refCount = m_tagRefCount.find(tag);
+    if (refCount == m_tagRefCount.end() || refCount->second <= 0) return;
+
     for (auto& [modelId, instances] : m_instanceScratch) instances.clear();
 
     m_registry.each([&](flecs::entity entity, const Transform& t, const Renderable& rend) {
-        if (filter && !filter(entity)) return;
-
         const id_t modelId = rend.model.Id();
 
         auto bakedIt = m_baked.find(modelId);
@@ -370,7 +376,11 @@ void ModelRenderer2::RenderTag(id_t tag, const std::function<bool(flecs::entity)
         const HitFlash* hitFlash = entity.try_get<HitFlash>();
         const float flash = hitFlash ? hitFlash->amount : 0.f;
 
-        m_instanceScratch[modelId].push_back(InstanceData{transform, teamColor, flash});
+        InstanceStyle styled{teamColor, flash, {}};
+        if (style && !style(entity, styled)) return;
+
+        m_instanceScratch[modelId].push_back(
+                InstanceData{transform, styled.color, styled.flash, styled.shieldFx});
     });
 
     // Overlays are plain extra instances of the same baked group, so they only
@@ -432,7 +442,7 @@ void ModelRenderer2::Render(double)
 
     // A structure's thrusters are station-keeping: nobody flies it, and it
     // is always correcting, so its _thrust group burns permanently.
-    RenderTag("_thrust"_id, [](flecs::entity entity) {
+    RenderTag("_thrust"_id, [](flecs::entity entity, InstanceStyle&) {
         const auto* controls = entity.try_get<Controls>();
         if (!controls) return entity.has<Structure>();
         return controls->actionFlags.thrustForward;
@@ -442,6 +452,12 @@ void ModelRenderer2::Render(double)
     // cargoRemaining replication yet, docs/freighter-model-todo.md #4b/#4c).
     RenderTag("_cargo_l"_id, {});
     RenderTag("_cargo_r"_id, {});
+
+    for (const ExtraPass& pass : m_extraPasses) {
+        m_shader.setShieldGlow(pass.shieldGlow);
+        RenderTag(pass.tag, pass.style);
+    }
+    m_shader.setShieldGlow(ShieldGlow::None);
 
     // Submissions are per-frame: whoever wants an overlay next frame re-submits.
     for (auto& [modelId, overlays] : m_overlayScratch) overlays.clear();

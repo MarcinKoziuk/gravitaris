@@ -66,6 +66,13 @@ void DrawCameraPanel(CGame& game)
     ImGui::SliderFloat("Lead smoothing (s)", &params.leadTau, 0.05f, 2.4f, "%.2f");
     ImGui::SetItemTooltip("Time constant for easing the lead vector. Low values let a turn swing the view. "
                           "Default 0.7.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Lead from speed", &params.leadMinSpeed, 0.f, 400.f, "%.0f");
+    ImGui::SetItemTooltip("Speed below which there is no lead at all. Keeps the view still while manoeuvring "
+                          "slowly, where the lead's gravity term would otherwise shove it around. Default 60.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Lead full at speed", &params.leadFullSpeed, 0.f, 1200.f, "%.0f");
+    ImGui::SetItemTooltip("Speed at which the lead is fully engaged; it ramps between the two. Default 300.");
     ImGui::EndDisabled();
 
     ImGui::SeparatorText("Enemy framing");

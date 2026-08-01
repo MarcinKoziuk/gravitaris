@@ -263,6 +263,11 @@ void CameraDirector::Update(const SceneView& view, std::optional<flecs::entity> 
         const float t = m_params.leadTime;
         leadGoal = playerVel * t + gravityAccel * (0.5f * t * t);
 
+        // Faded in with speed (see CameraParams::leadMinSpeed): manoeuvring
+        // slowly, the view should sit still and let the ship move within it.
+        const float span = std::max(m_params.leadFullSpeed - m_params.leadMinSpeed, 1e-3f);
+        leadGoal *= std::clamp((playerVel.length() - m_params.leadMinSpeed) / span, 0.f, 1.f);
+
         const float leadLength = leadGoal.length();
         if (leadLength > maxLead) leadGoal *= maxLead / leadLength;
 

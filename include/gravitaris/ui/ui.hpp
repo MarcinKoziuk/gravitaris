@@ -98,8 +98,12 @@ private:
 
     Rml::Element* m_shieldFill = nullptr;
     Rml::Element* m_shieldValue = nullptr;
+    Rml::Element* m_shieldSegments = nullptr;
     float m_shieldFraction = -2.f;
     std::string m_shieldStyle;
+    // Last drawn per-plate charges, quantised as they are written, so the
+    // markup is only rebuilt when a block actually changes shade.
+    std::vector<int> m_shownSegments;
 
     Rml::Element* m_upgradeDraft = nullptr;
     Rml::Element* m_upgradeOffers = nullptr;
@@ -177,6 +181,12 @@ public:
     // rather than an enum, so adding a shield type is a data change here and
     // in hud.rml, not a change to this interface. Negative blanks the row.
     void SetShieldFraction(float fraction, const std::string& styleClass);
+
+    // Per-plate charges, each 0..1, in the model's plate order -- ablative
+    // plating draws one block per plate, shaded by that plate's own charge, so
+    // a burned-through side reads as a gap. An empty list restores the plain
+    // continuous bar SetShieldFraction drives, which is what a bubble wants.
+    void SetShieldSegments(const std::vector<float>& charges);
 
     // The Lab's offers, in 1/2/3 order; an empty list hides the panel. Only
     // rebuilt when the contents actually change, so calling it every frame is

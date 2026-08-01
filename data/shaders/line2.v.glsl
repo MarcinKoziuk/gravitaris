@@ -6,6 +6,7 @@
 uniform mat3 viewProjection;   // world -> NDC (includes camera zoom + pan)
 uniform vec2 viewportSize;     // framebuffer size in pixels
 uniform float width;           // desired line thickness in pixels
+uniform float shieldGlow;      // ShieldGlow: 0 none, 1 directional, 2 flat
 
 in highp vec2 pointA;
 in highp vec2 pointB;
@@ -17,6 +18,7 @@ in highp float teamWeight;       // 1 = stroke authored in team placeholder colo
 in highp mat3 instanceTransform; // per-entity model matrix (locations 6,7,8)
 in highp vec3 instanceTeamColor; // per-entity team color (location 9)
 in highp float instanceFlash;    // per-entity hit-flash amount, 0..1 (location 10)
+in highp vec4 instanceShieldFx;  // xy: strike bearing (model space), z: glow, w: resting opacity (location 11)
 
 out lowp vec4 interpolatedColor;
 // Which analytic-AA path the fragment shader should take; mirrors param.w.
@@ -41,6 +43,11 @@ out highp float circleRadiusPix;
 // Extra half-pixels added beyond the nominal half-width so the alpha falloff
 // has room to fade outside the line without thinning it.
 const float AA_FEATHER = 1.0;
+
+// How tightly a shield strike's glow hugs its bearing. Higher is a smaller,
+// sharper bright spot; this is wide enough to light a recognisable arc of the
+// bubble rather than a single point of it.
+const float SHIELD_GLOW_FOCUS = 3.0;
 
 vec2 toPixel(mat3 m, vec2 p) {
     vec3 clip = m * vec3(p, 1.0);
@@ -121,5 +128,30 @@ void main() {
     // strokes keep their baked SVG color (StarCraft-style team mask). Hit
     // flash then whitens the whole result on top, team color and all.
     vec3 teamMixed = mix(color, instanceTeamColor, teamWeight);
-    interpolatedColor = vec4(mix(teamMixed, vec3(1.0), instanceFlash), 1.0);
+
+    // Directional: where the strike landed the shield goes white, and away
+    // from it keeps the color the pass gave it. Both bearings are measured
+    // from the model origin, so they agree however far off-center the shield
+    // is drawn. Flat: the caller already decided this whole strip was struck.
+    float glow = 0.0;
+    if (shieldGlow > 0.5 && instanceShieldFx.z > 0.0) {
+        // param.w >= 1.5 is an analytic ring or fill billboard, whose vertices
+        // carry a center and a radius rather than positions to take a bearing
+        // from -- a perfectly circular bubble lights evenly for want of one.
+        if (shieldGlow > 1.5 || param.w >= 1.5) {
+            glow = instanceShieldFx.z;
+        } else {
+            vec2 localPos = param.w < 0.5 ? mix(pointA, pointB, param.x) : pointB;
+            if (dot(localPos, localPos) > 0.0) {
+                float aim = max(dot(normalize(localPos), instanceShieldFx.xy), 0.0);
+                glow = instanceShieldFx.z * pow(aim, SHIELD_GLOW_FOCUS);
+            }
+        }
+    }
+
+    // A shield sits faint over the hull at rest and goes solid where it is
+    // struck; everything else is opaque and never touches instanceShieldFx.
+    float alpha = shieldGlow > 0.5 ? mix(instanceShieldFx.w, 1.0, glow) : 1.0;
+
+    interpolatedColor = vec4(mix(teamMixed, vec3(1.0), max(instanceFlash, glow)), alpha);
 }
