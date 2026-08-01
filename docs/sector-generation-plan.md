@@ -176,28 +176,38 @@ The intro dialog already exists and already carries a side-picker
 (`data/ui/main.rml`, `UI::SetIntroConfirmCallback`), so this grows that
 dialog rather than building a new document.
 
-**Ordering problem to solve first** (found during S3): the client builds the
-world *before* showing the dialog, so the dialog sits over the real solar
-system instead of a void (`src/client/gravitaris.cpp`, `BuildWorld` then
-`SetIntroConfirmCallback`). Once the seed comes *from* the dialog that no
-longer works. Three ways out, decide before writing the RML: build a
-throwaway backdrop sector and rebuild on confirm (needs a world teardown
-path that doesn't exist yet); show the dialog over an empty starfield; or
-keep the backdrop and let the dialog only pick a side, moving seed selection
-to a separate pre-round screen. Currently the client passes a default
-`SectorParams{}` and the dialog is unchanged.
+**Ordering, settled 2026-08-01**: the backdrop stays. The client builds a
+sector up front so the dialog sits over a real solar system, the dialog
+*shows* the seed that sector came from, and Apply/Randomize rebuild it in
+place — so a seed can be looked at before it's committed to. That needs a
+teardown path, which `Game::RebuildWorld` now provides.
 
-- [ ] Callback carries a `RoundSetup { TeamId team; std::uint32_t seed; int
-  factionCount; std::string aiPreset; }` instead of a bare `TeamId`.
-- [ ] Seed field: text input, blank means "pick one" (derived from
-  something the sim already has, *not* the wall clock — see the invariants).
-  Show the seed actually used, so a good round can be replayed.
-- [ ] Faction count select (2–6, default 4). The side dropdown is rebuilt
-  from the roster, so picking 4 offers exactly the four live colours —
-  replacing the hardcoded blue/red `<option>`s and the comment above them.
+- [x] `Game::RebuildWorld(SectorParams)`: destroys every `NetId`-carrying
+  entity plus the `FactionState` bookkeeping (which carries no NetId of its
+  own), clears the player/AI slots, and builds afresh. The Chipmunk bodies
+  go with their entities through `PhysicsSystem`'s existing `PhysicsRef`
+  OnRemove observer, so teardown needed no new physics code. Entities are
+  collected before any are destroyed — the observers touch the registry, so
+  destructing mid-iteration is not safe.
+- [x] Seed row in `data/ui/main.rml`: text field showing the live seed, plus
+  Apply and Random. `UI::SetSeedDisplay` / `SetSeedApplyCallback` /
+  `SetSeedRandomizeCallback`. Randomize carries no value — the client picks
+  the number and echoes it back through `SetSeedDisplay`, keeping RNG out of
+  the UI layer. The wall clock is the source there, which is fine: it feeds
+  a seed *into* the sim like a keystroke, rather than the sim reaching for
+  entropy itself.
+- [x] The side dropdown is rebuilt from the round's roster
+  (`UI::SetTeamOptions`), replacing the hardcoded blue/red `<option>`s, and
+  `TeamIdFromOption` now derives from `FACTION_ROSTER` instead of its own
+  list. A pick that the new roster no longer offers falls back to its first
+  side.
+- [x] Minimap `ResetFit()`, since the fit never shrinks and a reseed may
+  produce a smaller sector.
+- [ ] Faction count select (2–6, default 4). **Not done** — the plumbing
+  takes it (`SectorParams::factionCount`, roster-driven dropdown), only the
+  control is missing.
 - [ ] Per-AI personality preset select, from `AIPresetLibrary`
-  (`data/ai-presets.toml`) — one shared preset for all AI factions first;
-  per-faction presets only if it falls out cheaply.
+  (`data/ai-presets.toml`). **Not done.**
 - [ ] Round-over screen: **not in this increment** (still tracked in
   `gravity-well-mode-plan.md` U4).
 

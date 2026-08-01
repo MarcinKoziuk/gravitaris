@@ -76,6 +76,11 @@ public:
 
     Params& GetParams() { return m_params; }
 
+    // Drops the fitted radius so auto-fit re-establishes it from scratch.
+    // Needed when the world is replaced by a smaller one, which the fit's
+    // never-shrink rule would otherwise leave framed for its predecessor.
+    void ResetFit() { m_params.worldRadius = 0.f; }
+
     // Raw GL id + size, for registering with the RmlUi live-texture bridge.
     [[nodiscard]] unsigned TextureId() { return m_texture.id(); }
     [[nodiscard]] static Vector2i TextureSize() { return {TEXTURE_SIZE, TEXTURE_SIZE}; }

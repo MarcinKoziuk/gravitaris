@@ -95,7 +95,15 @@ private:
     // requested team has to be in place before the handshake fires.
     std::string m_connectUrl;
 
+    // The setup dialog's live sector: the backdrop is built from this, and
+    // Apply/Randomize rewrite the seed and rebuild in place.
+    SectorParams m_sectorParams;
+
     void StartSession(TeamId team);
+
+    // Rebuilds the backdrop sector on `seed` and refreshes what the dialog
+    // shows for it.
+    void ApplySectorSeed(std::uint32_t seed);
     void FeedInput();
     void ToggleRecording();
     void StartReplay();
@@ -187,13 +195,26 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
         // player picked -- so the dialog sits over the real solar system
         // rather than an empty void. Multiplayer's world arrives from the
         // server instead, once connected.
-        m_game->BuildWorld(SectorParams{});
+        m_game->BuildWorld(m_sectorParams);
     }
 
     m_ui.RegisterLiveTexture("minimap", m_game->GetMinimapRenderer().TextureId(),
                              MinimapRenderer::TextureSize().x(), MinimapRenderer::TextureSize().y());
 
     m_ui.SetIntroConfirmCallback([this](TeamId team) { StartSession(team); });
+    // Reseeding only makes sense for a world this process owns; a connected
+    // client's sector belongs to the server.
+    if (m_connectUrl.empty()) {
+        m_ui.SetSeedApplyCallback([this](std::uint32_t seed) { ApplySectorSeed(seed); });
+        m_ui.SetSeedRandomizeCallback([this] {
+            // Wall clock is fine here: this is a player action feeding a seed
+            // *into* the sim, the same as a keystroke -- not the sim reaching
+            // out for entropy of its own (ADR 0001).
+            const auto now = std::chrono::steady_clock::now().time_since_epoch();
+            ApplySectorSeed(static_cast<std::uint32_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(now).count()));
+        });
+    }
     m_ui.SetMinimapClickCallback([this](float nx, float ny) {
         m_game->LookAtMapPoint(Magnum::Vector2{nx, ny});
     });
@@ -212,6 +233,15 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     m_ui.SetDensityIndependentPixelRatio(PixelScale().x());
 
     m_ui.Init();
+
+    // Init() is what loads the documents, so the dialog's contents can only
+    // be filled in now. A connected client has no roster of its own yet --
+    // the server owns the sector -- so it offers the full set of colours and
+    // lets the handshake settle which one it actually gets.
+    m_ui.SetSeedDisplay(m_sectorParams.seed);
+    m_ui.SetTeamOptions(m_connectUrl.empty()
+                                ? m_game->GetRoster()
+                                : std::vector<TeamId>(std::begin(FACTION_ROSTER), std::end(FACTION_ROSTER)));
 
     m_glow = std::make_unique<GlowPostProcess>(m_filesystem);
 
@@ -300,6 +330,20 @@ void GravitarisApplication::tickEvent()
 // The intro dialog gates the whole session either way: single-player spawns
 // the combatants now, multiplayer starts the handshake carrying the side the
 // player picked.
+void GravitarisApplication::ApplySectorSeed(std::uint32_t seed)
+{
+    m_sectorParams.seed = seed;
+    m_game->RebuildWorld(m_sectorParams);
+
+    // The new sector is a different size; the minimap's fit only ever grows,
+    // so it has to be told to start over rather than stay framed for the
+    // world that just went away.
+    m_game->GetMinimapRenderer().ResetFit();
+
+    m_ui.SetSeedDisplay(m_sectorParams.seed);
+    m_ui.SetTeamOptions(m_game->GetRoster());
+}
+
 void GravitarisApplication::StartSession(TeamId team)
 {
     if (m_connectUrl.empty()) m_game->SpawnCombatants(team);

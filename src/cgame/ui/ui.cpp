@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <string>
 
 #include <RmlUi/Core.h>
 #include <RmlUi/Debugger.h>
@@ -17,6 +19,8 @@ static constexpr float HULL_WARN_FRACTION = 0.5f;
 static constexpr float HULL_CRITICAL_FRACTION = 0.25f;
 
 static std::optional<TeamId> TeamIdFromOption(const Rml::String& value);
+static const char* TeamOptionValue(TeamId team);
+static const char* TeamLabel(TeamId team);
 
 static void Assign(Rml::Element* element, std::string& cached, std::optional<float> value,
                    const char* format);
@@ -129,6 +133,25 @@ bool UI::Init()
             Listen(*teamSelect, "change", [this](Rml::Event& event) {
                 const Rml::String value = event.GetParameter<Rml::String>("value", "");
                 if (const std::optional<TeamId> team = TeamIdFromOption(value)) m_introTeam = *team;
+            });
+        }
+
+        m_seedInput = m_document->GetElementById("seed_input");
+
+        if (Rml::Element* button = m_document->GetElementById("apply_seed")) {
+            Listen(*button, "click", [this](Rml::Event&) {
+                if (!m_onSeedApply || !m_seedInput) return;
+                // strtoul rather than stoul: a field the player is free to
+                // type anything into shouldn't throw, and a partial parse of
+                // a fat-fingered seed is as good an arbitrary number as any.
+                const Rml::String text = m_seedInput->GetAttribute<Rml::String>("value", "");
+                m_onSeedApply(static_cast<std::uint32_t>(std::strtoul(text.c_str(), nullptr, 10)));
+            });
+        }
+
+        if (Rml::Element* button = m_document->GetElementById("randomize_seed")) {
+            Listen(*button, "click", [this](Rml::Event&) {
+                if (m_onSeedRandomize) m_onSeedRandomize();
             });
         }
 
@@ -343,6 +366,41 @@ void UI::SetIntroConfirmCallback(std::function<void(TeamId)> callback)
     m_onIntroConfirm = std::move(callback);
 }
 
+void UI::SetSeedApplyCallback(std::function<void(std::uint32_t)> callback)
+{
+    m_onSeedApply = std::move(callback);
+}
+
+void UI::SetSeedRandomizeCallback(std::function<void()> callback)
+{
+    m_onSeedRandomize = std::move(callback);
+}
+
+void UI::SetSeedDisplay(std::uint32_t seed)
+{
+    if (m_seedInput) m_seedInput->SetAttribute("value", std::to_string(seed));
+}
+
+void UI::SetTeamOptions(const std::vector<TeamId>& teams)
+{
+    if (!m_document || teams.empty()) return;
+
+    Rml::Element* select = m_document->GetElementById("team_select");
+    if (!select) return;
+
+    // The picked side has to stay valid: a roster that no longer offers it
+    // would leave m_introTeam naming a faction with no complex to launch from.
+    if (std::find(teams.begin(), teams.end(), m_introTeam) == teams.end()) m_introTeam = teams.front();
+
+    Rml::String options;
+    for (TeamId team : teams) {
+        const char* value = TeamOptionValue(team);
+        options += Rml::CreateString("<option value=\"%s\"%s>%s</option>", value,
+                                     team == m_introTeam ? " selected" : "", TeamLabel(team));
+    }
+    select->SetInnerRML(options);
+}
+
 void UI::SetMinimapClickCallback(std::function<void(float, float)> callback)
 {
     m_onMinimapClick = std::move(callback);
@@ -367,13 +425,43 @@ void UI::Listen(Rml::Element& element, const char* event, std::function<void(Rml
     element.AddEventListener(event, m_listeners.back().get());
 }
 
-// Maps the intro dropdown's option values. Offering another side is a new
-// <option> in main.rml plus a line here -- and a world that actually has a
-// starting complex for it (see Game::BuildWorld).
+// The dropdown carries these as its option values, and SetTeamOptions writes
+// them; the two must agree, which is why neither side hardcodes a list.
+static const char* TeamOptionValue(TeamId team)
+{
+    switch (team) {
+    case TeamId::Blue: return "blue";
+    case TeamId::Red: return "red";
+    case TeamId::Green: return "green";
+    case TeamId::Yellow: return "yellow";
+    case TeamId::Magenta: return "magenta";
+    case TeamId::Cyan: return "cyan";
+    case TeamId::None: break;
+    }
+    return "";
+}
+
+// Display text for the same option. Capitalized rather than the raw value,
+// since this is what the player reads.
+static const char* TeamLabel(TeamId team)
+{
+    switch (team) {
+    case TeamId::Blue: return "Blue";
+    case TeamId::Red: return "Red";
+    case TeamId::Green: return "Green";
+    case TeamId::Yellow: return "Yellow";
+    case TeamId::Magenta: return "Magenta";
+    case TeamId::Cyan: return "Cyan";
+    case TeamId::None: break;
+    }
+    return "";
+}
+
 static std::optional<TeamId> TeamIdFromOption(const Rml::String& value)
 {
-    if (value == "blue") return TeamId::Blue;
-    if (value == "red") return TeamId::Red;
+    for (TeamId team : FACTION_ROSTER) {
+        if (value == TeamOptionValue(team)) return team;
+    }
     return std::nullopt;
 }
 

@@ -1682,6 +1682,25 @@ void TestSectorGeneration()
 
     Require(first.GetSectorExtent() > 0., "sector: a real extent is reported for the minimap");
 
+    // Reseeding from the round-setup screen (S6): the old world goes away
+    // entirely and the new one is indistinguishable from a freshly built one.
+    // Rebuilt on `other`'s params so it can be compared against a Game that
+    // only ever knew them.
+    first.RebuildWorld(otherParams);
+    Require(describe(first) == describe(other),
+            "sector: a rebuilt world matches one built from those params outright");
+
+    std::size_t leftovers = 0;
+    first.GetRegistry().each([&](const FactionState&) { ++leftovers; });
+    Require(leftovers == 0, "sector: the old world's faction bookkeeping is gone after a rebuild");
+
+    // The physics bodies behind the destroyed entities are freed by an
+    // OnRemove observer; ticking proves the space is still coherent rather
+    // than holding shapes whose entities have gone.
+    first.SpawnCombatants(first.GetRoster().front());
+    for (int i = 0; i < 120; ++i) first.Update();
+    Require(first.GetSectorExtent() > 0., "sector: a rebuilt world still ticks");
+
     fs.Shutdown();
 }
 

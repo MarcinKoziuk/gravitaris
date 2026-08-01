@@ -173,6 +173,12 @@ public:
     // client can render the world while the player is still picking a side.
     void BuildWorld(const SectorParams& params);
 
+    // Throws the current world away and builds a fresh one on `params`. Only
+    // meaningful before combatants exist -- this is the round-setup screen
+    // reseeding its backdrop, not a mid-round restart, so it makes no attempt
+    // to preserve anything.
+    void RebuildWorld(const SectorParams& params);
+
     // The fixed two-sun blue-vs-red arena. Kept alongside generation as the
     // known-good layout sim-test's proofs run on, so a failing test means the
     // rule under test broke rather than the seed having moved a planet.

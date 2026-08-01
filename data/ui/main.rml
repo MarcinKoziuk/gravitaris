@@ -7,8 +7,53 @@
 			body
 			{
 				width: 440dp;
-				height: 196dp;
+				height: 250dp;
 				margin: auto;
+			}
+			/* Same row shape as team_row below: label, then the control it
+			   labels, on one line. */
+			div#seed_row
+			{
+				display: flex;
+				align-items: center;
+				margin-top: 14dp;
+			}
+			div#seed_row p
+			{
+				flex: 0 0 auto;
+				margin-right: 12dp;
+				margin-bottom: 0;
+				font-size: 12dp;
+				letter-spacing: 5dp;
+				color: #588;
+			}
+			input#seed_input
+			{
+				flex: 1 1 auto;
+				box-sizing: border-box;
+				padding: 8dp 10dp;
+				margin-right: 4dp;
+
+				color: #bee;
+				font-size: 14dp;
+				background-color: #0cf1;
+				border-width: 1dp;
+				border-color: #0cf8;
+				cursor: text;
+			}
+			input#seed_input:focus
+			{
+				border-color: #bff;
+			}
+			/* The two seed buttons sit inside a row, so they can't carry the
+			   full-size button's padding without pushing the field out. */
+			button.small
+			{
+				flex: 0 0 auto;
+				padding: 8dp 12dp;
+				margin: 0 0 0 4dp;
+				font-size: 12dp;
+				letter-spacing: 2dp;
 			}
 			div#title_bar span#title
 			{
@@ -67,16 +112,23 @@
 	<body template="vector-window">
 		<p>This is a game in development. Thanks for testing!</p>
 
+		<!-- The sector behind this dialog is the one this seed built.
+		     Applying or randomizing rebuilds it in place, so a seed can be
+		     looked at before it's committed to. -->
+		<div id="seed_row">
+			<p>SECTOR SEED</p>
+			<input type="text" id="seed_input" value="0" />
+			<button id="apply_seed" class="small">Apply</button>
+			<button id="randomize_seed" class="small">Random</button>
+		</div>
+
 		<div id="team_row">
 			<p>PICK YOUR SIDE</p>
-			<!-- Option values are parsed back to TeamId in UI::Init. The world
-			     only builds starting complexes for blue and red so far (see
-			     Game::BuildWorld), so those are the only two offered. -->
+			<!-- Options are rebuilt from the round's roster by
+			     UI::SetTeamOptions, so the sides offered here are exactly the
+			     ones the world raised a starting complex for. -->
 			<div class="select_wrap">
-				<select id="team_select">
-					<option value="blue" selected>Blue</option>
-					<option value="red">Red</option>
-				</select>
+				<select id="team_select"></select>
 				<div class="select_chevron"></div>
 			</div>
 		</div>

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -56,6 +57,9 @@ private:
     std::vector<std::unique_ptr<Rml::EventListener>> m_listeners;
 
     std::function<void(TeamId)> m_onIntroConfirm;
+    std::function<void(std::uint32_t)> m_onSeedApply;
+    std::function<void()> m_onSeedRandomize;
+    Rml::Element* m_seedInput = nullptr;
     std::function<void(float, float)> m_onMinimapClick;
     std::function<void()> m_onRecenter;
 
@@ -187,6 +191,23 @@ public:
     // Fired when the intro dialog's OK is clicked, with the side the player
     // picked. Set before Init(), which is what shows the dialog.
     void SetIntroConfirmCallback(std::function<void(TeamId)> callback);
+
+    // Rebuilds the side dropdown to offer exactly `teams`, keeping the
+    // current pick if it survives. Call after every world build -- the sides
+    // worth offering are the ones that got a starting complex.
+    void SetTeamOptions(const std::vector<TeamId>& teams);
+
+    // Shows the seed the current sector was built from.
+    void SetSeedDisplay(std::uint32_t seed);
+
+    // Fired by the setup dialog's Apply, with whatever is in the seed field
+    // (an unparseable field is ignored rather than reported -- the value is
+    // arbitrary, so there is no wrong answer to explain). Randomize carries
+    // no value: the caller picks the seed and echoes it back through
+    // SetSeedDisplay, keeping randomness out of this layer.
+    void SetSeedApplyCallback(std::function<void(std::uint32_t)> callback);
+
+    void SetSeedRandomizeCallback(std::function<void()> callback);
 
     // Fired while the minimap panel is pressed or dragged, with the cursor as
     // -1..1 across the map in each axis, +Y up. The UI knows the panel's

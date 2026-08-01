@@ -6,6 +6,7 @@
 
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
+#include <gravitaris/game/component/faction-state.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/ai/ai-preset-library.hpp>
@@ -75,6 +76,29 @@ void Game::BuildWorld(const SectorParams& params)
     }
 
     SettleScenario();
+}
+
+void Game::RebuildWorld(const SectorParams& params)
+{
+    // Collected before destroying any of them: the NetId and PhysicsRef
+    // OnRemove observers run during destruct() and touch the registry, which
+    // is not something to do halfway through iterating it.
+    std::vector<flecs::entity> doomed;
+    m_registry.each([&](flecs::entity entity, const NetId&) { doomed.push_back(entity); });
+    // FactionState entities carry no NetId (FactionSystem creates them bare),
+    // so they need their own sweep or a faction's respawn site and defeat
+    // flag would outlive the world it referred to.
+    m_registry.each([&](flecs::entity entity, const FactionState&) { doomed.push_back(entity); });
+
+    for (flecs::entity entity : doomed) {
+        if (entity.is_alive()) entity.destruct();
+    }
+
+    m_player.reset();
+    m_playerRespawnTimer = -1;
+    m_aiFactions.clear();
+
+    BuildWorld(params);
 }
 
 void Game::BuildClassicWorld()
