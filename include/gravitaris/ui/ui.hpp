@@ -59,6 +59,7 @@ private:
     std::function<void(TeamId)> m_onIntroConfirm;
     std::function<void(std::uint32_t)> m_onSeedApply;
     std::function<void()> m_onSeedRandomize;
+    Rml::Element* m_seedRow = nullptr;
     Rml::Element* m_seedInput = nullptr;
     std::function<void(float, float)> m_onMinimapClick;
     std::function<void()> m_onRecenter;
@@ -197,6 +198,12 @@ public:
 
     // Shows the seed the current sector was built from.
     void SetSeedDisplay(std::uint32_t seed);
+
+    // Hides the whole seed row. A connected client has no business reseeding
+    // a sector the server owns, and the server never sends its seed, so
+    // leaving the row up would show a live-looking field holding a number
+    // that isn't the one the world was built from.
+    void SetSeedRowVisible(bool visible);
 
     // Fired by the setup dialog's Apply, with whatever is in the seed field
     // (an unparseable field is ignored rather than reported -- the value is

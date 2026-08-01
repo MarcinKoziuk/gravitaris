@@ -13,6 +13,7 @@
 #include <iostream>
 #include <mutex>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -200,17 +201,31 @@ int main(int argc, char** argv)
     std::uint16_t port = 17890;
     std::string bindAddress;
     SectorParams sectorParams;
+    bool seedGiven = false;
 
     int positional = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         const auto value = [&]() -> long { return (i + 1 < argc) ? std::atol(argv[++i]) : 0L; };
 
-        if (arg == "--seed") sectorParams.seed = static_cast<std::uint32_t>(value());
+        if (arg == "--seed") {
+            sectorParams.seed = static_cast<std::uint32_t>(value());
+            seedGiven = true;
+        }
         else if (arg == "--factions") sectorParams.factionCount = static_cast<int>(value());
         else if (arg == "--stars") sectorParams.stars = static_cast<int>(value());
         else if (positional++ == 0) port = static_cast<std::uint16_t>(std::atoi(arg.c_str()));
         else bindAddress = arg;
+    }
+
+    // Without --seed every round would be the same sector, since the default
+    // is a plain 0. Picking one here is launch-time configuration, not the sim
+    // reaching for entropy (ADR 0001 point 5) -- once chosen it is fixed, and
+    // it alone determines the world. Tracked separately from the value because
+    // 0 is a legal seed to ask for explicitly.
+    if (!seedGiven) {
+        std::random_device entropy;
+        sectorParams.seed = entropy();
     }
     sectorParams.Sanitize();
 
@@ -225,6 +240,10 @@ int main(int argc, char** argv)
     // (planets, complexes) without it -- players arrive entirely through
     // NetServer's ClientHello handling.
     Game game(fs);
+    // Logged because a generated sector is otherwise unreproducible: this is
+    // the only record of what --seed to pass to get this round's map back.
+    LOG(info) << "gravitaris-server: sector seed " << sectorParams.seed << " ("
+              << sectorParams.factionCount << " factions, " << sectorParams.stars << " stars)";
     game.BuildWorld(sectorParams);
 
     // Every side gets a leader up front: the server can't know which teams

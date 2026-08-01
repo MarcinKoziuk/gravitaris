@@ -240,7 +240,12 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     // be filled in now. A connected client has no roster of its own yet --
     // the server owns the sector -- so it offers the full set of colours and
     // lets the handshake settle which one it actually gets.
-    m_ui.SetSeedDisplay(m_sectorParams.seed);
+    // The seed row is single-player's alone: the server generates its own
+    // sector and never sends the seed, so there is nothing true to show and
+    // nothing useful to type (see UI::SetSeedRowVisible).
+    m_ui.SetSeedRowVisible(m_connectUrl.empty());
+    if (m_connectUrl.empty()) m_ui.SetSeedDisplay(m_sectorParams.seed);
+
     m_ui.SetTeamOptions(m_connectUrl.empty()
                                 ? m_game->GetRoster()
                                 : std::vector<TeamId>(std::begin(FACTION_ROSTER), std::end(FACTION_ROSTER)));

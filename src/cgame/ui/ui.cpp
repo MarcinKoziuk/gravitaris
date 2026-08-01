@@ -136,6 +136,7 @@ bool UI::Init()
             });
         }
 
+        m_seedRow = m_document->GetElementById("seed_row");
         m_seedInput = m_document->GetElementById("seed_input");
 
         if (Rml::Element* button = m_document->GetElementById("apply_seed")) {
@@ -373,6 +374,11 @@ void UI::SetSeedRandomizeCallback(std::function<void()> callback)
 void UI::SetSeedDisplay(std::uint32_t seed)
 {
     if (m_seedInput) m_seedInput->SetAttribute("value", std::to_string(seed));
+}
+
+void UI::SetSeedRowVisible(bool visible)
+{
+    if (m_seedRow) m_seedRow->SetProperty("display", visible ? "block" : "none");
 }
 
 void UI::SetTeamOptions(const std::vector<TeamId>& teams)
