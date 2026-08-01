@@ -6,6 +6,7 @@
 
 #include <ankerl/unordered_dense.h>
 
+#include <gravitaris/gravitaris.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/bullet.hpp>
@@ -34,8 +35,6 @@
 namespace Gravitaris {
 
 using Magnum::Vector2d;
-
-static constexpr double PI = 3.14159265358979323846;
 
 // A rival target has to be this much closer (squared distance) than the
 // current one before a pilot switches to it.

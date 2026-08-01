@@ -1,12 +1,11 @@
 #include <cmath>
 
+#include <gravitaris/gravitaris.hpp>
 #include <gravitaris/game/gnc/control/flight-controller.hpp>
 
 namespace Gravitaris {
 
 using Magnum::Vector2d;
-
-static constexpr double PI = 3.14159265358979323846;
 
 static double WrapToPi(double angle);
 static void SetThrottle(ThrottleState& throttle, bool thrust,

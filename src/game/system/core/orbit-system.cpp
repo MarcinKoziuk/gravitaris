@@ -1,5 +1,6 @@
 #include <cmath>
 
+#include <gravitaris/gravitaris.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/orbit.hpp>
@@ -10,7 +11,6 @@
 namespace Gravitaris {
 
 namespace {
-constexpr double PI = 3.14159265358979323846;
 } // namespace
 
 OrbitSystem::OrbitSystem(flecs::world& registry, PhysicsSystem& physicsSystem)

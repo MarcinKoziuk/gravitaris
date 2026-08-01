@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <gravitaris/gravitaris.hpp>
 #include <gravitaris/game/ai/ai-preset-library.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/debug/debug-spawn.hpp>
@@ -8,8 +9,6 @@
 namespace Gravitaris {
 
 using Magnum::Vector2d;
-
-static constexpr double PI = 3.14159265358979323846;
 
 // Clear of the site itself: a wave dropped on top of a High Port is a wave
 // of collisions.

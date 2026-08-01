@@ -5,6 +5,7 @@
 
 #include <Magnum/Math/Vector2.h>
 
+#include <gravitaris/gravitaris.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
@@ -12,8 +13,6 @@
 #include <gravitaris/game/scenario/sector-scenario.hpp>
 
 namespace Gravitaris {
-
-static constexpr double PI = 3.14159265358979323846;
 
 // Scale reference throughout is the classic arena (classic-scenario.cpp):
 // two suns 22400 apart, planets on orbits of 4000..9600.

@@ -2,6 +2,7 @@
 #include <limits>
 #include <optional>
 
+#include <gravitaris/gravitaris.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
@@ -15,8 +16,6 @@
 namespace Gravitaris {
 
 using Magnum::Vector2d;
-
-static constexpr double PI = 3.14159265358979323846;
 
     // Claude: we have so many duplicates, please create a math utils: include/gravitaris/game/math-utils.hpp (move PI there too)
 static double WrapToPi(double angle)

@@ -34,11 +34,6 @@ using namespace Gravitaris;
 
 namespace {
 
-// M_PI is a POSIX/GNU <cmath> extension, not standard C++ -- MSVC doesn't
-// define it without _USE_MATH_DEFINES set before every <cmath> include.
-// Claude: we have hundreds of these, can you add it to gravitaris.hpp?
-constexpr double PI = 3.14159265358979323846;
-
 // Background stdin reader: std::cin has no non-blocking read, so the main
 // tick loop can't just poll it directly without stalling on the syscall. A
 // dedicated thread blocks on getline() and hands finished lines to the main

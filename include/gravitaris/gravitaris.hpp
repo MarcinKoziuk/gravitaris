@@ -20,4 +20,10 @@
 
 namespace Gravitaris {
     extern bool HasEnteredMain;
+
+    // M_PI is a POSIX/GNU <cmath> extension, not standard C++ -- MSVC doesn't
+    // define it without _USE_MATH_DEFINES set before every <cmath> include.
+    // A dozen files had grown their own copy of this constant instead.
+    constexpr double PI = 3.14159265358979323846;
+    constexpr float PI_F = 3.14159265358979323846f;
 }

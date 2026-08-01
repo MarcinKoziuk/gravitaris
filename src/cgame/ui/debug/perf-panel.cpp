@@ -6,6 +6,7 @@
 
 #include <imgui.h>
 
+#include <gravitaris/gravitaris.hpp>
 #include <gravitaris/cgame/cgame.hpp>
 #include <gravitaris/game/perf-monitor.hpp>
 
@@ -14,8 +15,6 @@
 namespace Gravitaris {
 
 namespace {
-
-constexpr float PI = 3.14159265358979323846f;
 
 // Minecraft's F3 profiler pie derives each slice's color from a hash of its
 // label instead of a hardcoded palette, so any section (present or future)
@@ -45,9 +44,9 @@ void DrawPieChart(const std::vector<Slice>& slices, const float radius)
     const ImVec2 topLeft = ImGui::GetCursorScreenPos();
     const ImVec2 center{topLeft.x + radius, topLeft.y + radius};
 
-    float angle = -PI / 2.f; // start at 12 o'clock, sweep clockwise
+    float angle = -PI_F / 2.f; // start at 12 o'clock, sweep clockwise
     for (const Slice& slice : slices) {
-        const float nextAngle = angle + (slice.ms / total) * 2.f * PI;
+        const float nextAngle = angle + (slice.ms / total) * 2.f * PI_F;
 
         drawList->PathLineTo(center);
         drawList->PathArcTo(center, radius, angle, nextAngle);

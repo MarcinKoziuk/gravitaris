@@ -1,13 +1,12 @@
 #include <algorithm>
 #include <cmath>
 
+#include <gravitaris/gravitaris.hpp>
 #include <gravitaris/cgame/net/snapshot-interpolator.hpp>
 
 namespace Gravitaris {
 
 namespace {
-
-constexpr float PI = 3.14159265358979323846f;
 
 float LerpFloat(float a, float b, float t)
 {
@@ -24,9 +23,9 @@ Magnum::Vector2 LerpVec(const Magnum::Vector2& a, const Magnum::Vector2& b, floa
 // through the wrap instead of the long way around through 0.
 float LerpAngleShortest(float a, float b, float t)
 {
-    float delta = std::fmod(b - a + PI, 2.f * PI);
-    if (delta < 0.f) delta += 2.f * PI;
-    delta -= PI;
+    float delta = std::fmod(b - a + PI_F, 2.f * PI_F);
+    if (delta < 0.f) delta += 2.f * PI_F;
+    delta -= PI_F;
     return a + delta * t;
 }
 

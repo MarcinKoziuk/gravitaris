@@ -4,6 +4,7 @@
 
 #include <Magnum/Math/Vector2.h>
 
+#include <gravitaris/gravitaris.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/team.hpp>
@@ -17,8 +18,6 @@ namespace Gravitaris {
 
 using Magnum::Vector2d;
 
-// Claude: you like to make a lot of Pies!
-static constexpr double PI = 3.14159265358979323846;
 
 static constexpr int FRAG_COUNT = 12;
 static constexpr double FRAG_SPEED_MIN = 120.0;
