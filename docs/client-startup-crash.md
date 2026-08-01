@@ -25,12 +25,22 @@ healthy runs (124 = survived, 139 = segfault).
 
 | What the client built at startup | Result |
 |---|---|
-| Generated sector, 4 factions | 1 crash in 3 |
+| Generated sector, 4 factions | 1 crash in 3, later 2 in 10 |
 | `BuildClassicWorld()` (the old 2-sun, 2-faction arena) | 1 crash in 6 |
 | Nothing — `BuildWorld` call removed entirely | 0 crashes in 8 |
 | `gravitaris-server`, same generated sector, headless | 0 crashes in 6 |
+| Generated sector, **starting complexes skipped** | **0 crashes in 10** |
+| Generated sector, planetside structures only (no High Port) | 2 crashes in 10 |
+| Debug build, generated sector, 4 factions | 1 crash in 8 |
 
-Two things follow:
+Three things follow:
+
+- **It needs structures.** Celestials alone never crash, however many of
+  them; adding the starting complexes brings it straight back. Both
+  structure paths are implicated — dropping only the orbital High Port and
+  keeping the planetside four still crashes at the full rate.
+- **It is not an optimizer artifact.** It reproduces in a Debug build, which
+  rules out the `-O2` dangling-swizzle family CLAUDE.md warns about.
 
 - **It is in world building**, and specifically in the **cgame half** of it:
   the headless server runs the identical `BuildWorld` on the identical
@@ -42,16 +52,32 @@ Two things follow:
   four times the structures and up to three times the celestials, so the
   same latent fault gets more chances per launch.
 
+## Checked and cleared
+
+- `EntitySpawner::SpawnStructure` / `SpawnOrbitingStructure`: read for the
+  flecs "reference into table storage held across an entity creation"
+  hazard. `SpawnOrbitingStructure` does hold a `const Transform&` to the
+  planet, but only uses it before `SpawnStructureBase` runs; everything else
+  is copied by value. Clean as far as that goes.
+- `AudioSystem`: has no spawn observer, so it isn't reacting to structures
+  being created off its own thread.
+
 ## Not yet ruled out
 
+- **`StructureAttachmentSystem`, not the spawn itself.** Worth testing first
+  next time: with no complexes there are also no attachments, so
+  `SettleScenario`'s attachment pass is empty — every result above is
+  equally consistent with the fault being there rather than in spawning. It
+  looks up each planet by NetId and takes `planet.get<Transform>()`; the
+  `is_alive()` guard covers a dead planet but not an alive one missing the
+  component.
 - Uninitialized read or a lifetime bug in the model/mesh resource path.
   `ResourceLoader::Load` (`resource-loader.inl`) has non-trivial weak-pointer
   caching with a documented history of duplicate-instance bugs, and the
   renderers keep shared per-id caches keyed off resource destruction — that
-  combination is where an intermittent fault is most plausible.
-- The `-O2`-only dangling-swizzle class of bug CLAUDE.md warns about. A grep
-  for the obvious `const Vector2& x = expr.xy()` shape over `cgame/` and
-  `client/` found nothing, but the search only covers the literal spelling.
+  combination is where an intermittent fault is most plausible. Note each
+  structure model is loaded once per faction, so 4 factions means four
+  Load calls per id where the classic world made two.
 - A GL/driver interaction during resource upload. The run log shows a long
   list of NVIDIA driver workarounds active.
 
@@ -64,6 +90,5 @@ or add a `SetUnhandledExceptionFilter` handler to the client that writes a
 minidump. A stack would almost certainly settle this in minutes; everything
 above is inference from launch counts.
 
-A Debug build was not tried — worth doing early, since the fault may simply
-not reproduce there (which would itself point at the `-O2`/uninitialized
-family).
+The Debug build reproduces it, so debugging does not have to fight an
+optimized build.
