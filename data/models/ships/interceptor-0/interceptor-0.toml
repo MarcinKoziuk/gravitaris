@@ -5,6 +5,8 @@ scale = 0.1
 density = 1
 # Overpowered for its mass: it leaves a planet in a hurry.
 thrust = 260
+# Faster hull, so a higher ceiling than the fighters' 200.
+max_speed = 260
 restitution = 0.5
 friction = 0.0
 

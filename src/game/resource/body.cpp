@@ -59,6 +59,9 @@ ResourcePtr<const Body> Body::Create(id_t id, LoadingContext& context)
         if (const auto friction = (*physicsCfg)["friction"].value<float>()) {
             body->m_friction = *friction;
         }
+        if (const auto maxSpeed = (*physicsCfg)["max_speed"].value<float>()) {
+            body->m_maxSpeed = *maxSpeed;
+        }
         if (const auto thrust = (*physicsCfg)["thrust"].value<float>()) {
             body->m_thrust = *thrust;
         }

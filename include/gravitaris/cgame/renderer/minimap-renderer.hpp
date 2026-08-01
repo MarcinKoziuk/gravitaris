@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include <flecs.h>
 
 #include <gravitaris/cgame/scene-view.hpp>
@@ -47,7 +49,11 @@ public:
         // planets travel. Clear it to take manual control from the debug
         // panel (the last fitted value stays put as the starting point).
         bool autoFit = true;
-        float shipDotPx = 6.f;      // ship dot radius, minimap texture px
+        // Ships read as markers, not bodies: a fighter is a speck next to a
+        // planet in world scale, and drawing it anywhere near a planet's size
+        // makes the map lie about what is worth flying to.
+        float shipTriPx = 3.5f;     // ship triangle circumradius, minimap texture px
+        float freighterTriPx = 2.5f;// smaller again -- commerce is background traffic
         float playerDotPx = 3.f;    // player marker dot radius, minimap texture px
         float planetMinPx = 4.f;    // floor for a planet ring that'd map below this
         float starMinPx = 7.f;      // floor for a sun ring that'd map below this (bigger than a planet)
@@ -87,7 +93,8 @@ public:
 
     // Renders the map: static, centered on `mapCenter` (not the player) so
     // panning the ship doesn't scroll the map. `subjectPos` places the ringed
-    // marker within that static view -- the camera subject, so it follows a
+    // marker within that static view, and is empty during round setup (no
+    // subject yet) and between death and respawn -- the camera subject, so it follows a
     // spectated ship rather than always sitting on your own. viewCenter/
     // viewHalfExtent describe the main camera's world-space extent, shaded as
     // the (optional) view rectangle.
@@ -96,7 +103,7 @@ public:
     // Binds its own framebuffer; the caller is
     // expected to bind whatever it renders to next itself (the app runs this
     // before the glow pass claims the scene target).
-    void Render(const SceneView& view, const Vector2& mapCenter, const Vector2& playerPos,
+    void Render(const SceneView& view, const Vector2& mapCenter, std::optional<Vector2> subjectPos,
                const Vector2& viewCenter, const Vector2& viewHalfExtent);
 };
 

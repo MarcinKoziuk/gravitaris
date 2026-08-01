@@ -34,6 +34,17 @@ public:
     // deck cannot leave, whoever is flying it.
     static constexpr cpFloat DEFAULT_THRUST = 220.0;
 
+    // Speed past which a hull's own thruster stops adding speed, for a hull
+    // that doesn't name its own in [physics] max_speed. Well clear of the
+    // ~30-50 units/s a circular orbit runs at over the planet radii in use,
+    // so ordinary flying never touches it, and above the 70 units/s that
+    // starts doing landing damage. Zero means uncapped.
+    //
+    // Gravity is deliberately NOT subject to this -- see
+    // ShipControlsSystem::ApplyMovement. Slingshotting past your engine's
+    // limit is the point.
+    static constexpr cpFloat DEFAULT_MAX_SPEED = 200.0;
+
     struct CircleShape {
         TVector2<cpFloat> pos;
         cpFloat radius;
@@ -64,6 +75,7 @@ private:
     cpFloat m_mass;
     cpFloat m_friction;
     cpFloat m_thrust = DEFAULT_THRUST;
+    cpFloat m_maxSpeed = DEFAULT_MAX_SPEED;
     float m_landingFragility = 1.f;
     bool m_kinematic = false;
     bool m_gravitySource = false;
@@ -98,6 +110,11 @@ public:
     // guidance plans against.
     [[nodiscard]] cpFloat GetThrust() const
     { return m_thrust; }
+
+    // Speed at which this hull's thruster stops being able to add speed
+    // along the direction of travel. Zero means uncapped.
+    [[nodiscard]] cpFloat GetMaxSpeed() const
+    { return m_maxSpeed; }
 
     // Multiplier on the landing damage this hull takes (DamageSystem) -- not
     // on fire taken, not on rams. Below 1 is heavier gear that shrugs off a

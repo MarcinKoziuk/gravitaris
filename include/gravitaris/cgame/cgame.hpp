@@ -263,11 +263,6 @@ public:
     // follow stops until FocusCamera().
     void LookAtMapPoint(const Magnum::Vector2& normalized);
 
-    // Frames the whole sector, for the round-setup screen: there is no player
-    // to follow yet, and a generated sector's bodies are nowhere near the
-    // origin the camera would otherwise sit at.
-    void FrameSector();
-
     void FocusCamera() { m_cameraDirector.FocusSubject(); }
 
     [[nodiscard]] bool IsCameraFollowing() const { return m_cameraDirector.IsFollowing(); }

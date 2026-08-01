@@ -69,8 +69,11 @@ void DrawHudPanel(CGame& game)
     ImGui::SetItemTooltip("World units from the map center to the map edge. Default 12000.");
     ImGui::EndDisabled();
     ImGui::SetNextItemWidth(220.f);
-    ImGui::DragFloat("Ship dot (px)", &minimap.shipDotPx, 0.1f, 1.f, 12.f, "%.1f");
-    ImGui::SetItemTooltip("Ship dot radius in minimap texture pixels. Default 6.");
+    ImGui::DragFloat("Ship tri (px)", &minimap.shipTriPx, 0.1f, 1.f, 12.f, "%.1f");
+    ImGui::SetItemTooltip("Ship triangle circumradius in minimap texture pixels. Default 3.5.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Freighter tri (px)", &minimap.freighterTriPx, 0.1f, 1.f, 12.f, "%.1f");
+    ImGui::SetItemTooltip("Freighter triangle circumradius in minimap texture pixels. Default 2.5.");
     ImGui::SetNextItemWidth(220.f);
     ImGui::DragFloat("Player dot (px)", &minimap.playerDotPx, 0.1f, 0.5f, 12.f, "%.1f");
     ImGui::SetItemTooltip("Player marker dot radius in minimap texture pixels. Default 3.");

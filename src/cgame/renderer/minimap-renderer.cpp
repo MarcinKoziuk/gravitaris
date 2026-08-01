@@ -13,6 +13,7 @@
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/orbit.hpp>
+#include <gravitaris/game/component/freighter.hpp>
 
 #include <gravitaris/game/logging.hpp>
 
@@ -42,6 +43,10 @@ const Vector3 PLANET_COLOR{0.2f, 1.f, 0.2f};
 // compete with the icons it encloses.
 const Vector3 VIEW_RECT_COLOR{0.28f, 0.31f, 0.34f};
 const Vector3 PLAYER_COLOR{1.f, 1.f, 1.f};
+// Freighters are drawn in one muted color whoever owns them: the original's
+// "commerce is neutral" rule (docs/gravity-well-1997.md), and it keeps the
+// map's team colors meaning "combat" at a glance.
+const Vector3 FREIGHTER_COLOR{0.45f, 0.5f, 0.55f};
 
 // Must match Line2Shader's vertex layout (same contract as ModelRenderer2's
 // baked geometry; the shader doesn't care that this one is rebuilt per frame).
@@ -91,6 +96,21 @@ void EmitSegment(std::vector<LineVertex>& out, const Vector2& a, const Vector2& 
     for (const Vector2& w : SEGMENT_WEIGHTS) {
         out.push_back(LineVertex{a, b, Vector2{}, Vector4{w.x(), w.y(), 0.f, PRIM_SEGMENT}, color, 0.f});
     }
+}
+
+// A point-down outline triangle of circumradius `radius`. Built from three
+// segments rather than a new shader primitive: Line2Shader only knows
+// segments, rings and discs, and a hollow triangle is three segments.
+void EmitTriangle(std::vector<LineVertex>& out, const Vector2& center, float radius, const Vector3& color)
+{
+    // cos30/sin30 for the two upper corners; the apex hangs straight down.
+    const Vector2 apex = center + Vector2{0.f, -radius};
+    const Vector2 left = center + Vector2{-0.866f * radius, 0.5f * radius};
+    const Vector2 right = center + Vector2{0.866f * radius, 0.5f * radius};
+
+    EmitSegment(out, left, right, color);
+    EmitSegment(out, right, apex, color);
+    EmitSegment(out, apex, left, color);
 }
 
 void EmitRect(std::vector<LineVertex>& out, const Vector2& center, const Vector2& halfExtent,
@@ -166,7 +186,7 @@ void MinimapRenderer::FitToSector(const SceneView& view, const Vector2& mapCente
     m_params.worldRadius = std::max(m_params.worldRadius, reach * MARGIN);
 }
 
-void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, const Vector2& subjectPos,
+void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, std::optional<Vector2> subjectPos,
                              const Vector2& viewCenter, const Vector2& viewHalfExtent)
 {
     m_framebuffer.setViewport({{}, TextureSize()})
@@ -204,11 +224,14 @@ void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, co
     // Ships: team-colored dots (same "enemy/ship" notion as the HUD arrows:
     // damageable + real team; bullets/shrapnel have neither). Same
     // both-worlds sweep as planets above.
-    const auto considerShip = [&](flecs::entity, const Transform& t, const Team& team, const Damageable&) {
+    const auto considerShip = [&](flecs::entity entity, const Transform& t, const Team& team, const Damageable&) {
         if (team.id == TeamId::None) return;
         const Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
         if ((pos - mapCenter).length() > worldRadius) return;
-        EmitBillboard(vertices, pos, m_params.shipDotPx / ppu, Vector3{TeamColor(team.id)}, PRIM_DISC);
+
+        const bool freighter = entity.has<Freighter>();
+        const float radius = (freighter ? m_params.freighterTriPx : m_params.shipTriPx) / ppu;
+        EmitTriangle(vertices, pos, radius, freighter ? FREIGHTER_COLOR : Vector3{TeamColor(team.id)});
     };
     view.Each(considerShip);
 
@@ -216,9 +239,13 @@ void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, co
         EmitRect(vertices, viewCenter, viewHalfExtent, VIEW_RECT_COLOR);
     }
 
-    // Subject marker: brighter, ringed, drawn on top of the team dots.
-    EmitBillboard(vertices, subjectPos, m_params.playerDotPx / ppu, PLAYER_COLOR, PRIM_DISC);
-    EmitBillboard(vertices, subjectPos, (m_params.playerDotPx + 6.f) / ppu, PLAYER_COLOR, PRIM_RING);
+    // Subject marker: the same triangle as any other ship, in white and
+    // ringed, drawn on top. Absent during round setup, when there is no
+    // subject to mark.
+    if (subjectPos) {
+        EmitTriangle(vertices, *subjectPos, m_params.shipTriPx / ppu, PLAYER_COLOR);
+        EmitBillboard(vertices, *subjectPos, (m_params.playerDotPx + 4.f) / ppu, PLAYER_COLOR, PRIM_RING);
+    }
 
     if (vertices.empty()) return;
 

@@ -5,6 +5,8 @@ density = 1
 # Surface thrust/weight of ~1.4 on a standard planet (Body::DEFAULT_THRUST) --
 # enough to leave the ground it landed on, with margin for a heavier rock.
 thrust = 220
+# Top speed the thruster alone can reach; gravity can still slingshot past it.
+max_speed = 200
 restitution = 0.5
 friction = 0.0
 

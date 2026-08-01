@@ -53,7 +53,10 @@ public:
     // movement without also predicting weapon fire (which would need
     // client-assigned NetIds to reconcile against the server's -- Phase 6)
     // still needs the exact same force/torque the real sim applies.
-    static void ApplyMovement(cpBody* body, const ControlFlags& flags, double thrust);
+    // `maxSpeed` caps what the thruster alone can reach (Body::GetMaxSpeed);
+    // zero is uncapped. Gravity is applied elsewhere and is not capped, so a
+    // slingshot still carries a ship past its engine's limit.
+    static void ApplyMovement(cpBody* body, const ControlFlags& flags, double thrust, double maxSpeed);
 
     // Muzzle position/velocity for a projectile leaving the ship's first
     // hardpoint at `muzzleSpeed` right now. Shared by Update() and

@@ -25,6 +25,8 @@ using Magnum::Vector2d;
 static constexpr float BOX_HP = 30.f; // a couple of primary hits or one ram
 static constexpr double HALF_PI = 1.5707963267948966;
 
+static cpVect ThrustWithinSpeedLimit(cpBody* body, double thrust, double maxSpeed);
+
 ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner,
                                        PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
                                        const UpgradeCatalog& catalog)
@@ -73,7 +75,7 @@ std::pair<Vector2d, Vector2d> ShipControlsSystem::ComputeBulletSpawn(const Trans
     }
 }
 
-void ShipControlsSystem::ApplyMovement(cpBody* body, const ControlFlags& flags, double thrust)
+void ShipControlsSystem::ApplyMovement(cpBody* body, const ControlFlags& flags, double thrust, double maxSpeed)
 {
     cpFloat ang = cpBodyGetAngularVelocity(body);
     const cpFloat maxAng = 15.0;
@@ -87,8 +89,36 @@ void ShipControlsSystem::ApplyMovement(cpBody* body, const ControlFlags& flags, 
         cpBodyApplyTorque(body, -20.0);
     }
     if (flags.thrustForward) {
-        cpBodyApplyForceAtLocalPoint(body, cpv(0, -thrust), cpv(0, 0));
+        cpBodyApplyForceAtLocalPoint(body, ThrustWithinSpeedLimit(body, thrust, maxSpeed), cpv(0, 0));
     }
+}
+
+// The hull's thrust, with any part of it that would push the ship past its
+// own speed limit taken out. Only the engine is capped: gravity is applied
+// separately (PhysicsSystem::ApplyGravity) and stays free to throw a ship
+// well past this, so a slingshot still beats what the thruster alone can do.
+//
+// Removing a component leaves a force that can point off the thruster's
+// axis, which a real rocket couldn't manage. That is the deliberate trade
+// for still being able to turn at top speed -- scaling the magnitude down
+// instead would take away heading authority exactly when it is most wanted.
+static cpVect ThrustWithinSpeedLimit(cpBody* body, double thrust, double maxSpeed)
+{
+    const cpVect local = cpv(0, -thrust);
+    if (maxSpeed <= 0.0) return local; // uncapped hull
+
+    const cpVect vel = cpBodyGetVelocity(body);
+    const cpFloat speed = cpvlength(vel);
+    if (speed < maxSpeed) return local;
+
+    const cpVect heading = cpBodyGetRotation(body);
+    const cpVect world = cpvrotate(local, heading);
+    const cpVect travel = cpvmult(vel, 1.0 / speed);
+
+    const cpFloat along = cpvdot(world, travel);
+    if (along <= 0.0) return local; // pointed away from travel: braking, always allowed
+
+    return cpvunrotate(cpvsub(world, cpvmult(travel, along)), heading);
 }
 
 void ShipControlsSystem::Update(std::uint64_t step)
@@ -97,7 +127,7 @@ void ShipControlsSystem::Update(std::uint64_t step)
         PhysicsBody& phys = m_physicsSystem.GetBody(ref);
         cpBody* body = phys.cp.body.get();
 
-        ApplyMovement(body, scontrols.actionFlags, phys.body->GetThrust());
+        ApplyMovement(body, scontrols.actionFlags, phys.body->GetThrust(), phys.body->GetMaxSpeed());
 
         ShipLoadout* loadout = entity.try_get_mut<ShipLoadout>();
         const ShipStats stats =

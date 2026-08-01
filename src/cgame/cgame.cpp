@@ -270,13 +270,20 @@ void CGame::SubmitShieldRings(const SceneView& view)
 
 void CGame::RenderMinimap()
 {
+    // No subject at all during round setup, and none between death and
+    // respawn (or in MP before the first snapshot). The map is worth drawing
+    // either way -- the sector is what the setup screen is there to show --
+    // so only the "you are here" marker is conditional.
     const std::optional<flecs::entity> subject = CameraSubject();
     const Transform* transform = subject ? subject->try_get<Transform>() : nullptr;
-    if (!transform) return; // between death and respawn (or MP: no snapshot yet): freeze the last frame
+
+    std::optional<Magnum::Vector2> subjectPos;
+    if (transform) {
+        subjectPos = Magnum::Vector2{static_cast<float>(transform->pos.x()),
+                                     static_cast<float>(transform->pos.y())};
+    }
 
     const Camera& camera = m_cameraDirector.GetCamera();
-    const Magnum::Vector2 subjectPos{static_cast<float>(transform->pos.x()),
-                                     static_cast<float>(transform->pos.y())};
     const Magnum::Vector2 viewHalfExtent = m_viewportSize / (2.f * std::max(camera.GetZoom(), 1e-3f));
 
     // In MP, everything but the own ship lives in m_mirrorWorld (see
@@ -290,18 +297,6 @@ void CGame::LookAtMapPoint(const Magnum::Vector2& normalized)
 {
     const float worldRadius = std::max(m_minimapRenderer.GetParams().worldRadius, 1.f);
     m_cameraDirector.LookAt(MinimapCenter() + normalized * worldRadius);
-}
-
-void CGame::FrameSector()
-{
-    // A little wider than the extent so the outermost orbit isn't drawn
-    // flush against the screen edge.
-    static constexpr float MARGIN = 1.1f;
-
-    const float extent = static_cast<float>(GetSectorExtent());
-    if (extent <= 0.f) return;
-
-    m_cameraDirector.FrameRegion(MinimapCenter(), extent * MARGIN, m_viewportSize);
 }
 
 void CGame::ConnectToServer(const std::string& wsUrl, TeamId requestedTeam)

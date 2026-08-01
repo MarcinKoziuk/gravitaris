@@ -222,7 +222,7 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
     SyncCollisionProxies(snapshotEntities, ownShipNetId, snapshotBaseTick, tick);
 
     PhysicsBody& phys = m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>());
-    ShipControlsSystem::ApplyMovement(phys.cp.body.get(), flags, phys.body->GetThrust());
+    ShipControlsSystem::ApplyMovement(phys.cp.body.get(), flags, phys.body->GetThrust(), phys.body->GetMaxSpeed());
 
     m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
     m_physicsSystem.Update();
@@ -328,7 +328,7 @@ std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t author
         // tradeoffs the class doc comment already accepts.
         SyncCollisionProxies(snapshotEntities, ownShipNetId, authoritativeTick, pending.tick);
         m_ownShip.get_mut<Controls>().actionFlags = pending.flags;
-        ShipControlsSystem::ApplyMovement(body, pending.flags, phys.body->GetThrust());
+        ShipControlsSystem::ApplyMovement(body, pending.flags, phys.body->GetThrust(), phys.body->GetMaxSpeed());
         m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
         m_physicsSystem.Update();
         m_history.push_back(CaptureTick(pending.tick, pending.flags));
