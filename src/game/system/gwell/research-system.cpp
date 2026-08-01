@@ -145,7 +145,11 @@ void ResearchSystem::Update(std::uint64_t step)
                 ShipLoadout* loadout = ship.try_get_mut<ShipLoadout>();
                 UpgradeDraft* draft = ship.try_get_mut<UpgradeDraft>();
                 if (loadout && draft) {
-                    if (!draft->available) {
+                    // Rolled from the empty state, not from `available`: a
+                    // landing that bounces, or a dock held a hair outside its
+                    // tolerance for a tick, drops eligibility and would
+                    // otherwise reshuffle the panel the moment it comes back.
+                    if (draft->offers[0] == 0) {
                         const NetId* netId = ship.try_get<NetId>();
                         draft->offers = m_catalog.RollOffers(
                                 loadout->levels, DraftSeed(step, netId ? netId->value : 0u));
@@ -170,6 +174,7 @@ void ResearchSystem::Update(std::uint64_t step)
                             fs.upgradeReady = false;
                             fs.researchProgress = 0.f;
                             draft->available = false;
+                            draft->offers = {};
 
                             const Transform& shipTransf = ship.get<Transform>();
                             m_eventQueue.Emit(GameEventType::UpgradeCollected, ship,
@@ -204,9 +209,13 @@ void ResearchSystem::Update(std::uint64_t step)
         tr.ready = fs.upgradeReady;
     });
 
-    m_registry.each([&](flecs::entity ship, UpgradeDraft& draft) {
-        if (!draft.available) return;
-        if (std::find(offered.begin(), offered.end(), ship) == offered.end()) draft.available = false;
+    m_registry.each([&](flecs::entity ship, UpgradeDraft& draft, const Team& team) {
+        if (std::find(offered.begin(), offered.end(), ship) != offered.end()) return;
+        draft.available = false;
+        // The rolled three survive as long as the faction's upgrade is still
+        // waiting, so re-qualifying for the same one shows the same offers.
+        const bool waiting = team.id != TeamId::None && byTeam[static_cast<std::size_t>(team.id)].ready;
+        if (!waiting) draft.offers = {};
     });
 
     // FactionState is server-only and a Lab's Structure is replicated, so the

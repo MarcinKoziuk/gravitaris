@@ -452,6 +452,12 @@ The Lab's research role (`ResearchSystem`), ahead of the upgrades themselves:
     only from what that ship can still take (a maxed tier drops out; the
     missile restock never does). Seeded from `(tick, NetId)` alone, so a
     replay — and eventually a second peer — rolls the same three (ADR 0001).
+    "Once" is keyed on the offers being *empty*, not on the draft being open
+    (fixed 2026-08-01): eligibility is a per-tick test — a landing that
+    bounces, a dock held a hair outside `DOCK_RELATIVE_SPEED` — and keying the
+    roll on `available` re-rolled the panel the instant it came back, which
+    read as the offers changing themselves a moment after appearing. The
+    rolled three now survive until the faction's upgrade is actually spent.
   - The player answers with `1`/`2`/`3` → `InputCommand::upgradePick`
     (replay v2, protocol v4), a one-shot `Controls::upgradePick` that
     `InputSystem` clears every tick. An AI takes offer 1 the tick it lands;
@@ -465,6 +471,15 @@ The Lab's research role (`ResearchSystem`), ahead of the upgrades themselves:
     ones dropped) each rebuild. `CGame::GetUpgradeOffers` resolves ids against
     the catalog; the panel deliberately follows the **own ship**, not the
     camera subject — a spectated unit's draft isn't the player's to spend.
+  - Sidebar (2026-08-01): `div#base_info`, pinned to the foot of the info panel
+    under its own rule, carries the faction's research bar and a `m:ss`
+    countdown (`CGame::GetResearchReadout` → `UI::SetResearchReadout`). Read
+    off the labs' replicated `Structure::researchProgress`, since
+    `FactionState` is server-only. The time divides by lab count — a second lab
+    halves the wait — and a `x2` suffix says why it runs faster than the wall
+    clock. It sits apart from the hull/shield/missile rows because it is
+    faction state, not ship state, and that section is where the rest of the
+    base readouts go.
 
 ### Weapons and the pool (`data/upgrades.toml`, `UpgradeCatalog`)
 
