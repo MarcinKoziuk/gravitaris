@@ -195,8 +195,6 @@ public:
     // `notches` is the scroll delta (positive = zoom in).
     void NudgeManualZoom(float notches);
 
-    void ToggleCameraFollow() { m_cameraFollow = !m_cameraFollow; }
-
     [[nodiscard]] bool IsFollowing() const { return m_cameraFollow; }
 
     // Free-look: parks the camera on `position` and stops following the

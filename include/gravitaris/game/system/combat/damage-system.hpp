@@ -44,6 +44,12 @@ private:
 
     void ResolveShipRams();
 
+    // Kills anything that has reached a star's surface. A rule, not a
+    // physical result: a sun is not a place you land badly, it is a place
+    // nothing comes back from, so this bypasses the landing curve, the hull's
+    // fragility and any shield outright.
+    void ResolveStarContact();
+
     // Spends `target`'s shield charge (if it carries one) against `damage`
     // and returns what still reaches the hull. Weapon hits only: a shield is
     // a defense against fire, not a cushion for flying into a mountain, so

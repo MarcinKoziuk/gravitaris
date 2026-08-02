@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- A heavy-rounds tracer: a short streak along the barrel axis (local -Y,
+     the nose direction) instead of the stock round's single point, centred on
+     the muzzle position so the swept-segment hit test still runs down its
+     middle. Hand-authored rather than drawn: two points and a hitbox is
+     less than Inkscape's smallest possible document. -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     version="1.1"
+     width="10"
+     height="40"
+     viewBox="-5 -20 10 40">
+  <g inkscape:groupmode="layer" inkscape:label="model">
+    <path d="M 0,-16 L 0,16"
+          style="fill:none;stroke:#ffaa33;stroke-width:1;stroke-linecap:butt" />
+  </g>
+  <g inkscape:groupmode="layer" inkscape:label="@body" style="display:none">
+    <circle cx="0" cy="0" r="0.5"
+            style="fill:#ff0000;stroke:none" />
+  </g>
+</svg>

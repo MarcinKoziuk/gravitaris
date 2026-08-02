@@ -15,6 +15,10 @@ struct ControlFlags {
     bool firePrimary : 1 = false;
     bool fireSecondary : 1 = false;
     bool fireMissile : 1 = false;
+    // Held, like thrustForward: a request for the overburn, which
+    // ShipControlsSystem grants only while there is boost left and the
+    // cooldown has expired (see Controls::boostTicks).
+    bool boost : 1 = false;
 };
 
 // Which of the Lab's three offers this tick's command accepts: 1..3, or 0 for
@@ -34,6 +38,19 @@ struct Controls {
     // One-shot, unlike actionFlags: ResearchSystem clears it the tick it acts
     // on it, so a held key can't spend two upgrades.
     UpgradePick upgradePick = 0;
+
+    // The overburn's two timers, both in ticks (see UpgradeDef::Boost).
+    // `boostTicks` is what is left of the current burn and is only ever
+    // non-zero on a ship carrying the upgrade; `boostCooldown` is the wait
+    // before another one can start, and runs down whether or not the button
+    // is held. A burn that is cut short still costs the full cooldown, so
+    // tapping it is not free.
+    std::uint16_t boostTicks = 0;
+    std::uint16_t boostCooldown = 0;
+    // Whether the overburn is actually running this tick -- what the movement
+    // integrator, the wire (PackControlFlags) and the exhaust all read, as
+    // opposed to actionFlags.boost, which is only the request.
+    bool boosting = false;
 };
 
 } // namespace Gravitaris

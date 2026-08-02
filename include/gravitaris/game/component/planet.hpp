@@ -19,6 +19,11 @@ namespace Gravitaris {
 // from already-replicated data (modelId) rather than sent directly.
 struct Planet {
     float radius = 0.f;
+    // A star rather than a rock: nothing survives touching one (DamageSystem),
+    // so it is never a landing site for anybody, player or AI. A field rather
+    // than a tag for the same reason `radius` is one -- it is fixed for the
+    // body's whole life and read as part of ordinary Planet queries.
+    bool star = false;
 };
 
 } // namespace Gravitaris

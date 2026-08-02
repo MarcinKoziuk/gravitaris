@@ -106,8 +106,10 @@ void SimpleModelRenderer::Render(double)
         RenderGroup("model"_id, it->second, transf);
     });
 
+    // No orange for the overburn here, unlike ModelRenderer2: this renderer
+    // has no per-instance colour to override. The flame still lights.
     m_registry.each([&](flecs::entity, Transform& transf, Renderable& rend, Controls& controls) {
-        if (!controls.actionFlags.thrustForward) return;
+        if (!controls.actionFlags.thrustForward && !controls.boosting) return;
 
         auto it = m_meshes.find(rend.model.Id());
         if (it == m_meshes.end()) return;

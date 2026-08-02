@@ -130,6 +130,11 @@ private:
     // markup is only rebuilt when a block actually changes shade.
     std::vector<int> m_shownSegments;
 
+    Rml::Element* m_boostFill = nullptr;
+    Rml::Element* m_boostValue = nullptr;
+    float m_boostFraction = -2.f;
+    bool m_boostCooling = false;
+
     Rml::Element* m_researchFill = nullptr;
     Rml::Element* m_researchValue = nullptr;
     float m_researchFraction = -2.f;
@@ -223,6 +228,12 @@ public:
     // a burned-through side reads as a gap. An empty list restores the plain
     // continuous bar SetShieldFraction drives, which is what a bubble wants.
     void SetShieldSegments(const std::vector<float>& charges);
+
+    // The overburn's readout: `fraction` is how much of a burn is available
+    // (1 ready, 0 just spent), `cooling` whether that is a cooldown filling
+    // rather than a burn running down. Negative blanks the row, for a ship
+    // that hasn't collected the upgrade.
+    void SetBoostReadout(float fraction, bool cooling);
 
     // The faction's research bar, 0..1, with `text` the countdown beside it --
     // this layer formats no times, the same way it holds no game state. A

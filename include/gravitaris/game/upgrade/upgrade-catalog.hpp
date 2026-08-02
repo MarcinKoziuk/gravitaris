@@ -71,6 +71,14 @@ public:
     // The level a ship holds in `def`, for the draft panel's "II -> III".
     [[nodiscard]] static std::uint8_t LevelOf(const UpgradeDef& def, const UpgradeLevels& levels);
 
+    // Which of `offers` an AI takes, as a 1-based slot (0 when none of them
+    // can be applied). A human reads the three cards and decides; a pilot
+    // scores them against what it is already carrying, so a wing ends up
+    // spread across shields, racks and guns instead of every ship taking
+    // whatever landed in slot one. Deterministic -- state in, slot out, no
+    // randomness (ADR 0001).
+    [[nodiscard]] std::uint8_t PreferredOffer(const Offers& offers, const ShipLoadout& loadout) const;
+
     // Grants one pick. Returns false if it was a no-op (unknown id, or an
     // already-maxed tier), which keeps the research bar full so the pick can
     // be retried rather than silently burning the upgrade.

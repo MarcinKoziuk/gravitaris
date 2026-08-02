@@ -1,0 +1,9 @@
+# As bullet-heavy, longer: ~13 world units of streak once the spawner's own
+# scale 3 is applied.
+scale = 0.1
+
+[physics]
+mass = 0.001
+density = 1
+restitution = 0.5
+friction = 0.0

@@ -100,8 +100,12 @@ void StructureDefenseSystem::Update()
             const Vector2d aim = (relPos + relVel * (*t)).normalized();
             const Vector2d vel = aim * round->speed + transf.vel;
 
+            // Along the firing solution, not along the turret's own facing:
+            // a round drawn as a streak has to lie on its line of flight.
+            const double rot = std::atan2(aim.y(), aim.x()) + PI / 2.0;
+
             const flecs::entity bullet =
-                    m_entitySpawner.SpawnBullet(round->modelId, transf.pos, vel, /*sensor=*/true);
+                    m_entitySpawner.SpawnBullet(round->modelId, transf.pos, vel, /*sensor=*/true, rot);
             bullet.emplace<Bullet>(round->lifetimeSeconds, turretTeam.id, round->damage);
 
             m_eventQueue.Emit(GameEventType::BulletFired, turret,

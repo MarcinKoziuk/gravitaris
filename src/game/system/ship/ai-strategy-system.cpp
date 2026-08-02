@@ -9,10 +9,10 @@
 #include <gravitaris/game/component/ai-pilot.hpp>
 #include <gravitaris/game/component/ai-strategy.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/faction-state.hpp>
 #include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/net-id.hpp>
-#include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/component/structure.hpp>
@@ -71,7 +71,7 @@ struct PlanetInfo {
     std::uint32_t netId = 0;
     Vector2d pos;
     TeamId team = TeamId::None;
-    bool claimable = false; // suns have no Orbit and cannot be landed on
+    bool claimable = false; // a star cannot be landed on, at any speed
     double surfaceGravity = 0.0;
     int structureCount = 0;
     double totalHp = 0.0;
@@ -143,7 +143,7 @@ void AIStrategySystem::Update()
             surfaceGravity = PhysicsSystem::GRAVITY_CONSTANT * gs->mass * gs->multiplier
                     * gravityMultiplier / (radius * radius);
         }
-        planets.push_back(PlanetInfo{ent, netId.value, transf.pos, team.id, ent.has<Orbit>(),
+        planets.push_back(PlanetInfo{ent, netId.value, transf.pos, team.id, !planet.star,
                                      surfaceGravity});
     });
     std::sort(planets.begin(), planets.end(),
@@ -157,6 +157,13 @@ void AIStrategySystem::Update()
         if (s.type == StructureType::Lab && team.id != TeamId::None) {
             teamHasLab[static_cast<std::size_t>(team.id)] = true;
         }
+    });
+
+    // An upgrade finished and waiting to be collected is a live reason to fly
+    // home, on its own -- see the `shopping` term below.
+    std::array<bool, NUM_TEAMS> teamUpgradeReady{};
+    m_registry.each([&](const FactionState& fs) {
+        teamUpgradeReady[static_cast<std::size_t>(fs.team)] = fs.upgradeReady;
     });
 
     const auto addStructure = [&](flecs::entity ent, const Damageable& hp, std::uint32_t planetNetId) {
@@ -286,12 +293,19 @@ void AIStrategySystem::Update()
         // tactical layer has stopped picking fights anyway. A pilot that
         // hasn't collected the upgrades it launched for is in the same
         // position -- it has business at home either way.
-        const bool shopping = pilot.upgradesWanted > 0 && pilot.padWaitRemaining > 0
-                && teamHasLab[static_cast<std::size_t>(myTeam.id)];
+        const std::size_t myTeamIndex = static_cast<std::size_t>(myTeam.id);
+        const bool shopping = teamHasLab[myTeamIndex]
+                && (teamUpgradeReady[myTeamIndex]
+                    || (pilot.upgradesWanted > 0 && pilot.padWaitRemaining > 0));
         const bool damaged = selfHull && selfHull->maxHp > 0.f && selfHull->hp < selfHull->maxHp;
 
         if (damaged || shopping) {
-            const flecs::entity home = FindHomePlanet(m_registry, myTeam.id, transf.pos);
+            // Shopping ends at a lab or it was not worth flying: only that
+            // planet can hand the upgrade over. A hurt pilot just wants the
+            // nearest friendly ground.
+            flecs::entity home;
+            if (shopping) home = FindResearchPlanet(m_registry, myTeam.id, transf.pos);
+            if (!home.is_alive()) home = FindHomePlanet(m_registry, myTeam.id, transf.pos);
             if (home.is_alive()) {
                 const double fraction = damaged
                         ? static_cast<double>(selfHull->hp / selfHull->maxHp)

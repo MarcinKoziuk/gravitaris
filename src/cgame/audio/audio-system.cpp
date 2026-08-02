@@ -70,6 +70,7 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
     // no-ops since m_backend doesn't exist yet -- uploaded explicitly below
     // once (if) one does.
     m_thrustClip = m_resourceLoader.Load<AudioClip>("sounds/thrust-1.wav"_id);
+    m_thrustBoostClip = m_resourceLoader.Load<AudioClip>("sounds/thrust-boost-1.wav"_id);
     m_hitClip    = m_resourceLoader.Load<AudioClip>("sounds/hit-1.wav"_id);
     // Two clips, not one: a bubble absorbing a round and a metal plate
     // taking one are different events to the player, and the shield type is
@@ -104,6 +105,7 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
     }
 
     HandleClipAdded(*m_thrustClip, m_thrustClip.Id());
+    HandleClipAdded(*m_thrustBoostClip, m_thrustBoostClip.Id());
     HandleClipAdded(*m_hitClip, m_hitClip.Id());
     HandleClipAdded(*m_bubbleClip, m_bubbleClip.Id());
     HandleClipAdded(*m_platingClip, m_platingClip.Id());
@@ -165,13 +167,42 @@ void AudioSystem::PlayOneShotById(id_t clipId, const Vector2& pos, float gain)
     m_backend->PlayOneShot(m_oneShotPool[chosen], it->second, pos, gain);
 }
 
+void AudioSystem::SweepThrusters(flecs::world& world)
+{
+    world.each([&](flecs::entity ent, const Transform& transf, const Controls& controls) {
+        if (!controls.actionFlags.thrustForward && !controls.boosting) return;
+
+        // A ship running the overburn is a different engine note. Picked per
+        // entity per frame rather than once for the sweep: a wing can have
+        // some of its ships boosting and the rest cruising.
+        const id_t wanted = controls.boosting ? m_thrustBoostClip.Id() : m_thrustClip.Id();
+        const auto bufferIt = m_buffers.find(wanted);
+
+        auto [it, inserted] = m_thrusters.try_emplace(ThrusterKey{world.c_ptr(), ent.id()});
+        ThrusterLoop& loop = it->second;
+        loop.seen = true;
+        loop.offFrames = 0;
+
+        const Vector2 pos{static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())};
+        const bool restart = inserted || loop.clipId != wanted || !m_backend->IsVoicePlaying(loop.voice);
+
+        if (inserted) loop.voice = m_backend->AcquireVoice();
+        else m_backend->SetVoicePosition(loop.voice, pos);
+
+        if (restart && bufferIt != m_buffers.end()) {
+            m_backend->PlayLooping(loop.voice, bufferIt->second, pos, THRUST_GAIN);
+            loop.clipId = wanted;
+        }
+    });
+}
+
 void AudioSystem::PlayChatBlip()
 {
     if (!m_enabled) return;
     PlayOneShotById(m_chatClip.Id(), m_listenerPos, CHAT_GAIN);
 }
 
-void AudioSystem::Update(const Vector2& cameraPos)
+void AudioSystem::Update(const Vector2& cameraPos, flecs::world* mirrorWorld)
 {
     if (!m_enabled) return;
 
@@ -212,33 +243,13 @@ void AudioSystem::Update(const Vector2& cameraPos)
         }
     });
 
-    // Thruster loops: one looping voice per entity holding thrust.
-    for (auto& [id, loop] : m_thrusters) loop.seen = false;
+    // Thruster loops: one looping voice per entity holding thrust. A net
+    // client's own ship is the only one in m_registry -- everybody else lives
+    // in the mirror world, so both are swept.
+    for (auto& [key, loop] : m_thrusters) loop.seen = false;
 
-    const auto thrustBufferIt = m_buffers.find(m_thrustClip.Id());
-
-    m_registry.each([&](flecs::entity ent, const Transform& transf, const Controls& controls) {
-        if (!controls.actionFlags.thrustForward) return;
-
-        auto [it, inserted] = m_thrusters.try_emplace(ent.id());
-        ThrusterLoop& loop = it->second;
-        loop.seen = true;
-        loop.offFrames = 0;
-
-        const Vector2 pos{static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())};
-        if (inserted) {
-            loop.voice = m_backend->AcquireVoice();
-            if (thrustBufferIt != m_buffers.end()) {
-                m_backend->PlayLooping(loop.voice, thrustBufferIt->second, pos, THRUST_GAIN);
-            }
-        }
-        else {
-            m_backend->SetVoicePosition(loop.voice, pos);
-            if (!m_backend->IsVoicePlaying(loop.voice) && thrustBufferIt != m_buffers.end()) {
-                m_backend->PlayLooping(loop.voice, thrustBufferIt->second, pos, THRUST_GAIN);
-            }
-        }
-    });
+    SweepThrusters(m_registry);
+    if (mirrorWorld) SweepThrusters(*mirrorWorld);
 
     // Entities that stopped thrusting (or died) this frame: give the gap a
     // short grace period (below) before handing the voice to the fade-out

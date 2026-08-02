@@ -16,6 +16,8 @@ std::string FormatDeathMessage(const DeathReport& report)
             return victim + " came down too hard";
         case DamageCause::Debris:
             return victim + " flew into the debris";
+        case DamageCause::Star:
+            return victim + " flew into the sun";
         default:
             return victim + " was destroyed";
         }
@@ -32,6 +34,8 @@ std::string FormatDeathMessage(const DeathReport& report)
         return victim + " was driven into the ground by " + killer;
     case DamageCause::Debris:
         return victim + " was caught by " + killer + "'s debris";
+    case DamageCause::Star:
+        return victim + " was chased into the sun by " + killer;
     case DamageCause::Gunfire:
     case DamageCause::Unknown:
         break;

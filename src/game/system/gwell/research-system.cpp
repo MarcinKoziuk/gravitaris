@@ -137,6 +137,10 @@ void ResearchSystem::Update(std::uint64_t step)
     // blanked at the end (see the last pass).
     std::vector<flecs::entity> offered;
 
+    // Factions whose bar filled this tick, so their pilots can be given a
+    // fresh reason to fly home (see the pass after this one).
+    std::vector<TeamId> restocked;
+
     m_registry.each([&](FactionState& fs) {
         TeamResearch& tr = byTeam[static_cast<std::size_t>(fs.team)];
 
@@ -153,15 +157,21 @@ void ResearchSystem::Update(std::uint64_t step)
                         const NetId* netId = ship.try_get<NetId>();
                         draft->offers = m_catalog.RollOffers(
                                 loadout->levels, DraftSeed(step, netId ? netId->value : 0u));
-                        draft->available = true;
                     }
+                    // Re-raised every qualifying tick, not only the one that
+                    // rolled: the last pass below clears it for anyone who is
+                    // not a collector *this* tick, so a bounce off the pad or
+                    // a tick outside dock tolerance would otherwise blank the
+                    // panel for good while the offers themselves survive.
+                    draft->available = true;
 
-                    // An AI has no HUD to pick from, so it takes the first
-                    // offer on the tick it lands -- the roll is weighted, so
-                    // that is still a varied choice across a match.
+                    // An AI has no HUD to pick from, so it scores the three
+                    // against what it is already carrying (PreferredOffer) --
+                    // taking whatever landed in slot one left wings that
+                    // never fitted a shield because the card came up second.
                     const Controls* controls = ship.try_get<Controls>();
                     const std::uint8_t slot = ship.has<AIPilot>()
-                            ? 1
+                            ? m_catalog.PreferredOffer(draft->offers, *loadout)
                             : (controls ? controls->upgradePick : 0);
 
                     if (slot >= 1 && slot <= UpgradeCatalog::OFFER_COUNT) {
@@ -203,6 +213,11 @@ void ResearchSystem::Update(std::uint64_t step)
             if (fs.researchProgress >= 1.f) {
                 fs.researchProgress = 1.f;
                 fs.upgradeReady = true;
+                // Every pilot of this faction now has a reason to come home
+                // again. Without this a ship spent the intent it spawned with
+                // and never went shopping for the rest of the match, however
+                // many upgrades its labs went on to finish.
+                restocked.push_back(fs.team);
                 // Announced from a lab rather than from nowhere, so the sound
                 // has a position -- it is that building that finished the work.
                 // Distinct from UpgradeCollected, which fires later, when a
@@ -215,6 +230,17 @@ void ResearchSystem::Update(std::uint64_t step)
         tr.progress = fs.researchProgress;
         tr.ready = fs.upgradeReady;
     });
+
+    if (!restocked.empty()) {
+        m_registry.each([&](AIPilot& pilot, const Team& team) {
+            if (std::find(restocked.begin(), restocked.end(), team.id) == restocked.end()) return;
+            // One more than it is already after, capped at its own greed, so a
+            // pilot that never made it home does not accumulate an unbounded
+            // shopping list while its labs keep working.
+            pilot.upgradesWanted = std::max<std::uint32_t>(pilot.upgradesWanted, 1u);
+            pilot.padWaitRemaining = pilot.personality.padWaitTicks;
+        });
+    }
 
     m_registry.each([&](flecs::entity ship, UpgradeDraft& draft, const Team& team) {
         if (std::find(offered.begin(), offered.end(), ship) != offered.end()) return;

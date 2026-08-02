@@ -19,6 +19,14 @@ struct PhysicsBody;
 
 class ShipControlsSystem {
 public:
+    // What the overburn is doing to a hull this tick: multipliers on its own
+    // thrust and speed cap, both 1 when it is not burning (so a ship without
+    // the upgrade needs no branch anywhere downstream).
+    struct BoostEffect {
+        double thrustScale = 1.;
+        double maxSpeedScale = 1.;
+    };
+
     // Nothing about the airframe is a constant here any more either: thrust
     // is the hull's own (Body::GetThrust), so guidance derives its available
     // acceleration as that force over the ship's live mass.
@@ -57,6 +65,19 @@ public:
     // zero is uncapped. Gravity is applied elsewhere and is not capped, so a
     // slingshot still carries a ship past its engine's limit.
     static void ApplyMovement(cpBody* body, const ControlFlags& flags, double thrust, double maxSpeed);
+
+    // Runs the overburn's timers for one tick and reports what it grants.
+    // Both sides of the wire call this off the same input and the same
+    // resolved stats -- the sim for every ship, ClientPrediction for the own
+    // one -- so a boosted ship is predicted with the force it really got.
+    // Call exactly once per ship per simulated tick: it is what counts the
+    // burn and the cooldown down.
+    static BoostEffect AdvanceBoost(Controls& controls, const ShipStats& stats);
+
+    // The same grant without advancing anything, for replaying an already
+    // -decided tick (ClientPrediction's reconciliation) where the timers
+    // must not run a second time.
+    [[nodiscard]] static BoostEffect BoostEffectOf(bool boosting, const ShipStats& stats);
 
     // Muzzle position/velocity for a projectile leaving the ship's first
     // hardpoint at `muzzleSpeed` right now. Shared by Update() and

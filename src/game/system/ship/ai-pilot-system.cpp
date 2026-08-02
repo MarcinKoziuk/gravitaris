@@ -14,10 +14,12 @@
 #include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/faction-state.hpp>
 #include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
 #include <gravitaris/game/component/planet.hpp>
+#include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/ai-pilot.hpp>
@@ -166,29 +168,46 @@ void AIPilotSystem::Update(std::uint64_t step)
         Vector2d pos;
         TeamId team;
         std::uint32_t netId;
+        // Hosts one of this faction's labs. An upgrade can only be collected
+        // at the planet that finished it (ResearchSystem's collector rule), so
+        // a shopping trip that lands anywhere else is a wasted descent.
+        bool hasLab = false;
     };
     std::vector<HomePlanet> homePlanets;
+
+    ankerl::unordered_dense::set<std::uint32_t> labPlanets;
+    std::array<bool, NUM_TEAMS> teamHasLab{};
+    m_registry.each([&](const Structure& s, const Team& team, const PlanetSurfaceAttachment& attach) {
+        if (s.type != StructureType::Lab || team.id == TeamId::None) return;
+        teamHasLab[static_cast<std::size_t>(team.id)] = true;
+        labPlanets.insert(attach.planetNetId);
+    });
+
+    // Whose upgrade is finished and waiting for somebody to come and get it.
+    std::array<bool, NUM_TEAMS> teamUpgradeReady{};
+    m_registry.each([&](const FactionState& fs) {
+        teamUpgradeReady[static_cast<std::size_t>(fs.team)] = fs.upgradeReady;
+    });
+
     m_registry.each([&](flecs::entity ent, const Planet&, const Transform& transf, const Team& team,
                         const NetId& netId) {
         if (IsHomePlanet(m_registry, ent, team.id)) {
-            homePlanets.push_back({ent, transf.pos, team.id, netId.value});
+            homePlanets.push_back({ent, transf.pos, team.id, netId.value,
+                                   labPlanets.contains(netId.value)});
         }
     });
     std::sort(homePlanets.begin(), homePlanets.end(),
               [](const HomePlanet& a, const HomePlanet& b) { return a.netId < b.netId; });
 
-    std::array<bool, NUM_TEAMS> teamHasLab{};
-    m_registry.each([&](const Structure& s, const Team& team) {
-        if (s.type == StructureType::Lab && team.id != TeamId::None) {
-            teamHasLab[static_cast<std::size_t>(team.id)] = true;
-        }
-    });
-
-    const auto nearestHome = [&homePlanets](TeamId team, const Vector2d& from) {
+    // `wantLab` picks the nearest home hosting a lab, falling back to the
+    // nearest home of any kind -- a pilot flying back for an upgrade has to
+    // reach the building that has it, but a hurt one just wants ground.
+    const auto nearestHome = [&homePlanets](TeamId team, const Vector2d& from, bool wantLab) {
         flecs::entity best;
         double bestDistSq = std::numeric_limits<double>::max();
         for (const HomePlanet& home : homePlanets) {
             if (home.team != team) continue;
+            if (wantLab && !home.hasLab) continue;
             const double distSq = (home.pos - from).dot();
             if (distSq < bestDistSq) {
                 bestDistSq = distSq;
@@ -230,10 +249,11 @@ void AIPilotSystem::Update(std::uint64_t step)
                         AIPilot& pilot, InputQueue& queue, const Team& myTeam) {
         const AIPersonality& personality = pilot.personality;
 
-        // This pilot's own fitted gun -- what it actually has to lead with.
+        // What this pilot is actually carrying: the gun it has to lead with,
+        // and the rack it can reach past it with.
         const ShipLoadout* loadout = ent.try_get<ShipLoadout>();
-        const WeaponDef* gun = m_catalog.ResolveStats(loadout ? loadout->levels : UpgradeLevels{}).gun;
-        const double bulletSpeed = gun ? gun->speed : 0.0;
+        const ShipStats stats = m_catalog.ResolveStats(loadout ? loadout->levels : UpgradeLevels{});
+        const double bulletSpeed = stats.gun ? stats.gun->speed : 0.0;
 
         // Hull state drives both breaking off and jinking. A drop since last
         // tick is the "being shot at" signal -- damage is resolved before
@@ -277,20 +297,30 @@ void AIPilotSystem::Update(std::uint64_t step)
             return std::max(personality.evadeRadius, src.radius * EVADE_SURFACE_CLEARANCE);
         };
 
-        // Shopping: a pilot holds its pad for the upgrades its own labs are
-        // still finishing (AIPersonality::upgradeGreed). With no labs left
-        // nothing is coming, so there is nothing to wait for.
+        // Shopping, for either of two reasons: something is finished and
+        // waiting to be collected right now, or this pilot is holding its pad
+        // for one its labs are still working on (AIPersonality::upgradeGreed,
+        // bounded by padWaitRemaining so a wing never parks forever). With no
+        // labs left nothing is coming either way.
         if (pilot.padWaitRemaining > 0) --pilot.padWaitRemaining;
-        const bool shopping = pilot.upgradesWanted > 0 && pilot.padWaitRemaining > 0
-                && teamHasLab[static_cast<std::size_t>(myTeam.id)];
+        const std::size_t myTeamIndex = static_cast<std::size_t>(myTeam.id);
+        const bool shopping = teamHasLab[myTeamIndex]
+                && (teamUpgradeReady[myTeamIndex]
+                    || (pilot.upgradesWanted > 0 && pilot.padWaitRemaining > 0));
 
         // A pilot with no strategy of its own flies its leader's objective,
         // except when its own hull or its own shopping list says otherwise --
         // the two things no one else can decide for it. (A leader gets the
         // same trip from AIStrategySystem, as AIGoal::Rearm.)
         if (!ent.has<AIStrategy>()) {
-            const flecs::entity home =
-                    (hurt || shopping) ? nearestHome(myTeam.id, transf.pos) : flecs::entity();
+            flecs::entity home;
+            if (hurt || shopping) {
+                // A shopping trip wants the lab; anything else just wants
+                // friendly ground, and takes the lab planet only if it is
+                // also the nearest.
+                if (shopping) home = nearestHome(myTeam.id, transf.pos, /*wantLab=*/true);
+                if (!home.is_alive()) home = nearestHome(myTeam.id, transf.pos, /*wantLab=*/false);
+            }
             if (home.is_alive()) {
                 pilot.order = AIOrder{AIOrderKind::Land, home};
             }
@@ -298,6 +328,15 @@ void AIPilotSystem::Update(std::uint64_t step)
                 const auto wing = wingOrders.find(static_cast<std::uint8_t>(myTeam.id));
                 pilot.order = wing != wingOrders.end() ? wing->second.order : AIOrder{};
             }
+        }
+
+        // Nothing sets down on a star and comes back (DamageSystem::
+        // ResolveStarContact). Caught here rather than at each of the places
+        // a Land order is honored, so the descent, the pad-holding rule and
+        // the danger-evasion exemption all see the same demoted order.
+        if (pilot.order.kind == AIOrderKind::Land && pilot.order.subject.is_alive()) {
+            const Planet* body = pilot.order.subject.try_get<Planet>();
+            if (body && body->star) pilot.order.kind = AIOrderKind::Patrol;
         }
 
         // A live Attack order names the target outright -- the strategy layer
@@ -727,6 +766,36 @@ void AIPilotSystem::Update(std::uint64_t step)
                 ? TrackBearing(transf, *aimPoint, velError, pilot.flight, &pilot.throttle)
                 : FlyToVelocity(transf, desiredVel, pilot.flight, &pilot.throttle,
                                 hasCoastFacing ? &coastFacing : nullptr);
+
+        // The overburn, on the same condition whatever the pilot is doing:
+        // the correction it is flying is bigger than its engine can deliver
+        // in reasonable time. That is the planet it is falling toward, and it
+        // is equally the hard break or hard close of a dogfight. Spending it
+        // needs no cooldown bookkeeping here -- ShipControlsSystem grants a
+        // burn only when there is one to grant.
+        if (personality.boostVelError > 0.0 && velError.length() > personality.boostVelError) {
+            flags.boost = true;
+        }
+
+        // Missiles, on their own cadence and their own (looser, longer)
+        // envelope: the round homes, so it is pointed rather than aimed, and
+        // it reaches targets the gun cannot. Fired at the target's actual
+        // bearing, not the gun's lead solution -- leading a homing round only
+        // launches it away from where it wants to go.
+        if (pilot.missileCooldown > 0) --pilot.missileCooldown;
+        if (pilot.missileCooldown == 0 && loadout && loadout->missileAmmo > 0 && stats.missile
+            && targetTransf && personality.missileRange > 0.0) {
+            const Vector2d toTarget = targetTransf->pos - transf.pos;
+            const double range = toTarget.length();
+            const double heading = static_cast<double>(transf.rot) - PI / 2.0;
+            const double bearing = std::atan2(toTarget.y(), toTarget.x());
+
+            if (range > 1e-6 && range < personality.missileRange
+                && std::abs(WrapToPi(bearing - heading)) < personality.missileTolerance) {
+                flags.fireMissile = true;
+                pilot.missileCooldown = personality.missileInterval;
+            }
+        }
 
         if (pilot.fireCooldown > 0) {
             --pilot.fireCooldown;

@@ -195,10 +195,11 @@ void ClientPrediction::SyncCollisionProxies(const std::vector<EntityState>& snap
     }
 }
 
-ClientPrediction::PredictedTick ClientPrediction::CaptureTick(std::uint64_t tick, const ControlFlags& flags)
+ClientPrediction::PredictedTick ClientPrediction::CaptureTick(std::uint64_t tick, const ControlFlags& flags,
+                                                              bool boosting)
 {
     const Transform& t = m_ownShip.get<Transform>();
-    return PredictedTick{tick, flags, t.pos, t.rot, t.vel, t.angVel};
+    return PredictedTick{tick, flags, t.pos, t.rot, t.vel, t.angVel, boosting};
 }
 
 void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
@@ -221,18 +222,24 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
     // always somewhat older tick) -- see SyncCollisionProxies/EvaluateOrbit.
     SyncCollisionProxies(snapshotEntities, ownShipNetId, snapshotBaseTick, tick);
 
+    // Off the own ship's own replicated loadout, so a collected fire-rate,
+    // weapon tier or overburn changes the predicted cadence, the round itself
+    // and the thrust the same tick the server's does -- otherwise the
+    // cosmetic tracer would leave the rail at a different speed than the shot
+    // the server actually fired.
+    const ShipLoadout* ownLoadout = m_ownShip.try_get<ShipLoadout>();
+    const ShipStats stats = m_catalog.ResolveStats(ownLoadout ? ownLoadout->levels : UpgradeLevels{});
+
     PhysicsBody& phys = m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>());
-    ShipControlsSystem::ApplyMovement(phys.cp.body.get(), flags, phys.body->GetThrust(), phys.body->GetMaxSpeed());
+    Controls& ownControls = m_ownShip.get_mut<Controls>();
+    const ShipControlsSystem::BoostEffect boost =
+            ShipControlsSystem::AdvanceBoost(ownControls, stats);
+    ShipControlsSystem::ApplyMovement(phys.cp.body.get(), flags,
+                                      phys.body->GetThrust() * boost.thrustScale,
+                                      phys.body->GetMaxSpeed() * boost.maxSpeedScale);
 
     m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
     m_physicsSystem.Update();
-
-    // Off the own ship's own replicated loadout, so a collected fire-rate or
-    // weapon tier changes the predicted cadence and the round itself the same
-    // tick the server's does -- otherwise the cosmetic tracer would leave the
-    // rail at a different speed than the shot the server actually fired.
-    const ShipLoadout* ownLoadout = m_ownShip.try_get<ShipLoadout>();
-    const ShipStats stats = m_catalog.ResolveStats(ownLoadout ? ownLoadout->levels : UpgradeLevels{});
 
     if (m_fireCooldown > 0) --m_fireCooldown;
     if (flags.firePrimary && m_fireCooldown == 0 && stats.gun) {
@@ -259,7 +266,8 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
                                                        m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()),
                                                        gun.speed);
         const flecs::entity bullet =
-                m_entitySpawner.SpawnBullet(gun.modelId, pos, vel, /*sensor=*/true);
+                m_entitySpawner.SpawnBullet(gun.modelId, pos, vel, /*sensor=*/true,
+                                            static_cast<double>(m_ownShip.get<Transform>().rot));
         bullet.emplace<Bullet>(gun.lifetimeSeconds, m_ownShip.get<Team>().id, 0.f,
                                m_ownShip.get<NetId>().value);
 
@@ -268,7 +276,7 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
                           gun.id);
     }
 
-    m_history.push_back(CaptureTick(tick, flags));
+    m_history.push_back(CaptureTick(tick, flags, ownControls.boosting));
     while (m_history.size() > MAX_HISTORY) m_history.pop_front();
 }
 
@@ -313,6 +321,10 @@ std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t author
     cpBodySetAngularVelocity(body, static_cast<cpFloat>(authoritative.angVel));
     m_physicsSystem.Update();
 
+    const ShipLoadout* replayLoadout = m_ownShip.try_get<ShipLoadout>();
+    const ShipStats replayStats =
+            m_catalog.ResolveStats(replayLoadout ? replayLoadout->levels : UpgradeLevels{});
+
     std::vector<PredictedTick> toReplay(std::next(it), m_history.end());
     m_history.clear();
     for (const PredictedTick& pending : toReplay) {
@@ -328,10 +340,17 @@ std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t author
         // tradeoffs the class doc comment already accepts.
         SyncCollisionProxies(snapshotEntities, ownShipNetId, authoritativeTick, pending.tick);
         m_ownShip.get_mut<Controls>().actionFlags = pending.flags;
-        ShipControlsSystem::ApplyMovement(body, pending.flags, phys.body->GetThrust(), phys.body->GetMaxSpeed());
+        // Replayed with the grant the tick actually flew with; AdvanceBoost
+        // is deliberately not called here, since its timers already ran when
+        // this tick was first predicted.
+        const ShipControlsSystem::BoostEffect replayBoost =
+                ShipControlsSystem::BoostEffectOf(pending.boosting, replayStats);
+        ShipControlsSystem::ApplyMovement(body, pending.flags,
+                                          phys.body->GetThrust() * replayBoost.thrustScale,
+                                          phys.body->GetMaxSpeed() * replayBoost.maxSpeedScale);
         m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
         m_physicsSystem.Update();
-        m_history.push_back(CaptureTick(pending.tick, pending.flags));
+        m_history.push_back(CaptureTick(pending.tick, pending.flags, pending.boosting));
     }
 
     return preCorrectionNowPos;

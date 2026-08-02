@@ -61,11 +61,13 @@ Line2Shader::Line2Shader(IFilesystem& fileSystem)
     u_viewportSize = uniformLocation("viewportSize");
     u_viewProjection = uniformLocation("viewProjection");
     u_shieldGlow = uniformLocation("shieldGlow");
+    u_forceInstanceColor = uniformLocation("forceInstanceColor");
 
     setWidth(1.f);
     setViewportSize(Vector2{1280.f, 720.f});
     setViewProjection(Matrix3{});
     setShieldGlow(ShieldGlow::None);
+    setForceInstanceColor(false);
 }
 
 Line2Shader& Line2Shader::setWidth(Magnum::Float widthPixels)
@@ -89,6 +91,12 @@ Line2Shader& Line2Shader::setViewProjection(const Matrix3& matrix)
 Line2Shader& Line2Shader::setShieldGlow(ShieldGlow mode)
 {
     setUniform(u_shieldGlow, static_cast<Magnum::Float>(mode));
+    return *this;
+}
+
+Line2Shader& Line2Shader::setForceInstanceColor(bool force)
+{
+    setUniform(u_forceInstanceColor, force ? 1.f : 0.f);
     return *this;
 }
 

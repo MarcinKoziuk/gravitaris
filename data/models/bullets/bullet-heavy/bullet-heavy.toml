@@ -1,0 +1,10 @@
+# A round is spawned at Transform scale 3 (EntitySpawner::SpawnBullet's
+# default), so the authored 32-unit streak flies as ~9.6 world units -- a bit
+# under a fighter's length.
+scale = 0.1
+
+[physics]
+mass = 0.001
+density = 1
+restitution = 0.5
+friction = 0.0

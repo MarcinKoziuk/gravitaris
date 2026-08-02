@@ -4,6 +4,7 @@
 
 #include <flecs.h>
 
+#include <gravitaris/game/id.hpp>
 #include <gravitaris/game/gnc/control/flight-controller.hpp>
 #include <gravitaris/game/gnc/guidance/behaviors.hpp>
 
@@ -102,6 +103,23 @@ struct AIPersonality {
 
     std::uint32_t decisionInterval = 15; // ticks between tactical re-evaluations
 
+    // Missiles. A rack is only worth collecting if it gets used, so a pilot
+    // launches whenever it has rounds, a target inside missileRange, and a
+    // nose within missileTolerance of it -- much looser than fireTolerance,
+    // since the round homes and does not need to be aimed so much as pointed.
+    // Deliberately longer-ranged than the gun: reaching a target the
+    // autocannon cannot is the rack's whole argument. 0 range disables.
+    double missileRange = 1100.0;
+    double missileTolerance = 0.35;
+    std::uint32_t missileInterval = 150; // ticks between launches (2.5s)
+
+    // Overburn (the OVERBURN upgrade; nothing happens on a pilot that hasn't
+    // collected it). Spent when the velocity correction the pilot is flying
+    // is at least this large -- which is exactly the arrival it cannot
+    // otherwise brake out of, and the hard break or hard close of a fight.
+    // 0 disables.
+    double boostVelError = 220.0;
+
     // Firing cadence: burstCount shots fired burstShotInterval ticks apart,
     // then fireInterval ticks of cooldown before the next burst starts.
     // burstCount = 1 is a plain single-shot cadence (burstShotInterval
@@ -128,10 +146,20 @@ struct AIPersonality {
 // human input uses.
 struct AIPilot {
     AIBehavior behavior = AIBehavior::Idle;
+    // Which temperament was applied (AIPresetLibrary::Apply), so a pilot can
+    // be asked what it is as well as what it is doing -- the F2 labels read
+    // it back through the library. The knobs themselves are copied into the
+    // three tuning blocks below and can be edited live, so this names where
+    // they started, not what they still are.
+    id_t presetId = 0;
     flecs::entity target; // becomes NetId when netcode lands
     AIOrder order;        // written by AIStrategySystem; None on a pilot with no AIStrategy
     std::uint32_t decisionCooldown = 0;
     std::uint32_t fireCooldown = 0;
+    // The pilot's own launch cadence (AIPersonality::missileInterval), on top
+    // of the weapon's -- what stops a rack being emptied into the first thing
+    // that wanders into range.
+    std::uint32_t missileCooldown = 0;
 
     // The body the pilot is climbing clear of, while it is. Held across the
     // climb so the hysteresis margin has something to compare against.

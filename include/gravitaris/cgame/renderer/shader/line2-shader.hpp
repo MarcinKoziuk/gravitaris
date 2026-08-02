@@ -32,6 +32,7 @@ protected:
     Magnum::Int u_viewportSize;
     Magnum::Int u_viewProjection;
     Magnum::Int u_shieldGlow;
+    Magnum::Int u_forceInstanceColor;
 
 public:
     // Per-vertex (static, baked once per model). teamWeight is 1 for strokes
@@ -65,6 +66,11 @@ public:
     // hands the pass its opacity from that attribute's w, driven to fully
     // opaque where the strike lands.
     Line2Shader& setShieldGlow(ShieldGlow mode);
+
+    // Draws the pass in each instance's own colour instead of the strokes'
+    // baked SVG one -- what lets the exhaust go orange under the overburn
+    // without the model authoring a second, differently-coloured flame.
+    Line2Shader& setForceInstanceColor(bool force);
 };
 
 } // namespace Gravitaris

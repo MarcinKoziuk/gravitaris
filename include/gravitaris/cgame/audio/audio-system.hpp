@@ -37,9 +37,33 @@ using Magnum::Vector2;
 // held -- continuous state, not an event.
 class AudioSystem {
 private:
+    // Thruster loops are keyed by world as well as entity: a net client keeps
+    // its own ship in the real world and everyone else in the mirror one, and
+    // the two number their entities independently.
+    struct ThrusterKey {
+        const flecs::world_t* world = nullptr;
+        flecs::entity_t entity = 0;
+
+        bool operator==(const ThrusterKey& other) const
+        { return world == other.world && entity == other.entity; }
+    };
+
+    struct ThrusterKeyHash {
+        std::size_t operator()(const ThrusterKey& key) const
+        {
+            const auto world = reinterpret_cast<std::uintptr_t>(key.world);
+            return std::hash<std::uint64_t>{}(static_cast<std::uint64_t>(world)
+                                              ^ (key.entity * 0x9e3779b97f4a7c15ull));
+        }
+    };
+
     struct ThrusterLoop {
         VoiceHandle voice;
         bool seen = false;
+        // Which clip the voice is currently looping. The overburn is a
+        // different engine note, so crossing that boundary restarts the loop
+        // on the other buffer rather than leaving the stock rumble running.
+        id_t clipId = 0;
         // Consecutive frames not seen thrusting. Kept below the release
         // grace period, a real stop is distinguished from the on/off
         // "bang-bang" burn pattern flight control produces while cruising --
@@ -75,6 +99,9 @@ private:
     // Only three named clips exist today; if/when sounds become dynamically
     // spawned like Models, generalize this into an id_t-keyed map instead.
     ResourcePtr<const AudioClip> m_thrustClip;
+    // The same loop with the injectors open, played instead of m_thrustClip
+    // while a ship is boosting (Controls::boosting).
+    ResourcePtr<const AudioClip> m_thrustBoostClip;
     ResourcePtr<const AudioClip> m_hitClip;
     // Borrows the stock gun's clip at a lower gain until a shield hit gets
     // its own.
@@ -97,7 +124,7 @@ private:
     std::vector<VoiceHandle> m_oneShotPool;
     std::size_t m_poolCursor = 0;
 
-    std::unordered_map<flecs::entity_t, ThrusterLoop> m_thrusters;
+    std::unordered_map<ThrusterKey, ThrusterLoop, ThrusterKeyHash> m_thrusters;
     std::vector<FadingVoice> m_fadingVoices;
 
     void HandleClipAdded(const AudioClip& clip, id_t id);
@@ -106,6 +133,11 @@ private:
     void PlayOneShotById(id_t clipId, const Vector2& pos, float gain);
 
     void AcquireVoicePool();
+
+    // Starts/moves a looping voice for every entity in `world` holding
+    // thrust, and marks it seen. Update() calls this once per world it was
+    // given before retiring whatever went unseen.
+    void SweepThrusters(flecs::world& world);
 
 public:
     AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
@@ -119,7 +151,10 @@ public:
     // Drives everything: listener follows the camera, queued shots play,
     // hit flashes trigger, thruster loops start/stop/move. Call once per
     // rendered frame.
-    void Update(const Vector2& cameraPos);
+    //
+    // `mirrorWorld` is the net client's replicated world, which holds every
+    // ship but your own -- without it nobody else's thrusters can be heard.
+    void Update(const Vector2& cameraPos, flecs::world* mirrorWorld = nullptr);
 
     // A chat line arrived. Played at the listener, so it sits centred and at
     // full gain wherever the camera happens to be -- chat is UI, not something

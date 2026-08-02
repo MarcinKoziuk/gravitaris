@@ -44,6 +44,8 @@
 #include <gravitaris/game/component/upgrade-draft.hpp>
 #include <gravitaris/game/event/death-report.hpp>
 #include <gravitaris/game/ai/ai-preset-library.hpp>
+#include <gravitaris/game/resource/body.hpp>
+#include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/id.hpp>
@@ -1368,6 +1370,34 @@ void TestUpgradeCatalog()
     Require(heavier.gun->damage > base.gun->damage && heavier.gun->speed > base.gun->speed,
             "catalog: a tiered gun hits harder and throws flatter than the stock one");
 
+    // Each tier hits harder and throws flatter than the one below it, and the
+    // whole line is drawn as a streak rather than the stock round's point --
+    // the top tier in its own colour. Asserted here because a mistyped model
+    // path is otherwise a silent placeholder at runtime.
+    ResourceLoader tierLoader(fs);
+    const WeaponDef* below = base.gun;
+    id_t firstTierModel = 0;
+    for (std::uint8_t tier = 1; tier <= gun->maxLevel; ++tier) {
+        UpgradeLevels tierLevels;
+        tierLevels.gunTier = tier;
+        const WeaponDef* round = catalog.ResolveStats(tierLevels).gun;
+
+        Require(round != nullptr, "catalog: every gun tier resolves to a weapon");
+        Require(round->modelId != 0 && round->modelId != base.gun->modelId,
+                "catalog: a heavy tier fires its own round, not the stock one");
+        Require(tierLoader.Load<Body>(round->modelId)->GetCircleShapes().size() == 1,
+                "catalog: a heavy round's model loads (one hitbox, not a placeholder)");
+        Require(round->damage > below->damage && round->speed > below->speed,
+                "catalog: each gun tier out-damages and outruns the one below it");
+
+        if (tier == 1) firstTierModel = round->modelId;
+        if (tier == gun->maxLevel) {
+            Require(round->modelId != firstTierModel,
+                    "catalog: the top gun tier is drawn differently from the first");
+        }
+        below = round;
+    }
+
     // Both shields resolve to a real reservoir, and swapping type resets the
     // tier rather than carrying it across.
     ShipLoadout loadout;
@@ -1505,6 +1535,24 @@ void TestResearch()
 
     for (int tick = 0; tick < 30 && ship.get<UpgradeDraft>().available; ++tick) game.Update();
     Require(ship.get<UpgradeDraft>().available, "research: an unanswered draft stays open");
+
+    // Bouncing off the pad and settling back must not cost the panel: the
+    // offers survive the hop, so eligibility has to come back with the ship
+    // rather than only being granted on the tick the three were first rolled
+    // (which left the player keying blind at a panel that never returned).
+    cpBodySetVelocity(shipBody, cpv(0., 30.));
+    bool leftThePad = false;
+    for (int tick = 0; tick < 60 && !leftThePad; ++tick) {
+        game.Update();
+        leftThePad = !ship.get<UpgradeDraft>().available;
+    }
+    Require(leftThePad, "research: leaving the pad closes the panel");
+    Require(offers == ship.get<UpgradeDraft>().offers,
+            "research: the rolled offers survive a bounce off the pad");
+
+    for (int tick = 0; tick < 600 && !ship.get<UpgradeDraft>().available; ++tick) game.Update();
+    Require(ship.get<UpgradeDraft>().available,
+            "research: settling back at the lab re-opens the same panel");
 
     std::uint32_t collectedSeq = 0;
     for (int tick = 0; tick < 60 && ship.is_alive() && !collectedSeq; ++tick) {
@@ -1815,6 +1863,121 @@ void TestFactionDefeatAndWin()
 // (Body::GetThrust) precisely so it can be held above the surface gravity of
 // anything landable, and the AI's departure climb and its strategy layer both
 // depend on that holding.
+// A star is not a landing site at any approach speed, and nothing that
+// reaches one comes back -- unlike a planet, where a gentle enough touchdown
+// is the whole point.
+void TestSunIsLethal()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    flecs::entity sun = spawner.SpawnStar("models/stars/sun"_id, Vector2d{0., 0.});
+    Require(sun.get<Planet>().star, "sun: a spawned star is marked as one");
+
+    const double radius = sun.get<Planet>().radius * sun.get<Transform>().scale.x();
+    Require(radius > 0., "sun: the star has a real radius (setup check)");
+
+    // The gentlest possible arrival -- the descent a planet would reward with
+    // a clean landing. Started just clear of the surface, drifting in.
+    flecs::entity ship = spawner.SpawnPlayer("models/ships/fighter-1"_id,
+                                             Vector2d{0., radius + 40.}, TeamId::Blue);
+    cpBody* body = game.GetPhysicsSystem().GetBody(ship.get<PhysicsRef>()).cp.body.get();
+    cpBodySetAngle(body, CP_PI); // legs down, as if setting down on a planet
+    cpBodySetVelocity(body, cpv(0., -4.));
+
+    DamageCause cause = DamageCause::Unknown;
+    game.OnDeath().connect([&cause](const DeathReport& report) { cause = report.cause; });
+
+    for (int tick = 0; tick < 600 && ship.is_alive(); ++tick) game.Update();
+
+    Require(!ship.is_alive(), "sun: touching a star destroys the ship, however gently it arrives");
+    Require(cause == DamageCause::Star, "sun: the kill feed blames the star, not a hard landing");
+
+    fs.Shutdown();
+}
+
+// The overburn: while it is burning a hull exceeds the speed its own engine
+// could otherwise reach, and having spent it, it has to wait.
+void TestBoost()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    const UpgradeCatalog& catalog = game.GetUpgradeCatalog();
+    const UpgradeDef* def = catalog.FindKind(UpgradeKind::Boost);
+    Require(def != nullptr, "boost: the pool has a boost upgrade");
+
+    // Empty space, no wells: whatever speed this ship reaches is its engine's
+    // doing and nothing else's.
+    flecs::entity ship = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.}, TeamId::Blue);
+    const double hullMaxSpeed = game.GetPhysicsSystem().GetBody(ship.get<PhysicsRef>()).body->GetMaxSpeed();
+
+    const auto flyWith = [&](bool boost, int ticks) {
+        for (int tick = 0; tick < ticks && ship.is_alive(); ++tick) {
+            InputCommand cmd;
+            cmd.tick = game.GetStep();
+            cmd.flags.thrustForward = true;
+            cmd.flags.boost = boost;
+            ship.get_mut<InputQueue>().Push(cmd);
+            game.Update();
+        }
+    };
+    const auto speed = [&] { return ship.get<Transform>().vel.length(); };
+
+    // Unupgraded: the button does nothing at all, and the hull's own cap holds.
+    flyWith(/*boost=*/true, 900);
+    Require(!ship.get<Controls>().boosting, "boost: a ship without the upgrade never burns");
+    Require(speed() <= hullMaxSpeed * 1.02,
+            "boost: an unupgraded hull is still held to its own top speed");
+
+    catalog.Apply(*def, ship.get_mut<ShipLoadout>());
+    const ShipStats stats = catalog.ResolveStats(ship.get<ShipLoadout>().levels);
+    Require(stats.boostTicks > 0 && stats.boostCooldownTicks > 0,
+            "boost: the fitted upgrade resolves to a real burn and a real wait");
+
+    // Burning: past the cap the engine alone could reach, with no gravity to
+    // credit it to.
+    double peak = 0.;
+    for (int tick = 0; tick < static_cast<int>(stats.boostTicks) && ship.is_alive(); ++tick) {
+        flyWith(/*boost=*/true, 1);
+        peak = std::max(peak, speed());
+    }
+    Require(peak > hullMaxSpeed, "boost: a burn carries the hull past its own top speed");
+    Require(peak <= hullMaxSpeed * static_cast<double>(stats.boostMaxSpeedScale) * 1.02,
+            "boost: and no further than the upgrade's own ceiling");
+
+    // Spent: the burn runs out and the wait starts, whether or not the button
+    // is still held.
+    flyWith(/*boost=*/true, static_cast<int>(stats.boostTicks) + 5);
+    Require(!ship.get<Controls>().boosting, "boost: a burn ends on its own timer, not on the button");
+    Require(ship.get<Controls>().boostCooldown > 0, "boost: spending one starts the wait");
+
+    flyWith(/*boost=*/true, 5);
+    Require(!ship.get<Controls>().boosting, "boost: holding the button through the wait grants nothing");
+
+    // ...and comes back once it has cooled.
+    for (int tick = 0; tick < static_cast<int>(stats.boostCooldownTicks) + stats.boostTicks + 5
+                 && !ship.get<Controls>().boosting;
+         ++tick) {
+        flyWith(/*boost=*/true, 1);
+    }
+    Require(ship.get<Controls>().boosting, "boost: another burn is available once the wait is over");
+
+    fs.Shutdown();
+}
+
 void TestTakeoff()
 {
     FilesystemPhysFS fs;
@@ -2194,6 +2357,81 @@ void TestRepairAndReachability()
 // danger lookahead so gravity-well evasion (which runs every tick and
 // overrides everything) can't quietly explain a result, and an explicit
 // flee threshold so hull never enters into it except where it is the point.
+// An upgrade an AI never spends is an upgrade it may as well not have
+// collected: a pilot handed a rack launches from it, and one handed the
+// overburn burns with it.
+void TestAIUsesItsUpgrades()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    // Missiles: a loaded rack, an enemy inside its envelope, nothing in the
+    // way. The pilot has to choose to launch -- nothing here presses it.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+
+        flecs::entity shooter = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{-500., 0.},
+                                                    game.GetAIPresets().Default());
+        shooter.get_mut<ShipLoadout>().missileAmmo = 10;
+        spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{500., 0.}, TeamId::Blue);
+
+        bool launched = false;
+        for (int tick = 0; tick < 900 && !launched; ++tick) {
+            game.Update();
+            game.GetRegistry().each([&](flecs::entity, const Missile&) { launched = true; });
+        }
+        Require(launched, "ai upgrades: a pilot with a loaded rack actually launches from it");
+        Require(shooter.get<ShipLoadout>().missileAmmo < 10,
+                "ai upgrades: and the launch comes off its own ammo");
+    }
+
+    // The overburn, on the condition it exists for: a pilot whose target is
+    // behind it at cruising speed has to kill all of that speed before it can
+    // do anything at all -- the same correction an arrival at a planet is,
+    // and far past what the engine alone delivers in reasonable time.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+
+        flecs::entity pilot = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{0., 0.},
+                                                  game.GetAIPresets().Default(),
+                                                  /*velocity=*/Vector2d{1500., 0.});
+        spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{-3000., 0.}, TeamId::Blue);
+
+        const UpgradeDef* boost = game.GetUpgradeCatalog().FindKind(UpgradeKind::Boost);
+        Require(boost != nullptr, "ai upgrades: the pool has a boost upgrade (setup check)");
+        game.GetUpgradeCatalog().Apply(*boost, pilot.get_mut<ShipLoadout>());
+
+        bool burned = false;
+        for (int tick = 0; tick < 600 && pilot.is_alive() && !burned; ++tick) {
+            game.Update();
+            burned = pilot.is_alive() && pilot.get<Controls>().boosting;
+        }
+        Require(burned, "ai upgrades: a pilot facing a correction it cannot brake spends a burn");
+
+        // And an identical pilot without the upgrade simply never does.
+        Game bare(fs);
+        flecs::entity unfitted =
+                bare.GetEntitySpawner().SpawnAIShip("models/ships/fighter-1"_id, Vector2d{0., 0.},
+                                                    bare.GetAIPresets().Default(),
+                                                    /*velocity=*/Vector2d{1500., 0.});
+        bare.GetEntitySpawner().SpawnPlayer("models/ships/fighter-1"_id, Vector2d{-3000., 0.},
+                                            TeamId::Blue);
+        bool bareBurned = false;
+        for (int tick = 0; tick < 600 && unfitted.is_alive() && !bareBurned; ++tick) {
+            bare.Update();
+            bareBurned = unfitted.is_alive() && unfitted.get<Controls>().boosting;
+        }
+        Require(!bareBurned, "ai upgrades: one that never collected it burns nothing");
+    }
+
+    fs.Shutdown();
+}
+
 void TestAITactics()
 {
     FilesystemPhysFS fs;
@@ -3038,12 +3276,15 @@ int main()
     TestUpgradeCatalog();
     TestShields();
     TestResearch();
+    TestSunIsLethal();
+    TestBoost();
     TestFactionDefeatAndWin();
     TestSectorGeneration();
     TestOwnBulletSuppression();
     TestTakeoff();
     TestRepairAndReachability();
     TestAITactics();
+    TestAIUsesItsUpgrades();
     TestInterceptKeepsTargetInSights();
     TestWebRtcRoundtrip();
     TestWebRtcSignalingRoundtrip();

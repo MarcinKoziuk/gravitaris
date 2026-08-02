@@ -4,6 +4,7 @@
 
 #include <Magnum/Math/Color.h>
 
+#include <gravitaris/game/ai/ai-preset-library.hpp>
 #include <gravitaris/game/component/ai-pilot.hpp>
 #include <gravitaris/game/component/ai-strategy.hpp>
 #include <gravitaris/game/component/freighter.hpp>
@@ -26,6 +27,15 @@ constexpr float SHIP_CLEARANCE = 22.f; // px between the ship's origin and the l
 constexpr float OFFSCREEN_MARGIN = 64.f;
 constexpr int MAX_LINES = 2;
 
+// The temperament sits above the goal/tactic pair, smaller and dimmer than
+// them: it is what this pilot *is* rather than what it is doing this second,
+// so it should read as a caption on the busy lines rather than compete with
+// them. Team colour is deliberately dropped -- the lines below already carry
+// the side, and a third line in the same colour just thickens the block.
+constexpr float PRESET_SCALE = 0.78f;
+constexpr float PRESET_LINE_HEIGHT = LINE_HEIGHT * PRESET_SCALE;
+const Magnum::Color3 PRESET_COLOR{0.62f, 0.72f, 0.78f};
+
 bool OnScreen(const ImVec2& p, const Magnum::Vector2& uiSize)
 {
     return p.x > -OFFSCREEN_MARGIN && p.y > -OFFSCREEN_MARGIN
@@ -46,6 +56,24 @@ void DrawLines(ImDrawList* drawList, const ImVec2& anchor, const Magnum::Color3&
         drawList->AddText(ImVec2(at.x + 1.f, at.y + 1.f), shadow, lines[i]);
         drawList->AddText(at, fill, lines[i]);
     }
+}
+
+// One smaller line sitting above whatever DrawLines just drew `below` lines of.
+void DrawCaption(ImDrawList* drawList, const ImVec2& anchor, const char* text, int below)
+{
+    ImFont* font = ImGui::GetFont();
+    const float size = ImGui::GetFontSize() * PRESET_SCALE;
+    const ImVec2 extent = font->CalcTextSizeA(size, FLT_MAX, 0.f, text);
+
+    const ImVec2 at(anchor.x - extent.x * 0.5f,
+                    anchor.y - SHIP_CLEARANCE - LINE_HEIGHT * static_cast<float>(below)
+                            - PRESET_LINE_HEIGHT);
+
+    const ImU32 fill = IM_COL32(static_cast<int>(PRESET_COLOR.r() * 255.f),
+                                static_cast<int>(PRESET_COLOR.g() * 255.f),
+                                static_cast<int>(PRESET_COLOR.b() * 255.f), 210);
+    drawList->AddText(font, size, ImVec2(at.x + 1.f, at.y + 1.f), IM_COL32(0, 0, 0, 170), text);
+    drawList->AddText(font, size, at, fill, text);
 }
 
 } // namespace
@@ -77,6 +105,14 @@ void DrawAiLabelOverlay(CGame& game, const Magnum::Vector2& uiSize)
         lines[count++] = tactic;
 
         DrawLines(drawList, anchor, TeamColor(team.id), lines, count);
+
+        // Named through the library rather than stored on the pilot: the
+        // preset's knobs are copied into the pilot at spawn and can be edited
+        // live, so the id is the only thing that still means "this
+        // temperament".
+        if (const AIPreset* preset = game.GetAIPresets().Find(pilot.presetId)) {
+            DrawCaption(drawList, anchor, preset->name.c_str(), count);
+        }
     });
 
     game.GetRegistry().each([&](const Freighter& freighter, const Transform& transf, const Team& team) {

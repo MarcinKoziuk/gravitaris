@@ -48,6 +48,7 @@ enum class UpgradeKind : std::uint8_t {
     FireRate,    // shorter cooldown, whichever weapon is fitted
     WeaponTier,  // fits the next weapon up its line
     Shield,      // a damage buffer in front of the hull
+    Boost,       // an overburn: more thrust, and briefly past the speed cap
 };
 
 // Which shield a ship is carrying. Unlike the levels, this is a real choice:
@@ -105,6 +106,19 @@ struct UpgradeDef {
     // means tiers[N - 1], so maxLevel is bounded by this list's length.
     std::vector<id_t> tiers;
 
+    // Boost only. The whole point is stopping: a ship bearing down on a
+    // planet gets the thrust to kill its speed in time, and the same button
+    // buys a burst of closing or breaking speed in a fight. Levels lengthen
+    // the burn and shorten the wait; the speed ceiling does not move with
+    // them -- one number decides how fast a boosted hull can ever go.
+    struct Boost {
+        float thrustScale = 1.f;         // multiplier on the hull's own thrust
+        float maxSpeedScale = 1.f;       // multiplier on the hull's own speed cap
+        float durationSeconds = 0.f;     // per level
+        float cooldownSeconds = 0.f;     // per level, floored at minCooldownSeconds
+        float minCooldownSeconds = 0.f;
+    } boost;
+
     struct Shield {
         ShieldType type = ShieldType::None;
         float capacity = 0.f;         // per level
@@ -124,6 +138,7 @@ struct UpgradeLevels {
     std::uint8_t gunTier = 0;
     std::uint8_t shield = 0;
     ShieldType shieldType = ShieldType::None;
+    std::uint8_t boost = 0;
 };
 
 // UpgradeLevels resolved against the catalog into what the sim actually
@@ -147,6 +162,14 @@ struct ShipStats {
     float shieldRegenPerSecond = 0.f;
     std::uint16_t shieldRegenDelayTicks = 0;
     float shieldAbsorbFraction = 1.f;
+
+    // Zero boostTicks means the ship isn't carrying the upgrade at all, which
+    // is what ShipControlsSystem tests before granting a burn -- the scales
+    // below are 1 in that case, so an unboosted hull needs no special case.
+    std::uint16_t boostTicks = 0;
+    std::uint16_t boostCooldownTicks = 0;
+    float boostThrustScale = 1.f;
+    float boostMaxSpeedScale = 1.f;
 };
 
 } // namespace Gravitaris

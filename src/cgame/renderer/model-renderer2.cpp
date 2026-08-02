@@ -36,6 +36,11 @@ namespace {
 // pass (see RenderTag).
 const id_t OVERLAY_TAG = "model"_id;
 
+// What an overburning exhaust is drawn in, whatever the hull authored its
+// flame as. Hot orange rather than the flame's usual pale: the tell has to
+// read at a glance, across a sector, on somebody else's ship.
+const Vector3 BOOST_EXHAUST_COLOR{1.f, 0.45f, 0.05f};
+
 // Must match Line2Shader's vertex layout.
 struct LineVertex {
     Vector2 pointA;
@@ -445,8 +450,22 @@ void ModelRenderer2::Render(double)
     RenderTag("_thrust"_id, [](flecs::entity entity, InstanceStyle&) {
         const auto* controls = entity.try_get<Controls>();
         if (!controls) return entity.has<Structure>();
-        return controls->actionFlags.thrustForward;
+        return controls->actionFlags.thrustForward && !controls->boosting;
     });
+
+    // The overburn's exhaust, drawn as its own pass so it can ignore the
+    // flame's authored colour outright (setForceInstanceColor) rather than
+    // needing every hull to author a second, orange one. Thrust is not
+    // required: the burn shows whenever it is running, which is the point
+    // when it is being used to stop.
+    m_shader.setForceInstanceColor(true);
+    RenderTag("_thrust"_id, [](flecs::entity entity, InstanceStyle& style) {
+        const auto* controls = entity.try_get<Controls>();
+        if (!controls || !controls->boosting) return false;
+        style.color = BOOST_EXHAUST_COLOR;
+        return true;
+    });
+    m_shader.setForceInstanceColor(false);
 
     // Freighter-0's cargo pods -- always drawn for now (no
     // cargoRemaining replication yet, docs/freighter-model-todo.md #4b/#4c).

@@ -16,6 +16,7 @@ enum class DamageCause : std::uint8_t {
     Ram,
     Crash,  // came down harder than the hull's landing threshold
     Debris, // caught the shrapnel of someone else's death
+    Star,   // flew into a sun; nothing survives that, at any speed
 };
 
 // Anything that can take bullet damage.

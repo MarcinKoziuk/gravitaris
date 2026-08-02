@@ -203,6 +203,38 @@ CGame::ShieldReadout CGame::GetShieldReadout()
                          std::move(segments)};
 }
 
+CGame::BoostReadout CGame::GetBoostReadout()
+{
+    const std::optional<flecs::entity> subject = CameraSubject();
+    if (!subject) return {};
+
+    const ShipLoadout* loadout = subject->try_get<ShipLoadout>();
+    const Controls* controls = subject->try_get<Controls>();
+    if (!loadout || !controls) return {};
+
+    const ShipStats stats = m_upgradeCatalog.ResolveStats(loadout->levels);
+    if (stats.boostTicks == 0) return {};
+
+    // Mid-burn the bar drains with the burn; afterwards it refills with the
+    // cooldown. Both are "how much of a boost you have", so they share one
+    // track rather than reading as two separate meters.
+    if (controls->boostTicks > 0) {
+        return BoostReadout{true,
+                            static_cast<float>(controls->boostTicks) / static_cast<float>(stats.boostTicks),
+                            false};
+    }
+    // A spectated unit's timers are never simulated on this side -- only the
+    // granted-burn bit reaches us (SnapshotApplier) -- so its bar reports
+    // that it is burning without pretending to know how much is left.
+    if (controls->boosting) return BoostReadout{true, 1.f, false};
+    if (controls->boostCooldown > 0 && stats.boostCooldownTicks > 0) {
+        const float remaining = static_cast<float>(controls->boostCooldown)
+                / static_cast<float>(stats.boostCooldownTicks);
+        return BoostReadout{true, std::clamp(1.f - remaining, 0.f, 1.f), true};
+    }
+    return BoostReadout{true, 1.f, false};
+}
+
 std::vector<CGame::UpgradeOffer> CGame::GetUpgradeOffers()
 {
     std::vector<UpgradeOffer> offers;
@@ -707,9 +739,10 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
 
     // Own-ship one-shots (BulletLifetimeSystem-tracked cosmetic bullets emit
     // BulletFired via m_clientPrediction) and thruster loop, via the same
-    // event-driven path single-player uses -- m_registry only ever holds the
-    // own ship in this mode, so nothing else's audio can leak in.
-    m_audioSystem.Update(camera.GetPosition());
+    // event-driven path single-player uses. m_registry only ever holds the
+    // own ship in this mode, so the mirror world has to be swept alongside
+    // it or no one else's thrusters are heard.
+    m_audioSystem.Update(camera.GetPosition(), &m_mirrorWorld);
 
     m_starfieldRenderer.SetZoom(camera.GetZoom());
     m_starfieldRenderer.SetCameraPosition(camera.GetPosition());

@@ -23,7 +23,21 @@ bool IsHomePlanet(flecs::world& registry, flecs::entity planet, TeamId team)
             && HasStructure(registry, netId->value, StructureType::Colony, team);
 }
 
+static flecs::entity FindHomePlanet(flecs::world& registry, TeamId team, const Magnum::Vector2d& from,
+                                    bool needsLab);
+
 flecs::entity FindHomePlanet(flecs::world& registry, TeamId team, const Magnum::Vector2d& from)
+{
+    return FindHomePlanet(registry, team, from, /*needsLab=*/false);
+}
+
+flecs::entity FindResearchPlanet(flecs::world& registry, TeamId team, const Magnum::Vector2d& from)
+{
+    return FindHomePlanet(registry, team, from, /*needsLab=*/true);
+}
+
+static flecs::entity FindHomePlanet(flecs::world& registry, TeamId team, const Magnum::Vector2d& from,
+                                    bool needsLab)
 {
     flecs::entity best;
     double bestDistSq = std::numeric_limits<double>::max();
@@ -31,6 +45,7 @@ flecs::entity FindHomePlanet(flecs::world& registry, TeamId team, const Magnum::
 
     registry.each([&](flecs::entity ent, const Planet&, const Transform& transf, const NetId& netId) {
         if (!IsHomePlanet(registry, ent, team)) return;
+        if (needsLab && !HasStructure(registry, netId.value, StructureType::Lab, team)) return;
         const double distSq = (transf.pos - from).dot();
         if (distSq < bestDistSq || (distSq == bestDistSq && netId.value < bestNetId)) {
             bestDistSq = distSq;

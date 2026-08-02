@@ -121,6 +121,8 @@ bool UI::Init()
         m_shieldSegments = hud->GetElementById("shield_segments");
         m_chatLog = hud->GetElementById("chat_log");
         m_chatInput = hud->GetElementById("chat_input");
+        m_boostFill = hud->GetElementById("boost_fill");
+        m_boostValue = hud->GetElementById("boost_value");
         m_researchFill = hud->GetElementById("research_fill");
         m_researchValue = hud->GetElementById("research_value");
         m_upgradeDraft = hud->GetElementById("upgrade_draft");
@@ -407,6 +409,33 @@ void UI::SetChatInput(bool active, const std::string& text)
 
     m_chatInput->SetClass("active", active);
     m_chatInput->SetInnerRML(active ? "say: " + EscapeRml(text) + "_" : "");
+}
+
+void UI::SetBoostReadout(float fraction, bool cooling)
+{
+    if (!m_boostFill || !m_boostValue) return;
+
+    const float quantised =
+            fraction < 0.f ? -1.f : std::round(std::clamp(fraction, 0.f, 1.f) * 100.f) / 100.f;
+    if (quantised == m_boostFraction && cooling == m_boostCooling) return;
+
+    m_boostFraction = quantised;
+    m_boostCooling = cooling;
+    m_boostFill->SetClass("cooling", cooling);
+
+    if (quantised < 0.f) {
+        m_boostFill->SetProperty("width", "0%");
+        m_boostValue->SetInnerRML("--");
+        return;
+    }
+
+    const int percent = static_cast<int>(std::lround(quantised * 100.f));
+    m_boostFill->SetProperty("width", std::to_string(percent) + "%");
+    // Three states off two inputs: the injectors are cooling (how far along),
+    // a burn is running (nothing useful to count down to), or it is there to
+    // be spent.
+    if (cooling) m_boostValue->SetInnerRML(std::to_string(percent) + "%");
+    else m_boostValue->SetInnerRML(quantised < 1.f ? "BURN" : "READY");
 }
 
 void UI::SetResearchReadout(float fraction, const std::string& text)

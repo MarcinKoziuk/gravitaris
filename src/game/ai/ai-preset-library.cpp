@@ -121,6 +121,7 @@ const AIPreset& AIPresetLibrary::PickRandom(std::uint32_t seed) const
 
 void AIPresetLibrary::Apply(const AIPreset& preset, AIPilot& pilot)
 {
+    pilot.presetId = preset.id;
     pilot.personality = preset.personality;
     pilot.guidance = preset.guidance;
     pilot.flight = preset.flight;

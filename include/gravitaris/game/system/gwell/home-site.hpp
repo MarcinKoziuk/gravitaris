@@ -18,4 +18,11 @@ bool IsHomePlanet(flecs::world& registry, flecs::entity planet, TeamId team);
 // none left. Ties break by NetId so every run picks the same one (ADR 0001).
 flecs::entity FindHomePlanet(flecs::world& registry, TeamId team, const Magnum::Vector2d& from);
 
+// The same, restricted to homes hosting one of the faction's own labs -- the
+// only places an upgrade can actually be collected (ResearchSystem's collector
+// rule), so a trip made for one has to end at one of these or it is wasted.
+// Dead entity when the faction has no lab on a home planet; callers fall back
+// to FindHomePlanet.
+flecs::entity FindResearchPlanet(flecs::world& registry, TeamId team, const Magnum::Vector2d& from);
+
 } // namespace Gravitaris

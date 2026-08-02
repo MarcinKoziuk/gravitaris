@@ -81,6 +81,11 @@ public:
         Magnum::Radd rot{0.};
         Magnum::Vector2d vel;
         double angVel = 0.;
+        // Whether the overburn was actually granted on this tick, as opposed
+        // to merely asked for in `flags`. Recorded rather than re-decided, so
+        // a replay re-applies the force the tick really flew with instead of
+        // running the burn/cooldown timers a second time.
+        bool boosting = false;
     };
 
     // Position error (world units) past which Reconcile() snaps and replays
@@ -171,7 +176,7 @@ public:
                                               std::uint32_t ownShipNetId);
 
 private:
-    PredictedTick CaptureTick(std::uint64_t tick, const ControlFlags& flags);
+    PredictedTick CaptureTick(std::uint64_t tick, const ControlFlags& flags, bool boosting);
 
     // Creates/updates/prunes the client-only kinematic collision proxies
     // (Phase 7/7.1) standing in for every Planet-typed EntityState, and every

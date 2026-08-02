@@ -377,6 +377,17 @@ public:
     };
     [[nodiscard]] ShieldReadout GetShieldReadout();
 
+    // The overburn, for that same unit. `fitted` is false on a ship that has
+    // not collected it, which blanks the row; `fraction` is how much of a
+    // burn is in hand and `cooling` whether the injectors are still recovering
+    // (see UI::SetBoostReadout).
+    struct BoostReadout {
+        bool fitted = false;
+        float fraction = 0.f;
+        bool cooling = false;
+    };
+    [[nodiscard]] BoostReadout GetBoostReadout();
+
     // The Lab draft the player's own ship is being offered, in panel order --
     // empty when there is nothing to pick. Only the own ship's: a spectated
     // unit's draft isn't the player's to spend, so the camera subject is
@@ -409,8 +420,6 @@ public:
     // each until it ages out (chat is an overlay on the game view, not a
     // window, so it has to get out of the way on its own).
     [[nodiscard]] std::vector<ChatLine> GetChatLog() const;
-
-    void ToggleCameraFollow() { m_cameraDirector.ToggleCameraFollow(); }
 
     // Spectating: the camera (and everything framed off it) follows another
     // unit instead of your own ship. Cycles NetId order across both worlds,

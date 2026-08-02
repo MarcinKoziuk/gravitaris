@@ -161,7 +161,10 @@ flecs::entity EntitySpawner::SpawnCelestial(id_t modelId, Vector2d position)
 
 flecs::entity EntitySpawner::SpawnStar(id_t modelId, Vector2d position)
 {
-    return SpawnCelestial(modelId, position);
+    flecs::entity entity = SpawnCelestial(modelId, position);
+    entity.get_mut<Planet>().star = true;
+
+    return entity;
 }
 
 flecs::entity EntitySpawner::SpawnOrbitingPlanet(id_t modelId, Vector2d center, double centerMass,

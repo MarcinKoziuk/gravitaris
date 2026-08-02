@@ -393,6 +393,9 @@ void GravitarisApplication::UpdateUi()
                            shield.type == ShieldType::Plating ? "plating" : "");
     m_ui.SetShieldSegments(shield.segments);
 
+    const CGame::BoostReadout boost = m_game->GetBoostReadout();
+    m_ui.SetBoostReadout(boost.fitted ? boost.fraction : -1.f, boost.cooling);
+
     std::vector<UpgradeOfferView> offers;
     for (const CGame::UpgradeOffer& offer : m_game->GetUpgradeOffers()) {
         offers.push_back(UpgradeOfferView{offer.name, offer.description, offer.level, offer.maxLevel});
@@ -703,9 +706,6 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         case KeyEvent::Key::LeftBracket:
             m_game->CycleSpectate(-1);
             return;
-        case KeyEvent::Key::F:
-            m_game->ToggleCameraFollow();
-            return;
         case KeyEvent::Key::F8:
             m_ui.ToggleDebugger();
             return;
@@ -756,12 +756,21 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
             m_currentInput.rotateLeft = true;
             break;
         case KeyEvent::Key::Down:
+        case KeyEvent::Key::F:
             m_game->StopSpectating();
             m_currentInput.firePrimary = true;   // held; cadence paced by the sim
             break;
         case KeyEvent::Key::Space:
+        case KeyEvent::Key::D:
             m_game->StopSpectating();
             m_currentInput.fireMissile = true;   // held; cadence paced by the sim
+            break;
+        // Held, like thrust. Harmless without the OVERBURN upgrade -- the sim
+        // simply never grants a burn (ShipControlsSystem::AdvanceBoost).
+        case KeyEvent::Key::LeftShift:
+        case KeyEvent::Key::RightShift:
+            ResumeOwnShip();
+            m_currentInput.boost = true;
             break;
         case KeyEvent::Key::X:
             m_game->StopSpectating();
@@ -859,10 +868,16 @@ void GravitarisApplication::keyReleaseEvent(Magnum::Platform::Sdl2Application::K
             m_currentInput.rotateLeft = false;
             break;
         case KeyEvent::Key::Down:
+        case KeyEvent::Key::F:
             m_currentInput.firePrimary = false;
             break;
         case KeyEvent::Key::Space:
+        case KeyEvent::Key::D:
             m_currentInput.fireMissile = false;
+            break;
+        case KeyEvent::Key::LeftShift:
+        case KeyEvent::Key::RightShift:
+            m_currentInput.boost = false;
             break;
         default:
             (void)0;

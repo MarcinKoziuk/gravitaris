@@ -132,6 +132,13 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
                         std::min<std::size_t>(def.maxLevel, def.tiers.size()));
                 break;
             }
+            case UpgradeKind::Boost:
+                def.boost.thrustScale = (*entry)["thrust_scale"].value_or(1.f);
+                def.boost.maxSpeedScale = (*entry)["max_speed_scale"].value_or(1.f);
+                def.boost.durationSeconds = (*entry)["duration_seconds"].value_or(0.f);
+                def.boost.cooldownSeconds = (*entry)["cooldown_seconds"].value_or(0.f);
+                def.boost.minCooldownSeconds = (*entry)["min_cooldown_seconds"].value_or(0.f);
+                break;
             case UpgradeKind::Shield: {
                 const auto typeName = (*entry)["shield_type"].value<std::string>();
                 def.shield.type = typeName ? ParseShieldType(*typeName, ok) : ShieldType::None;
@@ -221,6 +228,20 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
     stats.fireCooldownTicks = std::max(MIN_FIRE_COOLDOWN_TICKS,
                                        static_cast<std::uint32_t>(std::lround(cooldown)));
 
+    if (const UpgradeDef* def = FindKind(UpgradeKind::Boost); def && levels.boost > 0) {
+        const auto level = static_cast<float>(levels.boost);
+        stats.boostThrustScale = def->boost.thrustScale;
+        stats.boostMaxSpeedScale = def->boost.maxSpeedScale;
+        stats.boostTicks = static_cast<std::uint16_t>(
+                std::lround(def->boost.durationSeconds * level / Game::PHYSICS_DELTA));
+        // Levels shorten the wait rather than lengthening it, down to a floor
+        // -- otherwise a second tier would be strictly worse between burns.
+        const float cooldown = std::max(def->boost.minCooldownSeconds,
+                                        def->boost.cooldownSeconds / level);
+        stats.boostCooldownTicks =
+                static_cast<std::uint16_t>(std::lround(cooldown / Game::PHYSICS_DELTA));
+    }
+
     if (const UpgradeDef* def = FindKind(UpgradeKind::Shield, levels.shieldType); def && levels.shield > 0) {
         const auto level = static_cast<float>(levels.shield);
         stats.shieldCapacity = def->shield.capacity * level;
@@ -275,6 +296,55 @@ UpgradeCatalog::Offers UpgradeCatalog::RollOffers(const UpgradeLevels& levels, s
     return offers;
 }
 
+std::uint8_t UpgradeCatalog::PreferredOffer(const Offers& offers, const ShipLoadout& loadout) const
+{
+    // What each kind is worth to *this* hull right now. The shape of it is
+    // "cover a gap before deepening a strength": the first shield and the
+    // first rounds on an empty rack change what a ship can do at all, while a
+    // fourth cannon tier only makes it better at what it already does.
+    const auto score = [&](const UpgradeDef& def) {
+        const std::uint8_t level = LevelOf(def, loadout.levels);
+        switch (def.kind) {
+        case UpgradeKind::Shield:
+            // Nothing keeps a fighter alive like the first shield; a swap to
+            // the other type at the cost of the tiers already paid for is the
+            // one thing a pilot will not do.
+            if (loadout.levels.shieldType == ShieldType::None) return 100;
+            if (loadout.levels.shieldType != def.shield.type) return 0;
+            return 60 - 10 * static_cast<int>(level);
+        case UpgradeKind::MissileRack:
+            // An empty rack is a weapon the ship does not have. A full one is
+            // worth nothing at all, however tempting the card looks.
+            if (loadout.missileAmmo == 0) return 80;
+            return loadout.missileAmmo < def.rack.capacity / 2 ? 40 : 5;
+        case UpgradeKind::Boost:
+            // The first one is mobility it simply lacked; past that it is
+            // only a longer burn.
+            return level == 0 ? 70 : 30 - 5 * static_cast<int>(level);
+        case UpgradeKind::WeaponTier:
+            return 65 - 5 * static_cast<int>(level);
+        case UpgradeKind::FireRate:
+            return 50 - 5 * static_cast<int>(level);
+        }
+        return 0;
+    };
+
+    std::uint8_t bestSlot = 0;
+    int bestScore = 0;
+    for (std::size_t i = 0; i < offers.size(); ++i) {
+        const UpgradeDef* def = Find(offers[i]);
+        if (!def || !IsEligible(*def, loadout.levels)) continue;
+
+        // Ties break toward the earlier slot, so the same loadout offered the
+        // same three cards always takes the same one.
+        const int value = score(*def);
+        if (bestSlot != 0 && value <= bestScore) continue;
+        bestSlot = static_cast<std::uint8_t>(i + 1);
+        bestScore = value;
+    }
+    return bestSlot;
+}
+
 std::uint8_t UpgradeCatalog::LevelOf(const UpgradeDef& def, const UpgradeLevels& levels)
 {
     switch (def.kind) {
@@ -282,6 +352,7 @@ std::uint8_t UpgradeCatalog::LevelOf(const UpgradeDef& def, const UpgradeLevels&
     case UpgradeKind::FireRate:    return levels.fireRate;
     case UpgradeKind::WeaponTier:  return levels.gunTier;
     case UpgradeKind::Shield:      return levels.shieldType == def.shield.type ? levels.shield : 0;
+    case UpgradeKind::Boost:       return levels.boost;
     }
     return 0;
 }
@@ -301,6 +372,9 @@ bool UpgradeCatalog::Apply(const UpgradeDef& def, ShipLoadout& loadout) const
         return true;
     case UpgradeKind::WeaponTier:
         ++levels.gunTier;
+        return true;
+    case UpgradeKind::Boost:
+        ++levels.boost;
         return true;
     case UpgradeKind::Shield:
         // Switching type starts the new emitter at level 1 rather than
@@ -348,6 +422,7 @@ static UpgradeKind ParseKind(std::string_view name, bool& ok)
     if (name == "fire_rate")    return UpgradeKind::FireRate;
     if (name == "weapon_tier")  return UpgradeKind::WeaponTier;
     if (name == "shield")       return UpgradeKind::Shield;
+    if (name == "boost")        return UpgradeKind::Boost;
     ok = false;
     return UpgradeKind::MissileRack;
 }

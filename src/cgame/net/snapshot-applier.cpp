@@ -116,7 +116,7 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
                 const ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(state.modelId);
                 const float radius = body->GetCircleShapes().empty()
                         ? 0.f : static_cast<float>(body->GetCircleShapes().front().radius);
-                entity.emplace<Planet>(radius);
+                entity.emplace<Planet>(radius, state.isStar);
                 // Presence-only marker (never read for its own field values --
                 // OrbitSystem never runs against this world): camera/minimap's
                 // star-vs-planet check is `!entity.has<Orbit>()` for the real
@@ -184,6 +184,11 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
 
         if (Controls* controls = entity.try_get_mut<Controls>()) {
             controls->actionFlags = UnpackControlFlags(state.controlsFlags);
+            // The wire carries the burn the server granted, not the button
+            // the pilot held (see GatherSnapshot), so this world's copy is
+            // the granted state directly -- nothing here runs the timers that
+            // would otherwise decide it.
+            controls->boosting = controls->actionFlags.boost;
         }
         // Ownership changes mid-round (planet claims); creation-time Team
         // alone would leave the mirror stale.

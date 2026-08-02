@@ -64,7 +64,12 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
         state.vel = Magnum::Vector2{static_cast<float>(t.vel.x()), static_cast<float>(t.vel.y())};
         state.angVel = static_cast<float>(t.angVel);
         if (const Controls* controls = entity.try_get<Controls>()) {
-            state.controlsFlags = PackControlFlags(controls->actionFlags);
+            // The overburn travels as what the ship was granted, not what its
+            // pilot asked for: a request refused by the cooldown lights no
+            // exhaust, and this byte is what the exhaust is drawn from.
+            ControlFlags shown = controls->actionFlags;
+            shown.boost = controls->boosting;
+            state.controlsFlags = PackControlFlags(shown);
         }
         if (const Damageable* damageable = entity.try_get<Damageable>()) {
             state.hp = damageable->hp;

@@ -85,6 +85,54 @@ def thrust():
     return out
 
 
+def thrust_boost():
+    """The overburn's loop: thrust(), but with the injectors open.
+
+    Same brown-noise bed so the two read as one engine rather than two, then
+    the parts that say "past the redline" -- a brighter lowpass (more of the
+    hiss survives), a hard-clipped body, and a pair of detuned sawtooth
+    harmonics beating slowly against each other for the whine. Crossfaded
+    seamless exactly as thrust() is; see its comment for why the tail is
+    blended into the head rather than in place.
+
+    Draws from its own generator rather than the module-level one: sharing it
+    would shift the stream for every clip written after this one, silently
+    re-rolling assets this function has nothing to do with.
+    """
+    rng = random.Random(20260802)
+    dur = 1.2
+    n = int(RATE * dur)
+    raw = []
+    brown = 0.0
+    lp = 0.0
+    phase_a = 0.0
+    phase_b = 0.0
+    # Both whine partials complete a whole number of cycles over the loop, so
+    # the crossfade has nothing to smooth over at the seam.
+    freq_a = round(146.0 * dur) / dur
+    freq_b = round(219.0 * dur) / dur
+    for _ in range(n):
+        brown += rng.uniform(-1.0, 1.0) * 0.02
+        brown *= 0.997
+        lp += 0.22 * (brown - lp)  # brighter than thrust()'s 0.08: more edge
+
+        phase_a = (phase_a + freq_a / RATE) % 1.0
+        phase_b = (phase_b + freq_b / RATE) % 1.0
+        whine = (phase_a - 0.5) + (phase_b - 0.5)  # two saws, slowly beating
+
+        body = lp * 3.0
+        body = max(-0.6, min(0.6, body))  # clipped: the engine is straining
+        raw.append(body + whine * 0.18)
+
+    fade = int(RATE * 0.1)
+    m = n - fade
+    out = list(raw[:m])
+    for i in range(fade):
+        t = (i + 1) / fade
+        out[i] = raw[i] * t + raw[m + i] * (1.0 - t)
+    return out
+
+
 def hit():
     """Impact: white-noise crack + low sine thud."""
     dur = 0.18
@@ -214,6 +262,7 @@ def main():
     write_wav(f"{outdir}/laser-1.wav", fade_tail(laser()))
     # thrust loops seamlessly (crossfaded head/tail) -- no fade-out wanted.
     write_wav(f"{outdir}/thrust-1.wav", thrust())
+    write_wav(f"{outdir}/thrust-boost-1.wav", thrust_boost())
     write_wav(f"{outdir}/hit-1.wav", fade_tail(hit()))
     write_wav(f"{outdir}/shield-bubble-1.wav", fade_tail(bubble_shield()))
     write_wav(f"{outdir}/shield-plating-1.wav", fade_tail(plating_hit()))

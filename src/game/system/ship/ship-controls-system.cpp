@@ -75,6 +75,35 @@ std::pair<Vector2d, Vector2d> ShipControlsSystem::ComputeBulletSpawn(const Trans
     }
 }
 
+ShipControlsSystem::BoostEffect ShipControlsSystem::AdvanceBoost(Controls& controls, const ShipStats& stats)
+{
+    if (controls.boostCooldown > 0) --controls.boostCooldown;
+
+    if (controls.boostTicks > 0) {
+        --controls.boostTicks;
+    }
+    // A fresh burn needs the upgrade, the button, and the wait behind it.
+    // Thrust is not required: killing speed on the way into a planet is the
+    // whole reason this exists, and the ship is pointed retrograde with the
+    // engine lit for exactly that.
+    else if (stats.boostTicks > 0 && controls.actionFlags.boost && controls.boostCooldown == 0) {
+        controls.boostTicks = stats.boostTicks;
+        // Started here rather than when the burn ends, so letting go early
+        // buys nothing -- the wait is the same either way.
+        controls.boostCooldown = static_cast<std::uint16_t>(stats.boostCooldownTicks + stats.boostTicks);
+    }
+
+    controls.boosting = controls.boostTicks > 0;
+    return BoostEffectOf(controls.boosting, stats);
+}
+
+ShipControlsSystem::BoostEffect ShipControlsSystem::BoostEffectOf(bool boosting, const ShipStats& stats)
+{
+    if (!boosting) return BoostEffect{};
+    return BoostEffect{static_cast<double>(stats.boostThrustScale),
+                       static_cast<double>(stats.boostMaxSpeedScale)};
+}
+
 void ShipControlsSystem::ApplyMovement(cpBody* body, const ControlFlags& flags, double thrust, double maxSpeed)
 {
     cpFloat ang = cpBodyGetAngularVelocity(body);
@@ -127,11 +156,13 @@ void ShipControlsSystem::Update(std::uint64_t step)
         PhysicsBody& phys = m_physicsSystem.GetBody(ref);
         cpBody* body = phys.cp.body.get();
 
-        ApplyMovement(body, scontrols.actionFlags, phys.body->GetThrust(), phys.body->GetMaxSpeed());
-
         ShipLoadout* loadout = entity.try_get_mut<ShipLoadout>();
         const ShipStats stats =
                 m_catalog.ResolveStats(loadout ? loadout->levels : UpgradeLevels{});
+
+        const BoostEffect boost = AdvanceBoost(scontrols, stats);
+        ApplyMovement(body, scontrols.actionFlags, phys.body->GetThrust() * boost.thrustScale,
+                      phys.body->GetMaxSpeed() * boost.maxSpeedScale);
 
         if (scontrols.fireCooldown > 0) {
             --scontrols.fireCooldown;
@@ -146,8 +177,12 @@ void ShipControlsSystem::Update(std::uint64_t step)
 
             const Team* shooterTeam = entity.try_get<Team>();
             const NetId* shooterNetId = entity.try_get<NetId>();
+            // Fired along the barrel, so a round drawn as a streak
+            // (models/bullets/bullet-heavy) lies down its own line of flight
+            // rather than across it. A point-shaped round doesn't care.
             flecs::entity bulletEntity =
-                    m_entitySpawner.SpawnBullet(gun.modelId, ret.first, ret.second, /*sensor=*/true);
+                    m_entitySpawner.SpawnBullet(gun.modelId, ret.first, ret.second, /*sensor=*/true,
+                                                static_cast<double>(transf.rot));
             bulletEntity.emplace<Bullet>(gun.lifetimeSeconds,
                                          shooterTeam ? shooterTeam->id : TeamId::Blue,
                                          gun.damage,

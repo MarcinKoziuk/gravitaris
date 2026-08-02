@@ -10,6 +10,7 @@
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/missile.hpp>
+#include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
@@ -26,6 +27,11 @@ static constexpr double BULLET_QUERY_RADIUS = 2.0;
 // Landing/ram damage below one hull point is discarded entirely.
 static constexpr float MIN_LANDING_DAMAGE = 1.f;
 
+// How far above a star's surface the fatal boundary sits, as a fraction of
+// its radius. Slightly outside it, so a hull is gone at the moment it looks
+// like it touched rather than after visibly sinking into the disc.
+static constexpr double STAR_LETHAL_MARGIN = 1.02;
+
 static bool ShieldElementLive(flecs::entity ent, std::uint8_t element);
 
 DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
@@ -39,6 +45,7 @@ DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem,
 void DamageSystem::Update()
 {
     ResolveShipRams();
+    ResolveStarContact();
 
     // Landing / ram damage from this step's hard contacts.
     for (const ImpactEvent& ev : m_physicsSystem.DrainImpacts()) {
@@ -254,6 +261,43 @@ static bool ShieldElementLive(flecs::entity ent, std::uint8_t element)
     }
 
     return IsPlated(*loadout) && element < loadout->plateCount && loadout->plates[element] > 0.f;
+}
+
+void DamageSystem::ResolveStarContact()
+{
+    struct Star {
+        Magnum::Vector2d pos;
+        double lethalRadiusSq = 0.;
+    };
+    std::vector<Star> stars;
+    m_registry.each([&](const Transform& transf, const Planet& planet) {
+        if (!planet.star) return;
+        const double radius = static_cast<double>(planet.radius) * transf.scale.x() * STAR_LETHAL_MARGIN;
+        stars.push_back(Star{transf.pos, radius * radius});
+    });
+    if (stars.empty()) return;
+
+    // Position, not contact: a hull touching the disc is already gone, and
+    // waiting for Chipmunk to resolve a collision against it would let a fast
+    // enough approach tunnel straight through the star instead.
+    m_registry.each([&](flecs::entity entity, const Transform& transf, Damageable& dmg) {
+        if (dmg.hp <= 0.f || entity.has<Planet>()) return;
+
+        for (const Star& star : stars) {
+            if ((star.pos - transf.pos).dot() > star.lethalRadiusSq) continue;
+
+            dmg.hp = 0.f;
+            // lastDamageTeam is left as it stands: whoever last put a round
+            // into this hull gets the line, exactly as a crash credits the
+            // pursuer that drove it into the ground.
+            dmg.lastDamageCause = DamageCause::Star;
+            m_eventQueue.Emit(GameEventType::Impact, entity,
+                              Magnum::Vector2{static_cast<float>(transf.pos.x()),
+                                              static_cast<float>(transf.pos.y())},
+                              0);
+            return;
+        }
+    });
 }
 
 // networking-plan Phase 9's destroy rule. Nothing here destroys an entity

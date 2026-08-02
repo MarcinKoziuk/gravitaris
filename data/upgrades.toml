@@ -24,6 +24,10 @@ sound_gain = 0.5
 # The heavy line: an A-10 gatling, written out per tier rather than as a curve.
 # Each tier hits harder and throws flatter, and cycles faster as the feed
 # improves -- any one of them can be tuned without touching the others.
+#
+# A heavy round is a tracer, not a dot: the tiers fire bullet-heavy rather
+# than the stock bullet-0, and the top one its own cyan streak, so what a ship
+# is shooting is readable from the rounds alone.
 [[weapon]]
 key = "gatling_1"
 name = "Gatling"
@@ -31,7 +35,7 @@ cooldown_ticks = 6
 damage = 15.0
 speed = 224.0
 lifetime_seconds = 3.0
-model = "models/bullets/bullet-0"
+model = "models/bullets/bullet-heavy"
 sound = "sounds/gatling-1.wav"
 sound_gain = 0.7
 
@@ -40,20 +44,22 @@ key = "gatling_2"
 name = "Gatling II"
 cooldown_ticks = 5
 damage = 21.0
-speed = 250.0
+speed = 320.0
 lifetime_seconds = 3.2
-model = "models/bullets/bullet-0"
+model = "models/bullets/bullet-heavy"
 sound = "sounds/gatling-1.wav"
 sound_gain = 0.7
 
+# Flat enough that lead barely matters inside knife range -- the tier's real
+# reward as much as the damage is.
 [[weapon]]
 key = "gatling_3"
 name = "Gatling III"
 cooldown_ticks = 5
 damage = 30.0
-speed = 280.0
+speed = 420.0
 lifetime_seconds = 3.5
-model = "models/bullets/bullet-0"
+model = "models/bullets/bullet-heavy-cyan"
 sound = "sounds/gatling-1.wav"
 sound_gain = 0.7
 
@@ -117,6 +123,28 @@ max_level = 3
 weight = 1.0
 # One weapon per tier, in order: taking the upgrade fits the next one.
 tiers = ["gatling_1", "gatling_2", "gatling_3"]
+
+# The overburn. Its real job is arriving: a hull bearing down on a planet at
+# cruise cannot brake in time on its own thrust, and this is what turns that
+# into a stop. The extra speed is the sweetener -- a burst of closing or
+# breaking speed in a fight -- and it is deliberately modest, since the whole
+# combat model assumes a ship can be caught.
+#
+# max_speed_scale is the one number that bounds a boosted hull: 1.2 of the
+# hull's own [physics] max_speed, and levels never move it. They lengthen the
+# burn and shorten the wait instead.
+[[upgrade]]
+key = "overburn"
+name = "OVERBURN"
+description = "Injector overrun: hard thrust, briefly past the redline. Then it has to cool."
+kind = "boost"
+max_level = 3
+weight = 1.0
+thrust_scale = 2.5
+max_speed_scale = 1.2
+duration_seconds = 1.6
+cooldown_seconds = 9.0
+min_cooldown_seconds = 3.0
 
 [[upgrade]]
 key = "bubble_shield"

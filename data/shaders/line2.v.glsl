@@ -7,6 +7,11 @@ uniform mat3 viewProjection;   // world -> NDC (includes camera zoom + pan)
 uniform vec2 viewportSize;     // framebuffer size in pixels
 uniform float width;           // desired line thickness in pixels
 uniform float shieldGlow;      // ShieldGlow: 0 none, 1 directional, 2 flat
+// 1 = ignore the baked SVG stroke colour entirely and draw the pass in the
+// instance's colour, whatever the model authored. The exhaust uses it to
+// turn orange under the overburn; 0 (the default) leaves the team-mask rule
+// below exactly as it was.
+uniform float forceInstanceColor;
 
 in highp vec2 pointA;
 in highp vec2 pointB;
@@ -127,7 +132,7 @@ void main() {
     // Placeholder-authored strokes take the instance's team color; all other
     // strokes keep their baked SVG color (StarCraft-style team mask). Hit
     // flash then whitens the whole result on top, team color and all.
-    vec3 teamMixed = mix(color, instanceTeamColor, teamWeight);
+    vec3 teamMixed = mix(color, instanceTeamColor, max(teamWeight, forceInstanceColor));
 
     // Directional: where the strike landed the shield goes white, and away
     // from it keeps the color the pass gave it. Both bearings are measured
