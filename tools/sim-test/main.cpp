@@ -2039,6 +2039,47 @@ void TestTakeoff()
         Require(left, "landed: a leader with nothing left to do on the rock lifts off again");
     }
 
+    // A body that is not the heaviest in the sector is still a body. The
+    // danger reflex tested the predicted path against the single heaviest
+    // source, so once sectors had suns, no planet was ever evaluated at all
+    // and the only thing keeping a pilot off one was the departure rule.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+
+        // Unambiguously the heaviest thing in the sector, and far enough away
+        // that its own pull is not what the pilot is reacting to.
+        flecs::entity sun = spawner.SpawnStar("models/planets/simple"_id, Vector2d{0., 0.});
+        sun.get_mut<GravitySource>().multiplier = 100.;
+
+        // centerMass ~0 leaves it parked, so the course below stays a course.
+        flecs::entity planet = spawner.SpawnOrbitingPlanet("models/planets/simple"_id,
+                                                           Vector2d{0., 0.}, 1e-9, 60000., 1.0, 0.0);
+        const Vector2d centre = planet.get<Transform>().pos;
+        const double radius = planet.get<Planet>().radius * planet.get<Transform>().scale.x();
+
+        // The pursuit runs straight through the planet: guidance has no
+        // opinion about bodies in the way, so avoiding one is the reflex's
+        // job and nothing else's.
+        flecs::entity ship = spawner.SpawnAIShip("models/ships/fighter-1"_id,
+                                                 centre + Vector2d{0., 1200.},
+                                                 game.GetAIPresets().Default());
+        spawner.SpawnPlayer("models/ships/fighter-1"_id, centre + Vector2d{0., -1200.});
+
+        bool evaded = false;
+        double closest = std::numeric_limits<double>::max();
+        for (int tick = 0; tick < 900 && ship.is_alive(); ++tick) {
+            game.Update();
+            if (!ship.is_alive()) break;
+            if (ship.get<AIPilot>().behavior == AIBehavior::Evade) evaded = true;
+            closest = std::min(closest, (ship.get<Transform>().pos - centre).length() - radius);
+        }
+        Require(evaded, "evade: a planet that is not the sector's heaviest body still trips the "
+                        "danger reflex");
+        Require(ship.is_alive(), "evade: a pilot aimed at a planet survives the encounter");
+        Require(closest > 0., "evade: it never reaches the surface");
+    }
+
     // The strategy layer's side of the same rule: a rock nobody could lift
     // off again is not a claim worth ordering, however close and unowned.
     const auto ordersALanding = [&](double gravityMultiplier) {
