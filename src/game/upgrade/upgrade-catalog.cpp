@@ -61,8 +61,6 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
     Fittings fittings;
     if (const toml::table* ship = root["ship"].as_table()) {
         if (const auto v = (*ship)["gun"].value<std::string>()) fittings.shipGun = ID(v->c_str());
-        if (const auto v = (*ship)["missile"].value<std::string>()) fittings.shipMissile = ID(v->c_str());
-        if (const auto v = (*ship)["missile_capacity"].value<int>()) fittings.missileCapacity = *v;
     }
     if (const toml::table* turret = root["turret"].as_table()) {
         if (const auto v = (*turret)["weapon"].value<std::string>()) fittings.turretWeapon = ID(v->c_str());
@@ -99,6 +97,10 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
             def.description = (*entry)["description"].value_or("");
             def.maxLevel = (*entry)["max_level"].value_or<std::uint8_t>(1);
             def.weight = (*entry)["weight"].value_or(1.f);
+            // Not named `requires` -- that is a keyword from C++20 on.
+            if (const auto prereq = (*entry)["requires"].value<std::string>()) {
+                def.requiresId = ID(prereq->c_str());
+            }
             if (const auto scopeName = (*entry)["scope"].value<std::string>()) {
                 def.scope = ParseScope(*scopeName, ok);
                 if (!ok) {
@@ -110,11 +112,14 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
             switch (def.kind) {
             case UpgradeKind::MissileRack:
                 def.rack.perPickup = (*entry)["per_pickup"].value_or(0);
-                def.rack.capacity = (*entry)["capacity"].value_or(fittings.missileCapacity);
                 break;
             case UpgradeKind::FireRate:
                 def.fireRate.cooldownScale = (*entry)["cooldown_scale"].value_or(1.f);
                 break;
+            case UpgradeKind::MissileTier:
+                def.rack.perPickup = (*entry)["per_pickup"].value_or(0);
+                def.rack.capacity = (*entry)["capacity"].value_or(0);
+                [[fallthrough]];
             case UpgradeKind::WeaponTier: {
                 const toml::array* tiers = (*entry)["tiers"].as_array();
                 if (tiers) {
@@ -123,7 +128,7 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
                     }
                 }
                 if (def.tiers.empty()) {
-                    LOG(error) << "upgrades: " << *key << ": weapon_tier needs a `tiers` list; skipped";
+                    LOG(error) << "upgrades: " << *key << ": a weapon line needs a `tiers` list; skipped";
                     continue;
                 }
                 // The list is what a level can actually index, so it -- not the
@@ -132,6 +137,9 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
                         std::min<std::size_t>(def.maxLevel, def.tiers.size()));
                 break;
             }
+            case UpgradeKind::ResearchStock:
+                def.stock.perLevel = (*entry)["per_level"].value_or(0);
+                break;
             case UpgradeKind::Boost:
                 def.boost.thrustScale = (*entry)["thrust_scale"].value_or(1.f);
                 def.boost.maxSpeedScale = (*entry)["max_speed_scale"].value_or(1.f);
@@ -149,7 +157,17 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
                 def.shield.capacity = (*entry)["capacity"].value_or(0.f);
                 def.shield.regenPerSecond = (*entry)["regen_per_second"].value_or(0.f);
                 def.shield.regenDelaySeconds = (*entry)["regen_delay_seconds"].value_or(0.f);
-                def.shield.absorbFraction = (*entry)["absorb_fraction"].value_or(1.f);
+                def.shield.leakChance = (*entry)["leak_chance"].value_or(0.f);
+                if (const toml::array* leaks = (*entry)["leak_fraction"].as_array()) {
+                    for (const toml::node& leak : *leaks) {
+                        def.shield.leakFraction.push_back(leak.value_or(0.f));
+                    }
+                }
+                if (def.shield.leakChance > 0.f && def.shield.leakFraction.empty()) {
+                    LOG(error) << "upgrades: " << *key
+                               << ": a leaking shield needs a `leak_fraction` per level; skipped";
+                    continue;
+                }
                 break;
             }
             }
@@ -168,10 +186,14 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
         if (id != 0 && !FindWeapon(id)) LOG(error) << "upgrades: " << what << " names an unknown weapon";
     };
     require(m_fittings.shipGun, "[ship] gun");
-    require(m_fittings.shipMissile, "[ship] missile");
     require(m_fittings.turretWeapon, "[turret] weapon");
     for (const UpgradeDef& def : m_defs) {
         for (const id_t tier : def.tiers) require(tier, def.key.c_str());
+        // A prerequisite that isn't in the pool would take its dependant off
+        // the table for good rather than gating it.
+        if (def.requiresId != 0 && !Find(def.requiresId)) {
+            LOG(error) << "upgrades: " << def.key << " requires an upgrade that isn't in the pool";
+        }
     }
 
     LOG(info) << "upgrades: loaded " << m_weapons.size() << " weapons and " << m_defs.size()
@@ -208,7 +230,6 @@ const UpgradeDef* UpgradeCatalog::FindKind(UpgradeKind kind, ShieldType shieldTy
 ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
 {
     ShipStats stats;
-    stats.missileCapacity = m_fittings.missileCapacity;
 
     stats.gun = FindWeapon(m_fittings.shipGun);
     // A gun tier fits a different weapon rather than scaling the stock one,
@@ -218,7 +239,13 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
         if (const WeaponDef* tier = FindWeapon(def->tiers[index])) stats.gun = tier;
     }
 
-    stats.missile = FindWeapon(m_fittings.shipMissile);
+    // No stock launcher: a hull that hasn't fitted a bay has no missile at all,
+    // and both the round and the rack it goes in come from that bay's tier.
+    if (const UpgradeDef* def = FindKind(UpgradeKind::MissileTier); def && levels.missileTier > 0) {
+        const std::size_t index = std::min<std::size_t>(levels.missileTier, def->tiers.size()) - 1;
+        stats.missile = FindWeapon(def->tiers[index]);
+        stats.missileCapacity = def->rack.capacity * static_cast<int>(levels.missileTier);
+    }
     if (stats.missile) stats.missileCooldownTicks = stats.missile->cooldownTicks;
 
     float cooldown = static_cast<float>(stats.gun ? stats.gun->cooldownTicks : 1u);
@@ -248,7 +275,12 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
         stats.shieldRegenPerSecond = def->shield.regenPerSecond * level;
         stats.shieldRegenDelayTicks = static_cast<std::uint16_t>(
                 std::lround(def->shield.regenDelaySeconds / Game::PHYSICS_DELTA));
-        stats.shieldAbsorbFraction = def->shield.absorbFraction;
+        stats.shieldLeakChance = def->shield.leakChance;
+        if (!def->shield.leakFraction.empty()) {
+            const std::size_t index =
+                    std::min<std::size_t>(levels.shield, def->shield.leakFraction.size()) - 1;
+            stats.shieldLeakFraction = def->shield.leakFraction[index];
+        }
     }
 
     return stats;
@@ -256,8 +288,26 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
 
 bool UpgradeCatalog::IsEligible(const UpgradeDef& def, const UpgradeLevels& levels) const
 {
+    if (def.requiresId != 0) {
+        const UpgradeDef* prereq = Find(def.requiresId);
+        if (!prereq || LevelOf(*prereq, levels) == 0) return false;
+    }
     if (def.maxLevel == 0) return true; // a restock, always on the table
     return LevelOf(def, levels) < def.maxLevel;
+}
+
+int UpgradeCatalog::ResearchStockCapacity(const UpgradeLevels& levels, int base) const
+{
+    const UpgradeDef* def = FindKind(UpgradeKind::ResearchStock);
+    if (!def) return base;
+    return base + def->stock.perLevel * static_cast<int>(levels.researchStock);
+}
+
+UpgradeLevels UpgradeCatalog::Combined(const UpgradeLevels& ship, const UpgradeLevels& faction)
+{
+    UpgradeLevels levels = ship;
+    levels.researchStock = faction.researchStock;
+    return levels;
 }
 
 UpgradeCatalog::Offers UpgradeCatalog::RollOffers(const UpgradeLevels& levels, std::uint32_t seed) const
@@ -296,27 +346,34 @@ UpgradeCatalog::Offers UpgradeCatalog::RollOffers(const UpgradeLevels& levels, s
     return offers;
 }
 
-std::uint8_t UpgradeCatalog::PreferredOffer(const Offers& offers, const ShipLoadout& loadout) const
+std::uint8_t UpgradeCatalog::PreferredOffer(const Offers& offers, const ShipLoadout& loadout,
+                                            const UpgradeLevels& levels) const
 {
+    const int capacity = ResolveStats(levels).missileCapacity;
+
     // What each kind is worth to *this* hull right now. The shape of it is
     // "cover a gap before deepening a strength": the first shield and the
     // first rounds on an empty rack change what a ship can do at all, while a
     // fourth cannon tier only makes it better at what it already does.
     const auto score = [&](const UpgradeDef& def) {
-        const std::uint8_t level = LevelOf(def, loadout.levels);
+        const std::uint8_t level = LevelOf(def, levels);
         switch (def.kind) {
         case UpgradeKind::Shield:
             // Nothing keeps a fighter alive like the first shield; a swap to
             // the other type at the cost of the tiers already paid for is the
             // one thing a pilot will not do.
-            if (loadout.levels.shieldType == ShieldType::None) return 100;
-            if (loadout.levels.shieldType != def.shield.type) return 0;
+            if (levels.shieldType == ShieldType::None) return 100;
+            if (levels.shieldType != def.shield.type) return 0;
             return 60 - 10 * static_cast<int>(level);
+        case UpgradeKind::MissileTier:
+            // The launcher is a weapon the hull does not otherwise have; the
+            // tiers above it are only a better round.
+            return level == 0 ? 75 : 45 - 5 * static_cast<int>(level);
         case UpgradeKind::MissileRack:
-            // An empty rack is a weapon the ship does not have. A full one is
+            // An empty rack is a weapon the ship cannot use. A full one is
             // worth nothing at all, however tempting the card looks.
             if (loadout.missileAmmo == 0) return 80;
-            return loadout.missileAmmo < def.rack.capacity / 2 ? 40 : 5;
+            return loadout.missileAmmo < capacity / 2 ? 40 : 5;
         case UpgradeKind::Boost:
             // The first one is mobility it simply lacked; past that it is
             // only a longer burn.
@@ -325,6 +382,11 @@ std::uint8_t UpgradeCatalog::PreferredOffer(const Offers& offers, const ShipLoad
             return 65 - 5 * static_cast<int>(level);
         case UpgradeKind::FireRate:
             return 50 - 5 * static_cast<int>(level);
+        case UpgradeKind::ResearchStock:
+            // A queue only pays off for a side that leaves upgrades waiting,
+            // and an AI wing lands constantly -- so it is the card a pilot
+            // takes when the other two are worse, not one it goes for.
+            return 15;
         }
         return 0;
     };
@@ -333,7 +395,7 @@ std::uint8_t UpgradeCatalog::PreferredOffer(const Offers& offers, const ShipLoad
     int bestScore = 0;
     for (std::size_t i = 0; i < offers.size(); ++i) {
         const UpgradeDef* def = Find(offers[i]);
-        if (!def || !IsEligible(*def, loadout.levels)) continue;
+        if (!def || !IsEligible(*def, levels)) continue;
 
         // Ties break toward the earlier slot, so the same loadout offered the
         // same three cards always takes the same one.
@@ -348,11 +410,13 @@ std::uint8_t UpgradeCatalog::PreferredOffer(const Offers& offers, const ShipLoad
 std::uint8_t UpgradeCatalog::LevelOf(const UpgradeDef& def, const UpgradeLevels& levels)
 {
     switch (def.kind) {
-    case UpgradeKind::MissileRack: return 0;
-    case UpgradeKind::FireRate:    return levels.fireRate;
-    case UpgradeKind::WeaponTier:  return levels.gunTier;
-    case UpgradeKind::Shield:      return levels.shieldType == def.shield.type ? levels.shield : 0;
-    case UpgradeKind::Boost:       return levels.boost;
+    case UpgradeKind::MissileRack:  return 0;
+    case UpgradeKind::FireRate:     return levels.fireRate;
+    case UpgradeKind::WeaponTier:   return levels.gunTier;
+    case UpgradeKind::MissileTier:  return levels.missileTier;
+    case UpgradeKind::Shield:       return levels.shieldType == def.shield.type ? levels.shield : 0;
+    case UpgradeKind::Boost:        return levels.boost;
+    case UpgradeKind::ResearchStock: return levels.researchStock;
     }
     return 0;
 }
@@ -360,12 +424,19 @@ std::uint8_t UpgradeCatalog::LevelOf(const UpgradeDef& def, const UpgradeLevels&
 bool UpgradeCatalog::Apply(const UpgradeDef& def, ShipLoadout& loadout) const
 {
     UpgradeLevels& levels = loadout.levels;
-    if (!IsEligible(def, levels)) return false;
+    if (def.scope != UpgradeScope::Ship || !IsEligible(def, levels)) return false;
+
+    // Rounds are capped by the bay the ship has fitted, resolved rather than
+    // authored on the restock: one number decides rack width, and it is the
+    // one that also decides which round goes in it.
+    const auto load = [&](int rounds) {
+        loadout.missileAmmo = static_cast<std::uint8_t>(
+                std::min(loadout.missileAmmo + rounds, ResolveStats(levels).missileCapacity));
+    };
 
     switch (def.kind) {
     case UpgradeKind::MissileRack:
-        loadout.missileAmmo = static_cast<std::uint8_t>(
-                std::min<int>(loadout.missileAmmo + def.rack.perPickup, def.rack.capacity));
+        load(def.rack.perPickup);
         return true;
     case UpgradeKind::FireRate:
         ++levels.fireRate;
@@ -373,9 +444,15 @@ bool UpgradeCatalog::Apply(const UpgradeDef& def, ShipLoadout& loadout) const
     case UpgradeKind::WeaponTier:
         ++levels.gunTier;
         return true;
+    case UpgradeKind::MissileTier:
+        ++levels.missileTier;
+        load(def.rack.perPickup); // the fitting comes with rounds in it
+        return true;
     case UpgradeKind::Boost:
         ++levels.boost;
         return true;
+    case UpgradeKind::ResearchStock:
+        return false; // faction scope -- ApplyFaction's business, not a hull's
     case UpgradeKind::Shield:
         // Switching type starts the new emitter at level 1 rather than
         // carrying the old one's tiers over -- they're different hardware.
@@ -389,6 +466,17 @@ bool UpgradeCatalog::Apply(const UpgradeDef& def, ShipLoadout& loadout) const
         else {
             ++levels.shield;
         }
+        return true;
+    }
+    return false;
+}
+
+bool UpgradeCatalog::ApplyFaction(const UpgradeDef& def, UpgradeLevels& levels) const
+{
+    if (def.scope != UpgradeScope::Faction || !IsEligible(def, levels)) return false;
+
+    if (def.kind == UpgradeKind::ResearchStock) {
+        ++levels.researchStock;
         return true;
     }
     return false;
@@ -419,11 +507,13 @@ static WeaponDef ParseWeapon(const toml::table& entry, const std::string& key)
 
 static UpgradeKind ParseKind(std::string_view name, bool& ok)
 {
-    if (name == "missile_rack") return UpgradeKind::MissileRack;
-    if (name == "fire_rate")    return UpgradeKind::FireRate;
-    if (name == "weapon_tier")  return UpgradeKind::WeaponTier;
-    if (name == "shield")       return UpgradeKind::Shield;
-    if (name == "boost")        return UpgradeKind::Boost;
+    if (name == "missile_rack")   return UpgradeKind::MissileRack;
+    if (name == "fire_rate")      return UpgradeKind::FireRate;
+    if (name == "weapon_tier")    return UpgradeKind::WeaponTier;
+    if (name == "missile_tier")   return UpgradeKind::MissileTier;
+    if (name == "shield")         return UpgradeKind::Shield;
+    if (name == "boost")          return UpgradeKind::Boost;
+    if (name == "research_stock") return UpgradeKind::ResearchStock;
     ok = false;
     return UpgradeKind::MissileRack;
 }

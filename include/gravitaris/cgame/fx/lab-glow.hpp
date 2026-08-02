@@ -31,7 +31,7 @@ inline Magnum::Color3 LabGlowColor(const Structure& structure, float timeSeconds
         return Magnum::Math::lerp(legs[leg], legs[(leg + 1) % count], phase - static_cast<float>(leg));
     };
 
-    if (structure.upgradeReady) {
+    if (structure.upgradesReady > 0) {
         const Magnum::Color3 legs[]{TeamColor(TeamId::Red), TeamColor(TeamId::Yellow),
                                     TeamColor(TeamId::Blue)};
         return cycle(legs, 3, LAB_READY_CYCLE_LEG_SECONDS);

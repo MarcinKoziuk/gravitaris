@@ -360,8 +360,10 @@ public:
     // field it sits in rather than the acceleration it (never) picks up from it.
     [[nodiscard]] std::optional<float> GetGravityAccel();
 
-    // The rack's size, so the sidebar knows how many empty ticks to draw.
-    [[nodiscard]] int GetMissileCapacity() const;
+    // The subject's rack size, so the sidebar knows how many empty ticks to
+    // draw. Zero on a hull that has fitted no missile bay, which is the same
+    // thing GetMissileAmmo reports nothing for.
+    [[nodiscard]] int GetMissileCapacity();
 
     // Shield charge and capacity of that unit, both zero when it carries no
     // emitter (which blanks the bar rather than drawing an empty one).
@@ -408,7 +410,7 @@ public:
         float progress = 0.f;        // 0..1
         float secondsRemaining = 0.f;
         int labs = 0;
-        bool ready = false; // an upgrade is waiting to be collected
+        int ready = 0; // finished upgrades queued up for someone to collect
     };
     [[nodiscard]] std::optional<ResearchReadout> GetResearchReadout();
 

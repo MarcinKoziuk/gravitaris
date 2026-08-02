@@ -125,6 +125,7 @@ bool UI::Init()
         m_boostValue = hud->GetElementById("boost_value");
         m_researchFill = hud->GetElementById("research_fill");
         m_researchValue = hud->GetElementById("research_value");
+        m_researchTicks = hud->GetElementById("research_ticks");
         m_upgradeDraft = hud->GetElementById("upgrade_draft");
         m_upgradeOffers = hud->GetElementById("upgrade_offers");
         m_minimap = hud->GetElementById("minimap");
@@ -438,28 +439,39 @@ void UI::SetBoostReadout(float fraction, bool cooling)
     else m_boostValue->SetInnerRML(quantised < 1.f ? "BURN" : "READY");
 }
 
-void UI::SetResearchReadout(float fraction, const std::string& text)
+void UI::SetResearchReadout(float fraction, int stocked, const std::string& text)
 {
-    if (!m_researchFill || !m_researchValue) return;
+    if (!m_researchFill || !m_researchValue || !m_researchTicks) return;
 
     const float quantised =
             fraction < 0.f ? -1.f : std::round(std::clamp(fraction, 0.f, 1.f) * 100.f) / 100.f;
-    if (quantised == m_researchFraction && text == m_researchText) return;
+    if (quantised == m_researchFraction && stocked == m_researchStocked && text == m_researchText) return;
 
+    const bool ticksChanged = stocked != m_researchStocked;
     m_researchFraction = quantised;
+    m_researchStocked = stocked;
     m_researchText = text;
 
     if (quantised < 0.f) {
         m_researchFill->SetProperty("width", "0%");
         m_researchFill->SetClass("ready", false);
         m_researchValue->SetInnerRML("--");
+        m_researchTicks->SetInnerRML("");
         return;
     }
 
     const int percent = static_cast<int>(std::lround(quantised * 100.f));
     m_researchFill->SetProperty("width", std::to_string(percent) + "%");
-    m_researchFill->SetClass("ready", quantised >= 1.f);
+    m_researchFill->SetClass("ready", stocked > 0);
     m_researchValue->SetInnerRML(text);
+
+    // Rebuilt only when the count moves: the bar behind it changes every tick,
+    // and rewriting this row with it would reflow the panel for nothing.
+    if (ticksChanged) {
+        std::string ticks;
+        for (int i = 0; i < stocked; ++i) ticks += "<span class=\"research_tick\"></span>";
+        m_researchTicks->SetInnerRML(ticks);
+    }
 }
 
 void UI::SetUpgradeOffers(const std::vector<UpgradeOfferView>& offers)

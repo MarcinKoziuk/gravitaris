@@ -125,7 +125,9 @@ std::optional<int> CGame::GetMissileAmmo()
     if (!subject) return std::nullopt;
 
     const ShipLoadout* loadout = subject->try_get<ShipLoadout>();
-    if (!loadout) return std::nullopt; // a structure/planet being spectated has no rack
+    // A structure/planet being spectated has no rack, and neither has a hull
+    // that hasn't fitted a missile bay.
+    if (!loadout || loadout->levels.missileTier == 0) return std::nullopt;
 
     return static_cast<int>(loadout->missileAmmo);
 }
@@ -176,9 +178,13 @@ std::optional<float> CGame::GetGravityAccel()
     return static_cast<float>(GravityAt(transf->pos).length()) / SURFACE_GRAVITY;
 }
 
-int CGame::GetMissileCapacity() const
+int CGame::GetMissileCapacity()
 {
-    return m_upgradeCatalog.ResolveStats(UpgradeLevels{}).missileCapacity;
+    const std::optional<flecs::entity> subject = CameraSubject();
+    const ShipLoadout* loadout = subject ? subject->try_get<ShipLoadout>() : nullptr;
+    if (!loadout) return 0;
+
+    return m_upgradeCatalog.ResolveStats(loadout->levels).missileCapacity;
 }
 
 CGame::ShieldReadout CGame::GetShieldReadout()
@@ -246,12 +252,22 @@ std::vector<CGame::UpgradeOffer> CGame::GetUpgradeOffers()
     const ShipLoadout* loadout = player->try_get<ShipLoadout>();
     if (!draft || !loadout || !draft->available) return offers;
 
+    // A faction-scope card is at the tier the side holds, not the hull -- and
+    // the labs are where that reaches a client (Structure::researchStockLevel).
+    UpgradeLevels faction;
+    const Team* playerTeam = player->try_get<Team>();
+    CurrentSceneView().Each([&](const Structure& structure, const Team& team) {
+        if (structure.type != StructureType::Lab || !playerTeam || team.id != playerTeam->id) return;
+        faction.researchStock = structure.researchStockLevel;
+    });
+    const UpgradeLevels levels = UpgradeCatalog::Combined(loadout->levels, faction);
+
     for (const id_t id : draft->offers) {
         if (id == 0) continue;
         const UpgradeDef* def = m_upgradeCatalog.Find(id);
         if (!def) continue;
         offers.push_back(UpgradeOffer{def->name, def->description,
-                                      UpgradeCatalog::LevelOf(*def, loadout->levels), def->maxLevel});
+                                      UpgradeCatalog::LevelOf(*def, levels), def->maxLevel});
     }
     return offers;
 }
@@ -270,7 +286,7 @@ std::optional<CGame::ResearchReadout> CGame::GetResearchReadout()
         // Every lab of a faction carries the same pooled copy, so the last one
         // seen is as good as any.
         readout.progress = std::clamp(structure.researchProgress, 0.f, 1.f);
-        readout.ready = structure.upgradeReady;
+        readout.ready = structure.upgradesReady;
     });
     if (readout.labs == 0) return std::nullopt;
 

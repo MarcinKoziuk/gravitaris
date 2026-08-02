@@ -186,7 +186,7 @@ void AIPilotSystem::Update(std::uint64_t step)
     // Whose upgrade is finished and waiting for somebody to come and get it.
     std::array<bool, NUM_TEAMS> teamUpgradeReady{};
     m_registry.each([&](const FactionState& fs) {
-        teamUpgradeReady[static_cast<std::size_t>(fs.team)] = fs.upgradeReady;
+        teamUpgradeReady[static_cast<std::size_t>(fs.team)] = fs.upgradesReady > 0;
     });
 
     m_registry.each([&](flecs::entity ent, const Planet&, const Transform& transf, const Team& team,

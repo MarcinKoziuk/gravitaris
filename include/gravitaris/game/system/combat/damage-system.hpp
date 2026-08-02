@@ -42,6 +42,12 @@ private:
 
     LandingParams m_landingParams;
 
+    // Counts every hit a shield has resolved, so two rounds landing on the
+    // same plate on the same tick roll separately. Sim state like any other:
+    // it only advances inside Update, so a replay walks it identically. Never
+    // replicated -- only the server resolves damage.
+    std::uint32_t m_leakSeq = 0;
+
     void ResolveShipRams();
 
     // Kills anything that has reached a star's surface. A rule, not a
@@ -56,8 +62,8 @@ private:
     // landing and ram damage bypass it. `element` is the shield shape the
     // query actually struck (PhysicsBody::SHIELD_BUBBLE, or a plate index),
     // or nullopt when the round reached bare hull.
-    float AbsorbWithShield(flecs::entity target, float damage, const Magnum::Vector2& at,
-                           std::optional<std::uint8_t> element);
+    float AbsorbWithShield(std::uint64_t step, flecs::entity target, float damage,
+                           const Magnum::Vector2& at, std::optional<std::uint8_t> element);
 
     // Which of `ent`'s shield shapes `shape` is, or nullopt for plain hull.
     [[nodiscard]] std::optional<std::uint8_t> ShieldElementFor(flecs::entity ent, const cpShape* shape);
@@ -72,7 +78,9 @@ public:
 
     LandingParams& GetLandingParams() { return m_landingParams; }
 
-    void Update();
+    // `step` seeds the plating leak roll -- sim state in, outcome out, so a
+    // replay and a second peer leak on the same rounds (ADR 0001).
+    void Update(std::uint64_t step);
 };
 
 } // namespace Gravitaris

@@ -91,6 +91,7 @@ struct EntityState {
     std::uint8_t missileAmmo = 0;
     std::uint8_t fireRateLevel = 0;
     std::uint8_t gunTierLevel = 0;
+    std::uint8_t missileTierLevel = 0;
     std::uint8_t shieldLevel = 0;
     ShieldType shieldType = ShieldType::None;
     float shieldHp = 0.f;
@@ -114,7 +115,8 @@ struct EntityState {
     // Only written on a Lab (see Structure's own fields): what the client's
     // lab glow animates off.
     float researchProgress = 0.f;
-    bool upgradeReady = false;
+    std::uint8_t upgradesReady = 0;
+    std::uint8_t researchStockLevel = 0;
 
     // Non-zero when this entity rides a fixed-radius offset off a (possibly
     // moving) parent planet -- PlanetSurfaceAttachment (attachAngularSpeed

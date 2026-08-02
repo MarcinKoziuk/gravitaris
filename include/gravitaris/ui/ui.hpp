@@ -137,7 +137,9 @@ private:
 
     Rml::Element* m_researchFill = nullptr;
     Rml::Element* m_researchValue = nullptr;
+    Rml::Element* m_researchTicks = nullptr;
     float m_researchFraction = -2.f;
+    int m_researchStocked = -1;
     std::string m_researchText;
 
     Rml::Element* m_chatLog = nullptr;
@@ -237,10 +239,12 @@ public:
 
     // The faction's research bar, 0..1, with `text` the countdown beside it --
     // this layer formats no times, the same way it holds no game state. A
-    // negative fraction blanks the row (no lab). The bar takes a "ready" class
-    // at full, so a waiting upgrade reads differently from a filling bar.
+    // negative fraction blanks the row (no lab). `stocked` is how many
+    // finished upgrades are queued up for collection: one pip each, and the
+    // bar takes a "ready" class while any are waiting. The two are separate
+    // readings -- the bar keeps filling behind a non-empty queue.
     // Unchanged values are ignored, so calling it every frame is fine.
-    void SetResearchReadout(float fraction, const std::string& text);
+    void SetResearchReadout(float fraction, int stocked, const std::string& text);
 
     // Chat lines over the game view, oldest first; an empty list clears the
     // log. Only rebuilt when the contents actually change, so calling it every

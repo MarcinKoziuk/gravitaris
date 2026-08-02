@@ -38,6 +38,8 @@ static bool ShieldElementLive(flecs::entity ent, std::uint8_t element)
     return loadout && ShieldElementLive(*loadout, element);
 }
 
+static float LeakRoll(std::uint64_t step, std::uint32_t seq, std::uint8_t element);
+
 DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
                            const UpgradeCatalog& catalog)
         : m_registry(registry)
@@ -46,7 +48,7 @@ DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem,
         , m_catalog(catalog)
 {}
 
-void DamageSystem::Update()
+void DamageSystem::Update(std::uint64_t step)
 {
     ResolveShipRams();
     ResolveStarContact();
@@ -163,7 +165,8 @@ void DamageSystem::Update()
 
         const Magnum::Vector2 hitPoint{static_cast<float>(search.targetPoint.x),
                                        static_cast<float>(search.targetPoint.y)};
-        const float toHull = AbsorbWithShield(search.target, bullet.damage, hitPoint, search.targetElement);
+        const float toHull =
+                AbsorbWithShield(step, search.target, bullet.damage, hitPoint, search.targetElement);
 
         // A hit stopped entirely by a shield still consumes the round, but
         // emits no Impact -- the hull took nothing, and the hit flash reads
@@ -190,8 +193,8 @@ void DamageSystem::Update()
     }
 }
 
-float DamageSystem::AbsorbWithShield(flecs::entity target, float damage, const Magnum::Vector2& at,
-                                     std::optional<std::uint8_t> element)
+float DamageSystem::AbsorbWithShield(std::uint64_t step, flecs::entity target, float damage,
+                                     const Magnum::Vector2& at, std::optional<std::uint8_t> element)
 {
     ShipLoadout* loadout = target.try_get_mut<ShipLoadout>();
     if (!loadout || loadout->shieldHp <= 0.f) return damage;
@@ -208,10 +211,13 @@ float DamageSystem::AbsorbWithShield(flecs::entity target, float damage, const M
 
     const ShipStats stats = m_catalog.ResolveStats(loadout->levels);
 
-    // Plating leaks a fixed share of every hit however much charge is left,
-    // which is what keeps it from being strictly better than the bubble's
-    // bigger but slower reservoir.
-    const float absorbable = damage * stats.shieldAbsorbFraction;
+    // Plating stops most rounds whole and lets the rest through, however much
+    // charge is left -- which is what keeps it from being strictly better than
+    // the bubble's bigger but slower reservoir. Deeper plating leaks less of
+    // each round that does get through, not fewer of them.
+    const bool leaks = stats.shieldLeakChance > 0.f
+            && LeakRoll(step, m_leakSeq++, *element) < stats.shieldLeakChance;
+    const float absorbable = leaks ? damage * (1.f - stats.shieldLeakFraction) : damage;
     float absorbed;
 
     if (*element == PhysicsBody::SHIELD_BUBBLE) {
@@ -365,6 +371,24 @@ void DamageSystem::ResolveShipRams()
         // free, so a hard enough ram kills both without a special case here.
         m_eventQueue.Emit(GameEventType::Impact, survivor, contact, static_cast<std::uint32_t>(damage * 10.f));
     }
+}
+
+// 0..1 from sim state alone (ADR 0001: no std::rand), so a replay and a second
+// peer leak on exactly the same rounds. FNV-1a over the tick, the hit's own
+// ordinal and the element it landed on, then 24 bits of that as a fraction.
+static float LeakRoll(std::uint64_t step, std::uint32_t seq, std::uint8_t element)
+{
+    std::uint32_t h = 2166136261u;
+    const auto mix = [&h](std::uint32_t v) {
+        for (int byte = 0; byte < 4; ++byte) {
+            h = (h ^ ((v >> (byte * 8)) & 0xffu)) * 16777619u;
+        }
+    };
+    mix(static_cast<std::uint32_t>(step));
+    mix(static_cast<std::uint32_t>(step >> 32));
+    mix(seq);
+    mix(element);
+    return static_cast<float>(h & 0xffffffu) / 16777216.f;
 }
 
 } // namespace Gravitaris

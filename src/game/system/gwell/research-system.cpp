@@ -55,7 +55,8 @@ void ResearchSystem::Update(std::uint64_t step)
         flecs::entity anyLab;                  // whichever one announces a finished upgrade
         Magnum::Vector2 anyLabPos;
         float progress = 0.f;                  // mirrored onto those labs at the end of the tick
-        bool ready = false;
+        std::uint8_t ready = 0;
+        std::uint8_t stockLevel = 0;
     };
     std::array<TeamResearch, NUM_TEAMS> byTeam{};
 
@@ -144,11 +145,16 @@ void ResearchSystem::Update(std::uint64_t step)
     m_registry.each([&](FactionState& fs) {
         TeamResearch& tr = byTeam[static_cast<std::size_t>(fs.team)];
 
-        if (fs.upgradeReady) {
+        if (fs.upgradesReady > 0) {
             if (const flecs::entity ship = collector[static_cast<std::size_t>(fs.team)]; ship.is_alive()) {
                 ShipLoadout* loadout = ship.try_get_mut<ShipLoadout>();
                 UpgradeDraft* draft = ship.try_get_mut<UpgradeDraft>();
                 if (loadout && draft) {
+                    // The pool holds cards of both scopes, so what a draft is
+                    // rolled and scored against is the hull's levels overlaid
+                    // with its faction's.
+                    const UpgradeLevels levels = UpgradeCatalog::Combined(loadout->levels, fs.levels);
+
                     // Rolled from the empty state, not from `available`: a
                     // landing that bounces, or a dock held a hair outside its
                     // tolerance for a tick, drops eligibility and would
@@ -156,7 +162,7 @@ void ResearchSystem::Update(std::uint64_t step)
                     if (draft->offers[0] == 0) {
                         const NetId* netId = ship.try_get<NetId>();
                         draft->offers = m_catalog.RollOffers(
-                                loadout->levels, DraftSeed(step, netId ? netId->value : 0u));
+                                levels, DraftSeed(step, netId ? netId->value : 0u));
                     }
                     // Re-raised every qualifying tick, not only the one that
                     // rolled: the last pass below clears it for anyone who is
@@ -171,16 +177,23 @@ void ResearchSystem::Update(std::uint64_t step)
                     // never fitted a shield because the card came up second.
                     const Controls* controls = ship.try_get<Controls>();
                     const std::uint8_t slot = ship.has<AIPilot>()
-                            ? m_catalog.PreferredOffer(draft->offers, *loadout)
+                            ? m_catalog.PreferredOffer(draft->offers, *loadout, levels)
                             : (controls ? controls->upgradePick : 0);
 
                     if (slot >= 1 && slot <= UpgradeCatalog::OFFER_COUNT) {
                         const id_t chosen = draft->offers[slot - 1];
                         const UpgradeDef* def = m_catalog.Find(chosen);
+                        // A faction-scope card lands on the faction and is
+                        // kept when this hull dies; everything else is carried
+                        // by the ship that collected it.
+                        const bool granted = def && (def->scope == UpgradeScope::Faction
+                                                             ? m_catalog.ApplyFaction(*def, fs.levels)
+                                                             : m_catalog.Apply(*def, *loadout));
                         // A no-op pick (unknown id, or a tier that maxed out
-                        // between the roll and the press) leaves the bar full
-                        // so the player can pick again rather than losing it.
-                        if (def && m_catalog.Apply(*def, *loadout)) {
+                        // between the roll and the press) leaves the stock
+                        // untouched so the player can pick again rather than
+                        // losing it.
+                        if (granted) {
                             // Spent here rather than inferred from a loadout
                             // diff: the thing that hands an upgrade over is
                             // the thing that knows one was collected.
@@ -188,8 +201,10 @@ void ResearchSystem::Update(std::uint64_t step)
                                 aiPilot && aiPilot->upgradesWanted > 0) {
                                 --aiPilot->upgradesWanted;
                             }
-                            fs.upgradeReady = false;
-                            fs.researchProgress = 0.f;
+                            // Spends one off the queue; the bar itself is not
+                            // reset -- work already done toward the next one
+                            // is not the collector's to lose.
+                            --fs.upgradesReady;
                             draft->available = false;
                             draft->offers = {};
 
@@ -207,12 +222,15 @@ void ResearchSystem::Update(std::uint64_t step)
                 }
             }
         }
-        // Lose every lab and the bar simply stalls where it stood.
-        else if (tr.labs > 0) {
+        // Lose every lab and the bar simply stalls where it stood. Filling the
+        // queue stalls it too -- but only until somebody collects, which is
+        // the point of a bounded queue rather than an unbounded bank.
+        const int capacity = m_catalog.ResearchStockCapacity(fs.levels, m_config.research.stockCapacity);
+        if (tr.labs > 0 && fs.upgradesReady < capacity) {
             fs.researchProgress += progressPerLabPerTick * static_cast<float>(tr.labs);
             if (fs.researchProgress >= 1.f) {
-                fs.researchProgress = 1.f;
-                fs.upgradeReady = true;
+                fs.researchProgress = 0.f;
+                ++fs.upgradesReady;
                 // Every pilot of this faction now has a reason to come home
                 // again. Without this a ship spent the intent it spawned with
                 // and never went shopping for the rest of the match, however
@@ -228,7 +246,8 @@ void ResearchSystem::Update(std::uint64_t step)
         }
 
         tr.progress = fs.researchProgress;
-        tr.ready = fs.upgradeReady;
+        tr.ready = fs.upgradesReady;
+        tr.stockLevel = fs.levels.researchStock;
     });
 
     if (!restocked.empty()) {
@@ -245,9 +264,9 @@ void ResearchSystem::Update(std::uint64_t step)
     m_registry.each([&](flecs::entity ship, UpgradeDraft& draft, const Team& team) {
         if (std::find(offered.begin(), offered.end(), ship) != offered.end()) return;
         draft.available = false;
-        // The rolled three survive as long as the faction's upgrade is still
-        // waiting, so re-qualifying for the same one shows the same offers.
-        const bool waiting = team.id != TeamId::None && byTeam[static_cast<std::size_t>(team.id)].ready;
+        // The rolled three survive as long as the faction's queue is not
+        // empty, so re-qualifying shows the same offers.
+        const bool waiting = team.id != TeamId::None && byTeam[static_cast<std::size_t>(team.id)].ready > 0;
         if (!waiting) draft.offers = {};
     });
 
@@ -257,7 +276,8 @@ void ResearchSystem::Update(std::uint64_t step)
         if (s.type != StructureType::Lab || team.id == TeamId::None) return;
         const TeamResearch& tr = byTeam[static_cast<std::size_t>(team.id)];
         s.researchProgress = tr.progress;
-        s.upgradeReady = tr.ready;
+        s.upgradesReady = tr.ready;
+        s.researchStockLevel = tr.stockLevel;
     });
 }
 

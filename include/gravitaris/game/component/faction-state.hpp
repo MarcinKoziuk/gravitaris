@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include <gravitaris/game/component/team.hpp>
+#include <gravitaris/game/upgrade/upgrade-def.hpp>
 
 namespace Gravitaris {
 
@@ -26,11 +27,18 @@ struct FactionState {
     bool defeated = false;
     // Fighter-upgrade research, pooled across the faction's Labs (all labs
     // cooperate, so more labs finish sooner -- gravity-well-1997.md). 0..1;
-    // holds at 1 with upgradeReady set until a ship collects it at one of
-    // those labs' sites, then restarts from 0. Authoritative copy: clients
-    // read it off each Lab's Structure, which ResearchSystem mirrors it into.
+    // restarts from 0 each time it fills. Authoritative copy: clients read it
+    // off each Lab's Structure, which ResearchSystem mirrors it into.
     float researchProgress = 0.f;
-    bool upgradeReady = false;
+    // Finished upgrades waiting for a ship to come and collect them. The bar
+    // above stops advancing once this reaches the faction's queue capacity
+    // (UpgradeCatalog::ResearchStockCapacity) -- labs that nobody collects
+    // from eventually idle, rather than banking a match's worth of upgrades
+    // for whoever lands first.
+    std::uint8_t upgradesReady = 0;
+    // The faction's own UpgradeScope::Faction picks, which outlive every ship
+    // that collected one. Only researchStock is rolled today.
+    UpgradeLevels levels;
 };
 
 } // namespace Gravitaris

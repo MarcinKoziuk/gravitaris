@@ -211,7 +211,7 @@ void Game::Update()
         m_shieldSystem.Update();
         // DamageSystem applies this step's bullet hits and landing impacts, so
         // DeathSystem (next) sees final hp and can explode ships the same tick.
-        m_damageSystem.Update();
+        m_damageSystem.Update(m_step);
         m_structureDefenseSystem.Update();
         m_landingStateSystem.Update();
         // After LandingStateSystem, so a ship that touched down this tick is

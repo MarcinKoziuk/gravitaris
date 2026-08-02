@@ -107,7 +107,7 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
                 entity.emplace<HitOutline>(m_resourceLoader.Load<Body>(state.modelId));
                 entity.emplace<Structure>(Structure{state.structureType, state.rawMaterials,
                                                     state.finishedMaterials, state.researchProgress,
-                                                    state.upgradeReady});
+                                                    state.upgradesReady, state.researchStockLevel});
             }
             if (state.type == NetEntityType::Planet) {
                 entity.emplace<GravitySource>(GravitySource{state.gravityMass, state.gravityMultiplier});
@@ -208,7 +208,8 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
             structure->rawMaterials = state.rawMaterials;
             structure->finishedMaterials = state.finishedMaterials;
             structure->researchProgress = state.researchProgress;
-            structure->upgradeReady = state.upgradeReady;
+            structure->upgradesReady = state.upgradesReady;
+            structure->researchStockLevel = state.researchStockLevel;
         }
         if (GravitySource* source = entity.try_get_mut<GravitySource>()) {
             source->mass = state.gravityMass;
@@ -226,6 +227,7 @@ static void ApplyLoadout(flecs::entity entity, const EntityState& state)
         loadout->missileAmmo = state.missileAmmo;
         loadout->levels.fireRate = state.fireRateLevel;
         loadout->levels.gunTier = state.gunTierLevel;
+        loadout->levels.missileTier = state.missileTierLevel;
         loadout->levels.shield = state.shieldLevel;
         loadout->levels.shieldType = state.shieldType;
         loadout->shieldHp = state.shieldHp;

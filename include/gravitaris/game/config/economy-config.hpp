@@ -53,6 +53,9 @@ struct EconomyConfig {
     struct Research {
         // Seconds one Lab needs alone; N labs finish N times as fast.
         double secondsPerUpgrade = 30.0;
+        // Finished upgrades a faction can leave uncollected before its labs
+        // idle. The RESEARCH QUEUE upgrade widens it from here.
+        int stockCapacity = 3;
     } research;
 
     // Hull restored to a ship standing on one of its faction's developed

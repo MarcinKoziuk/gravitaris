@@ -38,8 +38,12 @@ claim_ticks = 60
 
 # Seconds one Lab needs to finish an upgrade alone; N labs finish N times as
 # fast. Research is unfunded -- no materials cost yet.
+#
+# stock_capacity is how many finished upgrades may wait uncollected before the
+# labs idle; the RESEARCH QUEUE upgrade widens it, to 10 at its last level.
 [research]
 seconds_per_upgrade = 30.0
+stock_capacity = 3
 
 # Hull per second restored to a ship standing on one of its own developed
 # planets (a Base and a Colony, the same pairing a respawn needs). Free --

@@ -25,7 +25,7 @@ namespace Gravitaris {
 
 // Bump on any wire-layout change; ReadSnapshot rejects mismatches outright
 // (no cross-version compatibility until there's a reason to have it).
-static constexpr std::uint8_t SNAPSHOT_VERSION = 10; // v10: +per-plate ablative charge
+static constexpr std::uint8_t SNAPSHOT_VERSION = 11; // v11: missile-bay tier, research queue depth
 
 // Sanity caps so a garbage buffer can't make ReadSnapshot allocate wildly.
 static constexpr std::uint32_t MAX_ENTITIES = 4096;
@@ -78,6 +78,7 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             state.missileAmmo = loadout->missileAmmo;
             state.fireRateLevel = loadout->levels.fireRate;
             state.gunTierLevel = loadout->levels.gunTier;
+            state.missileTierLevel = loadout->levels.missileTier;
             state.shieldLevel = loadout->levels.shield;
             state.shieldType = loadout->levels.shieldType;
             state.shieldHp = loadout->shieldHp;
@@ -110,7 +111,8 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             state.rawMaterials = structure->rawMaterials;
             state.finishedMaterials = structure->finishedMaterials;
             state.researchProgress = structure->researchProgress;
-            state.upgradeReady = structure->upgradeReady;
+            state.upgradesReady = structure->upgradesReady;
+            state.researchStockLevel = structure->researchStockLevel;
         }
         if (const PlanetSurfaceAttachment* attach = entity.try_get<PlanetSurfaceAttachment>()) {
             state.attachParentNetId = attach->planetNetId;
@@ -159,6 +161,7 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteU8(e.missileAmmo);
         out.WriteU8(e.fireRateLevel);
         out.WriteU8(e.gunTierLevel);
+        out.WriteU8(e.missileTierLevel);
         out.WriteU8(e.shieldLevel);
         out.WriteU8(static_cast<std::uint8_t>(e.shieldType));
         out.WriteF32(e.shieldHp);
@@ -179,7 +182,8 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteF32(e.rawMaterials);
         out.WriteF32(e.finishedMaterials);
         out.WriteF32(e.researchProgress);
-        out.WriteU8(e.upgradeReady ? 1 : 0);
+        out.WriteU8(e.upgradesReady);
+        out.WriteU8(e.researchStockLevel);
         out.WriteU32(e.attachParentNetId);
         out.WriteF32(e.attachRadius);
         out.WriteF32(e.attachTheta);
@@ -246,6 +250,7 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.missileAmmo = in.ReadU8();
         e.fireRateLevel = in.ReadU8();
         e.gunTierLevel = in.ReadU8();
+        e.missileTierLevel = in.ReadU8();
         e.shieldLevel = in.ReadU8();
         e.shieldType = static_cast<ShieldType>(in.ReadU8());
         e.shieldHp = in.ReadF32();
@@ -272,7 +277,8 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.rawMaterials = in.ReadF32();
         e.finishedMaterials = in.ReadF32();
         e.researchProgress = in.ReadF32();
-        e.upgradeReady = in.ReadU8() != 0;
+        e.upgradesReady = in.ReadU8();
+        e.researchStockLevel = in.ReadU8();
         e.attachParentNetId = in.ReadU32();
         e.attachRadius = in.ReadF32();
         e.attachTheta = in.ReadF32();

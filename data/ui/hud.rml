@@ -229,6 +229,28 @@
 				background-color: #fc0;
 			}
 
+			/* One pip per finished upgrade waiting on the pad, in the bar's
+			   own "ready" colour. Its own row rather than a number beside the
+			   countdown: the bar behind the queue keeps filling, so the two
+			   are separate readings and a pilot deciding whether to fly home
+			   wants the count at a glance. Written from code
+			   (UI::SetResearchReadout). */
+			div#research_ticks
+			{
+				min-height: 10dp;
+				margin-top: 6dp;
+			}
+
+			span.research_tick
+			{
+				display: inline-block;
+				vertical-align: top;
+				width: 10dp;
+				height: 10dp;
+				margin-right: 4dp;
+				background-color: #fc0;
+			}
+
 				/* One tick per stored missile. A full rack is wider than the
 			   sidebar, so the ticks wrap -- hence a min-height rather than a
 			   fixed one. Written from code (UI::SetMissileAmmo). */
@@ -544,6 +566,7 @@
 						<div class="bar_track">
 							<div id="research_fill"></div>
 						</div>
+						<div id="research_ticks"></div>
 					</div>
 				</div>
 

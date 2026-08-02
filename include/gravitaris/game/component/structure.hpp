@@ -35,9 +35,13 @@ struct Structure {
     // Only written on a Lab: its faction's pooled research state (owned by
     // FactionState, which is server-only), copied here every tick by
     // ResearchSystem so it rides the existing Structure replication -- the
-    // client's lab glow is the only reader.
+    // client's lab glow and the sidebar's readout are the only readers.
     float researchProgress = 0.f;
-    bool upgradeReady = false;
+    std::uint8_t upgradesReady = 0;
+    // The faction's RESEARCH QUEUE level, so a client can label that card with
+    // the tier its side actually holds -- FactionState's levels block is
+    // server-only, and this is the same ride its progress already takes.
+    std::uint8_t researchStockLevel = 0;
 };
 
 // Marks a structure as an auto-firing defense installation (Base, High

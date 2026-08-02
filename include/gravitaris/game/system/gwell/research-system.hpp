@@ -11,16 +11,19 @@ namespace Gravitaris {
 
 // Fighter-upgrade research (gravity-well-1997.md's Lab role): a faction's
 // Labs pool their effort into one research bar, so more labs finish sooner.
-// When it fills, the faction's labs flash "upgrade ready" and a same-team
-// ship that lands at one of those labs' planets -- or at that planet's High
-// Port -- is offered a draft of three upgrades from the pool
-// (data/upgrades.toml). Taking one restarts research.
+// Each time it fills, one finished upgrade joins the faction's queue and the
+// bar starts over; a same-team ship that lands at one of those labs' planets
+// -- or at that planet's High Port -- is offered a draft of three upgrades
+// from the pool (data/upgrades.toml), and taking one spends a place in the
+// queue. The queue is bounded (economy.toml's stock_capacity, widened by the
+// RESEARCH QUEUE upgrade): a side whose pilots never come home eventually
+// idles its labs rather than banking the whole match.
 //
-// The draft is rolled once, against the collecting ship's own levels, and
-// held until it picks; the player picks with Controls::upgradePick, an AI
-// takes the first offer the same tick. Everything lands on the collecting
-// ship (UpgradeScope::Ship) -- faction-wide passives are a later scope, not a
-// second code path here.
+// The draft is rolled once, against the collecting ship's levels combined
+// with its faction's, and held until it picks; the player picks with
+// Controls::upgradePick, an AI scores the three. A pick lands on the
+// collecting ship, or -- for UpgradeScope::Faction -- on FactionState's own
+// levels block, where it outlives that ship.
 //
 // Runs after FactionSystem (whose Update creates the FactionState entities
 // this reads) and after LandingStateSystem (whose landed flags gate pickup).

@@ -163,7 +163,7 @@ void AIStrategySystem::Update()
     // home, on its own -- see the `shopping` term below.
     std::array<bool, NUM_TEAMS> teamUpgradeReady{};
     m_registry.each([&](const FactionState& fs) {
-        teamUpgradeReady[static_cast<std::size_t>(fs.team)] = fs.upgradeReady;
+        teamUpgradeReady[static_cast<std::size_t>(fs.team)] = fs.upgradesReady > 0;
     });
 
     const auto addStructure = [&](flecs::entity ent, const Damageable& hp, std::uint32_t planetNetId) {

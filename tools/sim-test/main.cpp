@@ -1356,11 +1356,62 @@ void TestUpgradeCatalog()
             "catalog: fire-rate levels shorten the gun's cooldown");
     Require(!catalog.IsEligible(*fireRate, levels), "catalog: a maxed tier stops being offered");
 
-    // The restock is exempt from that -- it is the one thing always on the
-    // table, however many times it has been taken.
+    // The missile line: nothing to fire, nowhere to put rounds and no restock
+    // on the table until a bay is fitted, and each tier widens all three.
+    const UpgradeDef* bay = catalog.FindKind(UpgradeKind::MissileTier);
     const UpgradeDef* rack = catalog.FindKind(UpgradeKind::MissileRack);
-    Require(rack != nullptr && catalog.IsEligible(*rack, levels),
-            "catalog: a repeatable restock is always eligible");
+    Require(bay != nullptr && rack != nullptr, "catalog: the pool has a missile bay and a restock");
+    Require(base.missile == nullptr && base.missileCapacity == 0,
+            "catalog: an unupgraded hull carries no launcher at all");
+    Require(!catalog.IsEligible(*rack, levels),
+            "catalog: rounds are not offered to a hull with nothing to fire them from");
+
+    ShipLoadout racked;
+    Require(catalog.Apply(*bay, racked), "catalog: the bay can be fitted");
+    Require(catalog.IsEligible(*rack, racked.levels),
+            "catalog: the restock joins the table once the bay is fitted");
+    Require(catalog.IsEligible(*rack, racked.levels) && catalog.Apply(*rack, racked),
+            "catalog: a repeatable restock is always eligible once unlocked");
+    Require(racked.missileAmmo == catalog.ResolveStats(racked.levels).missileCapacity,
+            "catalog: a restock fills the rack the fitted bay decides, and no further");
+
+    const WeaponDef* previous = nullptr;
+    int previousCapacity = 0;
+    for (std::uint8_t tier = 1; tier <= bay->maxLevel; ++tier) {
+        UpgradeLevels tierLevels;
+        tierLevels.missileTier = tier;
+        const ShipStats round = catalog.ResolveStats(tierLevels);
+        Require(round.missile != nullptr && round.missile->IsGuided(),
+                "catalog: every bay tier resolves to a guided round");
+        Require(round.missileCapacity > previousCapacity, "catalog: each bay tier widens the rack");
+        if (previous) {
+            Require(round.missile->damage > previous->damage
+                            && round.missile->lifetimeSeconds > previous->lifetimeSeconds
+                            && round.missile->guidance.turnRate > previous->guidance.turnRate,
+                    "catalog: each missile tier hits harder, flies longer and turns tighter");
+        }
+        previous = round.missile;
+        previousCapacity = round.missileCapacity;
+    }
+    // A round that loiters is one a pilot cannot break from however hard they
+    // turn, so the top tier's burn stays short whatever else it gains.
+    Require(previous->lifetimeSeconds <= 4.0, "catalog: even the top missile burns out in four seconds");
+    Require(previousCapacity <= 12, "catalog: the widest rack is twelve rounds");
+
+    // Widening the research queue is the one faction-scope pick, so it lands
+    // on a levels block of its own and never on a hull.
+    const UpgradeDef* queue = catalog.FindKind(UpgradeKind::ResearchStock);
+    Require(queue != nullptr && queue->scope == UpgradeScope::Faction,
+            "catalog: the research queue is a faction-scope upgrade");
+    UpgradeLevels faction;
+    ShipLoadout hull;
+    Require(!catalog.Apply(*queue, hull), "catalog: a faction pick is not applied to a ship");
+    Require(catalog.ResearchStockCapacity(faction, 3) == 3, "catalog: an unwidened queue is the base");
+    for (std::uint8_t level = 0; level < queue->maxLevel; ++level) {
+        Require(catalog.ApplyFaction(*queue, faction), "catalog: the queue widens a level at a time");
+    }
+    Require(!catalog.ApplyFaction(*queue, faction), "catalog: the queue stops at its last level");
+    Require(catalog.ResearchStockCapacity(faction, 3) == 10, "catalog: a fully widened queue holds ten");
 
     const UpgradeDef* gun = catalog.FindKind(UpgradeKind::WeaponTier);
     Require(gun != nullptr && !gun->tiers.empty(), "catalog: the pool has a weapon-tier upgrade");
@@ -1454,6 +1505,17 @@ void TestHardpointMounts()
             "hardpoints: a hull's two racks are separate mounts");
     Require(body->FindMount("missile", 2) == rackA, "hardpoints: the mount index wraps");
 
+    // Mounts a pilot cannot tell apart are mounts the feature does not have:
+    // every pair on a hull has to be far enough apart to read at ship scale.
+    // (fighter-1 is ~14 units nose to tail.)
+    const auto farApart = [](const Body::Hardpoint* a, const Body::Hardpoint* b) {
+        return (a->pos - b->pos).length() > 1.0;
+    };
+    Require(farApart(gun, cannon), "hardpoints: the gun and cannon muzzles are visibly apart");
+    Require(farApart(rackA, rackB), "hardpoints: the two racks are visibly apart");
+    Require(farApart(body->FindMount("gun", 0), body->FindMount("gun", 1)),
+            "hardpoints: the paired gun mounts are visibly apart");
+
     // A weapon that names a family the hull hasn't got falls back to its gun
     // mounts rather than to the origin; one that names nothing at all still
     // leaves from a real point on the hull.
@@ -1467,6 +1529,8 @@ void TestHardpointMounts()
     const Vector2d fromPlasma = ShipControlsSystem::ComputeBulletSpawn(transf, phys, 100., "plasma", 0).first;
     Require(fromGun != fromCannon, "hardpoints: a cannon round leaves from the cannon mount, not the gun's");
     Require(fromPlasma == fromGun, "hardpoints: an unmounted family falls back to the gun mount");
+    Require(ShipControlsSystem::ComputeBulletSpawn(transf, phys, 100., "gun", 1).first != fromGun,
+            "hardpoints: consecutive rounds alternate across a hull's paired mounts");
     Require((fromGun - transf.pos).length() > 1. && (fromGun - transf.pos).length() < 100.,
             "hardpoints: the muzzle is offset from the hull's center but still on it");
 
@@ -1519,6 +1583,67 @@ void TestShields()
     Require(target.get<Damageable>().hp == hullBefore,
             "shields: a bubble hit the shield can cover never reaches the hull");
 
+    // Plating is the other bargain: most rounds stopped whole, the rest
+    // putting a share of themselves into the hull behind. That share is what
+    // levels buy down -- so it is asserted on the resolved stats, while the
+    // "some, not all" is asserted on a burst of real rounds below.
+    const UpgradeDef* plating = game.GetUpgradeCatalog().FindKind(UpgradeKind::Shield, ShieldType::Plating);
+    Require(plating != nullptr, "shields: the pool has field plating");
+    float leakedBefore = 1.f;
+    for (std::uint8_t level = 1; level <= plating->maxLevel; ++level) {
+        UpgradeLevels levels;
+        levels.shieldType = ShieldType::Plating;
+        levels.shield = level;
+        const ShipStats stats = game.GetUpgradeCatalog().ResolveStats(levels);
+        Require(stats.shieldLeakChance > 0.f && stats.shieldLeakChance < 1.f,
+                "shields: plating leaks by chance, neither never nor always");
+        Require(stats.shieldLeakFraction < leakedBefore,
+                "shields: each plating tier leaks less of the round that gets through");
+        leakedBefore = stats.shieldLeakFraction;
+    }
+    Require(game.GetUpgradeCatalog().ResolveStats(target.get<ShipLoadout>().levels).shieldLeakChance == 0.f,
+            "shields: a bubble never leaks while it has charge");
+
+    // A burst into a plated hull, with the plates topped back up between
+    // rounds -- one plate holds less than a heavy round, so left alone this
+    // would only be measuring how fast a spent plate recharges. What each
+    // round does to the hull says which branch it took: nothing at all
+    // (stopped whole), or the leak fraction of it (through the plate).
+    flecs::entity plated = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{4000., 0.},
+                                               TeamId::Blue);
+    game.GetUpgradeCatalog().Apply(*plating, plated.get_mut<ShipLoadout>());
+    Require(IsPlated(plated.get<ShipLoadout>()), "shields: fighter-1 carries authored plates");
+
+    // Under one plate's own charge, or the plate runs out first and both
+    // branches land the same overflow on the hull.
+    const float roundDamage = 8.f;
+    const float leakFraction =
+            game.GetUpgradeCatalog().ResolveStats(plated.get<ShipLoadout>().levels).shieldLeakFraction;
+    int stopped = 0;
+    int leaked = 0;
+    const int rounds = 40;
+    for (int shot = 0; shot < rounds; ++shot) {
+        ShipLoadout& loadout = plated.get_mut<ShipLoadout>();
+        loadout.plates.fill(1000.f);
+        loadout.plateRegenDelay = {};
+        loadout.shieldHp = 1000.f * static_cast<float>(loadout.plateCount);
+        plated.get_mut<Damageable>().hp = 10000.f; // never dies mid-burst
+
+        flecs::entity round = spawner.SpawnBullet("models/bullets/bullet-0"_id,
+                                                  Vector2d{4000. - 200., 0.}, Vector2d{400., 0.},
+                                                  /*sensor=*/true);
+        round.emplace<Bullet>(3.0, TeamId::Red, roundDamage, 0u);
+        for (int tick = 0; tick < 60 && round.is_alive(); ++tick) game.Update();
+
+        const float toHull = 10000.f - plated.get<Damageable>().hp;
+        if (toHull < 0.01f) ++stopped;
+        else if (std::abs(toHull - roundDamage * leakFraction) < 0.01f) ++leaked;
+    }
+    Require(leaked > 0, "shields: some rounds get through plating");
+    Require(stopped > 0, "shields: plating stops rounds whole rather than bleeding every one");
+    Require(stopped + leaked == rounds,
+            "shields: every round is either stopped whole or leaks exactly the tier's share");
+
     fs.Shutdown();
 }
 
@@ -1550,16 +1675,16 @@ void TestResearch()
     const int soloTicks =
             static_cast<int>(game.GetEconomyConfig().research.secondsPerUpgrade / Game::PHYSICS_DELTA);
     for (int tick = 0; tick < soloTicks - 1; ++tick) game.Update();
-    Require(!research().upgradeReady, "research: one lab is not done before its research period");
+    Require(research().upgradesReady == 0, "research: one lab is not done before its research period");
     Require(lab.get<Structure>().researchProgress > 0.9f,
             "research: the lab mirrors its faction's progress for replication");
-    for (int tick = 0; tick < 5 && !research().upgradeReady; ++tick) game.Update();
-    Require(research().upgradeReady, "research: one lab finishes after its research period");
-    Require(lab.get<Structure>().upgradeReady, "research: the ready flag reaches the lab too");
+    for (int tick = 0; tick < 5 && research().upgradesReady == 0; ++tick) game.Update();
+    Require(research().upgradesReady == 1, "research: one lab finishes after its research period");
+    Require(lab.get<Structure>().upgradesReady == 1, "research: the queue depth reaches the lab too");
 
     // Nobody landed, so it just waits.
     for (int tick = 0; tick < 60; ++tick) game.Update();
-    Require(research().upgradeReady, "research: a finished upgrade waits until someone collects it");
+    Require(research().upgradesReady > 0, "research: a finished upgrade waits until someone collects it");
 
     // Pickup: same setup TestLandingAndClaiming uses to get a ship down
     // gently, on the planet the lab sits on.
@@ -1616,6 +1741,10 @@ void TestResearch()
     Require(ship.get<UpgradeDraft>().available,
             "research: settling back at the lab re-opens the same panel");
 
+    // The bar behind a finished upgrade keeps filling while it waits, so what
+    // a pick costs is one place in the queue -- not whatever the labs have
+    // done since.
+    const std::uint8_t queuedBefore = research().upgradesReady;
     std::uint32_t collectedSeq = 0;
     for (int tick = 0; tick < 60 && ship.is_alive() && !collectedSeq; ++tick) {
         pressPick(1);
@@ -1625,8 +1754,10 @@ void TestResearch()
         });
     }
     Require(collectedSeq != 0, "research: picking an offer emits UpgradeCollected");
-    Require(!research().upgradeReady, "research: collecting clears the ready flag");
-    Require(!ship.get<UpgradeDraft>().available, "research: the draft closes once it is spent");
+    Require(research().upgradesReady == queuedBefore - 1,
+            "research: collecting spends one place in the queue");
+    Require(!ship.get<UpgradeDraft>().available || research().upgradesReady > 0,
+            "research: the draft closes once the queue is empty");
 
     // Second lab: the pooled bar now fills twice as fast, and the still
     // -landed ship collects again.
@@ -1652,13 +1783,18 @@ void TestResearch()
                     || collected.levels.shield > 0,
             "research: collecting an upgrade changes the ship's loadout");
 
-    // Missiles from here on, whether or not the draft happened to offer them.
-    ship.get_mut<ShipLoadout>().missileAmmo = 30;
+    // Missiles from here on, whether or not the draft happened to offer them:
+    // the bay is what fits a launcher at all, so it goes on before the rounds.
+    UpgradeLevels missileLevels;
+    missileLevels.missileTier = 1;
+    ship.get_mut<ShipLoadout>().levels.missileTier = 1;
+    ship.get_mut<ShipLoadout>().missileAmmo =
+            static_cast<std::uint8_t>(game.GetUpgradeCatalog().ResolveStats(missileLevels).missileCapacity);
 
     // Firing spends one round per missile cooldown, not one per tick.
     const auto liveMissiles = [&] {
         int count = 0;
-        const WeaponDef* round = game.GetUpgradeCatalog().ResolveStats(UpgradeLevels{}).missile;
+        const WeaponDef* round = game.GetUpgradeCatalog().ResolveStats(missileLevels).missile;
         game.GetRegistry().each([&](const Bullet& b) {
             if (round && b.damage == round->damage) ++count;
         });
@@ -1711,6 +1847,47 @@ void TestResearch()
     }
     Require(firedMissile.is_alive(), "research: the missile is still flying a second later");
     Require(angleToEnemy() < launchAngle * 0.5, "research: guidance turned the missile toward its target");
+
+    fs.Shutdown();
+}
+
+// A faction that never comes home banks a bounded queue of finished upgrades
+// and then idles its labs, rather than saving up a whole match's worth for
+// whoever lands first.
+void TestResearchQueue()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    flecs::entity planet =
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 1e-9, 800., 1.0, 0.0);
+    planet.set<Team>(Team{TeamId::Blue});
+    spawner.SpawnStructure(StructureType::Lab, "models/structures/lab"_id, planet, TeamId::Blue);
+
+    const auto research = [&] {
+        FactionState found{};
+        game.GetRegistry().each([&](const FactionState& fs2) {
+            if (fs2.team == TeamId::Blue) found = fs2;
+        });
+        return found;
+    };
+
+    const int capacity = game.GetEconomyConfig().research.stockCapacity;
+    Require(capacity == 3, "research: three finished upgrades may wait by default");
+
+    const int soloTicks =
+            static_cast<int>(game.GetEconomyConfig().research.secondsPerUpgrade / Game::PHYSICS_DELTA);
+    // A period per upgrade plus one more, so a queue that did not stop would
+    // be over its capacity by the end rather than exactly at it.
+    for (int tick = 0; tick < soloTicks * (capacity + 1) + 10; ++tick) game.Update();
+
+    Require(research().upgradesReady == capacity, "research: the queue fills to its capacity and stops");
+    Require(research().researchProgress < 1.f, "research: a full queue leaves the bar short of done");
 
     fs.Shutdown();
 }
@@ -2438,7 +2615,8 @@ void TestAIUsesItsUpgrades()
 
         flecs::entity shooter = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{-500., 0.},
                                                     game.GetAIPresets().Default());
-        shooter.get_mut<ShipLoadout>().missileAmmo = 10;
+        shooter.get_mut<ShipLoadout>().levels.missileTier = 1; // no bay, no launcher
+        shooter.get_mut<ShipLoadout>().missileAmmo = 4;
         spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{500., 0.}, TeamId::Blue);
 
         bool launched = false;
@@ -3339,6 +3517,7 @@ int main()
     TestHardpointMounts();
     TestShields();
     TestResearch();
+    TestResearchQueue();
     TestSunIsLethal();
     TestBoost();
     TestFactionDefeatAndWin();

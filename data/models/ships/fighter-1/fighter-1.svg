@@ -134,16 +134,24 @@
     <circle
        style="opacity:1;fill:#ff0000;fill-opacity:0;stroke:#ff0000"
        id_t="small:1"
-       cx="373.5"
-       cy="40.518456"
+       cx="330"
+       cy="205"
        r="5"
        id="circle5"
        inkscape:label="gun_0" />
     <circle
+       style="opacity:1;fill:#ff0000;fill-opacity:0;stroke:#ff0000"
+       id_t="small:1"
+       cx="419.16"
+       cy="205"
+       r="5"
+       id="circle5-2"
+       inkscape:label="gun_1" />
+    <circle
        style="display:inline;fill:#ff0000;fill-opacity:0;stroke:#ff0000"
        id_t="small:1"
-       cx="373.46872"
-       cy="43"
+       cx="373.5"
+       cy="40.518456"
        r="5"
        id="circle5-8"
        inkscape:label="cannon_0" />

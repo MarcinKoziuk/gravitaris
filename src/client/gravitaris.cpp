@@ -467,23 +467,22 @@ void GravitarisApplication::RefreshResearchReadout()
 {
     const std::optional<CGame::ResearchReadout> research = m_game->GetResearchReadout();
     if (!research) {
-        m_ui.SetResearchReadout(-1.f, "");
+        m_ui.SetResearchReadout(-1.f, 0, "");
         return;
     }
 
-    std::string text = "ready";
-    if (!research->ready) {
-        // Rounded up, so a bar that hasn't finished never reads 0:00.
-        const int seconds = static_cast<int>(std::ceil(research->secondsRemaining));
-        char buffer[16];
-        std::snprintf(buffer, sizeof(buffer), "%d:%02d", seconds / 60, seconds % 60);
-        text = buffer;
-    }
+    // The countdown is always to the *next* one -- what is already on the pad
+    // is the pip row's job, and the bar behind a non-empty queue keeps filling.
+    // Rounded up, so a bar that hasn't finished never reads 0:00.
+    const int seconds = static_cast<int>(std::ceil(research->secondsRemaining));
+    char buffer[16];
+    std::snprintf(buffer, sizeof(buffer), "%d:%02d", seconds / 60, seconds % 60);
+    std::string text = buffer;
     // Two labs research twice as fast; the sidebar says why the countdown
     // moves faster than the wall clock.
     if (research->labs > 1) text += " x" + std::to_string(research->labs);
 
-    m_ui.SetResearchReadout(research->progress, text);
+    m_ui.SetResearchReadout(research->progress, research->ready, text);
 }
 
 // One command for the tick Update() is about to run: keyboard, autopilot and

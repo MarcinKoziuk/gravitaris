@@ -50,11 +50,13 @@ struct WeaponDef {
 // the code that reads it; adding another tier, cost or magnitude of an
 // existing behavior is a data edit alone.
 enum class UpgradeKind : std::uint8_t {
-    MissileRack, // rounds onto the rack -- the only repeatable kind
-    FireRate,    // shorter cooldown, whichever weapon is fitted
-    WeaponTier,  // fits the next weapon up its line
-    Shield,      // a damage buffer in front of the hull
-    Boost,       // an overburn: more thrust, and briefly past the speed cap
+    MissileRack,  // rounds onto the rack -- the only repeatable kind
+    FireRate,     // shorter cooldown, whichever weapon is fitted
+    WeaponTier,   // fits the next weapon up its line
+    MissileTier,  // fits the launcher, then the next round up, and widens the rack
+    Shield,       // a damage buffer in front of the hull
+    Boost,        // an overburn: more thrust, and briefly past the speed cap
+    ResearchStock, // how many finished upgrades a faction can queue up
 };
 
 // Which shield a ship is carrying. Unlike the levels, this is a real choice:
@@ -103,9 +105,15 @@ struct UpgradeDef {
     // Relative odds of appearing in a draft, among everything still eligible.
     float weight = 1.f;
 
+    // Another upgrade this one is locked behind: it stays off the table until
+    // that one is at level 1. Zero means no prerequisite. This is what makes a
+    // weapon line a line rather than a set of independent pickups -- rounds
+    // are not offered to a hull with nothing to fire them from.
+    id_t requiresId = 0;
+
     struct Rack {
         int perPickup = 0;
-        int capacity = 0;
+        int capacity = 0; // MissileTier: per level; MissileRack: unused (the fitted bay decides)
     } rack;
 
     struct FireRate {
@@ -114,9 +122,15 @@ struct UpgradeDef {
         float cooldownScale = 1.f;
     } fireRate;
 
-    // WeaponTier only: the weapon fitted at each level, in order. Level N
-    // means tiers[N - 1], so maxLevel is bounded by this list's length.
+    // WeaponTier/MissileTier only: the weapon fitted at each level, in order.
+    // Level N means tiers[N - 1], so maxLevel is bounded by this list's length.
     std::vector<id_t> tiers;
+
+    // ResearchStock only: how much each level widens the faction's queue of
+    // finished-but-uncollected upgrades, over economy.toml's base.
+    struct Stock {
+        int perLevel = 0;
+    } stock;
 
     // Boost only. The whole point is stopping: a ship bearing down on a
     // planet gets the thrust to kill its speed in time, and the same button
@@ -136,9 +150,14 @@ struct UpgradeDef {
         float capacity = 0.f;         // per level
         float regenPerSecond = 0.f;   // per level
         float regenDelaySeconds = 0.f; // quiet time after a hit before regen resumes
-        // Share of an incoming hit the shield can eat; the remainder always
-        // reaches the hull, however much charge is left.
-        float absorbFraction = 1.f;
+        // How often a hit gets through at all, however much charge is left.
+        // Zero is an emitter that stops everything until it is spent (the
+        // bubble); the plates trade that for a bigger, faster reservoir.
+        float leakChance = 0.f;
+        // Share of a leaking hit that reaches the hull, one entry per level --
+        // a deeper stack of plates leaks less of each round that gets through,
+        // not fewer of them.
+        std::vector<float> leakFraction;
     } shield;
 };
 
@@ -148,9 +167,15 @@ struct UpgradeDef {
 struct UpgradeLevels {
     std::uint8_t fireRate = 0;
     std::uint8_t gunTier = 0;
+    // Zero means the hull carries no launcher at all, not a stock one: there
+    // is nothing to fire and nowhere to put rounds until the bay is fitted.
+    std::uint8_t missileTier = 0;
     std::uint8_t shield = 0;
     ShieldType shieldType = ShieldType::None;
     std::uint8_t boost = 0;
+    // UpgradeScope::Faction, so this one lives on FactionState's own block
+    // rather than a ship's -- see ResearchSystem.
+    std::uint8_t researchStock = 0;
 };
 
 // UpgradeLevels resolved against the catalog into what the sim actually
@@ -158,22 +183,26 @@ struct UpgradeLevels {
 // invalidate.
 //
 // `gun` and `missile` point into the catalog's own storage, which outlives
-// every ship, and are null only when the file names a weapon that isn't in
-// the table.
+// every ship. `missile` is null on a hull that has not fitted a bay, which is
+// most of them -- there is no stock launcher.
 struct ShipStats {
     const WeaponDef* gun = nullptr;
     const WeaponDef* missile = nullptr;
 
-    // The gun's own cooldown with the fire-rate tier applied; the missile's
-    // cadence is not upgradable, so it is the weapon's unmodified value.
+    // The gun's own cooldown with the fire-rate tier applied; the missile's is
+    // the fitted round's own, since its tier already carries the cadence.
     std::uint32_t fireCooldownTicks = 1;
     std::uint32_t missileCooldownTicks = 1;
+    // Rack width, which the bay's tier decides -- zero on a hull without one.
     int missileCapacity = 0;
 
     float shieldCapacity = 0.f;
     float shieldRegenPerSecond = 0.f;
     std::uint16_t shieldRegenDelayTicks = 0;
-    float shieldAbsorbFraction = 1.f;
+    // A hit leaks this often, and when it does this much of it reaches the
+    // hull. Both zero on an emitter that stops everything it has charge for.
+    float shieldLeakChance = 0.f;
+    float shieldLeakFraction = 0.f;
 
     // Zero boostTicks means the ship isn't carrying the upgrade at all, which
     // is what ShipControlsSystem tests before granting a burn -- the scales

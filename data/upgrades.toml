@@ -66,29 +66,55 @@ model = "models/bullets/bullet-heavy-cyan"
 sound = "sounds/gatling-1.wav"
 sound_gain = 0.7
 
-# Missiles are a weapon like any other; the rack upgrade only supplies rounds
-# for it. `guidance` is MissileSystem's homing envelope -- turn_rate is rad/s,
-# 2.5 being ~143 deg/s: tight enough to chase a turning fighter, loose enough
-# to be outrun by cutting hard across it.
+# The missile line. A hull carries no launcher at all until MISSILE BAY is
+# fitted; each tier of that upgrade fits the next round up and widens the rack.
+#
+# `guidance` is MissileSystem's homing envelope -- turn_rate in rad/s. The
+# governing number of the whole line is lifetime_seconds: a round that loiters
+# is one a pilot cannot break from, however hard they turn, so even the top
+# tier burns out in four seconds. Everything else here is tuned around that.
 [[weapon]]
 key = "missile_mk1"
 hardpoint = "missile"
 name = "Missile"
-cooldown_ticks = 30
-damage = 45.0
+cooldown_ticks = 36
+damage = 22.0
 speed = 140.0
-lifetime_seconds = 10.0
+lifetime_seconds = 2.5
 model = "models/missiles/missile-0"
 sound = "sounds/laser-1.wav"
-guidance = { turn_rate = 2.5, acceleration = 120.0, top_speed = 300.0 }
+guidance = { turn_rate = 1.2, acceleration = 90.0, top_speed = 210.0 }
+
+[[weapon]]
+key = "missile_mk2"
+hardpoint = "missile"
+name = "Missile II"
+cooldown_ticks = 30
+damage = 28.0
+speed = 150.0
+lifetime_seconds = 3.2
+model = "models/missiles/missile-0"
+sound = "sounds/laser-1.wav"
+guidance = { turn_rate = 1.6, acceleration = 110.0, top_speed = 235.0 }
+
+[[weapon]]
+key = "missile_mk3"
+hardpoint = "missile"
+name = "Missile III"
+cooldown_ticks = 26
+damage = 34.0
+speed = 160.0
+lifetime_seconds = 4.0
+model = "models/missiles/missile-0"
+sound = "sounds/laser-1.wav"
+guidance = { turn_rate = 2.0, acceleration = 130.0, top_speed = 260.0 }
 
 # ---- fittings --------------------------------------------------------------
 
-# What an unupgraded hull carries.
+# What an unupgraded hull carries. No missile: the launcher is researched, not
+# issued, so there is no `missile` fitting here to fall back on.
 [ship]
 gun = "autocannon"
-missile = "missile_mk1"
-missile_capacity = 60
 
 # Base/High Port turrets (StructureDefenseSystem) fire the same round a stock
 # ship does, on their own much slower cadence.
@@ -99,15 +125,44 @@ fire_cooldown_ticks = 90
 
 # ---- the research pool -----------------------------------------------------
 
+# The launcher itself, and the only way onto the missile line: a hull that
+# hasn't taken this has no rack, and MISSILE RACK stays off its table
+# (`requires`). Each tier fits the next round up and widens the rack by
+# `capacity`, so the ceiling is 12 rounds -- a handful of kills, not a
+# standoff weapon.
+[[upgrade]]
+key = "missile_bay"
+name = "MISSILE BAY"
+description = "Fits the launcher, then a harder round. Four more tubes each time."
+kind = "missile_tier"
+max_level = 3
+weight = 1.0
+tiers = ["missile_mk1", "missile_mk2", "missile_mk3"]
+per_pickup = 4 # rounds that come with the fitting
+capacity = 4   # per level
+
 [[upgrade]]
 key = "missile_rack"
 name = "MISSILE RACK"
-description = "30 guided rounds. Slow off the rail, but they chase."
+description = "Reload. Fills the tubes you have."
 kind = "missile_rack"
 max_level = 0 # a restock: always on the table
+requires = "missile_bay"
 weight = 1.4
-per_pickup = 30
-capacity = 60
+per_pickup = 6 # capped at the bay's own capacity
+
+# Where a faction's finished upgrades queue up while nobody is home to collect
+# them. Widening the queue is worth a pick of its own to a side whose pilots
+# fly long sorties -- and worth nothing to one that lands after every kill.
+[[upgrade]]
+key = "research_queue"
+name = "RESEARCH QUEUE"
+description = "One more finished upgrade can wait on the pad before the labs idle."
+kind = "research_stock"
+scope = "faction"
+max_level = 7 # 3 in stock by default, 10 with every level
+weight = 0.7
+per_level = 1
 
 [[upgrade]]
 key = "autoloader"
@@ -161,12 +216,12 @@ weight = 0.9
 capacity = 90.0
 regen_per_second = 2.0
 regen_delay_seconds = 3.0
-absorb_fraction = 1.0
+leak_chance = 0.0 # a bubble never lets a round through while it has charge
 
 [[upgrade]]
 key = "plating_shield"
 name = "FIELD PLATING"
-description = "Hull-hugging. Leaks a quarter of every hit, recharges fast."
+description = "Hull-hugging. Some rounds get through it -- fewer with every layer."
 kind = "shield"
 shield_type = "plating"
 max_level = 3
@@ -174,4 +229,12 @@ weight = 0.9
 capacity = 112.0
 regen_per_second = 7.0
 regen_delay_seconds = 1.0
-absorb_fraction = 0.75
+# Plating leaks by chance rather than by a fixed share of every hit: half the
+# rounds are stopped whole, and the rest put leak_fraction of themselves into
+# the hull behind. That is what keeps it from being strictly better than the
+# bubble's bigger, slower reservoir -- and what makes a bad exchange under it
+# a run of luck rather than arithmetic.
+leak_chance = 0.5
+# One entry per level: a quarter of the round gets through at the first layer,
+# a tenth at the third.
+leak_fraction = [0.25, 0.175, 0.10]

@@ -50,6 +50,7 @@ bool EconomyConfig::Load(IFilesystem& filesystem, const char* path)
     }
     if (const toml::table* t = root["research"].as_table()) {
         if (const auto v = (*t)["seconds_per_upgrade"].value<double>()) research.secondsPerUpgrade = *v;
+        if (const auto v = (*t)["stock_capacity"].value<int>()) research.stockCapacity = *v;
     }
     if (const toml::table* t = root["repair"].as_table()) {
         if (const auto v = (*t)["hull_per_second"].value<float>()) repair.hullPerSecond = *v;
