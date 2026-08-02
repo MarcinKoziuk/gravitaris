@@ -656,6 +656,14 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         return;
     }
 
+    // F2 toggles the AI labels on their own: no window, no input capture, so
+    // no startTextInput() here -- flying while watching them is the point.
+    if (event.key() == KeyEvent::Key::F2) {
+        m_debugUi->ToggleAiLabels();
+        event.setAccepted();
+        return;
+    }
+
     // When the overlay has keyboard focus (e.g. an active widget), route keys
     // to it and keep them away from gameplay.
     if (m_debugUi->HandleKeyPress(event)) {

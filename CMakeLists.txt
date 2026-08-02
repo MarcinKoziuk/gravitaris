@@ -724,6 +724,9 @@ add_executable(GravitarisNG
     src/cgame/ui/debug/spawn-panel.cpp
     src/cgame/ui/debug/ai-panel.hpp
     src/cgame/ui/debug/ai-panel.cpp
+    src/cgame/ui/debug/ai-names.hpp
+    src/cgame/ui/debug/ai-label-overlay.hpp
+    src/cgame/ui/debug/ai-label-overlay.cpp
     src/cgame/ui/debug/trajectory-panel.hpp
     src/cgame/ui/debug/trajectory-panel.cpp
     src/cgame/ui/debug/flight-panel.hpp

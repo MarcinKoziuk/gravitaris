@@ -16,6 +16,7 @@
 #include "physics-panel.hpp"
 #include "net-panel.hpp"
 #include "ai-panel.hpp"
+#include "ai-label-overlay.hpp"
 
 namespace Gravitaris {
 
@@ -71,6 +72,9 @@ bool DebugUi::WantsTextInput() const
 
 void DebugUi::BuildFrame()
 {
+    if (m_aiLabels) DrawAiLabelOverlay(m_game, m_uiSize);
+    if (!m_visible) return;
+
     ImGui::SetNextWindowSize(ImVec2(460.f, 520.f), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(24.f, 24.f), ImGuiCond_FirstUseEver);
 
@@ -133,7 +137,7 @@ void DebugUi::BuildFrame()
 
 void DebugUi::Draw()
 {
-    if (!m_visible) return;
+    if (!m_visible && !m_aiLabels) return;
 
     m_imgui.newFrame();
     BuildFrame();

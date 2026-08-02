@@ -29,6 +29,10 @@ private:
 
     bool m_visible = false;
 
+    // Independent of m_visible: the AI label overlay is a gameplay-watching
+    // aid, so it draws without the dev window and without capturing input.
+    bool m_aiLabels = false;
+
     // ImGui's logical display size, kept for world->UI overlay drawing.
     Magnum::Vector2 m_uiSize;
 
@@ -47,13 +51,16 @@ public:
     void SetVisible(bool visible) { m_visible = visible; }
     [[nodiscard]] bool IsVisible() const { return m_visible; }
 
+    void ToggleAiLabels() { m_aiLabels = !m_aiLabels; }
+    [[nodiscard]] bool ShowsAiLabels() const { return m_aiLabels; }
+
     // Re-layout on window/framebuffer resize.
     void Relayout(const Magnum::Vector2& uiSize,
                   const Magnum::Vector2i& windowSize,
                   const Magnum::Vector2i& framebufferSize);
 
     // Build the widgets and render them to the currently bound framebuffer.
-    // No-op while hidden.
+    // No-op while hidden and showing no AI labels.
     void Draw();
 
     // Whether ImGui currently wants the corresponding input, so the app can

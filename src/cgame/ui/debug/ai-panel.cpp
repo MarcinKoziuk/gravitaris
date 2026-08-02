@@ -14,15 +14,12 @@
 #include <gravitaris/cgame/cgame.hpp>
 #include <gravitaris/cgame/team-color.hpp>
 
+#include "ai-names.hpp"
 #include "ai-panel.hpp"
 
 namespace Gravitaris {
 
 namespace {
-
-constexpr const char* BEHAVIOR_NAMES[] = {"Idle", "Evade", "Intercept", "Orbit", "Land", "Depart"};
-constexpr const char* GOAL_NAMES[] = {"Dogfight", "Claim", "AttackComplex", "InterceptFrtr", "Defend"};
-constexpr const char* ORDER_NAMES[] = {"-", "Attack", "Land", "Patrol"};
 
 struct PilotRow {
     flecs::entity entity;
@@ -106,14 +103,14 @@ void DrawAiPanel(CGame& game)
         ImGui::PopStyleColor();
 
         ImGui::TableNextColumn();
-        if (row.strategy) ImGui::TextUnformatted(GOAL_NAMES[static_cast<int>(row.strategy->goal)]);
+        if (row.strategy) ImGui::TextUnformatted(AIGoalName(row.strategy->goal));
         else ImGui::TextDisabled("-");
 
         ImGui::TableNextColumn();
-        ImGui::TextUnformatted(ORDER_NAMES[static_cast<int>(row.pilot->order.kind)]);
+        ImGui::TextUnformatted(AIOrderKindName(row.pilot->order.kind));
 
         ImGui::TableNextColumn();
-        ImGui::TextUnformatted(BEHAVIOR_NAMES[static_cast<int>(row.pilot->behavior)]);
+        ImGui::TextUnformatted(AIBehaviorName(row.pilot->behavior));
 
         ImGui::TableNextColumn();
         DrawDistance(DistanceTo(row.pos, row.pilot->order.subject));
