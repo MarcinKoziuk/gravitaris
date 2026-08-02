@@ -440,6 +440,13 @@ void AIPilotSystem::Update(std::uint64_t step)
         }
 
         Vector2d desiredVel = transf.vel; // Idle: no correction
+
+        // Attitude to hold once there is no burn left to steer by; unset
+        // means the desired velocity itself, which is the control layer's own
+        // default.
+        Vector2d coastFacing;
+        bool hasCoastFacing = false;
+
         switch (pilot.behavior) {
             case AIBehavior::Evade:
                 if (well) {
@@ -507,71 +514,110 @@ void AIPilotSystem::Update(std::uint64_t step)
                 if (const Source* site = ordered ? findSource(pilot.order.subject) : nullptr) {
                     desiredVel = LandOnBody(transf, site->pos, site->vel, site->mass * gravityMultiplier,
                                             site->radius + SHIP_LANDING_CLEARANCE, pilot.guidance);
+
+                    // On the pad the attitude that matters is up -- legs to
+                    // the ground, which is what LandingStateSystem's
+                    // uprightness test asks for. Inside the flare LandOnBody
+                    // asks only to match the site's own motion, so without
+                    // this the control layer coasts onto that velocity
+                    // instead: for an orbiting planet a ~80 unit/s vector
+                    // along its orbit, i.e. a parked pilot spends the whole
+                    // stay chasing an attitude taken from the pad's direction
+                    // of travel rather than settling on its legs.
+                    const Vector2d r = transf.pos - site->pos;
+                    if (r.length() > 1e-6) {
+                        coastFacing = r.normalized();
+                        hasCoastFacing = true;
+                    }
                 }
                 break;
             case AIBehavior::Idle:
                 break;
         }
 
-        ControlFlags flags = FlyToVelocity(transf, desiredVel, pilot.flight, &pilot.throttle);
+        // The lead solution on this pilot's target, when it has one in range:
+        // both what the gun shoots at and what the nose is flown to.
+        std::optional<Vector2d> aimPoint;
+        double targetRange = 0.0;
+        if (pilot.behavior == AIBehavior::Intercept && targetTransf) {
+            const Vector2d relPos = targetTransf->pos - transf.pos;
+            targetRange = relPos.length();
+            if (targetRange < personality.fireRange) {
+                const Vector2d relVel = targetTransf->vel - transf.vel;
+                if (std::optional<double> t = SolveInterceptTime(relPos, relVel, bulletSpeed)) {
+                    aimPoint = relPos + relVel * (*t);
+                }
+            }
+        }
+
+        // Who owns the nose this tick. FlyToVelocity always resolves that in
+        // favour of the burn, which in a dogfight means flying the whole
+        // engagement broadside: at standoff the velocity correction is
+        // station-keeping chatter pointing nowhere in particular, so the ship
+        // pirouettes after it and the lead solution only lands inside
+        // fireTolerance by luck. Inside firing range the gun wins instead --
+        // up to a correction worth breaking the aim for, so an arrival still
+        // flips and brakes, and a pilot pushed inside its standoff still
+        // turns to open the range rather than boring in.
+        const Vector2d velError = desiredVel - transf.vel;
+        const bool gunHasTheNose = aimPoint.has_value()
+                && targetRange > personality.standoffDistance
+                && velError.length() < personality.aimPriorityError;
+
+        ControlFlags flags = gunHasTheNose
+                ? TrackBearing(transf, *aimPoint, velError, pilot.flight, &pilot.throttle)
+                : FlyToVelocity(transf, desiredVel, pilot.flight, &pilot.throttle,
+                                hasCoastFacing ? &coastFacing : nullptr);
 
         if (pilot.fireCooldown > 0) {
             --pilot.fireCooldown;
         }
-        else if (pilot.behavior == AIBehavior::Intercept && targetTransf) {
-            const Vector2d relPos = targetTransf->pos - transf.pos;
-            const Vector2d relVel = targetTransf->vel - transf.vel;
-            if (relPos.length() < personality.fireRange) {
-                if (std::optional<double> t = SolveInterceptTime(relPos, relVel, bulletSpeed)) {
-                    const Vector2d aim = relPos + relVel * (*t);
-                    const double aimHeading = std::atan2(aim.y(), aim.x());
-                    const double heading = static_cast<double>(transf.rot) - PI / 2.0;
+        else if (aimPoint) {
+            const double aimHeading = std::atan2(aimPoint->y(), aimPoint->x());
+            const double heading = static_cast<double>(transf.rot) - PI / 2.0;
 
-                    // Rolled once per firing opportunity (not every tick) and
-                    // held steady while waiting for an aligned shot -- a
-                    // sloppy shot is then a real, fixed aiming error rather
-                    // than the fire threshold flickering randomly tick to
-                    // tick (which would look like the gun spraying).
-                    if (personality.aimJitter > 0.0 && !pilot.aimBiasRolled) {
-                        pilot.aimBias = (SplitMix64NextUnit(rng) - 0.5) * 2.0 * personality.aimJitter;
-                        pilot.aimBiasRolled = true;
+            // Rolled once per firing opportunity (not every tick) and held
+            // steady while waiting for an aligned shot -- a sloppy shot is
+            // then a real, fixed aiming error rather than the fire threshold
+            // flickering randomly tick to tick (which would look like the gun
+            // spraying).
+            if (personality.aimJitter > 0.0 && !pilot.aimBiasRolled) {
+                pilot.aimBias = (SplitMix64NextUnit(rng) - 0.5) * 2.0 * personality.aimJitter;
+                pilot.aimBiasRolled = true;
+            }
+            const double tolerance = personality.fireTolerance
+                    + (personality.aimJitter > 0.0 ? pilot.aimBias : 0.0);
+
+            // Weapon discipline: bullets are gravity-immune and fly straight,
+            // so a body across the firing solution eats the shot. Holding fire
+            // costs nothing (the cooldown is only spent on shots actually
+            // taken) and stops a pilot from emptying itself into a planet the
+            // target is hiding behind.
+            bool blocked = false;
+            for (const Source& src : sources) {
+                if (src.radius <= 0.0) continue;
+                if (SegmentHitsCircle(transf.pos, transf.pos + *aimPoint, src.pos,
+                                      src.radius + SHOT_CLEARANCE)) {
+                    blocked = true;
+                    break;
+                }
+            }
+
+            if (!blocked && std::abs(WrapToPi(aimHeading - heading)) < tolerance) {
+                flags.firePrimary = true;
+                pilot.aimBiasRolled = false; // roll fresh for the next shot
+
+                if (personality.burstCount > 1) {
+                    if (pilot.burstShotsRemaining == 0) {
+                        pilot.burstShotsRemaining = personality.burstCount;
                     }
-                    const double tolerance = personality.fireTolerance
-                            + (personality.aimJitter > 0.0 ? pilot.aimBias : 0.0);
-
-                    // Weapon discipline: bullets are gravity-immune and fly
-                    // straight, so a body across the firing solution eats the
-                    // shot. Holding fire costs nothing (the cooldown is only
-                    // spent on shots actually taken) and stops a pilot from
-                    // emptying itself into a planet the target is hiding
-                    // behind.
-                    bool blocked = false;
-                    for (const Source& src : sources) {
-                        if (src.radius <= 0.0) continue;
-                        if (SegmentHitsCircle(transf.pos, transf.pos + aim, src.pos,
-                                              src.radius + SHOT_CLEARANCE)) {
-                            blocked = true;
-                            break;
-                        }
-                    }
-
-                    if (!blocked && std::abs(WrapToPi(aimHeading - heading)) < tolerance) {
-                        flags.firePrimary = true;
-                        pilot.aimBiasRolled = false; // roll fresh for the next shot
-
-                        if (personality.burstCount > 1) {
-                            if (pilot.burstShotsRemaining == 0) {
-                                pilot.burstShotsRemaining = personality.burstCount;
-                            }
-                            --pilot.burstShotsRemaining;
-                            pilot.fireCooldown = pilot.burstShotsRemaining > 0
-                                    ? personality.burstShotInterval
-                                    : personality.fireInterval;
-                        }
-                        else {
-                            pilot.fireCooldown = personality.fireInterval;
-                        }
-                    }
+                    --pilot.burstShotsRemaining;
+                    pilot.fireCooldown = pilot.burstShotsRemaining > 0
+                            ? personality.burstShotInterval
+                            : personality.fireInterval;
+                }
+                else {
+                    pilot.fireCooldown = personality.fireInterval;
                 }
             }
         }

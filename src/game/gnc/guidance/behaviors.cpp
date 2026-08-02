@@ -87,6 +87,17 @@ Vector2d InterceptEntity(const Transform& ship, const Transform& target, const G
     }
 
     Vector2d desired = GotoPoint(ship, aim, params) + matchVel;
+
+    // GotoPoint stops closing at arriveRadius but has no opinion once inside
+    // it, so an overshoot past standoff is never taken back and the ship
+    // settles into a permanent tight orbit on matchVel alone. Same radial
+    // hold as OrbitBody's station-keeping, against the standoff radius.
+    if (dist > 1e-6 && dist < params.arriveRadius) {
+        const double radialErr = params.arriveRadius - dist;
+        const double vRadial = std::clamp(radialErr * params.orbitRadialKp, 0.0, params.maxRadialSpeed);
+        desired -= (toTarget / dist) * vRadial;
+    }
+
     const double speed = desired.length();
     if (speed > cap) {
         desired *= cap / speed;

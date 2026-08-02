@@ -8,11 +8,15 @@ namespace Gravitaris {
 using Magnum::Vector2d;
 
 static double WrapToPi(double angle);
+static double HeadingError(const Transform& ship, const Vector2d& bearing);
+static ControlFlags SteerTo(const Transform& ship, double headingError,
+                            const FlightControllerParams& params);
 static void SetThrottle(ThrottleState& throttle, bool thrust,
                         const FlightControllerParams& params);
 
 ControlFlags FlyToVelocity(const Transform& ship, const Vector2d& desiredVel,
-                           const FlightControllerParams& params, ThrottleState* throttle)
+                           const FlightControllerParams& params, ThrottleState* throttle,
+                           const Vector2d* coastFacing)
 {
     ControlFlags flags{};
 
@@ -30,26 +34,18 @@ ControlFlags FlyToVelocity(const Transform& ship, const Vector2d& desiredVel,
 
     // Coasting still steers, onto the velocity it wants rather than onto the
     // (near-zero, so directionless) error: a ship left at whatever attitude
-    // its last correction ended on flies its whole cruise sideways.
-    const Vector2d steer = coasting ? desiredVel : velError;
+    // its last correction ended on flies its whole cruise sideways. A caller
+    // that knows a better resting attitude names it instead.
+    const Vector2d steer = coasting && coastFacing ? *coastFacing
+                         : coasting                ? desiredVel
+                                                   : velError;
     if (steer.length() < 1e-6) {
         if (throttle) SetThrottle(*throttle, false, params);
         return flags;
     }
 
-    // Ship forward is local -Y (see ShipControlsSystem), so world heading is
-    // rot - pi/2. Positive turn = CCW = rotateLeft (+torque).
-    const double targetHeading = std::atan2(steer.y(), steer.x());
-    const double currentHeading = static_cast<double>(ship.rot) - PI / 2.0;
-    const double headingError = WrapToPi(targetHeading - currentHeading);
-
-    const double turn = params.headingKp * headingError - params.headingKd * ship.angVel;
-    if (turn > params.turnDeadband) {
-        flags.rotateLeft = true;
-    }
-    else if (turn < -params.turnDeadband) {
-        flags.rotateRight = true;
-    }
+    const double headingError = HeadingError(ship, steer);
+    flags = SteerTo(ship, headingError, params);
 
     const bool aimed = !coasting && std::abs(headingError) < params.aimTolerance;
     if (!throttle) {
@@ -70,6 +66,40 @@ ControlFlags FlyToVelocity(const Transform& ship, const Vector2d& desiredVel,
     return flags;
 }
 
+ControlFlags TrackBearing(const Transform& ship, const Vector2d& bearing, const Vector2d& velError,
+                          const FlightControllerParams& params, ThrottleState* throttle)
+{
+    ControlFlags flags{};
+    if (bearing.length() < 1e-6) {
+        if (throttle) SetThrottle(*throttle, false, params);
+        return flags;
+    }
+
+    flags = SteerTo(ship, HeadingError(ship, bearing), params);
+
+    // The nose is spoken for, so the only burn on offer is one it was already
+    // pointed at. Everything else in the correction is given up rather than
+    // taken out of the aim.
+    bool burn = false;
+    if (velError.length() > params.velocityDeadband) {
+        burn = std::abs(HeadingError(ship, velError)) < params.aimTolerance;
+    }
+
+    if (!throttle) {
+        flags.thrustForward = burn;
+        return flags;
+    }
+
+    if (throttle->holdTicks > 0) {
+        --throttle->holdTicks;
+    }
+    const bool dwelling = throttle->holdTicks > 0;
+    SetThrottle(*throttle, dwelling ? (throttle->thrusting && burn) : burn, params);
+    flags.thrustForward = throttle->thrusting;
+
+    return flags;
+}
+
 Vector2d HoldPositionDesiredVelocity(const Transform& ship, const Vector2d& anchor,
                                      const FlightControllerParams& params)
 {
@@ -79,6 +109,30 @@ Vector2d HoldPositionDesiredVelocity(const Transform& ship, const Vector2d& anch
         desired *= params.maxApproachSpeed / speed;
     }
     return desired;
+}
+
+// Ship forward is local -Y (see ShipControlsSystem), so world heading is
+// rot - pi/2.
+static double HeadingError(const Transform& ship, const Vector2d& bearing)
+{
+    const double targetHeading = std::atan2(bearing.y(), bearing.x());
+    const double currentHeading = static_cast<double>(ship.rot) - PI / 2.0;
+    return WrapToPi(targetHeading - currentHeading);
+}
+
+// Positive turn = CCW = rotateLeft (+torque).
+static ControlFlags SteerTo(const Transform& ship, double headingError,
+                            const FlightControllerParams& params)
+{
+    ControlFlags flags{};
+    const double turn = params.headingKp * headingError - params.headingKd * ship.angVel;
+    if (turn > params.turnDeadband) {
+        flags.rotateLeft = true;
+    }
+    else if (turn < -params.turnDeadband) {
+        flags.rotateRight = true;
+    }
+    return flags;
 }
 
 static void SetThrottle(ThrottleState& throttle, bool thrust,

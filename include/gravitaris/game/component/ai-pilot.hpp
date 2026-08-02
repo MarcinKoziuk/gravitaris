@@ -47,6 +47,14 @@ struct AIPersonality {
     double fireRange = 350.0;        // opens fire this far out (was 250)
     double fireTolerance = 0.10;     // rad off the lead solution, still fires
 
+    // Dogfight heading priority (units/s). Inside fireRange the nose tracks
+    // the firing solution (FlightController's TrackBearing) rather than the
+    // velocity correction, for as long as that correction stays under this;
+    // past it the burn takes the heading back, so an arrival still flips and
+    // brakes. A pilot whose attitude is only ever a byproduct of
+    // station-keeping lands a shot inside fireTolerance by accident at best.
+    double aimPriorityError = 45.0;
+
     // Gravity-well danger avoidance. A predicted approach inside evadeRadius
     // triggers Evade; once evading, the ship must clear evadeRadius*evadeMargin
     // before handing control back (hysteresis, avoids flapping at the boundary).

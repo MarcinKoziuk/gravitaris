@@ -49,8 +49,26 @@ struct ThrottleState {
 // Fire bits are left false; callers merge their own. `throttle` is optional:
 // pass null for the original chattery bang-bang throttle (player assists,
 // where the input is only ever held for a moment anyway).
+//
+// `coastFacing` is the attitude to hold when there is no burn left to steer
+// by; null keeps the desired velocity itself. A caller whose desired velocity
+// is expressed in a moving frame needs it: a ship parked on an orbiting planet
+// wants to be still relative to the pad, which reads here as the planet's own
+// orbital velocity -- a full cruise vector -- and steering onto that lays the
+// ship on its side.
 ControlFlags FlyToVelocity(const Transform& ship, const Magnum::Math::Vector2<double>& desiredVel,
-                           const FlightControllerParams& params, ThrottleState* throttle = nullptr);
+                           const FlightControllerParams& params, ThrottleState* throttle = nullptr,
+                           const Magnum::Math::Vector2<double>* coastFacing = nullptr);
+
+// The other side of the trade a single nose-mounted thruster forces. One
+// actuator cannot both aim and steer: FlyToVelocity always resolves that in
+// favour of steering and takes whatever attitude falls out, which is right for
+// a crossing and wrong for a gunfight. This resolves it the other way -- hold
+// the nose on `bearing`, and spend thrust only on the part of `velError` that
+// happens to lie ahead of it anyway.
+ControlFlags TrackBearing(const Transform& ship, const Magnum::Math::Vector2<double>& bearing,
+                          const Magnum::Math::Vector2<double>& velError,
+                          const FlightControllerParams& params, ThrottleState* throttle = nullptr);
 
 // Desired velocity that brings the ship to rest at `anchor`; feed the result
 // to FlyToVelocity.
