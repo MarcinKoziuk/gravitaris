@@ -23,6 +23,10 @@ namespace Gravitaris {
 
 namespace {
 
+// How close to the aim point counts as being on it. Under a tick of cruise
+// travel, so the approach settles into the hold rather than straddling it.
+constexpr double AIM_DEADBAND = 1.0;
+
 // True if `planetNetId` already has a live structure of `type` attached to
 // it (planetside or orbital) -- the "new-unit rule", re-checked at build
 // time rather than trusting what dispatch decided, in case someone else
@@ -126,15 +130,34 @@ void FreighterSystem::Update()
             aimPos = planetTransf.pos + planetTransf.vel * eta;
         }
         const Vector2d toAim = aimPos - transf.pos;
-        const double aimDistance = std::max(toAim.length(), 1e-6);
+        const double aimDistance = toAim.length();
+
+        // Station-keeping: the freighter can reach the rendezvous point well
+        // before the planet does, and this close the residual toward it is
+        // numerical noise rather than a direction. Flying that at cruise
+        // crosses the point every tick, so the ship bounces back and forth
+        // with its nose flipping end over end for as long as it waits. Hold
+        // still instead, nose on the planet it's waiting for.
+        if (aimDistance < AIM_DEADBAND) {
+            m_physicsSystem.SetKinematicMotion(ref, transf.pos, Vector2d{},
+                                               std::atan2(toPlanet.x(), -toPlanet.y()));
+            transf.vel = Vector2d{};
+            controls.actionFlags.thrustForward = false;
+            return;
+        }
 
         // Ramps toward cruise rather than snapping to it, so there's
         // an actual accelerating phase for the _thrust visual/audio below to
         // key off of; once at cruise speed it coasts thrustless (currentSpeed
         // reads back last tick's transf.vel, which this same block sets, so
-        // it persists across ticks without a separate stored field).
+        // it persists across ticks without a separate stored field). Capped so
+        // a tick never carries it past the aim point either -- the deadband
+        // above is narrower than a tick of cruise travel, so without this the
+        // ship would jump straight over it.
         const double currentSpeed = transf.vel.length();
-        const double speed = std::min(currentSpeed + m_config.freighter.transitAcceleration * Game::PHYSICS_DELTA, m_config.freighter.transitSpeed);
+        const double speed = std::min({currentSpeed + m_config.freighter.transitAcceleration * Game::PHYSICS_DELTA,
+                                       m_config.freighter.transitSpeed,
+                                       aimDistance / Game::PHYSICS_DELTA});
         const Vector2d vel = (toAim / aimDistance) * speed;
         const Vector2d pos = transf.pos + vel * Game::PHYSICS_DELTA;
         // Nose is local -Y (see ShipControlsSystem::ApplyMovement's thrust

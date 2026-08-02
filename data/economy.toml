@@ -19,10 +19,13 @@ freighter_cost = 60.0
 # Same new-unit rule as a freighter, but same-planet and instant.
 self_development_cost = 40.0
 
-# Freighters fly slowly and visibly; arrival_radius sits past the High Port's
-# own orbit so a parking freighter never lands on top of one.
+# Freighters fly slowly and visibly, but above planetary orbital speed (51-79
+# at the sector's orbit radii) -- under it a freighter can never close on its
+# target and spends minutes arcing around the star waiting for the planet to
+# come to it. arrival_radius sits past the High Port's own orbit so a parking
+# freighter never lands on top of one.
 [freighter]
-transit_speed = 40.0
+transit_speed = 80.0
 transit_acceleration = 20.0
 arrival_radius = 440.0
 cargo_unload_interval_ticks = 300

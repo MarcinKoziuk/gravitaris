@@ -32,7 +32,9 @@ struct EconomyConfig {
     } production;
 
     struct Freighter {
-        double transitSpeed = 40.0;
+        // Above planetary orbital speed at the sector's orbit radii (51-79),
+        // or a freighter can never close on its target -- see economy.toml.
+        double transitSpeed = 80.0;
         double transitAcceleration = 20.0;
         // Past the High Port's own orbit, so a parking freighter never sits
         // on top of one.
