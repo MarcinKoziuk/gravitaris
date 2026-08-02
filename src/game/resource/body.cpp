@@ -1,4 +1,5 @@
 #include <cstring>
+#include <optional>
 
 #include <Magnum/Math/Matrix4.h>
 #include <Magnum/Math/Vector4.h>
@@ -15,6 +16,7 @@ using Magnum::Vector4d;
 
 typedef TVector2<cpFloat> cpvec2;
 
+static std::optional<unsigned> MountIndex(const std::string& name, const char* prefix);
 static bool IsCircle(const NSVGshape* shape);
 static std::vector<std::vector<cpvec2>> ShapeToPolygons(const NSVGshape* shape, const Matrix4d& transform);
 static Body::CircleShape ShapeToCircle(const NSVGshape* shape, const Matrix4d& transform);
@@ -147,6 +149,39 @@ const Body::Hardpoint* Body::FindHardpoint(const char* name) const
     return nullptr;
 }
 
+const Body::Hardpoint* Body::FindMount(const char* prefix, unsigned nth) const
+{
+    unsigned count = 0;
+    for (const Hardpoint& hardpoint : m_hardpoints) {
+        if (MountIndex(hardpoint.name, prefix)) ++count;
+    }
+    if (count == 0) return nullptr;
+
+    // The `want`-th smallest index, found by a scan per rank rather than by
+    // sorting: a hull carries a handful of mounts, and the authored indices may
+    // be sparse (`gun_0`, `gun_2`) or out of document order.
+    const unsigned want = nth % count;
+    const Hardpoint* chosen = nullptr;
+    unsigned chosenIndex = 0;
+    for (unsigned rank = 0; rank <= want; ++rank) {
+        const Hardpoint* best = nullptr;
+        unsigned bestIndex = 0;
+        for (const Hardpoint& hardpoint : m_hardpoints) {
+            const std::optional<unsigned> index = MountIndex(hardpoint.name, prefix);
+            if (!index) continue;
+            if (chosen && *index <= chosenIndex) continue;
+            if (!best || *index < bestIndex) {
+                best = &hardpoint;
+                bestIndex = *index;
+            }
+        }
+        if (!best) break;
+        chosen = best;
+        chosenIndex = bestIndex;
+    }
+    return chosen;
+}
+
 void Body::AddShieldOutline(const NSVGshape* shape, const Matrix4d& transform)
 {
     if (!m_shieldOutline.empty()) {
@@ -274,6 +309,23 @@ static std::vector<std::vector<cpvec2>> ShapeToPolygons(const NSVGshape* shape, 
     }
 
     return lines;
+}
+
+// `gun` -> 0, `gun_2` -> 2, anything else -> none. A bare prefix is accepted so
+// a hull carrying exactly one mount of a family needn't number it.
+static std::optional<unsigned> MountIndex(const std::string& name, const char* prefix)
+{
+    const std::size_t length = std::strlen(prefix);
+    if (name.compare(0, length, prefix) != 0) return std::nullopt;
+    if (name.size() == length) return 0u;
+    if (name[length] != '_') return std::nullopt;
+
+    unsigned index = 0;
+    for (std::size_t i = length + 1; i < name.size(); ++i) {
+        if (name[i] < '0' || name[i] > '9') return std::nullopt;
+        index = index * 10 + static_cast<unsigned>(name[i] - '0');
+    }
+    return name.size() > length + 1 ? std::optional<unsigned>(index) : std::nullopt;
 }
 
 static bool IsCircle(const NSVGshape* shape)

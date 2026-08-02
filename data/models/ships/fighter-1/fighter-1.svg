@@ -29,9 +29,9 @@
      inkscape:pageshadow="2"
      inkscape:zoom="4"
      inkscape:cx="373.375"
-     inkscape:cy="244.375"
+     inkscape:cy="204.375"
      inkscape:document-units="px"
-     inkscape:current-layer="layer1"
+     inkscape:current-layer="g7"
      showgrid="true"
      inkscape:window-width="3840"
      inkscape:window-height="2054"
@@ -129,29 +129,40 @@
      inkscape:groupmode="layer"
      id_t="layer5"
      inkscape:label="@hardpoints"
-     style="display:none"
+     style="display:inline"
      id="g7">
     <circle
        style="opacity:1;fill:#ff0000;fill-opacity:0;stroke:#ff0000"
        id_t="small:1"
        cx="373.5"
-       cy="27.862206"
+       cy="40.518456"
        r="5"
-       id="circle5" />
+       id="circle5"
+       inkscape:label="gun_0" />
+    <circle
+       style="display:inline;fill:#ff0000;fill-opacity:0;stroke:#ff0000"
+       id_t="small:1"
+       cx="373.46872"
+       cy="43"
+       r="5"
+       id="circle5-8"
+       inkscape:label="cannon_0" />
     <circle
        style="opacity:1;fill:#ff0000;fill-opacity:0;stroke:#ff0000"
        id_t="medium:1"
-       cx="200.5"
-       cy="328.36221"
+       cx="245.5"
+       cy="314.29971"
        r="5"
-       id="circle6" />
+       id="circle6"
+       inkscape:label="missile_0" />
     <circle
        style="opacity:1;fill:#ff0000;fill-opacity:0;stroke:#ff0000"
        id_t="medium:2"
-       cx="541.5"
-       cy="330.86221"
+       cx="483.375"
+       cy="312.11221"
        r="5"
-       id="circle7" />
+       id="circle7"
+       inkscape:label="missile_1" />
   </g>
   <g
      inkscape:groupmode="layer"

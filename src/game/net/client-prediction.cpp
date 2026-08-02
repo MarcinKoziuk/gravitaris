@@ -261,10 +261,16 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
         // Cosmetic only -- zero damage, and DamageSystem never runs on this
         // client -- so it flies through whatever the server says it hit and
         // expires on its own; hits/damage stay entirely server-authoritative.
+        // The mount counter is the own ship's own Controls, the same field the
+        // server counts up -- the two can still drift apart (this cooldown is
+        // predicted independently, and a dropped input makes the server skip a
+        // shot this client took), but only ever by which wingtip a tracer
+        // leaves from, and the server's copy of this shot is never drawn here.
         const auto [pos, vel] =
                 ShipControlsSystem::ComputeBulletSpawn(m_ownShip.get<Transform>(),
                                                        m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()),
-                                                       gun.speed);
+                                                       gun.speed, gun.hardpoint.c_str(),
+                                                       ownControls.gunMount++);
         const flecs::entity bullet =
                 m_entitySpawner.SpawnBullet(gun.modelId, pos, vel, /*sensor=*/true,
                                             static_cast<double>(m_ownShip.get<Transform>().rot));

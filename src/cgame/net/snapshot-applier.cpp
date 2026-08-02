@@ -21,6 +21,8 @@
 #include <gravitaris/cgame/resource/model.hpp>
 #include <gravitaris/cgame/component/renderable.hpp>
 #include <gravitaris/cgame/component/hit-flash.hpp>
+#include <gravitaris/cgame/component/hit-outline.hpp>
+#include <gravitaris/cgame/component/shield-flash.hpp>
 #include <gravitaris/cgame/component/remote-smoothing.hpp>
 #include <gravitaris/cgame/net/snapshot-applier.hpp>
 
@@ -97,10 +99,12 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
                 // `has<Freighter>()` of both worlds, and without this a
                 // replicated hauler reads as an ordinary fighter.
                 if (state.isFreighter) entity.emplace<Freighter>();
+                entity.emplace<HitOutline>(m_resourceLoader.Load<Body>(state.modelId));
                 ApplyLoadout(entity, state);
             }
             if (state.type == NetEntityType::Structure) {
                 entity.emplace<Damageable>(state.hp, 100.f);
+                entity.emplace<HitOutline>(m_resourceLoader.Load<Body>(state.modelId));
                 entity.emplace<Structure>(Structure{state.structureType, state.rawMaterials,
                                                     state.finishedMaterials, state.researchProgress,
                                                     state.upgradeReady});
@@ -129,6 +133,7 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
             }
             entity.emplace<Renderable>(m_resourceLoader.Load<Model>(state.modelId));
             entity.emplace<HitFlash>();
+            entity.emplace<ShieldFlash>();
             entity.emplace<RemoteSmoothing>();
             m_byNetId[state.netId] = entity;
         }

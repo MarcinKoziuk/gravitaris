@@ -32,7 +32,11 @@ static constexpr float MIN_LANDING_DAMAGE = 1.f;
 // like it touched rather than after visibly sinking into the disc.
 static constexpr double STAR_LETHAL_MARGIN = 1.02;
 
-static bool ShieldElementLive(flecs::entity ent, std::uint8_t element);
+static bool ShieldElementLive(flecs::entity ent, std::uint8_t element)
+{
+    const ShipLoadout* loadout = ent.try_get<ShipLoadout>();
+    return loadout && ShieldElementLive(*loadout, element);
+}
 
 DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
                            const UpgradeCatalog& catalog)
@@ -247,20 +251,6 @@ bool DamageSystem::HasShieldGeometry(flecs::entity ent)
 {
     const PhysicsRef* ref = ent.try_get<PhysicsRef>();
     return ref && !m_physicsSystem.GetBody(*ref).shieldShapes.empty();
-}
-
-// A shield element stops a shot only while it is the emitter the ship is
-// actually carrying and still has charge to spend against it.
-static bool ShieldElementLive(flecs::entity ent, std::uint8_t element)
-{
-    const ShipLoadout* loadout = ent.try_get<ShipLoadout>();
-    if (!loadout) return false;
-
-    if (element == PhysicsBody::SHIELD_BUBBLE) {
-        return loadout->levels.shieldType == ShieldType::Bubble && loadout->shieldHp > 0.f;
-    }
-
-    return IsPlated(*loadout) && element < loadout->plateCount && loadout->plates[element] > 0.f;
 }
 
 void DamageSystem::ResolveStarContact()

@@ -34,9 +34,7 @@ struct PhysicsBody {
         std::vector<cpShapeUniquePtr> shapes;
     } cp;
 
-    // Plate index meaning "the bubble", which is one element rather than an
-    // indexed array of them.
-    static constexpr std::uint8_t SHIELD_BUBBLE = 0xFF;
+    static constexpr std::uint8_t SHIELD_BUBBLE = SHIELD_BUBBLE_ELEMENT;
 
     // The shapes in cp.shapes that are shield rather than hull -- the bubble
     // outline, and one entry per *segment* of each ablative plate (so a

@@ -26,6 +26,12 @@ struct WeaponDef {
     id_t soundId = 0; // played at the muzzle by AudioSystem
     float soundGain = 0.5f;
 
+    // Which family of mounts this leaves from: the model's `<hardpoint>_N`
+    // markers (Body::FindMount), falling back to its gun mounts and then to
+    // the hull's own center. Data rather than a rule over the weapon's stats,
+    // so a new heavy line is a toml edit and the sim never learns weapon names.
+    std::string hardpoint = "gun";
+
     // MissileSystem's homing envelope. Zero turnRate means unguided, which is
     // what every gun round is.
     struct Guidance {
@@ -65,6 +71,12 @@ enum class ShieldType : std::uint8_t {
 // authoring more '+plating' paths than this is clamped at load (Body::AddPlates),
 // so the index a hit reports always addresses all three.
 inline constexpr std::size_t MAX_SHIELD_PLATES = 16;
+
+// Plate index meaning "the bubble", which is one element rather than one of an
+// indexed array. Lives here, with the plate width it sits outside of, so both
+// the physics shapes (PhysicsBody::SHIELD_BUBBLE) and the geometry query the
+// client resolves its own hits with (QueryBodySegment) name the same value.
+inline constexpr std::uint8_t SHIELD_BUBBLE_ELEMENT = 0xFF;
 
 // Where a collected upgrade lands. Only Ship is honored today -- everything
 // is carried by the ship that picked it up and lost with it. Faction is the

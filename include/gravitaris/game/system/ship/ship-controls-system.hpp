@@ -79,14 +79,23 @@ public:
     // must not run a second time.
     [[nodiscard]] static BoostEffect BoostEffectOf(bool boosting, const ShipStats& stats);
 
-    // Muzzle position/velocity for a projectile leaving the ship's first
-    // hardpoint at `muzzleSpeed` right now. Shared by Update() and
-    // client-side prediction (Phase 6) so the cosmetic bullet spawns exactly
-    // where the server's will -- which means both sides must resolve the same
-    // muzzle speed for the shooter's gun tier, not just call this the same way.
+    // The mount family every weapon falls back to when the hull carries none
+    // of its own (WeaponDef::hardpoint), and the last resort before the hull's
+    // own center.
+    static constexpr const char* GUN_HARDPOINT = "gun";
+
+    // Muzzle position/velocity for a projectile leaving `mount`-th mount of the
+    // `hardpoint` family at `muzzleSpeed` right now, falling back to the gun
+    // mounts and then to the hull's center. Shared by Update() and client-side
+    // prediction (Phase 6) so the cosmetic bullet spawns exactly where the
+    // server's will -- which means both sides must resolve the same muzzle
+    // speed and the same mount for the shooter's gun tier, not just call this
+    // the same way.
     static std::pair<Magnum::Vector2d, Magnum::Vector2d> ComputeBulletSpawn(const Transform& transf,
                                                                              const PhysicsBody& phys,
-                                                                             double muzzleSpeed);
+                                                                             double muzzleSpeed,
+                                                                             const char* hardpoint = GUN_HARDPOINT,
+                                                                             unsigned mount = 0);
 };
 
 } // namespace Gravitaris

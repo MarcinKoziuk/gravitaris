@@ -45,6 +45,7 @@
 #include <gravitaris/game/event/death-report.hpp>
 #include <gravitaris/game/ai/ai-preset-library.hpp>
 #include <gravitaris/game/resource/body.hpp>
+#include <gravitaris/game/resource/body-query.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/game.hpp>
@@ -1426,6 +1427,67 @@ void TestUpgradeCatalog()
 
 // DamageSystem/ShieldSystem: a fitted shield eats a hit before the hull does,
 // and recharges once the fire lets up.
+// A round leaves the mount its weapon names (WeaponDef::hardpoint), and a
+// client can resolve where it lands from the same authored geometry the server
+// built its Chipmunk shapes from -- the two halves of a hit that has to look
+// the same on both sides of the wire.
+void TestHardpointMounts()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    ResourceLoader loader(fs);
+    const ResourcePtr<const Body> body = loader.Load<Body>("models/ships/fighter-1"_id);
+
+    const Body::Hardpoint* gun = body->FindMount("gun", 0);
+    const Body::Hardpoint* cannon = body->FindMount("cannon", 0);
+    Require(gun && cannon, "hardpoints: fighter-1 carries both a gun and a cannon mount");
+    Require(gun->pos != cannon->pos, "hardpoints: the two are distinct points on the hull");
+    Require(body->FindMount("plasma", 0) == nullptr,
+            "hardpoints: a family the hull doesn't carry resolves to nothing, so a weapon can fall back");
+
+    const Body::Hardpoint* rackA = body->FindMount("missile", 0);
+    const Body::Hardpoint* rackB = body->FindMount("missile", 1);
+    Require(rackA && rackB && rackA->pos != rackB->pos,
+            "hardpoints: a hull's two racks are separate mounts");
+    Require(body->FindMount("missile", 2) == rackA, "hardpoints: the mount index wraps");
+
+    // A weapon that names a family the hull hasn't got falls back to its gun
+    // mounts rather than to the origin; one that names nothing at all still
+    // leaves from a real point on the hull.
+    Game game(fs);
+    flecs::entity ship = game.GetEntitySpawner().SpawnPlayer("models/ships/fighter-1"_id, Vector2d{100., 50.});
+    const PhysicsBody& phys = game.GetPhysicsSystem().GetBody(ship.get<PhysicsRef>());
+    const Transform& transf = ship.get<Transform>();
+
+    const Vector2d fromGun = ShipControlsSystem::ComputeBulletSpawn(transf, phys, 100., "gun", 0).first;
+    const Vector2d fromCannon = ShipControlsSystem::ComputeBulletSpawn(transf, phys, 100., "cannon", 0).first;
+    const Vector2d fromPlasma = ShipControlsSystem::ComputeBulletSpawn(transf, phys, 100., "plasma", 0).first;
+    Require(fromGun != fromCannon, "hardpoints: a cannon round leaves from the cannon mount, not the gun's");
+    Require(fromPlasma == fromGun, "hardpoints: an unmounted family falls back to the gun mount");
+    Require((fromGun - transf.pos).length() > 1. && (fromGun - transf.pos).length() < 100.,
+            "hardpoints: the muzzle is offset from the hull's center but still on it");
+
+    // The client-side geometry query and the sim's own segment query have to
+    // agree about what a round met: a shot across the hull is stopped by the
+    // authored bubble, one that misses the hull entirely by nothing.
+    const std::optional<BodyHit> across =
+            QueryBodySegment(*body, Vector2d{0., 0.}, 0., Vector2d{1., 1.},
+                             Vector2d{-200., 0.}, Vector2d{200., 0.}, 2.);
+    Require(across.has_value(), "body-query: a shot through the hull registers");
+    Require(across->shieldElement && *across->shieldElement == SHIELD_BUBBLE_ELEMENT,
+            "body-query: fighter-1's authored bubble is met before its hull");
+    Require(across->point.x() < 0., "body-query: the near side is the one that stops it");
+
+    Require(!QueryBodySegment(*body, Vector2d{0., 0.}, 0., Vector2d{1., 1.},
+                              Vector2d{-200., 500.}, Vector2d{200., 500.}, 2.),
+            "body-query: a shot that passes clear of the hull registers nothing");
+
+    fs.Shutdown();
+}
+
 void TestShields()
 {
     FilesystemPhysFS fs;
@@ -3274,6 +3336,7 @@ int main()
     TestSelfDevelopment();
     TestPlanetsideStructureHits();
     TestUpgradeCatalog();
+    TestHardpointMounts();
     TestShields();
     TestResearch();
     TestSunIsLethal();

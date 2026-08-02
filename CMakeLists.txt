@@ -491,6 +491,7 @@ add_executable(GravitarisNG
     src/cgame/input/replay-controller.hpp
     src/cgame/input/replay-controller.cpp
     src/game/resource/body.cpp
+    src/game/resource/body-query.cpp
     extlibs/nanosvg/nanosvg.c
     include/gravitaris/game/resource/common/iresource.hpp
     include/gravitaris/game/resource/common/detail/resource-loader.inl
@@ -881,6 +882,7 @@ endif()
 add_executable(gravitaris-sim-test
     tools/sim-test/main.cpp
     src/game/resource/body.cpp
+    src/game/resource/body-query.cpp
     extlibs/nanosvg/nanosvg.c
     extlibs/clipper/clipper.cpp
     extlibs/physfs/physfs.cpp
@@ -990,6 +992,7 @@ if(NOT EMSCRIPTEN)
     add_executable(gravitaris-server
         src/server/gravitaris-server.cpp
         src/game/resource/body.cpp
+        src/game/resource/body-query.cpp
         extlibs/nanosvg/nanosvg.c
         extlibs/clipper/clipper.cpp
         extlibs/physfs/physfs.cpp

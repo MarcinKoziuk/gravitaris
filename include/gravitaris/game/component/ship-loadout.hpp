@@ -54,6 +54,18 @@ inline bool IsPlated(const ShipLoadout& loadout)
     return loadout.levels.shieldType == ShieldType::Plating && loadout.plateCount > 0;
 }
 
+// A shield element stops a shot only while it is the emitter the ship is
+// actually carrying and still has charge to spend against it. `element` is a
+// plate index or SHIELD_BUBBLE_ELEMENT, as reported by the geometry a round
+// met (PhysicsBody::ShieldElementOf server-side, QueryBodySegment on a client).
+inline bool ShieldElementLive(const ShipLoadout& loadout, std::uint8_t element)
+{
+    if (element == SHIELD_BUBBLE_ELEMENT) {
+        return loadout.levels.shieldType == ShieldType::Bubble && loadout.shieldHp > 0.f;
+    }
+    return IsPlated(loadout) && element < loadout.plateCount && loadout.plates[element] > 0.f;
+}
+
 // Capacity and regen split evenly across the plates, so a hull's plate count
 // decides how *concentrated* its armour is, not how much of it there is --
 // upgrades.toml's one set of numbers keeps meaning the same total charge and

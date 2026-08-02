@@ -30,6 +30,7 @@ sound_gain = 0.5
 # is shooting is readable from the rounds alone.
 [[weapon]]
 key = "gatling_1"
+hardpoint = "cannon"
 name = "Gatling"
 cooldown_ticks = 6
 damage = 15.0
@@ -41,6 +42,7 @@ sound_gain = 0.7
 
 [[weapon]]
 key = "gatling_2"
+hardpoint = "cannon"
 name = "Gatling II"
 cooldown_ticks = 5
 damage = 21.0
@@ -54,6 +56,7 @@ sound_gain = 0.7
 # reward as much as the damage is.
 [[weapon]]
 key = "gatling_3"
+hardpoint = "cannon"
 name = "Gatling III"
 cooldown_ticks = 5
 damage = 30.0
@@ -69,6 +72,7 @@ sound_gain = 0.7
 # to be outrun by cutting hard across it.
 [[weapon]]
 key = "missile_mk1"
+hardpoint = "missile"
 name = "Missile"
 cooldown_ticks = 30
 damage = 45.0

@@ -407,6 +407,7 @@ static WeaponDef ParseWeapon(const toml::table& entry, const std::string& key)
     if (const auto model = entry["model"].value<std::string>()) weapon.modelId = ID(model->c_str());
     if (const auto sound = entry["sound"].value<std::string>()) weapon.soundId = ID(sound->c_str());
     weapon.soundGain = entry["sound_gain"].value_or(weapon.soundGain);
+    weapon.hardpoint = entry["hardpoint"].value_or(weapon.hardpoint);
 
     if (const toml::table* guidance = entry["guidance"].as_table()) {
         weapon.guidance.turnRate = (*guidance)["turn_rate"].value_or(0.0);

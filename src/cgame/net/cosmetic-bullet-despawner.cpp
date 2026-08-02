@@ -1,10 +1,16 @@
-#include <algorithm>
+#include <optional>
 #include <vector>
 
 #include <gravitaris/game/component/bullet.hpp>
-#include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/component/team.hpp>
+#include <gravitaris/game/resource/body-query.hpp>
 
+#include <gravitaris/cgame/component/hit-flash.hpp>
+#include <gravitaris/cgame/component/hit-outline.hpp>
+#include <gravitaris/cgame/component/shield-flash.hpp>
+#include <gravitaris/cgame/fx/hit-flash-system.hpp>
 #include <gravitaris/cgame/net/cosmetic-bullet-despawner.hpp>
 
 namespace Gravitaris {
@@ -16,31 +22,60 @@ CosmeticBulletDespawner::CosmeticBulletDespawner(flecs::world& registry, flecs::
 
 void CosmeticBulletDespawner::CheckLocalHits()
 {
-    std::vector<flecs::entity> hitBullets;
+    struct Hit {
+        flecs::entity bullet;
+        flecs::entity target;
+        BodyHit where;
+    };
+    std::vector<Hit> hits;
+
     m_registry.each([&](flecs::entity bulletEnt, const Bullet& bullet, const Transform& bulletTransf) {
-        const Vector2d& a = bulletTransf.prevPos;
-        const Vector2d& b = bulletTransf.pos;
-        const Vector2d ab = b - a;
-        const double abLengthSq = ab.dot();
+        if (bulletTransf.pos == bulletTransf.prevPos) return;
 
-        bool hit = false;
-        m_mirrorWorld.each([&](flecs::entity, const Team& shipTeam, const Controls&, const Transform& shipTransf) {
-            if (hit) return;
-            if (shipTeam.id == bullet.team) return; // no friendly fire
+        std::optional<Hit> nearest;
+        m_mirrorWorld.each([&](flecs::entity ship, const HitOutline& outline, const Transform& shipTransf) {
+            // Same three rejections DamageSystem makes before it will call
+            // anything a hit: no friendly fire, nothing that can't be damaged
+            // (a planet, which a shot passes straight through -- and which has
+            // no HitOutline here in the first place), and no shield element
+            // that is spent or not the emitter this ship is carrying, so a
+            // round threading the gap between two plates lands on the hull
+            // behind them instead of stopping short.
+            if (!ship.is_alive() || !ship.has<Damageable>()) return;
+            const Team* shipTeam = ship.try_get<Team>();
+            if (shipTeam && shipTeam->id == bullet.team) return;
 
-            double distSq;
-            if (abLengthSq < 1e-9) {
-                distSq = (shipTransf.pos - a).dot();
-            } else {
-                const double t = std::clamp(Magnum::Math::dot(shipTransf.pos - a, ab) / abLengthSq, 0.0, 1.0);
-                distSq = (shipTransf.pos - (a + ab * t)).dot();
+            const std::optional<BodyHit> hit =
+                    QueryBodySegment(*outline.body, shipTransf.pos, static_cast<double>(shipTransf.rot),
+                                     shipTransf.scale, bulletTransf.prevPos, bulletTransf.pos,
+                                     BULLET_QUERY_RADIUS);
+            if (!hit) return;
+            if (hit->shieldElement) {
+                const ShipLoadout* loadout = ship.try_get<ShipLoadout>();
+                if (!loadout || !ShieldElementLive(*loadout, *hit->shieldElement)) return;
             }
-            if (distSq <= LOCAL_HIT_RADIUS * LOCAL_HIT_RADIUS) hit = true;
+            if (nearest && nearest->where.alpha <= hit->alpha) return;
+
+            nearest = Hit{bulletEnt, ship, *hit};
         });
-        if (hit) hitBullets.push_back(bulletEnt);
+
+        if (nearest) hits.push_back(*nearest);
     });
 
-    for (flecs::entity bulletEnt : hitBullets) bulletEnt.destruct();
+    for (const Hit& hit : hits) {
+        const Magnum::Vector2 point{static_cast<float>(hit.where.point.x()),
+                                    static_cast<float>(hit.where.point.y())};
+        if (hit.where.shieldElement) {
+            const std::int8_t plate = *hit.where.shieldElement == SHIELD_BUBBLE_ELEMENT
+                    ? ShieldFlash::BUBBLE
+                    : static_cast<std::int8_t>(*hit.where.shieldElement);
+            HitFlashSystem::ApplyShieldHit(hit.target, point, plate);
+        }
+        else if (HitFlash* flash = hit.target.try_get_mut<HitFlash>()) {
+            flash->amount = 1.f;
+        }
+        hit.bullet.destruct();
+    }
 }
 
 // No ownerNetId filter needed (fixed 2026-07-21 -- an earlier version had

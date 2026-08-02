@@ -170,6 +170,14 @@ public:
     // The named hardpoint, or nullptr when this model has none by that name.
     [[nodiscard]] const Hardpoint* FindHardpoint(const char* name) const;
 
+    // The `nth` mount of a family -- the hardpoints labelled `<prefix>_0`,
+    // `<prefix>_1`, ... (or bare `<prefix>`), in ascending index order rather
+    // than SVG document order, wrapping when the model carries fewer than
+    // `nth + 1` of them. Null when it carries none, which is what lets a
+    // weapon fall back to another family (WeaponDef::hardpoint) instead of
+    // firing out of a mount the hull doesn't have.
+    [[nodiscard]] const Hardpoint* FindMount(const char* prefix, unsigned nth) const;
+
     [[nodiscard]] const std::vector<Hardpoint>& GetHardpoints() const
     { return m_hardpoints; }
 

@@ -35,6 +35,11 @@ struct Controls {
     // Same, for missiles -- their own cadence, so emptying the rack takes
     // several seconds however hard the button is held.
     std::uint32_t missileCooldown = 0;
+    // Which mount the next round of each kind leaves from, counted up on every
+    // shot so a hull with more than one of a family alternates across them
+    // (Body::FindMount wraps, so these never need clamping to a hull's count).
+    std::uint8_t gunMount = 0;
+    std::uint8_t missileMount = 0;
     // One-shot, unlike actionFlags: ResearchSystem clears it the tick it acts
     // on it, so a held key can't spend two upgrades.
     UpgradePick upgradePick = 0;

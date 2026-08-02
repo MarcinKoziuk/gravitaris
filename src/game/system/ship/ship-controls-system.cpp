@@ -47,32 +47,24 @@ cpBodyApplyTorque(cpBody *body, cpFloat torque)
 
 std::pair<Vector2d, Vector2d> ShipControlsSystem::ComputeBulletSpawn(const Transform& transf,
                                                                     const PhysicsBody& phys,
-                                                                    double muzzleSpeed)
+                                                                    double muzzleSpeed,
+                                                                    const char* hardpoint, unsigned mount)
 {
-    if (!phys.body->GetHardpoints().empty()) {
-        Body::Hardpoint hp = phys.body->GetHardpoints().front();
-        double s = std::sin(double(transf.rot));
-        double c = std::cos(double(transf.rot));
+    const Body::Hardpoint* hp = phys.body->FindMount(hardpoint, mount);
+    if (!hp) hp = phys.body->FindMount(GUN_HARDPOINT, mount);
 
-        Vector2d pos(
-                hp.pos.x() * c - hp.pos.y() * s,
-                hp.pos.x() * s + hp.pos.y() * c
-        );
-
-        pos += transf.pos;
-
-        Vector2d vel(
-                muzzleSpeed * std::cos(double(transf.rot - Radd(1.5708))),
-                muzzleSpeed * std::sin(double(transf.rot - Radd(1.5708)))
-        );
-
-        vel += transf.vel;
-
-        return std::make_pair(pos, vel);
+    Vector2d pos = transf.pos;
+    if (hp) {
+        const double s = std::sin(double(transf.rot));
+        const double c = std::cos(double(transf.rot));
+        pos += Vector2d(hp->pos.x() * c - hp->pos.y() * s,
+                        hp->pos.x() * s + hp->pos.y() * c);
     }
-    else {
-        return std::make_pair(Vector2d{}, Vector2d{});
-    }
+
+    const double heading = double(transf.rot) - HALF_PI; // nose is local -Y
+    const Vector2d vel = Vector2d{std::cos(heading), std::sin(heading)} * muzzleSpeed + transf.vel;
+
+    return std::make_pair(pos, vel);
 }
 
 ShipControlsSystem::BoostEffect ShipControlsSystem::AdvanceBoost(Controls& controls, const ShipStats& stats)
@@ -173,7 +165,8 @@ void ShipControlsSystem::Update(std::uint64_t step)
             const WeaponDef& gun = *stats.gun;
             scontrols.fireCooldown = stats.fireCooldownTicks;
             std::pair<Vector2d, Vector2d> ret =
-                    ShipControlsSystem::ComputeBulletSpawn(transf, phys, gun.speed);
+                    ShipControlsSystem::ComputeBulletSpawn(transf, phys, gun.speed, gun.hardpoint.c_str(),
+                                                           scontrols.gunMount++);
 
             const Team* shooterTeam = entity.try_get<Team>();
             const NetId* shooterNetId = entity.try_get<NetId>();
@@ -211,11 +204,9 @@ void ShipControlsSystem::Update(std::uint64_t step)
             scontrols.missileCooldown = stats.missileCooldownTicks;
             --loadout->missileAmmo;
 
-            const Vector2d muzzlePos =
-                    ShipControlsSystem::ComputeBulletSpawn(transf, phys, round.speed).first;
-            const double heading = static_cast<double>(transf.rot) - HALF_PI; // nose is local -Y
-            const Vector2d vel =
-                    Vector2d{std::cos(heading), std::sin(heading)} * round.speed + transf.vel;
+            const auto [muzzlePos, vel] =
+                    ShipControlsSystem::ComputeBulletSpawn(transf, phys, round.speed,
+                                                           round.hardpoint.c_str(), scontrols.missileMount++);
 
             const Team* shooterTeam = entity.try_get<Team>();
             flecs::entity missile =
