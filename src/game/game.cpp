@@ -37,6 +37,7 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_missileSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_upgradeCatalog)
         , m_factionSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_landingStateSystem(m_registry, m_physicsSystem, m_factionSystem)
+        , m_repairSystem(m_registry, *m_entitySpawner, m_economyConfig)
         , m_conquestSystem(m_registry, *m_entitySpawner, m_eventQueue, m_factionSystem, m_economyConfig)
         , m_deathSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_trajectoryPredictor(m_registry, m_physicsSystem)
@@ -213,6 +214,9 @@ void Game::Update()
         m_damageSystem.Update();
         m_structureDefenseSystem.Update();
         m_landingStateSystem.Update();
+        // After LandingStateSystem, so a ship that touched down this tick is
+        // already standing when its hull is topped up.
+        m_repairSystem.Update();
         m_conquestSystem.Update();
         m_economySystem.Update();
         m_deathSystem.Update(m_step);

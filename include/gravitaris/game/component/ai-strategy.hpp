@@ -16,6 +16,7 @@ enum class AIGoal : std::uint8_t {
     AttackComplex,      // destroy an enemy planet's structures
     InterceptFreighter, // kill an enemy freighter in transit
     DefendComplex,      // patrol an own planet an enemy is closing on
+    Rearm,              // go home to repair the hull and collect upgrades
 };
 
 // Per-goal multipliers on the utility scores, so two leaders in the same
@@ -26,6 +27,10 @@ struct AIStrategyWeights {
     double attackComplex = 1.0;
     double interceptFreighter = 1.0;
     double defend = 1.0;
+    // Scaled by how hurt the pilot is (and forced while it still wants
+    // upgrades), so 1.0 is not "always go home" -- it is "go home when a
+    // fight is no longer winnable". 0 fights to the death.
+    double rearm = 1.0;
 };
 
 // Server-only leader state (ADR 0001), on the AI fighters that play the mode

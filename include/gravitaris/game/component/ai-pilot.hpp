@@ -43,7 +43,11 @@ struct AIOrder {
 // GuidanceParams/FlightControllerParams (also stored per-pilot on AIPilot)
 // cover flight-dynamics tuning; this covers the decision layer above them.
 struct AIPersonality {
-    double engageRange = 6000.0;     // pursue the target inside this
+    // How far a fight is worth travelling: the distance at which an enemy is
+    // worth half as much as one alongside, when AIStrategySystem weighs
+    // dogfighting against the other things this pilot could be doing. Not a
+    // cutoff -- a named target is always flown to.
+    double engageRange = 6000.0;
     double standoffDistance = 50.0;  // desired range to hold during Intercept
     double fireRange = 350.0;        // opens fire this far out (was 250)
     double fireTolerance = 0.10;     // rad off the lead solution, still fires
@@ -87,6 +91,14 @@ struct AIPersonality {
     // Parked on a pad, an enemy this close is reason enough to leave: nothing
     // is winnable from the ground, and a stationary target is a free shot.
     double groundedThreatRange = 600.0;
+
+    // How many upgrades this pilot means to be carrying when it leaves home.
+    // 1 is "take whatever the lab has finished and go"; 2 is a pilot that
+    // sits out most of a research cycle (30s a lab, see economy.toml) to
+    // arrive late and overgunned. padWaitTicks bounds the wait, so a faction
+    // with no labs left never parks its wing forever.
+    std::uint32_t upgradeGreed = 1;
+    std::uint32_t padWaitTicks = 2700; // 45s at the fixed tick
 
     std::uint32_t decisionInterval = 15; // ticks between tactical re-evaluations
 
@@ -168,6 +180,18 @@ struct AIPilot {
     // Shots left in the burst currently underway; 0 = between bursts (the
     // next successful shot starts a fresh one of personality.burstCount).
     std::uint32_t burstShotsRemaining = 0;
+
+    // Upgrades this pilot still means to collect before it leaves home, and
+    // the ticks it will wait around for them. Seeded from the personality at
+    // spawn and decremented by ResearchSystem as it actually collects, so the
+    // count is spent by the thing that hands them out rather than inferred
+    // from a loadout diff.
+    std::uint32_t upgradesWanted = 0;
+    std::uint32_t padWaitRemaining = 0;
+
+    // The planet this pilot is heading home to (hurt, or shopping). Held so
+    // the trip survives the decision cadence that started it.
+    flecs::entity homeSite;
 };
 
 } // namespace Gravitaris

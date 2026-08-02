@@ -33,6 +33,7 @@ inline const char* AIGoalName(AIGoal goal)
         case AIGoal::AttackComplex:      return "AttackComplex";
         case AIGoal::InterceptFreighter: return "InterceptFrtr";
         case AIGoal::DefendComplex:      return "Defend";
+        case AIGoal::Rearm:              return "Rearm";
     }
     return "?";
 }

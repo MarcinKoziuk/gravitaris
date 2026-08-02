@@ -30,6 +30,7 @@
 #include <gravitaris/game/system/gwell/faction-system.hpp>
 #include <gravitaris/game/system/ship/landing-state-system.hpp>
 #include <gravitaris/game/system/gwell/conquest-system.hpp>
+#include <gravitaris/game/system/ship/repair-system.hpp>
 #include <gravitaris/game/system/combat/death-system.hpp>
 #include <gravitaris/game/system/ship/ai-pilot-system.hpp>
 #include <gravitaris/game/system/ship/ai-strategy-system.hpp>
@@ -96,6 +97,8 @@ protected:
     FactionSystem m_factionSystem;
 
     LandingStateSystem m_landingStateSystem;
+
+    RepairSystem m_repairSystem;
 
     ConquestSystem m_conquestSystem;
 

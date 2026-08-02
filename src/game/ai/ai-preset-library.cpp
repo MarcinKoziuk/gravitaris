@@ -139,6 +139,8 @@ static void ReadPersonality(const toml::table& t, AIPersonality& p)
     if (const auto v = t["fire_tolerance"].value<double>()) p.fireTolerance = *v;
     if (const auto v = t["aim_priority_error"].value<double>()) p.aimPriorityError = *v;
     if (const auto v = t["grounded_threat_range"].value<double>()) p.groundedThreatRange = *v;
+    if (const auto v = t["upgrade_greed"].value<std::uint32_t>()) p.upgradeGreed = *v;
+    if (const auto v = t["pad_wait_ticks"].value<std::uint32_t>()) p.padWaitTicks = *v;
     if (const auto v = t["evade_radius"].value<double>()) p.evadeRadius = *v;
     if (const auto v = t["evade_margin"].value<double>()) p.evadeMargin = *v;
     if (const auto v = t["danger_lookahead_steps"].value<int>()) p.dangerLookaheadSteps = *v;
@@ -193,6 +195,7 @@ static void ReadStrategy(const toml::table& t, AIStrategyWeights& w)
     if (const auto v = t["attack_complex"].value<double>()) w.attackComplex = *v;
     if (const auto v = t["intercept_freighter"].value<double>()) w.interceptFreighter = *v;
     if (const auto v = t["defend"].value<double>()) w.defend = *v;
+    if (const auto v = t["rearm"].value<double>()) w.rearm = *v;
 }
 
 // xorshift32, seeded by the caller from sim state (ADR 0001) -- nothing here

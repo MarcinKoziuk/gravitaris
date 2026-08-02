@@ -308,6 +308,44 @@ sequence reproducible; a snapshot taken before the pass would let a whole
 wing — all of whom spawn with a zero decision cooldown and so decide on the
 same tick — claim the same planet.
 
+*Somewhere to be (2026-08-02, from a live session where most AI ships read
+`Dogfight` / `Orbit` for minutes at a time).* Three separate things all
+ended at the same patrol ring, and it was the honest report of an idle
+pilot, not a bug in the patrol:
+
+- **`engageRange` was a cutoff.** The strategy layer scored a dogfight on a
+  3000-unit falloff while the tactical layer refused to fly one past 6000,
+  so between those figures a leader committed to a fight it would not
+  travel to. The gate is gone: any named enemy is flown to, and
+  `engageRange` is now the falloff the strategy layer scores dogfights with
+  — how far a fight is worth travelling, weighed against everything else
+  the pilot could be doing, rather than a wall. `Dogfight` also issues a
+  real `Attack` order now, which is what makes the tactical layer treat it
+  as a destination. That order is deliberately *not* propagated to the
+  wing (nor is `Rearm`): the leader's pick is one enemy out of many and the
+  wing has its own nearest.
+- **`hurt` was permanent.** Nothing restored hull, so a pilot that fell
+  under `fleeHealthFraction` could never pick `Intercept` again and
+  patrolled out the round. `RepairSystem` gives hull back to any ship —
+  player included — standing on one of its faction's developed planets (a
+  Base *and* a Colony, the same pairing a respawn needs; `IsHomePlanet` is
+  now the single definition of that, shared with `FactionSystem`).
+- **Nothing sent it there.** `AIGoal::Rearm` lands a leader at its nearest
+  home planet, scaled by damage and decisive below the flee threshold
+  (`REARM_URGENCY` deliberately exceeds every other goal's ceiling of 1).
+  Pilots without an `AIStrategy` reach the same trip from `AIPilotSystem`,
+  which writes them the same `Land` order in place of the wing's.
+
+The same trip carries the shopping list: a fresh pilot launches wanting
+`AIPersonality::upgradeGreed` upgrades and holds its pad until
+`ResearchSystem` has handed them over, `padWaitTicks` expires, or a threat
+turns up overhead. `sniper`/`cautious` want two and arrive late and
+overgunned; `reckless` has `pad_wait_ticks = 0` and `rearm = 0`, so it
+never shops and never goes home to patch up — the ground-side reading of
+the same temperament its `flee_health_fraction = 0` already states.
+
+Covered by `TestRepairAndReachability`.
+
 *Partly done 2026-07-26, fixing "AI runs away at full speed when chased":*
 `InterceptEntity`'s velocity feedforward now matches only the target's
 lateral motion, not its line-of-sight motion (mirroring a pursuer's charge
@@ -319,8 +357,8 @@ attacker toward a stale distant lock. Deliberate, disadvantage-driven
 retreat (return to base to repair, fall back to defend home) is still
 unimplemented — there is no Flee behavior at all, which is the point: every
 retreat seen today is one of these two accidents. (Deliberate retreat exists
-as of 2026-07-28 — see the phase-5 status above. There is still nothing to
-retreat *to*: no repair mechanic, so Flee is disengagement, not a trip home.)
+as of 2026-07-28 — see the phase-5 status above. There is somewhere to
+retreat *to* as of 2026-08-02: `RepairSystem` and `AIGoal::Rearm`, below.)
 
 *Thrust vs. gravity, and two silent guidance layers (2026-07-29), fixing "AI
 ships are stuck on Depart".* The pilots were flying it correctly; nothing

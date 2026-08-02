@@ -14,6 +14,7 @@
 #include <gravitaris/game/resource/body.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/gwell/faction-system.hpp>
+#include <gravitaris/game/system/gwell/home-site.hpp>
 
 namespace Gravitaris {
 
@@ -67,12 +68,7 @@ std::optional<FactionSystem::SpawnPoint> FactionSystem::SpawnPosition(TeamId tea
     // nothing to respawn out of, so it is skipped and the search falls through
     // to somewhere that does. Stations are exempt: a High Port IS the
     // infrastructure.
-    const auto canHost = [&](flecs::entity planet) {
-        const NetId* netId = planet.try_get<NetId>();
-        return netId
-               && HasFriendlyStructure(m_registry, netId->value, StructureType::Base, team)
-               && HasFriendlyStructure(m_registry, netId->value, StructureType::Colony, team);
-    };
+    const auto canHost = [&](flecs::entity planet) { return IsHomePlanet(m_registry, planet, team); };
 
     // Site: last friendly landing site if it's still alive, friendly and built up...
     flecs::entity site;

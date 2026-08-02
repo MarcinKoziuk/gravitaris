@@ -55,6 +55,13 @@ struct EconomyConfig {
         double secondsPerUpgrade = 30.0;
     } research;
 
+    // Hull restored to a ship standing on one of its faction's developed
+    // planets (RepairSystem) -- the same Base+Colony pairing a respawn needs,
+    // since that is what makes a rock somewhere to come home to.
+    struct Repair {
+        float hullPerSecond = 10.f;
+    } repair;
+
     // Reads `path` (default "economy.toml"). Returns false and keeps the
     // defaults above if it can't be read or parsed.
     bool Load(IFilesystem& filesystem, const char* path = "economy.toml");

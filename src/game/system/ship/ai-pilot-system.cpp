@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <optional>
@@ -29,6 +30,7 @@
 #include <gravitaris/game/gnc/control/flight-controller.hpp>
 #include <gravitaris/game/util/splitmix.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
+#include <gravitaris/game/system/gwell/home-site.hpp>
 #include <gravitaris/game/system/ship/ship-controls-system.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/system/ship/ai-pilot-system.hpp>
@@ -36,6 +38,8 @@
 namespace Gravitaris {
 
 using Magnum::Vector2d;
+
+static constexpr std::size_t NUM_TEAMS = 7; // TeamId::Blue..None
 
 // A rival target has to be this much closer (squared distance) than the
 // current one before a pilot switches to it.
@@ -153,6 +157,47 @@ void AIPilotSystem::Update(std::uint64_t step)
         candidates.push_back({ent, transf.pos, team.id});
     });
 
+    // Somewhere to come home to, and whether anything is still being built
+    // there worth coming home for. Both are per-team facts, so they're read
+    // once here rather than per pilot; NetId order keeps the nearest-home tie
+    // break the same on every run (ADR 0001).
+    struct HomePlanet {
+        flecs::entity entity;
+        Vector2d pos;
+        TeamId team;
+        std::uint32_t netId;
+    };
+    std::vector<HomePlanet> homePlanets;
+    m_registry.each([&](flecs::entity ent, const Planet&, const Transform& transf, const Team& team,
+                        const NetId& netId) {
+        if (IsHomePlanet(m_registry, ent, team.id)) {
+            homePlanets.push_back({ent, transf.pos, team.id, netId.value});
+        }
+    });
+    std::sort(homePlanets.begin(), homePlanets.end(),
+              [](const HomePlanet& a, const HomePlanet& b) { return a.netId < b.netId; });
+
+    std::array<bool, NUM_TEAMS> teamHasLab{};
+    m_registry.each([&](const Structure& s, const Team& team) {
+        if (s.type == StructureType::Lab && team.id != TeamId::None) {
+            teamHasLab[static_cast<std::size_t>(team.id)] = true;
+        }
+    });
+
+    const auto nearestHome = [&homePlanets](TeamId team, const Vector2d& from) {
+        flecs::entity best;
+        double bestDistSq = std::numeric_limits<double>::max();
+        for (const HomePlanet& home : homePlanets) {
+            if (home.team != team) continue;
+            const double distSq = (home.pos - from).dot();
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = home.entity;
+            }
+        }
+        return best;
+    };
+
     // Wing orders. A pilot with no AIStrategy of its own -- everything that
     // isn't a faction leader -- flies its team leader's objective instead of
     // its own nearest-enemy pick, which is what turns one strategic ship into
@@ -165,9 +210,13 @@ void AIPilotSystem::Update(std::uint64_t step)
         std::uint32_t netId = std::numeric_limits<std::uint32_t>::max();
     };
     ankerl::unordered_dense::map<std::uint8_t, WingOrder> wingOrders;
-    m_registry.each([&](flecs::entity ent, const AIStrategy&, const AIPilot& leader, const Team& team,
+    m_registry.each([&](flecs::entity ent, const AIStrategy& strategy, const AIPilot& leader, const Team& team,
                         const NetId& netId) {
         if (leader.order.kind == AIOrderKind::None || !leader.order.subject.is_alive()) return;
+        // Two of a leader's goals are its own business: its dogfight pick is
+        // one enemy out of many and the wing has its own nearest, and a trip
+        // home is about that leader's hull, not the wing's.
+        if (strategy.goal == AIGoal::Dogfight || strategy.goal == AIGoal::Rearm) return;
 
         WingOrder& slot = wingOrders[static_cast<std::uint8_t>(team.id)];
         if (netId.value >= slot.netId) return;
@@ -179,11 +228,6 @@ void AIPilotSystem::Update(std::uint64_t step)
 
     m_registry.each([&](flecs::entity ent, Transform& transf, PhysicsRef& ref,
                         AIPilot& pilot, InputQueue& queue, const Team& myTeam) {
-        if (!ent.has<AIStrategy>()) {
-            const auto wing = wingOrders.find(static_cast<std::uint8_t>(myTeam.id));
-            pilot.order = wing != wingOrders.end() ? wing->second.order : AIOrder{};
-        }
-
         const AIPersonality& personality = pilot.personality;
 
         // This pilot's own fitted gun -- what it actually has to lead with.
@@ -232,6 +276,29 @@ void AIPilotSystem::Update(std::uint64_t step)
         const auto evadeRadiusOf = [&personality](const Source& src) {
             return std::max(personality.evadeRadius, src.radius * EVADE_SURFACE_CLEARANCE);
         };
+
+        // Shopping: a pilot holds its pad for the upgrades its own labs are
+        // still finishing (AIPersonality::upgradeGreed). With no labs left
+        // nothing is coming, so there is nothing to wait for.
+        if (pilot.padWaitRemaining > 0) --pilot.padWaitRemaining;
+        const bool shopping = pilot.upgradesWanted > 0 && pilot.padWaitRemaining > 0
+                && teamHasLab[static_cast<std::size_t>(myTeam.id)];
+
+        // A pilot with no strategy of its own flies its leader's objective,
+        // except when its own hull or its own shopping list says otherwise --
+        // the two things no one else can decide for it. (A leader gets the
+        // same trip from AIStrategySystem, as AIGoal::Rearm.)
+        if (!ent.has<AIStrategy>()) {
+            const flecs::entity home =
+                    (hurt || shopping) ? nearestHome(myTeam.id, transf.pos) : flecs::entity();
+            if (home.is_alive()) {
+                pilot.order = AIOrder{AIOrderKind::Land, home};
+            }
+            else {
+                const auto wing = wingOrders.find(static_cast<std::uint8_t>(myTeam.id));
+                pilot.order = wing != wingOrders.end() ? wing->second.order : AIOrder{};
+            }
+        }
 
         // A live Attack order names the target outright -- the strategy layer
         // has already weighed a structure or freighter against the nearest
@@ -303,13 +370,14 @@ void AIPilotSystem::Update(std::uint64_t step)
             if (ordered && pilot.order.kind == AIOrderKind::Land) {
                 pilot.behavior = AIBehavior::Land;
             }
-            // An ordered attack ignores engageRange. That range is how a pilot
-            // picks a dogfight opponent out of whatever is nearby; applying it
-            // to a named subject leaves a leader holding an attack goal while
-            // it patrols a well thousands of units away from it.
-            else if (!hurt && targetTransf
-                     && (orderedAttack
-                         || (targetTransf->pos - transf.pos).length() < personality.engageRange)) {
+            // Any live enemy is worth flying to. Range used to gate this, and
+            // a pilot whose nearest enemy sat outside it went and circled a
+            // rock instead -- an idle state wearing a goal's name. How far a
+            // fight is worth travelling is a question for the strategy layer,
+            // which weighs it against the other things a pilot could be doing
+            // (AIPersonality::engageRange is that scale); down here, having
+            // somewhere to be always beats patrolling.
+            else if (!hurt && targetTransf) {
                 pilot.behavior = AIBehavior::Intercept;
             }
             else if (patrolBody) {
@@ -353,8 +421,12 @@ void AIPilotSystem::Update(std::uint64_t step)
         }
 
         const bool onGround = landing && landing->landed;
-        const bool holding = onGround && siteNet && siteNet->value == landing->landedOnNetId
-                && !threatOverhead;
+        const bool waitingForKit = shopping && onGround
+                && std::any_of(homePlanets.begin(), homePlanets.end(), [&](const HomePlanet& home) {
+                       return home.team == myTeam.id && home.netId == landing->landedOnNetId;
+                   });
+        const bool holding = onGround && !threatOverhead
+                && ((siteNet && siteNet->value == landing->landedOnNetId) || waitingForKit);
         if (holding) {
             pilot.behavior = AIBehavior::Landed;
         }

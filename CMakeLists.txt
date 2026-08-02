@@ -605,6 +605,10 @@ add_executable(GravitarisNG
     src/game/system/ship/landing-state-system.cpp
     include/gravitaris/game/system/gwell/conquest-system.hpp
     src/game/system/gwell/conquest-system.cpp
+    include/gravitaris/game/system/gwell/home-site.hpp
+    src/game/system/gwell/home-site.cpp
+    include/gravitaris/game/system/ship/repair-system.hpp
+    src/game/system/ship/repair-system.cpp
     include/gravitaris/game/system/core/structure-attachment-system.hpp
     src/game/system/core/structure-attachment-system.cpp
     include/gravitaris/game/system/combat/structure-defense-system.hpp
@@ -899,6 +903,8 @@ add_executable(gravitaris-sim-test
     src/game/system/gwell/faction-system.cpp
     src/game/system/ship/landing-state-system.cpp
     src/game/system/gwell/conquest-system.cpp
+    src/game/system/gwell/home-site.cpp
+    src/game/system/ship/repair-system.cpp
     src/game/system/core/structure-attachment-system.cpp
     src/game/system/combat/structure-defense-system.cpp
     src/game/system/gwell/freighter-system.cpp
@@ -1006,6 +1012,8 @@ if(NOT EMSCRIPTEN)
         src/game/system/gwell/faction-system.cpp
         src/game/system/ship/landing-state-system.cpp
         src/game/system/gwell/conquest-system.cpp
+        src/game/system/gwell/home-site.cpp
+        src/game/system/ship/repair-system.cpp
         src/game/system/core/structure-attachment-system.cpp
         src/game/system/combat/structure-defense-system.cpp
         src/game/system/gwell/freighter-system.cpp

@@ -40,3 +40,9 @@ claim_ticks = 60
 # fast. Research is unfunded -- no materials cost yet.
 [research]
 seconds_per_upgrade = 30.0
+
+# Hull per second restored to a ship standing on one of its own developed
+# planets (a Base and a Colony, the same pairing a respawn needs). Free --
+# coming home and staying still is the whole cost.
+[repair]
+hull_per_second = 10.0

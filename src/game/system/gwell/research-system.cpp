@@ -171,6 +171,13 @@ void ResearchSystem::Update(std::uint64_t step)
                         // between the roll and the press) leaves the bar full
                         // so the player can pick again rather than losing it.
                         if (def && m_catalog.Apply(*def, *loadout)) {
+                            // Spent here rather than inferred from a loadout
+                            // diff: the thing that hands an upgrade over is
+                            // the thing that knows one was collected.
+                            if (AIPilot* aiPilot = ship.try_get_mut<AIPilot>();
+                                aiPilot && aiPilot->upgradesWanted > 0) {
+                                --aiPilot->upgradesWanted;
+                            }
                             fs.upgradeReady = false;
                             fs.researchProgress = 0.f;
                             draft->available = false;

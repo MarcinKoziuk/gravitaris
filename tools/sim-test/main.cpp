@@ -2110,6 +2110,82 @@ void TestTakeoff()
     fs.Shutdown();
 }
 
+// Coming home: the hull is only ever given back on a faction's own developed
+// planet, and having somewhere to go is what stops a hurt pilot orbiting out
+// the round. Also the reachability rule that made that orbit possible -- a
+// distant enemy is a trip, not a shrug.
+void TestRepairAndReachability()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    // Same descent as TestLandingAndClaiming, on a planet that either carries
+    // this team's complex or is a bare rock. Returns the hull gained while
+    // standing on it.
+    const auto hullGainedWhileLanded = [&](bool developed) {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+
+        flecs::entity planet = spawner.SpawnOrbitingPlanet("models/planets/simple"_id,
+                                                           Vector2d{0., 0.}, 1e-9, 800., 1.0, 0.0);
+        if (developed) BuildStartingComplex(spawner, planet, TeamId::Blue);
+
+        const float planetRadius = planet.get<Planet>().radius
+                * static_cast<float>(planet.get<Transform>().scale.x());
+        flecs::entity ship = spawner.SpawnPlayer("models/ships/fighter-1"_id,
+                                                 Vector2d{800., planetRadius + 15.});
+        cpBody* shipBody = game.GetPhysicsSystem().GetBody(ship.get<PhysicsRef>()).cp.body.get();
+        cpBodySetAngle(shipBody, CP_PI);
+        cpBodySetVelocity(shipBody, cpv(0., -8.));
+
+        Damageable& hull = ship.get_mut<Damageable>();
+        hull.hp = hull.maxHp * 0.4f;
+        const float hpBefore = hull.hp;
+
+        for (int tick = 0; tick < 900 && ship.is_alive(); ++tick) {
+            game.Update();
+        }
+        Require(ship.is_alive(), "repair: the descending ship survives touchdown (setup check)");
+        Require(ship.get<LandingState>().landed, "repair: the ship is standing on the planet (setup check)");
+        return ship.get<Damageable>().hp - hpBefore;
+    };
+
+    Require(hullGainedWhileLanded(/*developed=*/true) > 1.f,
+            "repair: a hurt ship standing on its faction's developed planet gets hull back");
+    Require(hullGainedWhileLanded(/*developed=*/false) == 0.f,
+            "repair: a bare rock repairs nothing, however long you sit on it");
+
+    // Reachability: an enemy well past the old engage-range cutoff used to
+    // leave a pilot circling the nearest body instead. Nothing else is in
+    // this scene, so Orbit here would be a pilot with nowhere to be.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 1e-9, 800., 1.0, 0.0);
+
+        flecs::entity ship = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{400., 0.},
+                                                 game.GetAIPresets().Default());
+        ship.get_mut<AIPilot>().personality.dangerLookaheadSteps = 0;
+        flecs::entity enemy = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{12000., 0.});
+
+        const double rangeBefore = (enemy.get<Transform>().pos - ship.get<Transform>().pos).length();
+        for (int tick = 0; tick < 900; ++tick) {
+            game.Update();
+        }
+        const double rangeAfter = (enemy.get<Transform>().pos - ship.get<Transform>().pos).length();
+
+        Require(ship.get<AIPilot>().behavior == AIBehavior::Intercept,
+                "reachability: an enemy past the old engage range is still flown to");
+        Require(rangeAfter < rangeBefore - 100.0,
+                "reachability: and the pilot actually closes on it");
+    }
+
+    fs.Shutdown();
+}
+
 // Phase 5 tactics (docs/ai-ships.md): weapon discipline, jinking under fire,
 // breaking off when hurt, and one leader per objective.
 //
@@ -2966,6 +3042,7 @@ int main()
     TestSectorGeneration();
     TestOwnBulletSuppression();
     TestTakeoff();
+    TestRepairAndReachability();
     TestAITactics();
     TestInterceptKeepsTargetInSights();
     TestWebRtcRoundtrip();

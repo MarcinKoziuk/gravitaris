@@ -109,6 +109,13 @@ flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, const 
     entity.emplace<ShipLoadout>(MakeShipLoadout(*body));
     entity.emplace<UpgradeDraft>();
     AIPresetLibrary::Apply(preset, entity.get_mut<AIPilot>());
+    {
+        // A fresh pilot launches with a shopping list: whatever its labs have
+        // finished is the point of standing on the pad at all.
+        AIPilot& pilot = entity.get_mut<AIPilot>();
+        pilot.upgradesWanted = pilot.personality.upgradeGreed;
+        pilot.padWaitRemaining = pilot.personality.padWaitTicks;
+    }
     AssignNetId(entity);
     AddRenderable(entity, modelId);
 

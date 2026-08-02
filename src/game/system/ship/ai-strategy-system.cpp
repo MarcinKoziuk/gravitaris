@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -18,11 +19,14 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
+#include <gravitaris/game/system/gwell/home-site.hpp>
 #include <gravitaris/game/system/ship/ai-strategy-system.hpp>
 
 namespace Gravitaris {
 
 using Magnum::Vector2d;
+
+static constexpr std::size_t NUM_TEAMS = 7; // TeamId::Blue..None
 
 // Distance at which a proximity term is worth half its weight -- how far a
 // leader is willing to travel for each kind of objective. Expansion targets
@@ -39,6 +43,12 @@ static constexpr double COMPLEX_REFERENCE_HP = 100.0;
 // A rival goal must beat the incumbent by this much to take over, so a
 // leader commits to something instead of oscillating between near-ties.
 static constexpr double GOAL_SWITCH_MARGIN = 1.2;
+
+// What going home is worth to a pilot already under its own flee threshold.
+// Above every other goal's ceiling of 1, deliberately: below that fraction
+// the tactical layer has stopped picking fights, so any other goal scored
+// here is one it would carry around without flying.
+static constexpr double REARM_URGENCY = 3.0;
 
 // Crowding falloff: a subject already spoken for by n other leaders scores
 // CROWDING_SHARE/(CROWDING_SHARE + n) of its worth, so the second leader to
@@ -85,6 +95,14 @@ double Proximity(double dist, double scale)
     return scale / (scale + dist);
 }
 
+// Whether a second leader picking the same subject is duplicated effort. A
+// planet to claim or a complex to level is; an enemy fighter and a home pad
+// are not.
+bool Crowds(AIGoal goal)
+{
+    return goal != AIGoal::Dogfight && goal != AIGoal::Rearm;
+}
+
 AIOrder OrderFor(AIGoal goal, flecs::entity subject)
 {
     switch (goal) {
@@ -92,7 +110,11 @@ AIOrder OrderFor(AIGoal goal, flecs::entity subject)
         case AIGoal::AttackComplex:      return AIOrder{AIOrderKind::Attack, subject};
         case AIGoal::InterceptFreighter: return AIOrder{AIOrderKind::Attack, subject};
         case AIGoal::DefendComplex:      return AIOrder{AIOrderKind::Patrol, subject};
-        case AIGoal::Dogfight:           break;
+        case AIGoal::Rearm:              return AIOrder{AIOrderKind::Land, subject};
+        // A named enemy, not a hint: an ordered attack ignores engageRange,
+        // which is what makes a leader cross a sector for the fight it just
+        // chose instead of picking one and then patrolling a nearer rock.
+        case AIGoal::Dogfight:           return AIOrder{AIOrderKind::Attack, subject};
     }
     return AIOrder{};
 }
@@ -130,6 +152,13 @@ void AIStrategySystem::Update()
         planetByNetId.emplace(planets[i].netId, i);
     }
 
+    std::array<bool, NUM_TEAMS> teamHasLab{};
+    m_registry.each([&](const Structure& s, const Team& team) {
+        if (s.type == StructureType::Lab && team.id != TeamId::None) {
+            teamHasLab[static_cast<std::size_t>(team.id)] = true;
+        }
+    });
+
     const auto addStructure = [&](flecs::entity ent, const Damageable& hp, std::uint32_t planetNetId) {
         const auto it = planetByNetId.find(planetNetId);
         if (it == planetByNetId.end()) return;
@@ -159,13 +188,12 @@ void AIStrategySystem::Update()
     std::sort(ships.begin(), ships.end(),
               [](const ShipInfo& a, const ShipInfo& b) { return a.netId < b.netId; });
 
-    // Who is already spoken for. Dogfights are exempt: several ships
-    // converging on one enemy fighter is a fine outcome, unlike two of them
-    // descending on the same rock.
+    // Who is already spoken for. Dogfights and home pads are exempt: several
+    // ships converging on one enemy fighter is a fine outcome, and a pad
+    // holds a whole wing -- unlike two of them descending on the same rock.
     ankerl::unordered_dense::map<std::uint64_t, int> takers;
     m_registry.each([&](flecs::entity, const AIStrategy& strategy) {
-        if (strategy.goal == AIGoal::Dogfight || !strategy.subject.is_alive()) return;
-        ++takers[strategy.subject.id()];
+        if (Crowds(strategy.goal) && strategy.subject.is_alive()) ++takers[strategy.subject.id()];
     });
 
     // Leaders decide in NetId order, and each one's pick lands in `takers`
@@ -195,8 +223,12 @@ void AIStrategySystem::Update()
         if (strategy.commitCooldown > 0) --strategy.commitCooldown;
 
         // Hold a claim through its descent; anyone taking the planet in the
-        // meantime (us included) releases it early.
-        if (strategy.goal == AIGoal::ClaimPlanet && strategy.commitCooldown > 0
+        // meantime (us included) releases it early, and so does a hull too
+        // hurt to be flying the descent at all.
+        const Damageable* selfHull = self.try_get<Damageable>();
+        const bool tooHurtToCommit = selfHull && selfHull->maxHp > 0.f
+                && selfHull->hp / selfHull->maxHp < static_cast<float>(pilot.personality.fleeHealthFraction);
+        if (strategy.goal == AIGoal::ClaimPlanet && strategy.commitCooldown > 0 && !tooHurtToCommit
             && strategy.subject.is_alive()) {
             const Team* subjectTeam = strategy.subject.try_get<Team>();
             if (subjectTeam && subjectTeam->id == TeamId::None) continue;
@@ -219,13 +251,13 @@ void AIStrategySystem::Update()
         Choice best;
         double incumbentScore = 0.0;
         const auto consider = [&](AIGoal goal, flecs::entity subject, double score) {
-            if (goal != AIGoal::Dogfight) {
+            if (Crowds(goal)) {
                 const auto it = takers.find(subject.id());
                 int others = it != takers.end() ? it->second : 0;
                 // This leader's own claim is not competition for itself --
                 // discounting it would make every incumbent goal look worse
                 // than the alternatives on every re-score.
-                if (subject == strategy.subject && strategy.goal != AIGoal::Dogfight) --others;
+                if (subject == strategy.subject && Crowds(strategy.goal)) --others;
                 score *= CROWDING_SHARE / (CROWDING_SHARE + others);
             }
 
@@ -248,9 +280,40 @@ void AIStrategySystem::Update()
             return found;
         };
 
+        // Going home, scaled by how badly the hull is hurt: a scratch is a
+        // mild pull that any real objective outscores, and a pilot under its
+        // own flee threshold outranks everything, since below that the
+        // tactical layer has stopped picking fights anyway. A pilot that
+        // hasn't collected the upgrades it launched for is in the same
+        // position -- it has business at home either way.
+        const bool shopping = pilot.upgradesWanted > 0 && pilot.padWaitRemaining > 0
+                && teamHasLab[static_cast<std::size_t>(myTeam.id)];
+        const bool damaged = selfHull && selfHull->maxHp > 0.f && selfHull->hp < selfHull->maxHp;
+
+        if (damaged || shopping) {
+            const flecs::entity home = FindHomePlanet(m_registry, myTeam.id, transf.pos);
+            if (home.is_alive()) {
+                const double fraction = damaged
+                        ? static_cast<double>(selfHull->hp / selfHull->maxHp)
+                        : 1.0;
+                const double urgency =
+                        (shopping || fraction < pilot.personality.fleeHealthFraction)
+                        ? REARM_URGENCY
+                        : 1.0 - fraction;
+                const double dist = (home.get<Transform>().pos - transf.pos).length();
+                consider(AIGoal::Rearm, home,
+                         weights.rearm * urgency * Proximity(dist, EXPANSION_SCALE));
+            }
+        }
+
+        // How far a fight is worth travelling is the personality's own
+        // engageRange: the tactical layer flies whatever is named here, so
+        // this is the only place that range still means anything.
         if (const ShipInfo* enemy = nearestShip(transf.pos, /*wantFreighter=*/false)) {
             consider(AIGoal::Dogfight, enemy->entity,
-                     weights.dogfight * Proximity((enemy->pos - transf.pos).length(), RAID_SCALE));
+                     weights.dogfight
+                             * Proximity((enemy->pos - transf.pos).length(),
+                                         pilot.personality.engageRange));
         }
         if (const ShipInfo* freighter = nearestShip(transf.pos, /*wantFreighter=*/true)) {
             consider(AIGoal::InterceptFreighter, freighter->entity,
