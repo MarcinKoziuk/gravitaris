@@ -15,6 +15,7 @@
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
+#include <gravitaris/game/component/landing-state.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
@@ -315,6 +316,43 @@ void AIPilotSystem::Update(std::uint64_t step)
             }
         }
 
+        // On a pad the pilot either has business there or it leaves. Only
+        // holding is decided here; a pilot with no reason to stay falls
+        // through to the ladder, whose Depart rule already owns getting a
+        // ship off a body it is standing on. Running the rest of that ladder
+        // from the ground is what left a parked ship twitching at its own
+        // landing site -- the reflexes are written for a ship in flight and
+        // command a climb, a break or a pursuit that the legs then fight.
+        const LandingState* landing = ent.try_get<LandingState>();
+        const NetId* siteNet = ordered && pilot.order.kind == AIOrderKind::Land
+                        && pilot.order.subject.is_alive()
+                ? pilot.order.subject.try_get<NetId>()
+                : nullptr;
+
+        bool threatOverhead = false;
+        for (const Candidate& c : candidates) {
+            if (c.entity == ent || c.team == myTeam.id) continue;
+            const double range = personality.groundedThreatRange;
+            if ((c.pos - transf.pos).dot() < range * range) {
+                threatOverhead = true;
+                break;
+            }
+        }
+
+        const bool onGround = landing && landing->landed;
+        const bool holding = onGround && siteNet && siteNet->value == landing->landedOnNetId
+                && !threatOverhead;
+        if (holding) {
+            pilot.behavior = AIBehavior::Landed;
+        }
+
+        // The other half: leaving is a decision, not a side effect of having
+        // somewhere else to be. The departure rule below starts a climb only
+        // for a pilot whose objective is elsewhere, so one with no objective
+        // at all -- a leader whose claim has just fired, fodder with no
+        // orders -- sat on the rock for the rest of the round.
+        const bool groundedWantsOut = onGround && !holding;
+
         // Breaking off, checked every tick like the danger override below.
         // The hysteresis is on range rather than on hull: nothing repairs a
         // ship, so a hull fraction that has fallen through the threshold
@@ -341,7 +379,7 @@ void AIPilotSystem::Update(std::uint64_t step)
                     personality.fleeRange * (pilot.fleeing ? personality.fleeMargin : 1.0);
             pilot.fleeing = threat.is_alive() && threatDistSq < range * range;
             pilot.fleeThreat = pilot.fleeing ? threat : flecs::entity();
-            if (pilot.fleeing) pilot.behavior = AIBehavior::Flee;
+            if (pilot.fleeing && !holding) pilot.behavior = AIBehavior::Flee;
         }
 
         // Where this pilot's business actually is: the order's subject, or
@@ -368,8 +406,13 @@ void AIPilotSystem::Update(std::uint64_t step)
                     && (objective->pos - neighbourhood->pos).length() < clearRadius;
             const bool departing = pilot.departureSite == neighbourhood->entity;
 
-            if (objective && !objectiveHere
-                && distance < clearRadius * (departing ? DEPARTURE_MARGIN : 1.0)) {
+            // A climb already underway runs on its own hysteresis band: once
+            // committed, what started it stops mattering, or a claim firing
+            // mid-climb would strand the pilot halfway up.
+            const bool wantsOut =
+                    departing || groundedWantsOut || (objective && !objectiveHere);
+
+            if (wantsOut && distance < clearRadius * (departing ? DEPARTURE_MARGIN : 1.0)) {
                 pilot.departureSite = neighbourhood->entity;
                 pilot.behavior = AIBehavior::Depart;
             }
@@ -396,8 +439,9 @@ void AIPilotSystem::Update(std::uint64_t step)
         // "predicted to reach the surface" fights it into a hover just short
         // of touchdown. Only the body being landed on is exempt -- anything
         // else on the way down is still a well to evade.
-        const bool landingHere = pilot.behavior == AIBehavior::Land && well
-                && pilot.order.subject == well->entity;
+        const bool landingHere = (pilot.behavior == AIBehavior::Land
+                                  || pilot.behavior == AIBehavior::Landed)
+                && well && pilot.order.subject == well->entity;
 
         bool predictedDanger = false;
         if (well && !landingHere) {
@@ -425,7 +469,7 @@ void AIPilotSystem::Update(std::uint64_t step)
 
         const bool effectiveDanger = predictedDanger && !pilot.dangerSuppressed;
 
-        if (effectiveDanger) {
+        if (effectiveDanger && !holding) {
             pilot.behavior = AIBehavior::Evade;
         }
         else if (pilot.behavior == AIBehavior::Evade) {
@@ -524,6 +568,17 @@ void AIPilotSystem::Update(std::uint64_t step)
                     // along its orbit, i.e. a parked pilot spends the whole
                     // stay chasing an attitude taken from the pad's direction
                     // of travel rather than settling on its legs.
+                    const Vector2d r = transf.pos - site->pos;
+                    if (r.length() > 1e-6) {
+                        coastFacing = r.normalized();
+                        hasCoastFacing = true;
+                    }
+                }
+                break;
+            case AIBehavior::Landed:
+                if (const Source* site = findSource(pilot.order.subject)) {
+                    desiredVel = site->vel;
+
                     const Vector2d r = transf.pos - site->pos;
                     if (r.length() > 1e-6) {
                         coastFacing = r.normalized();

@@ -15,6 +15,7 @@ enum class AIBehavior {
     Intercept, // pursuing the target
     Orbit,     // patrolling the heaviest body
     Land,      // descending onto the order's subject body
+    Landed,    // parked on the order's subject body, holding the pad
     Depart,    // climbing clear of the body it launched from
     Flee,      // breaking off from a threat while too hurt to fight it
 };
@@ -82,6 +83,10 @@ struct AIPersonality {
     double jinkSpeed = 30.0;
     std::uint32_t jinkPeriod = 26;
     std::uint32_t underFireTicks = 90;
+
+    // Parked on a pad, an enemy this close is reason enough to leave: nothing
+    // is winnable from the ground, and a stationary target is a free shot.
+    double groundedThreatRange = 600.0;
 
     std::uint32_t decisionInterval = 15; // ticks between tactical re-evaluations
 
