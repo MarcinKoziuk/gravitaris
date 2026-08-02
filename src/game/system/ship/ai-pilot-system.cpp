@@ -210,15 +210,28 @@ void AIPilotSystem::Update(std::uint64_t step)
         // danger-ignore rolls below -- same value every replay of this tick.
         std::uint64_t rng = SplitMix64Seed(step, ent.id());
 
-        const Source* well = nullptr;
+        // The body that rules where the pilot actually is. Raw mass picks the
+        // sector's sun from anywhere in it, which is the wrong answer for
+        // every question asked of it -- an idle pilot circled the sun rather
+        // than the rock it was next to. Gravitational influence is the same
+        // falloff the sim's own force law uses.
+        const Source* dominant = nullptr;
+        double bestInfluence = 0.0;
         for (const Source& src : sources) {
             if (src.entity == ent) continue;
-            if (!well || src.mass > well->mass) well = &src;
+            const double influence = src.mass / std::max((src.pos - transf.pos).dot(), 1.0);
+            if (!dominant || influence > bestInfluence) {
+                bestInfluence = influence;
+                dominant = &src;
+            }
         }
 
-        const double evadeRadius = well
-                ? std::max(personality.evadeRadius, well->radius * EVADE_SURFACE_CLEARANCE)
-                : personality.evadeRadius;
+        // How close this pilot is willing to come to a given body. Authored
+        // against the 120-unit planets, so anything bigger raises it to keep
+        // the clearance a personality was written to expect.
+        const auto evadeRadiusOf = [&personality](const Source& src) {
+            return std::max(personality.evadeRadius, src.radius * EVADE_SURFACE_CLEARANCE);
+        };
 
         // A live Attack order names the target outright -- the strategy layer
         // has already weighed a structure or freighter against the nearest
@@ -281,7 +294,7 @@ void AIPilotSystem::Update(std::uint64_t step)
             // A Patrol order circles the body it names (the faction's own
             // planet); with no order, the dominant well.
             const bool patrolOrdered = ordered && pilot.order.kind == AIOrderKind::Patrol;
-            const Source* patrolBody = patrolOrdered ? findSource(pilot.order.subject) : well;
+            const Source* patrolBody = patrolOrdered ? findSource(pilot.order.subject) : dominant;
 
             // Tactical pick among Land/Intercept/Orbit/Idle; the danger check
             // below (which runs every tick, not just on this slower cadence)
@@ -306,7 +319,7 @@ void AIPilotSystem::Update(std::uint64_t step)
                     pilot.patrolBody = patrolBody->entity;
                     pilot.patrolRadius = patrolOrdered
                             ? patrolBody->radius * PATROL_RADIUS_FACTOR
-                            : std::max(r.length(), evadeRadius * 2.0);
+                            : std::max(r.length(), evadeRadiusOf(*patrolBody) * 2.0);
                     const double cross = r.x() * transf.vel.y() - r.y() * transf.vel.x();
                     pilot.patrolDirection = (cross < 0.0) ? -1.0 : 1.0;
                 }
@@ -434,26 +447,38 @@ void AIPilotSystem::Update(std::uint64_t step)
         // into danger, it's caught within a tick instead of up to
         // decisionInterval ticks late.
         //
-        // A descent onto the well is the plan, not a hazard: LandOnBody owns
+        // A descent onto the site is the plan, not a hazard: LandOnBody owns
         // its own braked approach envelope, and a reflex that fires on
         // "predicted to reach the surface" fights it into a hover just short
-        // of touchdown. Only the body being landed on is exempt -- anything
+        // of touchdown. Only the body being set down on is exempt -- anything
         // else on the way down is still a well to evade.
-        const bool landingHere = (pilot.behavior == AIBehavior::Land
-                                  || pilot.behavior == AIBehavior::Landed)
-                && well && pilot.order.subject == well->entity;
+        const bool settingDown = pilot.behavior == AIBehavior::Land
+                || pilot.behavior == AIBehavior::Landed;
 
-        bool predictedDanger = false;
-        if (well && !landingHere) {
+        // Every body, not just the heaviest one: testing the path against a
+        // single source meant that in a sector with a sun, no planet was ever
+        // evaluated for danger at all, and the only thing keeping pilots off
+        // planets was the departure rule.
+        const Source* threat = nullptr;
+        if (!sources.empty()) {
             const std::vector<Vector2d> path =
                     m_predictor.Predict(ent, personality.dangerLookaheadSteps, Game::PHYSICS_DELTA);
             for (const Vector2d& p : path) {
-                if ((p - well->pos).length() < evadeRadius) {
-                    predictedDanger = true;
-                    break;
+                for (const Source& src : sources) {
+                    if (src.entity == ent) continue;
+                    if (settingDown && src.entity == pilot.order.subject) continue;
+
+                    const double radius = evadeRadiusOf(src);
+                    if ((p - src.pos).dot() < radius * radius) {
+                        threat = &src;
+                        break;
+                    }
                 }
+                if (threat) break;
             }
         }
+
+        const bool predictedDanger = threat != nullptr;
 
         // Roll once per fresh danger episode (not every tick it persists) so
         // a Reckless ship that shrugs off a warning actually commits to the
@@ -471,14 +496,21 @@ void AIPilotSystem::Update(std::uint64_t step)
 
         if (effectiveDanger && !holding) {
             pilot.behavior = AIBehavior::Evade;
+            pilot.evadeSite = threat->entity;
         }
         else if (pilot.behavior == AIBehavior::Evade) {
             // Hysteresis: don't hand control back the instant the prediction
-            // clears -- wait until genuinely clear of the well, or this would
-            // flap Evade/Intercept right at the trigger boundary.
-            const bool clear = !well
-                    || (transf.pos - well->pos).length() > evadeRadius * personality.evadeMargin;
+            // clears -- wait until genuinely clear of the body being climbed
+            // away from, or this would flap Evade/Intercept right at the
+            // trigger boundary. Which body that is has to be held across the
+            // climb (as departureSite is), since the prediction that named it
+            // stops firing long before the ship is actually out.
+            const Source* site = findSource(pilot.evadeSite);
+            const bool clear = !site
+                    || (transf.pos - site->pos).length()
+                            > evadeRadiusOf(*site) * personality.evadeMargin;
             if (clear) {
+                pilot.evadeSite = flecs::entity();
                 pilot.decisionCooldown = 0; // re-pick a tactical behavior next tick
             }
         }
@@ -493,8 +525,8 @@ void AIPilotSystem::Update(std::uint64_t step)
 
         switch (pilot.behavior) {
             case AIBehavior::Evade:
-                if (well) {
-                    desiredVel = EvadeBody(transf, well->pos, well->vel, pilot.guidance);
+                if (const Source* site = findSource(pilot.evadeSite)) {
+                    desiredVel = EvadeBody(transf, site->pos, site->vel, pilot.guidance);
                 }
                 break;
             case AIBehavior::Intercept:

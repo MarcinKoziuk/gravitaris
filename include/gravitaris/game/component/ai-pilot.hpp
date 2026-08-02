@@ -125,6 +125,10 @@ struct AIPilot {
     // climb so the hysteresis margin has something to compare against.
     flecs::entity departureSite;
 
+    // The body a danger episode named, held the same way and for the same
+    // reason: the prediction stops firing well before the ship is out of it.
+    flecs::entity evadeSite;
+
     // Captured when entering Orbit so the patrol ring stays put. patrolBody
     // is the body being circled: the dominant well by default, the order's
     // subject under Patrol.
