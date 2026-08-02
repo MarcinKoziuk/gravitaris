@@ -11,6 +11,7 @@
 #include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/component/upgrade-draft.hpp>
@@ -86,6 +87,9 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             state.gravityMass = static_cast<float>(source->mass);
             state.gravityMultiplier = source->multiplier;
         }
+        if (state.type == NetEntityType::Ship) {
+            state.isFreighter = entity.has<Freighter>();
+        }
         if (state.type == NetEntityType::Planet) {
             state.isStar = !entity.has<Orbit>();
             if (const Orbit* orbit = entity.try_get<Orbit>()) {
@@ -160,6 +164,7 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteF32(e.gravityMass);
         out.WriteF32(e.gravityMultiplier);
         out.WriteU8(e.isStar ? 1 : 0);
+        out.WriteU8(e.isFreighter ? 1 : 0);
         out.WriteF32(e.orbitCenter.x());
         out.WriteF32(e.orbitCenter.y());
         out.WriteF32(e.orbitRadius);
@@ -252,6 +257,7 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.gravityMass = in.ReadF32();
         e.gravityMultiplier = in.ReadF32();
         e.isStar = in.ReadU8() != 0;
+        e.isFreighter = in.ReadU8() != 0;
         e.orbitCenter.x() = in.ReadF32();
         e.orbitCenter.y() = in.ReadF32();
         e.orbitRadius = in.ReadF32();

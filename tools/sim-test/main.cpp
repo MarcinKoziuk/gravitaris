@@ -42,11 +42,13 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/upgrade-draft.hpp>
+#include <gravitaris/game/event/death-report.hpp>
 #include <gravitaris/game/ai/ai-preset-library.hpp>
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/scenario/starting-complex.hpp>
+#include <gravitaris/game/system/gwell/faction-system.hpp>
 #include <gravitaris/game/system/gwell/research-system.hpp>
 #include <gravitaris/game/scenario/structure-layout.hpp>
 #include <gravitaris/game/net/byte-stream.hpp>
@@ -884,6 +886,7 @@ void TestShipCollision()
         float hpB = 0.f;
         bool crossed = false; // the two centres passed through each other
         double mass = 0.;
+        std::vector<DeathReport> deaths; // what the kill feed was told, in order
     };
 
     // One head-on pass. Thresholds are set from the pair's *actual* momentum
@@ -914,6 +917,7 @@ void TestShipCollision()
 
         Outcome out;
         out.mass = cpBodyGetMass(bodyA);
+        game.OnDeath().connect([&out](const DeathReport& report) { out.deaths.push_back(report); });
         for (int tick = 0; tick < 400; ++tick) {
             game.Update();
             if (!a.is_alive() || !b.is_alive()) break;
@@ -959,6 +963,13 @@ void TestShipCollision()
         // and the "survivor" does not survive.
         Require(ram.hpA > 75.f && ram.hpA < 95.f,
                 "ram: the survivor is damaged exactly once, not once per overlapping shape pair");
+
+        // The kill feed's side of the same event: one death, blamed on the
+        // ship that won the ram rather than on nobody.
+        Require(ram.deaths.size() == 1, "death feed: a ram kill reports exactly one death");
+        Require(ram.deaths[0].victimTeam == TeamId::Red, "death feed: the victim's side is reported");
+        Require(ram.deaths[0].killerTeam == TeamId::Blue, "death feed: the ram is credited to the survivor");
+        Require(ram.deaths[0].cause == DamageCause::Ram, "death feed: a ram is reported as a ram");
     }
 
     // Evenly matched: no weaker party to pick, and choosing by entity id
@@ -1712,6 +1723,29 @@ void TestSectorGeneration()
     for (int i = 0; i < 120; ++i) first.Update();
     Require(first.GetSectorExtent() > 0., "sector: a rebuilt world still ticks");
 
+    // Every combatant starts at a site, not out in the void: within one
+    // spawn offset of the sector extent. A home can be the outermost body
+    // there is, so a spawn genuinely does sit at the extent -- what this
+    // pins down is that it is never somewhere else entirely (the minimap's
+    // own margin is what keeps the marker on the map). Swept over seeds
+    // because this is a property of a particular layout, not of the code
+    // path any one seed exercises.
+    for (std::uint32_t seed = 1; seed <= 128; ++seed) {
+        SectorParams sweep;
+        sweep.seed = seed;
+
+        Game game(fs);
+        game.BuildWorld(sweep);
+        game.SpawnCombatants(game.GetRoster().front());
+
+        const double extent = game.GetSectorExtent();
+        game.GetRegistry().each([&](flecs::entity entity, const Transform& t, const Team&, const Damageable&) {
+            if (entity.has<Planet>() || entity.has<Structure>()) return;
+            Require(t.pos.length() <= extent + FactionSystem::RESPAWN_OFFSET_RADIUS,
+                    "sector: every combatant spawns at a site inside the sector");
+        });
+    }
+
     fs.Shutdown();
 }
 
@@ -1883,6 +1917,128 @@ void TestTakeoff()
                 "takeoff: the descent costs the hull nothing");
     }
 
+    // The same descent onto a planet that is actually travelling its orbit --
+    // the only kind the sector generator makes. centerMass puts the pad at
+    // ~80 units/s, on a par with a fighter's own cruise, and the orbit is wide
+    // enough that over a descent it is effectively a straight line at that
+    // speed. Everything the pilot wants at the bottom is expressed in that
+    // moving frame, so an attitude taken from a world-space velocity is an
+    // attitude taken from the pad's direction of travel rather than from up.
+    // The approach is radial to the *orbit* (the pad's +X pole, its motion
+    // being +Y) so the two are perpendicular and the difference shows.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity planet = spawner.SpawnOrbitingPlanet("models/planets/simple"_id,
+                                                           Vector2d{0., 0.}, 1828571., 20000., 1.0, 0.0);
+
+        flecs::entity leader = spawner.SpawnAILeader("models/ships/fighter-1"_id,
+                                                     planet.get<Transform>().pos + Vector2d{2500., 0.},
+                                                     TeamId::Red, game.GetAIPresets().Default());
+        const float hp = leader.get<Damageable>().hp;
+
+        game.Update(); // OrbitSystem writes the pad's velocity on the first tick
+        Require(planet.get<Transform>().vel.length() > 60.,
+                "takeoff: the orbiting planet actually moves (setup check)");
+
+        bool claimed = false;
+        int ticks = 0;
+        for (ticks = 0; ticks < 3600 && leader.is_alive() && !claimed; ++ticks) {
+            game.Update();
+            claimed = planet.get<Team>().id == TeamId::Red;
+        }
+        Require(leader.is_alive(), "takeoff: the leader survives a landing on a moving planet");
+        Require(claimed, "takeoff: a leader ordered onto a moving planet lands and claims it");
+        // The budget is what the bug cost: taking the resting attitude off the
+        // pad's world velocity rather than off up left the pilot flying the
+        // whole time it sat there, and roughly doubled this.
+        Require(ticks < 1800, "takeoff: setting down on a moving planet is not slower than the "
+                              "descent itself -- a parked pilot stops flying");
+        Require(leader.get<Damageable>().hp >= hp,
+                "takeoff: the moving-planet descent costs the hull nothing");
+    }
+
+    // A pilot parked on a planet with an enemy loitering just overhead -- close
+    // enough that the departure rule counts its business as being "here". It
+    // still has to get airborne: nothing is winnable from the ground.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity planet = spawner.SpawnOrbitingPlanet("models/planets/simple"_id,
+                                                           Vector2d{0., 0.}, 1828571., 20000., 1.0, 0.0);
+        const Vector2d centre = planet.get<Transform>().pos;
+        const double radius = planet.get<Planet>().radius * planet.get<Transform>().scale.x();
+
+        flecs::entity ship = spawner.SpawnAIShip("models/ships/fighter-1"_id,
+                                                 centre + Vector2d{radius + 13., 0.},
+                                                 game.GetAIPresets().Default(), Vector2d{},
+                                                 -3.14159265358979323846 / 2.);
+        spawner.SpawnPlayer("models/ships/fighter-1"_id, centre + Vector2d{0., radius + 120.});
+
+        int clearAt = -1;
+        for (int tick = 0; tick < 1200 && ship.is_alive() && clearAt < 0; ++tick) {
+            game.Update();
+            if (!ship.is_alive()) break;
+            if ((ship.get<Transform>().pos - centre).length() - radius > 300.) clearAt = tick;
+        }
+        Require(ship.is_alive(), "takeoff: the pilot survives having an enemy overhead");
+        Require(clearAt >= 0, "takeoff: a parked pilot with an enemy overhead gets off the "
+                              "surface instead of fighting from where it stands");
+    }
+
+    // Both halves of "either lift off or stay": a leader down on the rock it
+    // was ordered onto holds the pad for as long as the claim needs, and then
+    // leaves once there is nothing keeping it there.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity planet = spawner.SpawnOrbitingPlanet("models/planets/simple"_id,
+                                                           Vector2d{0., 0.}, 1828571., 20000., 1.0, 0.0);
+        flecs::entity leader = spawner.SpawnAILeader("models/ships/fighter-1"_id,
+                                                     planet.get<Transform>().pos + Vector2d{2500., 0.},
+                                                     TeamId::Red, game.GetAIPresets().Default());
+
+        int downAt = -1;
+        for (int tick = 0; tick < 3600 && leader.is_alive() && downAt < 0; ++tick) {
+            game.Update();
+            if (leader.is_alive() && leader.get<AIPilot>().behavior == AIBehavior::Landed) downAt = tick;
+        }
+        Require(downAt >= 0, "landed: a leader ordered onto a planet reaches the parked state");
+
+        // Holding is measured against the pad, not the world: the planet is
+        // orbiting, so a ship that sat perfectly still in world space would
+        // have slid off it.
+        const Vector2d touchdown = leader.get<Transform>().pos - planet.get<Transform>().pos;
+        int held = 0;
+        int observed = 0;
+        double wander = 0.;
+        bool claimed = false;
+        for (int tick = 0; tick < 1800 && leader.is_alive() && !claimed; ++tick) {
+            game.Update();
+            if (!leader.is_alive()) break;
+            claimed = planet.get<Team>().id == TeamId::Red;
+            ++observed;
+            if (leader.get<AIPilot>().behavior == AIBehavior::Landed) ++held;
+            const Vector2d r = leader.get<Transform>().pos - planet.get<Transform>().pos;
+            wander = std::max(wander, (r - touchdown).length());
+        }
+        Require(claimed, "landed: a parked leader holds the pad long enough to claim");
+        Require(held >= observed - 2, "landed: a parked leader stays parked instead of flapping "
+                                      "between the pad and the airborne reflexes");
+        Require(wander < 40., "landed: a parked leader holds its spot on the pad");
+
+        // And the other half -- the claim is done, so there is no longer any
+        // business here.
+        const double radius = planet.get<Planet>().radius * planet.get<Transform>().scale.x();
+        bool left = false;
+        for (int tick = 0; tick < 1800 && leader.is_alive() && !left; ++tick) {
+            game.Update();
+            if (!leader.is_alive()) break;
+            left = (leader.get<Transform>().pos - planet.get<Transform>().pos).length() - radius > 300.;
+        }
+        Require(left, "landed: a leader with nothing left to do on the rock lifts off again");
+    }
+
     // The strategy layer's side of the same rule: a rock nobody could lift
     // off again is not a claim worth ordering, however close and unowned.
     const auto ordersALanding = [&](double gravityMultiplier) {
@@ -2023,6 +2179,13 @@ void TestAITactics()
         hull.hp = hull.maxHp * hullFraction;
 
         flecs::entity enemy = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{300., 0.});
+        // This block measures where the pilot goes, not how hard it shoots,
+        // and the healthy control closes to point-blank with its gun on the
+        // target: without the armour the run ends early with nothing left to
+        // measure the range against.
+        Damageable& targetHull = enemy.get_mut<Damageable>();
+        targetHull.maxHp = 1e6f;
+        targetHull.hp = targetHull.maxHp;
 
         const double before = (enemy.get<Transform>().pos - ship.get<Transform>().pos).length();
         for (int tick = 0; tick < 240; ++tick) game.Update();
@@ -2241,6 +2404,9 @@ void TestNetRoundtrip(Game& game)
     NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
                      *serverTransport);
     NetClient client(*clientTransport, "sim-test-client");
+    // The client has no sector of its own; the seed reaches it in the welcome
+    // and nowhere else, so the HUD can name the round it is playing.
+    server.SetSectorSeed(0xC0FFEEu);
 
     // A few ticks to land the handshake (Connected -> ClientHello ->
     // ServerWelcome), then hold thrust for a while so the round-tripped
@@ -2254,6 +2420,7 @@ void TestNetRoundtrip(Game& game)
     Require(client.IsWelcomed(), "net: client welcomed after handshake");
     Require(client.GetYourShipNetId() != 0, "net: client got a real ship NetId");
     Require(server.PeerCount() == 1, "net: server sees exactly one peer");
+    Require(client.GetSectorSeed() == 0xC0FFEEu, "net: the welcome carries the served sector's seed");
 
     const std::uint32_t shipNetId = client.GetYourShipNetId();
     const flecs::entity shipEntity = game.GetEntitySpawner().EntityForNetId(shipNetId);
@@ -2680,6 +2847,59 @@ RunResult RunSimulation()
     return result;
 }
 
+// Keeping the target in the sights, which is the whole difference between a
+// dogfight and a pirouette. A pilot already at its standoff range has nothing
+// left to correct but station-keeping chatter, and a heading taken from that
+// chatter points nowhere in particular -- so measure the heading itself rather
+// than a kill, which a head-on merge would produce either way (there the
+// velocity correction and the bearing to the target are the same vector, and
+// the pilot lines up by accident).
+void TestInterceptKeepsTargetInSights()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    // Already inside firing range and past standoff, and crucially not on a
+    // collision course: the target crosses the pilot's line of sight, so
+    // "steer onto the velocity correction" and "point at the target" are two
+    // genuinely different attitudes.
+    flecs::entity ship = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{0., 0.},
+                                             game.GetAIPresets().Default());
+    flecs::entity target = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{150., 0.},
+                                               TeamId::Blue, Vector2d{0., 70.});
+    Damageable& targetHull = target.get_mut<Damageable>();
+    targetHull.maxHp = 1e6f; // the aim is under test, not the damage
+    targetHull.hp = targetHull.maxHp;
+
+    int onTarget = 0;
+    int measured = 0;
+    for (int tick = 0; tick < 900; ++tick) {
+        game.Update();
+        if (ship.get<AIPilot>().behavior != AIBehavior::Intercept) continue;
+
+        const Vector2d los = target.get<Transform>().pos - ship.get<Transform>().pos;
+        if (los.length() > ship.get<AIPilot>().personality.fireRange) continue;
+
+        const double heading = static_cast<double>(ship.get<Transform>().rot) - PI / 2.;
+        double error = std::atan2(los.y(), los.x()) - heading;
+        error = std::fmod(error + 3. * PI, 2. * PI) - PI;
+
+        ++measured;
+        if (std::abs(error) < 0.25) ++onTarget;
+    }
+
+    Require(measured > 300, "ai tactics: the pilot spends the run dogfighting in range (setup check)");
+    Require(onTarget * 2 > measured,
+            "ai tactics: a pilot holding standoff keeps its nose on the target most of the time, "
+            "instead of flying the engagement broadside to it");
+    fs.Shutdown();
+}
+
 } // namespace
 
 int main()
@@ -2706,6 +2926,7 @@ int main()
     TestOwnBulletSuppression();
     TestTakeoff();
     TestAITactics();
+    TestInterceptKeepsTargetInSights();
     TestWebRtcRoundtrip();
     TestWebRtcSignalingRoundtrip();
 

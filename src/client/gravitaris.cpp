@@ -37,6 +37,7 @@
 #include <gravitaris/game/input/input-command.hpp>
 
 #include <gravitaris/cgame/cgame.hpp>
+#include <gravitaris/game/event/death-report.hpp>
 #include <gravitaris/cgame/team-color.hpp>
 #include <gravitaris/cgame/renderer/glow-post-process.hpp>
 
@@ -59,6 +60,8 @@ static Application::GLConfiguration CreateGLConfiguration(const Application::Arg
 // from the page's own URL (argv is never populated from it). Empty string
 // means single-player.
 static std::string GetConnectUrl(const Application::Arguments& arguments);
+static std::string TeamColorCss(TeamId team);
+static std::vector<ChatSpan> ColorTeamNames(const std::string& text);
 
 class GravitarisApplication : public Magnum::Platform::Application {
 private:
@@ -398,12 +401,15 @@ void GravitarisApplication::UpdateUi()
 
     std::vector<ChatLineView> chat;
     for (const CGame::ChatLine& line : m_game->GetChatLog()) {
-        const Magnum::Color3 color = TeamColor(line.team);
-        char hex[16];
-        std::snprintf(hex, sizeof(hex), "#%02x%02x%02x", static_cast<int>(std::lround(color.r() * 255.f)),
-                      static_cast<int>(std::lround(color.g() * 255.f)),
-                      static_cast<int>(std::lround(color.b() * 255.f)));
-        chat.push_back(ChatLineView{line.sender + ":", line.text, hex});
+        // A line with no sender is a notice (the kill feed, server messages),
+        // and a bare ":" in front of it would read as somebody nameless
+        // saying it. Its body is the only one worth colouring: a player's own
+        // words are theirs, whatever sides they happen to name.
+        const bool notice = line.sender.empty();
+        chat.push_back(ChatLineView{notice ? "" : line.sender + ":",
+                                    notice ? ColorTeamNames(line.text)
+                                           : std::vector<ChatSpan>{ChatSpan{line.text, ""}},
+                                    TeamColorCss(line.team)});
     }
     m_ui.SetChatLog(chat);
     m_ui.SetChatInput(m_chatActive, m_chatDraft);
@@ -434,7 +440,19 @@ void GravitarisApplication::RefreshHudReadout()
                               : "ping " + std::to_string(std::lround(ping)) + " ms";
     }
 
-    m_ui.SetHudStatus(BuildInfoString(), pingText);
+    // The seed the round is running on, so a sector worth reporting can still
+    // be named once the setup dialog is gone. As a connected client the sector
+    // is the server's, so the seed is whatever the welcome carried -- 0 until
+    // it lands, which is worth nothing to a player and so isn't shown.
+    std::string status = BuildInfoString();
+    if (m_connectUrl.empty()) {
+        status += "  seed " + std::to_string(m_sectorParams.seed);
+    }
+    else if (const std::uint32_t seed = m_game->GetServerSectorSeed()) {
+        status += "  seed " + std::to_string(seed);
+    }
+
+    m_ui.SetHudStatus(status, pingText);
     m_ui.SetHudTelemetry(m_game->GetSpeed(), m_game->GetGravityAccel());
     RefreshResearchReadout();
 }
@@ -614,6 +632,17 @@ void GravitarisApplication::viewportEvent(ViewportEvent& event)
 
 void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::KeyEvent& event)
 {
+    // Before every other binding, gameplay and debug alike: while a line is
+    // being composed the keyboard belongs to it entirely -- typing "kill"
+    // must not fire the autopilot's K, nor "h" the dev overlay. Only while
+    // composing, though: the not-yet-composing case is the Enter that opens
+    // the row, and the overlay's own text fields get first refusal on that
+    // one (below).
+    if (m_chatActive && HandleChatKey(event)) {
+        event.setAccepted();
+        return;
+    }
+
     // F1 toggles the dev overlay; H is an alternate on the same action, since
     // bare F1 is a hardware brightness key on Mac laptops and never reaches
     // the app without holding Fn. Text input is enabled only while the
@@ -634,8 +663,8 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         return;
     }
 
-    // Before every gameplay key, including the debug ones: while a line is
-    // being composed the keyboard belongs to it entirely.
+    // The Enter that opens the compose row; every other key while composing
+    // was already taken above.
     if (HandleChatKey(event)) {
         event.setAccepted();
         return;
@@ -912,6 +941,54 @@ void GravitarisApplication::pointerMoveEvent(PointerMoveEvent& event)
     if (m_ui.ProcessMouseMove(p.x(), p.y())) {
         event.setAccepted();
     }
+}
+
+static std::string TeamColorCss(TeamId team)
+{
+    const Magnum::Color3 color = TeamColor(team);
+    char hex[16];
+    std::snprintf(hex, sizeof(hex), "#%02x%02x%02x", static_cast<int>(std::lround(color.r() * 255.f)),
+                  static_cast<int>(std::lround(color.g() * 255.f)),
+                  static_cast<int>(std::lround(color.b() * 255.f)));
+    return hex;
+}
+
+// Splits a notice into runs, every side it names carrying that side's colour.
+// The names are recovered from the finished text rather than travelling beside
+// it: a kill-feed line reaches a connected client as a chat message (see
+// NetServer::BroadcastNotice), so the text is all there is. Safe only because
+// TeamDisplayName is a closed set of words and no notice is ever written by a
+// player.
+static std::vector<ChatSpan> ColorTeamNames(const std::string& text)
+{
+    std::vector<ChatSpan> spans;
+    std::size_t plainBegin = 0;
+
+    for (std::size_t at = 0; at < text.size();) {
+        TeamId found = TeamId::None;
+        std::size_t length = 0;
+
+        for (TeamId team : FACTION_ROSTER) {
+            const std::string name = TeamDisplayName(team);
+            if (text.compare(at, name.size(), name) != 0) continue;
+            found = team;
+            length = name.size();
+            break;
+        }
+
+        if (length == 0) {
+            ++at;
+            continue;
+        }
+
+        if (at > plainBegin) spans.push_back(ChatSpan{text.substr(plainBegin, at - plainBegin), ""});
+        spans.push_back(ChatSpan{text.substr(at, length), TeamColorCss(found)});
+        at += length;
+        plainBegin = at;
+    }
+
+    if (plainBegin < text.size()) spans.push_back(ChatSpan{text.substr(plainBegin), ""});
+    return spans;
 }
 
 static double GetTime()

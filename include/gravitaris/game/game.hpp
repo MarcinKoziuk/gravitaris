@@ -261,6 +261,11 @@ public:
     DamageSystem::LandingParams& GetLandingDamageParams()
     { return m_damageSystem.GetLandingParams(); }
 
+    // Every ship destroyed, for whoever writes the kill feed -- single-player
+    // straight into its own chat log, a server out to its peers.
+    sigslot::signal<const DeathReport&>& OnDeath()
+    { return m_deathSystem.OnDeath(); }
+
     // The sim's one-shot event stream (docs/networking-plan.md Phase 1).
     // Consumers keep their own cursor and read via ConsumeSince.
     [[nodiscard]] const GameEventQueue& GetEventQueue() const { return m_eventQueue; }

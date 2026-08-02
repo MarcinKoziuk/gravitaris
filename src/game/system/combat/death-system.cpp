@@ -9,6 +9,7 @@
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/util/splitmix.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
@@ -44,9 +45,28 @@ void DeathSystem::Update(std::uint64_t step)
     });
 
     for (flecs::entity ship : dead) {
+        ReportDeath(ship);
         Explode(ship, step);
         ship.destruct();
     }
+}
+
+void DeathSystem::ReportDeath(flecs::entity ship)
+{
+    if (m_onDeath.slot_count() == 0) return;
+
+    // Ships only: a Base or a Colony coming down is the conquest game's news,
+    // not the kill feed's.
+    const Team* team = ship.try_get<Team>();
+    if (!team || ship.has<Structure>()) return;
+
+    const Damageable& dmg = ship.get<Damageable>();
+
+    DeathReport report;
+    report.victimTeam = team->id;
+    report.killerTeam = dmg.lastDamageTeam;
+    report.cause = dmg.lastDamageCause;
+    m_onDeath(report);
 }
 
 void DeathSystem::Explode(flecs::entity ship, std::uint64_t step)

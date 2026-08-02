@@ -83,6 +83,11 @@ struct EntityState {
     // Only meaningful for NetEntityType::Ship: what the sidebar's readouts
     // show for whichever unit the camera is on, plus the tiers the shooter's
     // gun and shield stats are resolved from (UpgradeCatalog::ResolveStats).
+    // Only meaningful for NetEntityType::Ship: carries cargo rather than
+    // guns. A presence bit like isStar -- the Freighter component's own
+    // fields are consumed purely server-side, and the client only needs to
+    // know a hauler from a fighter to draw it as one (minimap, HUD arrows).
+    bool isFreighter = false;
     std::uint8_t missileAmmo = 0;
     std::uint8_t fireRateLevel = 0;
     std::uint8_t gunTierLevel = 0;

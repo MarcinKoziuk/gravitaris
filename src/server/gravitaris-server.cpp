@@ -20,6 +20,7 @@
 
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/debug/debug-spawn.hpp>
+#include <gravitaris/game/event/death-report.hpp>
 #include <gravitaris/game/fs/filesystem-physfs.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/ai/ai-preset-library.hpp>
@@ -260,6 +261,15 @@ int main(int argc, char** argv)
     NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
                      transport);
     server.SetAutoAssignRoster(game.GetRoster());
+    server.SetSectorSeed(sectorParams.seed);
+
+    // Kill feed, as a server notice on the existing chat channel: an unnamed
+    // sender with no team is exactly what ChatMessagePacket already means by
+    // one, so the feed needs no packet of its own and lands in every client's
+    // log in the same order as everybody's chat.
+    game.OnDeath().connect([&server](const DeathReport& report) {
+        server.BroadcastNotice(FormatDeathMessage(report));
+    });
 
     LOG(info) << "gravitaris-server: listening on ws://" << (bindAddress.empty() ? "0.0.0.0" : bindAddress)
               << ":" << port;

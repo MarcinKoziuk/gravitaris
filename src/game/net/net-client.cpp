@@ -44,6 +44,7 @@ void NetClient::Update()
                         m_yourShipNetId = welcome.yourShipNetId;
                         m_tickRate = welcome.tickRate;
                         m_yourTeam = welcome.yourTeam;
+                        m_sectorSeed = welcome.sectorSeed;
                         m_welcomed = true;
                         break;
                     }

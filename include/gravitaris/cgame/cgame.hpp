@@ -588,6 +588,12 @@ public:
     [[nodiscard]] float GetLastPingMs() const { return m_netClient ? m_netClient->GetLastPingMs() : -1.f; }
     [[nodiscard]] float GetAveragePingMs() const { return m_netClient ? m_netClient->GetAveragePingMs() : -1.f; }
 
+    // The seed the served sector was generated from; 0 before the welcome
+    // lands, and always 0 in single-player, where the client owns the seed
+    // and never has to ask for it.
+    [[nodiscard]] std::uint32_t GetServerSectorSeed() const
+    { return m_netClient ? m_netClient->GetSectorSeed() : 0u; }
+
     // Net debug tab: live artificial delay/jitter/loss (SimulatedNetTransport,
     // sits below NetClient -- see m_simulatedTransport's own field comment).
     // nullptr before ConnectToServer runs; caller must check IsNetClient()

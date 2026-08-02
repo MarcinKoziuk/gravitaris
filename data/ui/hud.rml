@@ -94,7 +94,11 @@
 				margin-top: 7dp;
 				box-sizing: border-box;
 
-				background-color: #0cf1;
+				/* An empty track still has to read as a track on an SDR
+				   panel; the alpha this started at only separated from black
+				   on an HDR one. Same reason the empty missile ticks and the
+				   section rules below are where they are. */
+				background-color: #0cf3;
 				border-width: 1dp;
 				border-color: #0cf8;
 			}
@@ -176,11 +180,16 @@
 				position: absolute;
 				left: 14dp;
 				right: 14dp;
-				bottom: 56dp;
+				/* Clear of the footer at its tallest: the build line wraps to
+				   two at this width, and a connected client adds the ping
+				   under it. Sized for that rather than for the one-line case,
+				   since the alternative is the footer climbing over the
+				   research bar whenever it grows. */
+				bottom: 88dp;
 
 				padding-top: 14dp;
 				border-top-width: 1dp;
-				border-top-color: #0cf3;
+				border-top-color: #0cf6;
 			}
 
 			div#base_info div.stat
@@ -224,7 +233,7 @@
 
 			span.missile_tick.empty
 			{
-				background-color: #0cf3;
+				background-color: #0cf6;
 			}
 
 			/* Secondary telemetry: three short columns under a rule, quiet
@@ -236,7 +245,7 @@
 				                           cells; centre them against it */
 				padding-top: 14dp;
 				border-top-width: 1dp;
-				border-top-color: #0cf3;
+				border-top-color: #0cf6;
 			}
 
 			div.telemetry_cell
@@ -268,8 +277,9 @@
 				margin: 0 auto;
 			}
 
-			/* Build identity on top, the ping under it. Both come from the
-			   frame loop -- see UI::SetHudStatus. */
+			/* Build identity and the round's seed on one line, the ping
+			   under it. Both come from the frame loop -- see
+			   UI::SetHudStatus. */
 			div#panel_footer
 			{
 				position: absolute;

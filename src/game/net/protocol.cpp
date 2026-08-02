@@ -51,6 +51,7 @@ void WriteServerWelcome(const ServerWelcomePacket& packet, ByteWriter& out)
     out.WriteU32(packet.yourShipNetId);
     out.WriteU32(packet.tickRate);
     out.WriteU8(static_cast<std::uint8_t>(packet.yourTeam));
+    out.WriteU32(packet.sectorSeed);
 }
 
 bool ReadServerWelcomeBody(ByteReader& in, ServerWelcomePacket& out)
@@ -59,6 +60,7 @@ bool ReadServerWelcomeBody(ByteReader& in, ServerWelcomePacket& out)
     out.yourShipNetId = in.ReadU32();
     out.tickRate = in.ReadU32();
     out.yourTeam = static_cast<TeamId>(in.ReadU8());
+    out.sectorSeed = in.ReadU32();
     return in.Ok();
 }
 

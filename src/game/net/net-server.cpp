@@ -90,6 +90,7 @@ void NetServer::HandleRespawns()
         welcome.yourShipNetId = state.ship.get<NetId>().value;
         welcome.tickRate = 60;
         welcome.yourTeam = state.team;
+        welcome.sectorSeed = m_sectorSeed;
 
         ByteWriter writer;
         WriteServerWelcome(welcome, writer);
@@ -153,6 +154,7 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             welcome.yourShipNetId = ship.get<NetId>().value;
             welcome.tickRate = 60;
             welcome.yourTeam = it->second.team;
+            welcome.sectorSeed = m_sectorSeed;
 
             ByteWriter writer;
             WriteServerWelcome(welcome, writer);
@@ -231,6 +233,13 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
         case PacketType::ChatMessage:
             break; // server never receives these
     }
+}
+
+void NetServer::BroadcastNotice(const std::string& text)
+{
+    ChatMessagePacket message;
+    message.text = text;
+    BroadcastChat(message);
 }
 
 void NetServer::BroadcastChat(const ChatMessagePacket& message)

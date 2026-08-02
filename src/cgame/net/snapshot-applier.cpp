@@ -6,6 +6,7 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/component/upgrade-draft.hpp>
 #include <gravitaris/game/component/planet.hpp>
@@ -91,6 +92,11 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
                 entity.emplace<Damageable>(state.hp, 100.f);
                 entity.emplace<ShipLoadout>();
                 entity.emplace<UpgradeDraft>();
+                // Presence-only marker, same idiom as Orbit below: nothing in
+                // this world drives a freighter, but the minimap asks
+                // `has<Freighter>()` of both worlds, and without this a
+                // replicated hauler reads as an ordinary fighter.
+                if (state.isFreighter) entity.emplace<Freighter>();
                 ApplyLoadout(entity, state);
             }
             if (state.type == NetEntityType::Structure) {

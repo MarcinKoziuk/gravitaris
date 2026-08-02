@@ -387,8 +387,12 @@ void UI::SetChatLog(const std::vector<ChatLineView>& lines)
     std::string markup;
     for (const ChatLineView& line : lines) {
         markup += "<div class=\"chat_line\"><span class=\"chat_sender\" style=\"color: "
-                  + line.senderColor + ";\">" + EscapeRml(line.sender) + "</span> "
-                  + EscapeRml(line.text) + "</div>";
+                  + line.senderColor + ";\">" + EscapeRml(line.sender) + "</span> ";
+        for (const ChatSpan& span : line.body) {
+            if (span.color.empty()) markup += EscapeRml(span.text);
+            else markup += "<span style=\"color: " + span.color + ";\">" + EscapeRml(span.text) + "</span>";
+        }
+        markup += "</div>";
     }
     m_chatLog->SetInnerRML(markup);
 }

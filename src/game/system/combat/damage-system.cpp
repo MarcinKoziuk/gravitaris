@@ -9,6 +9,7 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/missile.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
@@ -71,6 +72,8 @@ void DamageSystem::Update()
                   << "; hp " << dmg->hp << " -> " << (dmg->hp - damage);
 
         dmg->hp -= damage;
+        dmg->lastDamageCause = DamageCause::Crash;
+        dmg->lastDamageTeam = TeamId::None;
 
         m_eventQueue.Emit(GameEventType::LandingCrash, hitEntity,
                           Magnum::Vector2{static_cast<float>(ev.contact.x()),
@@ -155,7 +158,14 @@ void DamageSystem::Update()
         // emits no Impact -- the hull took nothing, and the hit flash reads
         // as hull damage.
         if (toHull > 0.f) {
-            search.target.get_mut<Damageable>().hp -= toHull;
+            Damageable& targetDmg = search.target.get_mut<Damageable>();
+            targetDmg.hp -= toHull;
+            // Shrapnel is the ownerless team, so it credits nobody -- which is
+            // also what tells a death by debris from one by gunfire.
+            targetDmg.lastDamageCause = bullet.team == TeamId::None ? DamageCause::Debris
+                                        : bulletEnt.has<Missile>() ? DamageCause::Missile
+                                                                   : DamageCause::Gunfire;
+            targetDmg.lastDamageTeam = bullet.team;
 
             m_eventQueue.Emit(GameEventType::Impact, search.target, hitPoint,
                               static_cast<std::uint32_t>(toHull * 10.f));
@@ -272,8 +282,13 @@ void DamageSystem::ResolveShipRams()
         if (!std::isfinite(ev.massA) || !std::isfinite(ev.massB)) continue;
 
         const Magnum::Vector2 contact{static_cast<float>(ev.contact.x()), static_cast<float>(ev.contact.y())};
-        const auto kill = [&](flecs::entity ship, Damageable& dmg) {
+        const auto credit = [](Damageable& dmg, const Team* other) {
+            dmg.lastDamageCause = DamageCause::Ram;
+            dmg.lastDamageTeam = other ? other->id : TeamId::None;
+        };
+        const auto kill = [&](flecs::entity ship, Damageable& dmg, const Team* other) {
             dmg.hp = 0.f;
+            credit(dmg, other);
             m_eventQueue.Emit(GameEventType::Impact, ship, contact, 0);
         };
 
@@ -281,8 +296,8 @@ void DamageSystem::ResolveShipRams()
         // that -- not the heavier one's -- is what decides a mutual kill.
         const double momentum = std::min(ev.massA, ev.massB) * ev.closingSpeed;
         if (momentum >= params.bothDieMomentum) {
-            kill(a, *dmgA);
-            kill(b, *dmgB);
+            kill(a, *dmgA, teamB);
+            kill(b, *dmgB, teamA);
             continue;
         }
 
@@ -296,8 +311,8 @@ void DamageSystem::ResolveShipRams()
         // by entity id would decide a head-on ram on spawn order. Both die.
         static constexpr double TOUGHNESS_EPSILON = 1e-6;
         if (std::fabs(toughA - toughB) <= TOUGHNESS_EPSILON * std::max(toughA, toughB)) {
-            kill(a, *dmgA);
-            kill(b, *dmgB);
+            kill(a, *dmgA, teamB);
+            kill(b, *dmgB, teamA);
             continue;
         }
 
@@ -306,11 +321,12 @@ void DamageSystem::ResolveShipRams()
         Damageable& survivorDmg = aWins ? *dmgA : *dmgB;
         const double loserMass = aWins ? ev.massB : ev.massA;
 
-        kill(aWins ? b : a, aWins ? *dmgB : *dmgA);
+        kill(aWins ? b : a, aWins ? *dmgB : *dmgA, aWins ? teamA : teamB);
 
         const auto damage =
                 static_cast<float>(loserMass * ev.closingSpeed * params.survivorDamageScale);
         survivorDmg.hp -= damage;
+        credit(survivorDmg, aWins ? teamB : teamA);
         // May itself be lethal -- DeathSystem's hp <= 0 scan handles that for
         // free, so a hard enough ram kills both without a special case here.
         m_eventQueue.Emit(GameEventType::Impact, survivor, contact, static_cast<std::uint32_t>(damage * 10.f));

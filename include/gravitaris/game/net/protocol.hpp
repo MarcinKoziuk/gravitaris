@@ -53,6 +53,10 @@ struct ServerWelcomePacket {
     std::uint32_t yourShipNetId = 0;
     std::uint32_t tickRate = 60;
     TeamId yourTeam = TeamId::Blue;
+    // Which sector this is. Nothing on the client re-generates the world from
+    // it -- the bodies arrive as snapshots -- but a round nobody can name is a
+    // round nobody can report, so the HUD shows it (see UI::SetHudStatus).
+    std::uint32_t sectorSeed = 0;
 };
 
 // Deviation from the plan's sketch: adds lastAckedEventSeq alongside

@@ -33,6 +33,7 @@ class NetClient {
     std::uint32_t m_yourShipNetId = 0;
     std::uint32_t m_tickRate = 60;
     TeamId m_yourTeam = TeamId::Blue;
+    std::uint32_t m_sectorSeed = 0;
     // Sent with ClientHello; TeamId::None (the default) means "no
     // preference, auto-assign" -- see ClientHelloPacket::requestedTeam. The
     // client's intro dialog fills this in via CGame::ConnectToServer.
@@ -290,6 +291,9 @@ public:
     [[nodiscard]] std::uint32_t GetYourShipNetId() const { return m_yourShipNetId; }
     [[nodiscard]] std::uint32_t GetTickRate() const { return m_tickRate; }
     [[nodiscard]] TeamId GetYourTeam() const { return m_yourTeam; }
+
+    // The seed the server's sector was generated from, 0 until welcomed.
+    [[nodiscard]] std::uint32_t GetSectorSeed() const { return m_sectorSeed; }
 
     // The most recently decoded snapshot, or nullopt if none has arrived yet.
     [[nodiscard]] const std::optional<SnapshotData>& GetLatestSnapshot() const { return m_latestSnapshot; }

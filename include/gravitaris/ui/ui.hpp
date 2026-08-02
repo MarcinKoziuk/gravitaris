@@ -37,17 +37,28 @@ struct UpgradeOfferView {
     }
 };
 
-// One chat line as the HUD needs it: the name already resolved, and the colour
-// to draw it in as a literal CSS value -- ui/ knows nothing about teams beyond
-// the dropdown, so the caller does that lookup.
+// One run of a chat line's body, with the literal CSS colour to draw it in
+// (empty inherits the line's own). A kill feed names two sides, so a body is
+// not one colour.
+struct ChatSpan {
+    std::string text;
+    std::string color;
+
+    bool operator==(const ChatSpan& other) const
+    { return text == other.text && color == other.color; }
+};
+
+// One chat line as the HUD needs it: the name already resolved, and every
+// colour already a literal CSS value -- ui/ knows nothing about teams beyond
+// the dropdown, so the caller does those lookups.
 struct ChatLineView {
     std::string sender;
-    std::string text;
+    std::vector<ChatSpan> body;
     std::string senderColor = "#cff";
 
     bool operator==(const ChatLineView& other) const
     {
-        return sender == other.sender && text == other.text && senderColor == other.senderColor;
+        return sender == other.sender && body == other.body && senderColor == other.senderColor;
     }
 };
 

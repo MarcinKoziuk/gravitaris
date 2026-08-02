@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <optional>
 
 #include <flecs.h>
@@ -53,7 +54,10 @@ public:
         // planet in world scale, and drawing it anywhere near a planet's size
         // makes the map lie about what is worth flying to.
         float shipTriPx = 3.5f;     // ship triangle circumradius, minimap texture px
-        float freighterTriPx = 2.5f;// smaller again -- commerce is background traffic
+        // A hauler is a filled dot rather than a triangle (the triangle
+        // means "armed"), and smaller than one: commerce is background
+        // traffic, and only your own is mapped at all.
+        float freighterDotPx = 2.f;
         float playerDotPx = 3.f;    // player marker dot radius, minimap texture px
         float planetMinPx = 4.f;    // floor for a planet ring that'd map below this
         float starMinPx = 7.f;      // floor for a sun ring that'd map below this (bigger than a planet)
@@ -72,6 +76,10 @@ private:
 
     Params m_params;
 
+    // The radius the last Render actually framed: the fitted one, widened if
+    // that was what it took to keep the subject on the map.
+    float m_frameRadius = 0.f;
+
     // Grows m_params.worldRadius to cover every celestial's furthest reach
     // from `mapCenter`. Never shrinks within a round -- a body destroyed or
     // not yet replicated shouldn't snap the whole map to a new scale.
@@ -81,6 +89,12 @@ public:
     explicit MinimapRenderer(IFilesystem& filesystem);
 
     Params& GetParams() { return m_params; }
+
+    // World radius the map currently spans, for turning a click on the panel
+    // back into a world position. Not Params::worldRadius: that is the body
+    // fit alone, which is not what was drawn once the subject pushed the
+    // frame wider.
+    [[nodiscard]] float FrameRadius() const { return std::max(m_frameRadius, 1.f); }
 
     // Drops the fitted radius so auto-fit re-establishes it from scratch.
     // Needed when the world is replaced by a smaller one, which the fit's
@@ -95,7 +109,9 @@ public:
     // panning the ship doesn't scroll the map. `subjectPos` places the ringed
     // marker within that static view, and is empty during round setup (no
     // subject yet) and between death and respawn -- the camera subject, so it follows a
-    // spectated ship rather than always sitting on your own. viewCenter/
+    // spectated ship rather than always sitting on your own. `subjectTeam` is
+    // whose side the map is drawn for: it decides which freighters are
+    // mapped, and TeamId::None (no subject) maps none. viewCenter/
     // viewHalfExtent describe the main camera's world-space extent, shaded as
     // the (optional) view rectangle.
     // Every world in `view` is swept for planets and ships, so multiplayer's
@@ -104,7 +120,7 @@ public:
     // expected to bind whatever it renders to next itself (the app runs this
     // before the glow pass claims the scene target).
     void Render(const SceneView& view, const Vector2& mapCenter, std::optional<Vector2> subjectPos,
-               const Vector2& viewCenter, const Vector2& viewHalfExtent);
+               TeamId subjectTeam, const Vector2& viewCenter, const Vector2& viewHalfExtent);
 };
 
 } // namespace Gravitaris

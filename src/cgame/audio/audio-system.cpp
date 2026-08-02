@@ -30,6 +30,16 @@ constexpr std::size_t ONE_SHOT_POOL_SIZE = 24;
 // hard-stopping mid-waveform (Update() has no dt; at 60 fps this is ~100 ms).
 constexpr float THRUST_FADE_FRAMES = 6.f;
 
+// A thrust loop keeps playing through gaps this short before it's handed to
+// the fade-out list. FlightController's min-burn/min-coast hysteresis makes
+// a normal cruise toggle Controls::thrustForward on and off every
+// 80-400 ms (see FlightControllerParams); without this grace period every
+// one of those coasts tore the voice down and restarted it from the top,
+// which is audible as the loop "bursting" instead of running continuously.
+// A genuine stop (arrival, death, disengage) still fades out, just a beat
+// later.
+constexpr std::uint32_t THRUST_RELEASE_GRACE_FRAMES = 24;
+
 constexpr float HIT_GAIN = 0.85f;
 constexpr float SHIELD_HIT_GAIN = 0.35f;
 constexpr float RESEARCH_GAIN = 0.8f;
@@ -213,6 +223,7 @@ void AudioSystem::Update(const Vector2& cameraPos)
         auto [it, inserted] = m_thrusters.try_emplace(ent.id());
         ThrusterLoop& loop = it->second;
         loop.seen = true;
+        loop.offFrames = 0;
 
         const Vector2 pos{static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())};
         if (inserted) {
@@ -229,10 +240,11 @@ void AudioSystem::Update(const Vector2& cameraPos)
         }
     });
 
-    // Entities that stopped thrusting (or died) this frame: hand the voice to
-    // the fade-out list rather than releasing (= hard-stopping) it here.
+    // Entities that stopped thrusting (or died) this frame: give the gap a
+    // short grace period (below) before handing the voice to the fade-out
+    // list rather than releasing (= hard-stopping) it here.
     for (auto it = m_thrusters.begin(); it != m_thrusters.end();) {
-        if (!it->second.seen) {
+        if (!it->second.seen && ++it->second.offFrames >= THRUST_RELEASE_GRACE_FRAMES) {
             m_fadingVoices.push_back({it->second.voice, THRUST_GAIN});
             it = m_thrusters.erase(it);
         }

@@ -40,6 +40,11 @@ private:
     struct ThrusterLoop {
         VoiceHandle voice;
         bool seen = false;
+        // Consecutive frames not seen thrusting. Kept below the release
+        // grace period, a real stop is distinguished from the on/off
+        // "bang-bang" burn pattern flight control produces while cruising --
+        // see the grace constant in the .cpp.
+        std::uint32_t offFrames = 0;
     };
 
     // A looping voice whose owner stopped thrusting: ramped down over a few

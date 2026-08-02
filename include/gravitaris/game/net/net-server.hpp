@@ -85,6 +85,10 @@ class NetServer {
     std::vector<TeamId> m_autoAssignRoster{TeamId::Blue, TeamId::Red};
     std::size_t m_nextAutoAssign = 0;
 
+    // Sent in every ServerWelcome so a connected client can name the round it
+    // is in; the server owns the sector, so this is the only way one learns it.
+    std::uint32_t m_sectorSeed = 0;
+
     // Dead-man timeout: if a welcomed peer hasn't landed a fresh command in
     // this many ticks, inject one synthetic all-clear command so repeat-last
     // -command can't keep a stalled client's ship thrusting/spinning forever
@@ -120,6 +124,11 @@ public:
     NetServer(flecs::world& registry, EntitySpawner& entitySpawner, const GameEventQueue& eventQueue,
              FactionSystem& factionSystem, INetTransport& transport);
 
+    // A server notice on the chat channel: no sender and no team, which is
+    // what ChatMessagePacket already means by one. Lets anything outside the
+    // net layer (the kill feed) reach every peer without a packet of its own.
+    void BroadcastNotice(const std::string& text);
+
     // Polls the transport: completes the ClientHello/ServerWelcome handshake
     // (spawning a player ship per new peer), pushes ClientInput commands into
     // the matching ship's InputQueue, and destroys a peer's ship on
@@ -141,6 +150,9 @@ public:
     {
         if (!roster.empty()) m_autoAssignRoster = roster;
     }
+
+    // The seed the world this server serves was generated from.
+    void SetSectorSeed(std::uint32_t seed) { m_sectorSeed = seed; }
 
     [[nodiscard]] std::size_t PeerCount() const { return m_peers.size(); }
 

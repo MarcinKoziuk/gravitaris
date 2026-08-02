@@ -20,6 +20,7 @@
 #include <gravitaris/game/component/upgrade-draft.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/structure.hpp>
+#include <gravitaris/game/event/death-report.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 
 #include <gravitaris/cgame/fx/hit-flash-system.hpp>
@@ -85,6 +86,14 @@ CGame::CGame(IFilesystem &filesystem)
 
     m_modelRenderer2.SetExtraPasses(ShieldPasses());
     m_mirrorRenderer2.SetExtraPasses(ShieldPasses());
+
+    // Kill feed. As a net client this sim only holds the own predicted ship,
+    // and the deaths that count are the server's -- which arrive as chat like
+    // everyone else's lines, so writing one here too would double them up.
+    OnDeath().connect([this](const DeathReport& report) {
+        if (m_netClient) return;
+        PushChatLine("", TeamId::None, FormatDeathMessage(report));
+    });
 }
 
 SceneView CGame::CurrentSceneView()
@@ -426,6 +435,8 @@ void CGame::RenderMinimap()
                                      static_cast<float>(transform->pos.y())};
     }
 
+    const Team* subjectTeam = subject ? subject->try_get<Team>() : nullptr;
+
     const Camera& camera = m_cameraDirector.GetCamera();
     const Magnum::Vector2 viewHalfExtent = m_viewportSize / (2.f * std::max(camera.GetZoom(), 1e-3f));
 
@@ -433,7 +444,9 @@ void CGame::RenderMinimap()
     // m_netClient's field comment) -- sweep it too so remote ships/planets
     // show up exactly like single-player's real registry entities do.
     const SceneView view = CurrentSceneView();
-    m_minimapRenderer.Render(view, MinimapCenter(), subjectPos, camera.GetPosition(), viewHalfExtent);
+    m_minimapRenderer.Render(view, MinimapCenter(), subjectPos,
+                             subjectTeam ? subjectTeam->id : TeamId::None,
+                             camera.GetPosition(), viewHalfExtent);
 }
 
 void CGame::RenderCompass()
@@ -463,8 +476,7 @@ void CGame::RenderCompass()
 
 void CGame::LookAtMapPoint(const Magnum::Vector2& normalized)
 {
-    const float worldRadius = std::max(m_minimapRenderer.GetParams().worldRadius, 1.f);
-    m_cameraDirector.LookAt(MinimapCenter() + normalized * worldRadius);
+    m_cameraDirector.LookAt(MinimapCenter() + normalized * m_minimapRenderer.FrameRadius());
 }
 
 void CGame::ConnectToServer(const std::string& wsUrl, TeamId requestedTeam)

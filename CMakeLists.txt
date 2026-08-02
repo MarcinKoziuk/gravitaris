@@ -589,6 +589,8 @@ add_executable(GravitarisNG
     src/game/debug/debug-spawn.cpp
     include/gravitaris/game/system/combat/bullet-lifetime-system.hpp
     src/game/system/combat/bullet-lifetime-system.cpp
+    include/gravitaris/game/event/death-report.hpp
+    src/game/event/death-report.cpp
     include/gravitaris/game/system/combat/damage-system.hpp
     src/game/system/combat/damage-system.cpp
     include/gravitaris/game/system/combat/shield-system.hpp
@@ -887,6 +889,7 @@ add_executable(gravitaris-sim-test
     src/game/system/ship/ai-strategy-system.cpp
     src/game/system/ship/ship-controls-system.cpp
     src/game/system/combat/bullet-lifetime-system.cpp
+    src/game/event/death-report.cpp
     src/game/system/combat/damage-system.cpp
     src/game/system/combat/shield-system.cpp
     src/game/system/combat/missile-system.cpp
@@ -993,6 +996,7 @@ if(NOT EMSCRIPTEN)
         src/game/system/ship/ai-strategy-system.cpp
         src/game/system/ship/ship-controls-system.cpp
         src/game/system/combat/bullet-lifetime-system.cpp
+        src/game/event/death-report.cpp
         src/game/system/combat/damage-system.cpp
         src/game/system/combat/shield-system.cpp
         src/game/system/combat/missile-system.cpp

@@ -32,6 +32,7 @@ using Line2Batch::InstanceData;
 using Line2Batch::EmitBillboard;
 using Line2Batch::EmitSegment;
 using Line2Batch::PRIM_RING;
+using Line2Batch::PRIM_DISC;
 
 namespace {
 
@@ -51,10 +52,11 @@ const Vector3 PLANET_COLOR{0.2f, 1.f, 0.2f};
 // compete with the icons it encloses.
 const Vector3 VIEW_RECT_COLOR{0.28f, 0.31f, 0.34f};
 const Vector3 PLAYER_COLOR{1.f, 1.f, 1.f};
-// Freighters are drawn in one muted color whoever owns them: the original's
-// "commerce is neutral" rule (docs/gravity-well-1997.md), and it keeps the
-// map's team colors meaning "combat" at a glance.
-const Vector3 FREIGHTER_COLOR{0.45f, 0.5f, 0.55f};
+// Only your own freighters are mapped, and in grey rather than your team
+// colour: the map's coloured triangles then mean "combat" and nothing else,
+// and a rival's supply line is something to go and find rather than something
+// the HUD hands you.
+const Vector3 FREIGHTER_COLOR{0.5f, 0.5f, 0.5f};
 
 // A point-down outline triangle of circumradius `radius`. Built from three
 // segments rather than a new shader primitive: Line2Shader only knows
@@ -145,7 +147,7 @@ void MinimapRenderer::FitToSector(const SceneView& view, const Vector2& mapCente
 }
 
 void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, std::optional<Vector2> subjectPos,
-                             const Vector2& viewCenter, const Vector2& viewHalfExtent)
+                             TeamId subjectTeam, const Vector2& viewCenter, const Vector2& viewHalfExtent)
 {
     m_framebuffer.setViewport({{}, TextureSize()})
                  .clearColor(0, BACKGROUND)
@@ -155,7 +157,20 @@ void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, st
 
     if (m_params.autoFit) FitToSector(view, mapCenter);
 
-    const float worldRadius = std::max(m_params.worldRadius, 1.f);
+    float worldRadius = std::max(m_params.worldRadius, 1.f);
+
+    // The body fit stops at the outermost orbit, and a home can be the
+    // outermost body there is -- so a ship launched from one starts on the
+    // rim and is off the map as soon as it flies outward. Widening for the
+    // subject keeps the marker on the map wherever it goes. Unlike the body
+    // fit this is per-frame rather than stored, so the map returns to the
+    // sector's own scale on the way back in instead of staying zoomed out
+    // for the rest of the round.
+    if (m_params.autoFit && subjectPos) {
+        static constexpr float SUBJECT_MARGIN = 1.06f;
+        worldRadius = std::max(worldRadius, (*subjectPos - mapCenter).length() * SUBJECT_MARGIN);
+    }
+    m_frameRadius = worldRadius;
     // Minimap px per world unit; fixed-px icon sizes convert through this.
     const float ppu = (TEXTURE_SIZE * 0.5f) / worldRadius;
 
@@ -180,16 +195,25 @@ void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, st
     view.Each(considerPlanet);
 
     // Ships: team-colored dots (same "enemy/ship" notion as the HUD arrows:
-    // damageable + real team; bullets/shrapnel have neither). Same
-    // both-worlds sweep as planets above.
+    // damageable + real team; bullets/shrapnel have neither), minus rival
+    // freighters. Same both-worlds sweep as planets above.
     const auto considerShip = [&](flecs::entity entity, const Transform& t, const Team& team, const Damageable&) {
         if (team.id == TeamId::None) return;
+
+        const bool freighter = entity.has<Freighter>();
+        if (freighter && team.id != subjectTeam) return;
+
         const Vector2 pos{static_cast<float>(t.pos.x()), static_cast<float>(t.pos.y())};
         if ((pos - mapCenter).length() > worldRadius) return;
 
-        const bool freighter = entity.has<Freighter>();
-        const float radius = (freighter ? m_params.freighterTriPx : m_params.shipTriPx) / ppu;
-        EmitTriangle(vertices, pos, radius, freighter ? FREIGHTER_COLOR : Vector3{TeamColor(team.id)});
+        // A hauler is a dot, not a triangle: the triangle means "something
+        // that shoots", so a glance over the map counts combat without
+        // having to tell colours apart.
+        if (freighter) {
+            EmitBillboard(vertices, pos, m_params.freighterDotPx / ppu, FREIGHTER_COLOR, PRIM_DISC);
+            return;
+        }
+        EmitTriangle(vertices, pos, m_params.shipTriPx / ppu, Vector3{TeamColor(team.id)});
     };
     view.Each(considerShip);
 
