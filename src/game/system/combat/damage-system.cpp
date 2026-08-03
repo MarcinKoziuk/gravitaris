@@ -127,20 +127,27 @@ void DamageSystem::Update(std::uint64_t step)
             DamageSystem* self;
             flecs::entity bulletEnt;
             TeamId team;
+            bool friendlyFire;
+            flecs::entity_t shooter;
             flecs::entity target;
             cpVect targetPoint{};
             cpFloat targetAlpha = 0.f;
             std::optional<std::uint8_t> targetElement;
-        } search{this, bulletEnt, bullet.team};
+        } search{this, bulletEnt, bullet.team, m_friendlyFire, bullet.shooter};
 
         cpSpaceSegmentQuery(space, from, to, BULLET_QUERY_RADIUS, filter,
                             [](cpShape* shape, cpVect point, cpVect, cpFloat alpha, void* data) {
             auto* s = static_cast<HitSearch*>(data);
             const flecs::entity ent = s->self->m_physicsSystem.GetEntityForShape(shape);
             if (!ent.is_alive() || ent == s->bulletEnt) return;
+            // Nothing ever shoots itself: the round starts inside its own
+            // shooter's hull, so this is the sweep's first hit every time.
+            if (s->shooter != 0 && ent.id() == s->shooter) return;
 
             const Team* entTeam = ent.try_get<Team>();
-            if (entTeam && entTeam->id == s->team) return; // no friendly fire
+            // A round meeting its own side passes through unless the round is
+            // being fought with friendly fire on.
+            if (!s->friendlyFire && entTeam && entTeam->id == s->team) return;
 
             if (!ent.try_get<Damageable>()) return; // a planet: shots pass through it
 
@@ -317,7 +324,8 @@ void DamageSystem::ResolveShipRams()
 
         const Team* teamA = a.try_get<Team>();
         const Team* teamB = b.try_get<Team>();
-        if (teamA && teamB && teamA->id == teamB->id) continue; // friendlies only ever overlap
+        // Friendlies only ever overlap -- unless the round says otherwise.
+        if (!m_friendlyFire && teamA && teamB && teamA->id == teamB->id) continue;
 
         if (!std::isfinite(ev.massA) || !std::isfinite(ev.massB)) continue;
 

@@ -40,6 +40,7 @@ bool ReadClientHelloBody(ByteReader& in, ClientHelloPacket& out)
 {
     out.protocolVersion = in.ReadU32();
     ReadString(in, out.name);
+    out.name = out.name.substr(0, MAX_PLAYER_NAME);
     out.requestedTeam = static_cast<TeamId>(in.ReadU8());
     return in.Ok();
 }

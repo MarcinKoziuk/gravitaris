@@ -6,6 +6,8 @@
 
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
+#include <gravitaris/game/component/callsign.hpp>
+#include <gravitaris/game/net/protocol.hpp>
 #include <gravitaris/game/component/faction-state.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/team.hpp>
@@ -116,6 +118,15 @@ void Game::BuildClassicWorld()
     SettleScenario();
 }
 
+void Game::SetPlayerName(const std::string& name)
+{
+    const std::size_t begin = name.find_first_not_of(" \t");
+    if (begin == std::string::npos) return;
+
+    m_playerName = name.substr(begin, name.find_last_not_of(" \t") - begin + 1)
+                           .substr(0, MAX_PLAYER_NAME);
+}
+
 void Game::SpawnCombatants(TeamId playerTeam)
 {
     // Same site selection a respawn uses (just no funding -- the first
@@ -125,6 +136,7 @@ void Game::SpawnCombatants(TeamId playerTeam)
             m_factionSystem.SpawnPosition(playerTeam).value_or(FactionSystem::SpawnPoint{});
     m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, spawn.pos, playerTeam,
                                             spawn.vel, spawn.rot);
+    m_player->emplace<Callsign>(m_playerName);
 
     // Every complex the player isn't flying for gets a leader that plays the
     // mode, not just a dogfighter. Per-faction presets are U4's round-setup
@@ -143,7 +155,24 @@ void Game::AddAIFaction(TeamId team, id_t preset)
         faction.leader = m_entitySpawner->SpawnAILeader("models/ships/fighter-1"_id, site->pos, team,
                                                         ResolveAIPreset(faction.preset), site->vel,
                                                         site->rot);
+        faction.leader->emplace<Callsign>(LeaderCallsign(team));
     }
+}
+
+// One per faction, so it needs no counter to stay unique -- and it is what
+// somebody flying alone types to go and find the enemy (/tp red-leader).
+std::string Game::LeaderCallsign(TeamId team)
+{
+    switch (team) {
+    case TeamId::Blue: return "blue-leader";
+    case TeamId::Red: return "red-leader";
+    case TeamId::Violet: return "violet-leader";
+    case TeamId::Yellow: return "yellow-leader";
+    case TeamId::Magenta: return "magenta-leader";
+    case TeamId::Cyan: return "cyan-leader";
+    case TeamId::None: break;
+    }
+    return "leader";
 }
 
 void Game::Start()
@@ -269,6 +298,7 @@ void Game::HandlePlayerRespawn()
                 TickRespawn(m_player, m_playerRespawnTimer, TeamId::Blue)) {
         m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, spawn->pos, TeamId::Blue,
                                                 spawn->vel, spawn->rot);
+        m_player->emplace<Callsign>(m_playerName);
     }
 }
 
@@ -280,6 +310,7 @@ void Game::HandleAILeaderRespawns()
             faction.leader = m_entitySpawner->SpawnAILeader("models/ships/fighter-1"_id, spawn->pos,
                                                             faction.team, ResolveAIPreset(faction.preset), spawn->vel,
                                                             spawn->rot);
+            faction.leader->emplace<Callsign>(LeaderCallsign(faction.team));
         }
     }
 }

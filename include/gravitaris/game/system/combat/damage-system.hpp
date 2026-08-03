@@ -42,6 +42,11 @@ private:
 
     LandingParams m_landingParams;
 
+    // Off by default: a side's rounds and hulls pass through each other. A
+    // round-wide rule rather than per-ship, so both the bullet sweep and the
+    // ram resolver read the one flag.
+    bool m_friendlyFire = false;
+
     // Counts every hit a shield has resolved, so two rounds landing on the
     // same plate on the same tick roll separately. Sim state like any other:
     // it only advances inside Update, so a replay walks it identically. Never
@@ -77,6 +82,9 @@ public:
                  const UpgradeCatalog& catalog);
 
     LandingParams& GetLandingParams() { return m_landingParams; }
+
+    void SetFriendlyFire(bool enabled) { m_friendlyFire = enabled; }
+    [[nodiscard]] bool IsFriendlyFire() const { return m_friendlyFire; }
 
     // `step` seeds the plating leak roll -- sim state in, outcome out, so a
     // replay and a second peer leak on the same rounds (ADR 0001).

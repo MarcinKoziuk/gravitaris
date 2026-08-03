@@ -41,6 +41,11 @@ struct Damageable {
     // nothing has a side to blame (a crash, own shrapnel).
     DamageCause lastDamageCause = DamageCause::Unknown;
     TeamId lastDamageTeam = TeamId::None;
+    // Cheated (chat's /god): hp still comes off normally, but DeathSystem puts
+    // it back rather than destroying the hull -- one choke point catches every
+    // damage source, suns and crashes included. Deliberately NOT serialized:
+    // death is resolved server-side, and it dies with the ship it was set on.
+    bool invulnerable = false;
 };
 
 } // namespace Gravitaris

@@ -22,6 +22,8 @@
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/event/death-report.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
+#include <gravitaris/game/net/protocol.hpp>
+#include <gravitaris/game/cheat/cheat-console.hpp>
 
 #include <gravitaris/cgame/fx/hit-flash-system.hpp>
 #include <gravitaris/cgame/team-color.hpp>
@@ -306,46 +308,49 @@ void CGame::SubmitChat(const std::string& text)
     const std::string trimmed = text.substr(begin, text.find_last_not_of(" \t") - begin + 1);
 
     if (m_netClient) {
-        // Nothing local: the line comes back from the server like everyone
-        // else's, which is also what proves it was actually sent.
+        // Cheats included: the server owns the sim, so a command run against
+        // this client's copy of the world would be overwritten by the next
+        // snapshot. The line comes back from the server like everyone else's,
+        // which is also what proves it was actually sent.
         m_netClient->SendChat(trimmed);
         return;
     }
 
     const std::optional<flecs::entity> player = GetPlayer();
     const Team* team = player ? player->try_get<Team>() : nullptr;
-    PushChatLine("you", team ? team->id : TeamId::None, trimmed);
+    const TeamId teamId = team ? team->id : TeamId::None;
+
+    if (IsCheatCommand(trimmed)) {
+        PushChatLine(m_playerName, teamId, trimmed);
+        for (std::string& line :
+             RunCheatCommand(*this, player.value_or(flecs::entity{}), teamId, trimmed).reply) {
+            PushChatLine("", TeamId::None, std::move(line));
+        }
+        return;
+    }
+
+    PushChatLine(m_playerName, teamId, trimmed);
 }
 
 std::vector<CGame::ChatLine> CGame::GetChatLog() const
 {
-    std::vector<ChatLine> out;
-    out.reserve(m_chatLog.size());
-    for (const TimedChatLine& timed : m_chatLog) {
-        if (m_renderTimeSeconds - timed.arrivedAt > CHAT_LINE_LIFETIME) continue;
-        out.push_back(timed.line);
-    }
-    return out;
+    return std::vector<ChatLine>(m_chatLog.begin(), m_chatLog.end());
 }
 
 void CGame::DrainChat()
 {
-    if (m_netClient) {
-        for (ChatMessagePacket& message : m_netClient->TakeChatMessages()) {
-            PushChatLine(std::move(message.sender), message.team, std::move(message.text));
-        }
-    }
+    if (!m_netClient) return;
 
-    while (!m_chatLog.empty() && m_renderTimeSeconds - m_chatLog.front().arrivedAt > CHAT_LINE_LIFETIME) {
-        m_chatLog.pop_front();
+    for (ChatMessagePacket& message : m_netClient->TakeChatMessages()) {
+        PushChatLine(std::move(message.sender), message.team, std::move(message.text));
     }
 }
 
 void CGame::PushChatLine(std::string sender, TeamId team, std::string text)
 {
-    m_chatLog.push_back(TimedChatLine{ChatLine{std::move(sender), team, std::move(text)},
-                                      m_renderTimeSeconds});
-    while (m_chatLog.size() > CHAT_LOG_LINES) m_chatLog.pop_front();
+    m_chatLog.push_back(ChatLine{std::move(sender), team, std::move(text)});
+    while (m_chatLog.size() > CHAT_HISTORY_LINES) m_chatLog.pop_front();
+    ++m_chatRevision;
 
     m_audioSystem.PlayChatBlip();
 }
@@ -531,7 +536,7 @@ void CGame::ConnectToServer(const std::string& wsUrl, TeamId requestedTeam)
 {
     m_netTransport = std::make_unique<WebRtcTransport>(WebRtcTransport::Role::Offerer);
     m_simulatedTransport = std::make_unique<SimulatedNetTransport>(*m_netTransport);
-    m_netClient = std::make_unique<NetClient>(*m_simulatedTransport, "gravitaris-client");
+    m_netClient = std::make_unique<NetClient>(*m_simulatedTransport, m_playerName);
     m_netClient->SetRequestedTeam(requestedTeam);
     m_ownShipSync.emplace(m_clientPrediction, *m_netClient, m_predictedTickClock);
     m_remoteEventApplier.emplace(*m_netClient, m_eventQueue, m_cosmeticBulletDespawner);

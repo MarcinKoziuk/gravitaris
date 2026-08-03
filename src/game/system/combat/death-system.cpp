@@ -41,7 +41,14 @@ void DeathSystem::Update(std::uint64_t step)
     // removes them, neither of which is safe mid-iteration.
     std::vector<flecs::entity> dead;
     m_registry.each([&](flecs::entity entity, Damageable& dmg) {
-        if (dmg.hp <= 0.f) dead.push_back(entity);
+        if (dmg.hp > 0.f) return;
+        // A cheated hull is not spared the damage, only its conclusion: it
+        // comes back off the floor every tick something drives it through.
+        if (dmg.invulnerable) {
+            dmg.hp = dmg.maxHp;
+            return;
+        }
+        dead.push_back(entity);
     });
 
     for (flecs::entity ship : dead) {

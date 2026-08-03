@@ -275,7 +275,7 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
                 m_entitySpawner.SpawnBullet(gun.modelId, pos, vel, /*sensor=*/true,
                                             static_cast<double>(m_ownShip.get<Transform>().rot));
         bullet.emplace<Bullet>(gun.lifetimeSeconds, m_ownShip.get<Team>().id, 0.f,
-                               m_ownShip.get<NetId>().value);
+                               m_ownShip.get<NetId>().value, m_ownShip.id());
 
         m_eventQueue.Emit(GameEventType::BulletFired, m_ownShip,
                           Magnum::Vector2{static_cast<float>(pos.x()), static_cast<float>(pos.y())},

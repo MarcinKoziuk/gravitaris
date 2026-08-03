@@ -26,6 +26,7 @@ struct ChatMessagePacket;
 // -- the same before/after split GravitarisApplication's FeedInput/Render
 // already follows for local input.
 class NetServer {
+    Game& m_game;
     flecs::world& m_registry;
     EntitySpawner& m_entitySpawner;
     const GameEventQueue& m_eventQueue;
@@ -113,6 +114,10 @@ class NetServer {
     // one order.
     void BroadcastChat(const ChatMessagePacket& message);
 
+    // The same, to one peer: a cheat's reply is the issuer's business, not
+    // the round's -- unless it changed the round (CheatResult::announce).
+    void SendChat(PeerId peer, const ChatMessagePacket& message);
+
     // Spawns a fresh ship (and re-welcomes the peer with its new NetId) for
     // any welcomed peer whose ship isn't alive, after RESPAWN_DELAY_TICKS.
     // Without this, a peer whose ship dies (e.g. crashed into a sun) stays a
@@ -120,9 +125,18 @@ class NetServer {
     // peer with a dead ship, and nothing else ever gives them a new one.
     void HandleRespawns();
 
+    // What this peer is known by: whatever ClientHello called it, or a
+    // stand-in built from the peer id. One rule, so the name on a chat line
+    // and the Callsign on that peer's hull can never disagree -- which is
+    // what the cheats address each other by.
+    [[nodiscard]] static std::string PeerCallsign(PeerId peer, const PeerState& state);
+
 public:
-    NetServer(flecs::world& registry, EntitySpawner& entitySpawner, const GameEventQueue& eventQueue,
-             FactionSystem& factionSystem, INetTransport& transport);
+    // Takes the Game rather than the four pieces of it this used to name:
+    // chat cheats (CheatConsole) run against the whole sim, so the pieces had
+    // grown into "all of it" anyway. Still doesn't own it -- the caller drives
+    // the tick loop.
+    NetServer(Game& game, INetTransport& transport);
 
     // A server notice on the chat channel: no sender and no team, which is
     // what ChatMessagePacket already means by one. Lets anything outside the

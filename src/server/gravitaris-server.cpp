@@ -258,8 +258,7 @@ int main(int argc, char** argv)
     }
 
     WebRtcServerTransport transport(port, DefaultIceServers(), bindAddress);
-    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
-                     transport);
+    NetServer server(game, transport);
     server.SetAutoAssignRoster(game.GetRoster());
     server.SetSectorSeed(sectorParams.seed);
 

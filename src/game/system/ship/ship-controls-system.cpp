@@ -179,7 +179,8 @@ void ShipControlsSystem::Update(std::uint64_t step)
             bulletEntity.emplace<Bullet>(gun.lifetimeSeconds,
                                          shooterTeam ? shooterTeam->id : TeamId::Blue,
                                          gun.damage,
-                                         shooterNetId ? shooterNetId->value : 0u);
+                                         shooterNetId ? shooterNetId->value : 0u,
+                                         entity.id());
 
             // param carries the weapon's id so a listener that never sees the
             // shooter's loadout -- the audio system on a remote client --
@@ -214,7 +215,7 @@ void ShipControlsSystem::Update(std::uint64_t step)
                                                 static_cast<double>(transf.rot), Vector2d{1., 1.});
             missile.emplace<Bullet>(round.lifetimeSeconds,
                                     shooterTeam ? shooterTeam->id : TeamId::Blue, round.damage,
-                                    /*ownerNetId=*/0u);
+                                    /*ownerNetId=*/0u, entity.id());
             // MissileSystem locks a target on its first tick, and steers by
             // this weapon's own guidance envelope.
             missile.emplace<Missile>(Missile{0u, round.id});

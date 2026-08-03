@@ -4,21 +4,24 @@
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
+#include <gravitaris/game/component/callsign.hpp>
 #include <gravitaris/game/net/byte-stream.hpp>
 #include <gravitaris/game/net/protocol.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/gwell/faction-system.hpp>
+#include <gravitaris/game/cheat/cheat-console.hpp>
+#include <gravitaris/game/game.hpp>
 #include <gravitaris/game/net/net-server.hpp>
 
 namespace Gravitaris {
 
-NetServer::NetServer(flecs::world& registry, EntitySpawner& entitySpawner, const GameEventQueue& eventQueue,
-                     FactionSystem& factionSystem, INetTransport& transport)
-        : m_registry(registry)
-        , m_entitySpawner(entitySpawner)
-        , m_eventQueue(eventQueue)
-        , m_factionSystem(factionSystem)
+NetServer::NetServer(Game& game, INetTransport& transport)
+        : m_game(game)
+        , m_registry(game.GetRegistry())
+        , m_entitySpawner(game.GetEntitySpawner())
+        , m_eventQueue(game.GetEventQueue())
+        , m_factionSystem(game.GetFactionSystem())
         , m_transport(transport)
 {}
 
@@ -84,6 +87,7 @@ void NetServer::HandleRespawns()
 
         const id_t playerModel = "models/ships/fighter-1"_id;
         state.ship = m_entitySpawner.SpawnPlayer(playerModel, spawn->pos, state.team, spawn->vel, spawn->rot);
+        state.ship.emplace<Callsign>(PeerCallsign(peer, state));
 
         ServerWelcomePacket welcome;
         welcome.clientId = peer;
@@ -145,6 +149,7 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             }
             const flecs::entity ship = m_entitySpawner.SpawnPlayer(playerModel, spawn.pos, it->second.team,
                                                                    spawn.vel, spawn.rot);
+            ship.emplace<Callsign>(PeerCallsign(peer, it->second));
             it->second.ship = ship;
             it->second.welcomed = true;
             it->second.lastQueuedInputTick = currentTick; // dead-man baseline: "joined now", not tick 0
@@ -220,11 +225,26 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             if (it == m_peers.end() || !it->second.welcomed) return;
 
             ChatMessagePacket message;
-            message.sender = it->second.name.empty() ? "player " + std::to_string(peer) : it->second.name;
+            message.sender = PeerCallsign(peer, it->second);
             message.team = it->second.team;
             message.text = chat.text;
             BroadcastChat(message);
             LOG(info) << "chat: " << message.sender << ": " << message.text;
+
+            // Cheats run here, against the authoritative world -- a client's
+            // own copy is overwritten by the next snapshot. The command itself
+            // is broadcast above like any other line: everyone can cheat, so
+            // nobody has to wonder who did.
+            if (IsCheatCommand(chat.text)) {
+                const CheatResult cheat =
+                        RunCheatCommand(m_game, it->second.ship, it->second.team, chat.text);
+                for (const std::string& line : cheat.reply) {
+                    ChatMessagePacket reply;
+                    reply.text = line;
+                    if (cheat.announce) BroadcastChat(reply);
+                    else SendChat(peer, reply);
+                }
+            }
             break;
         }
         case PacketType::ServerWelcome:
@@ -240,6 +260,23 @@ void NetServer::BroadcastNotice(const std::string& text)
     ChatMessagePacket message;
     message.text = text;
     BroadcastChat(message);
+}
+
+std::string NetServer::PeerCallsign(PeerId peer, const PeerState& state)
+{
+    // The fallback is built here rather than stored on the peer, so it can't
+    // be mistaken for a name somebody actually chose.
+    return state.name.empty() ? "player " + std::to_string(peer) : state.name;
+}
+
+void NetServer::SendChat(PeerId peer, const ChatMessagePacket& message)
+{
+    const auto it = m_peers.find(peer);
+    if (it == m_peers.end() || !it->second.welcomed) return;
+
+    ByteWriter writer;
+    WriteChatMessage(message, writer);
+    m_transport.Send(peer, 0, writer.Data(), writer.Size(), true);
 }
 
 void NetServer::BroadcastChat(const ChatMessagePacket& message)

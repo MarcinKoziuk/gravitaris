@@ -18,6 +18,13 @@ struct Bullet {
     // copy instead of a second, time-delayed authoritative one (see
     // ClientPrediction::Step). Omitting an entity needs no wire field.
     std::uint32_t ownerNetId = 0;
+    // Whatever fired this, as a raw flecs id. A round leaves from a mount
+    // inside its own hull, so the first thing the hit sweep meets is the
+    // shooter itself -- with friendly fire on the team rule no longer covers
+    // that, and every shot would land on the ship that took it. Zero for
+    // death shrapnel, which belongs to nobody and hits everyone. Sim state
+    // like ownerNetId, and deliberately not serialized for the same reason.
+    std::uint64_t shooter = 0;
 };
 
 } // namespace Gravitaris

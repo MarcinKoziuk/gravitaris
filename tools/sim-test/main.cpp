@@ -24,6 +24,7 @@
 #include <gravitaris/game/fs/filesystem-physfs.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/callsign.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/faction-state.hpp>
 #include <gravitaris/game/system/ship/ship-controls-system.hpp>
@@ -48,6 +49,7 @@
 #include <gravitaris/game/resource/body-query.hpp>
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
+#include <gravitaris/game/cheat/cheat-console.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/scenario/starting-complex.hpp>
@@ -2141,6 +2143,169 @@ void TestSunIsLethal()
     fs.Shutdown();
 }
 
+// The chat cheats (CheatConsole). Everyone can run them and nothing gates
+// them, so what's worth proving is that each one actually reaches the sim --
+// they run server-side in multiplayer, where a client can't check for itself.
+void TestCheats()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    Game game(fs);
+    game.BuildClassicWorld();
+    game.SpawnCombatants(TeamId::Blue);
+    game.SettleScenario();
+
+    const flecs::entity ship = *game.GetPlayer();
+    const auto run = [&](const char* text) {
+        return RunCheatCommand(game, ship, TeamId::Blue, text);
+    };
+
+    Require(IsCheatCommand("/god"), "cheat: a leading slash addresses the console");
+    Require(!IsCheatCommand("god"), "cheat: ordinary chat is not a command");
+    Require(!run("/nonsense").reply.empty(), "cheat: an unknown command still answers");
+
+    // Research: straight into the faction's collection queue, which is what a
+    // lab would have filled.
+    run("/research 3");
+    int ready = 0;
+    game.GetRegistry().each([&](const FactionState& faction) {
+        if (faction.team == TeamId::Blue) ready = faction.upgradesReady;
+    });
+    Require(ready == 3, "cheat: /research queues finished upgrades for the faction");
+
+    // Upgrades land on the hull directly, bypassing the draft entirely.
+    run("/upgrade bubble_shield");
+    Require(ship.get<ShipLoadout>().levels.shieldType == ShieldType::Bubble,
+            "cheat: /upgrade fits a named upgrade straight onto the ship");
+    run("/upgrade missile_bay");
+    run("/ammo");
+    Require(ship.get<ShipLoadout>().missileAmmo > 0, "cheat: /ammo fills the rack it just fitted");
+
+    // Heal has to put the shield back too, not only the hull.
+    ship.get_mut<Damageable>().hp = 1.f;
+    ship.get_mut<ShipLoadout>().shieldHp = 0.f;
+    run("/heal");
+    Require(ship.get<Damageable>().hp == ship.get<Damageable>().maxHp,
+            "cheat: /heal restores the hull");
+    Require(ship.get<ShipLoadout>().shieldHp > 0.f, "cheat: /heal recharges the shield");
+
+    // God: the hull still takes the damage, DeathSystem just refuses the
+    // conclusion -- so a hp of zero survives a tick.
+    run("/god");
+    ship.get_mut<Damageable>().hp = 0.f;
+    game.Update();
+    Require(ship.is_alive(), "cheat: /god survives a hull driven to zero");
+    Require(ship.get<Damageable>().hp > 0.f, "cheat: /god puts the hull back");
+
+    // ...and /kill has to get through it, or a cheated ship could never let go.
+    run("/kill");
+    game.Update();
+    Require(!ship.is_alive(), "cheat: /kill overrides /god");
+
+    // Teleport works on a fresh ship (the old one just died).
+    const flecs::entity flown = game.GetEntitySpawner().SpawnPlayer(
+            "models/ships/fighter-1"_id, Vector2d{0., 0.}, TeamId::Blue);
+    RunCheatCommand(game, flown, TeamId::Blue, "/tp 4321 -1234");
+    game.Update();
+    Require(std::abs(flown.get<Transform>().pos.x() - 4321.) < 50.
+                    && std::abs(flown.get<Transform>().pos.y() + 1234.) < 50.,
+            "cheat: /tp moves the ship's physics body, not only its Transform");
+
+    // Callsigns: a cheat aimed with @name lands on that player's ship, and
+    // /tp <name> takes you to them at their own velocity. This is the whole
+    // multiplayer story -- the server resolves names against Callsign, so the
+    // name has to survive onto a fresh hull too.
+    game.SetPlayerName("  Ace  ");
+    Require(game.GetPlayerName() == "Ace", "callsign: a typed name is trimmed");
+    const flecs::entity mine = game.GetEntitySpawner().SpawnPlayer(
+            "models/ships/fighter-1"_id, Vector2d{0., 0.}, TeamId::Blue);
+    mine.emplace<Callsign>(game.GetPlayerName());
+
+    const flecs::entity theirs = game.GetEntitySpawner().SpawnPlayer(
+            "models/ships/fighter-1"_id, Vector2d{9000., 500.}, TeamId::Red);
+    theirs.emplace<Callsign>(std::string("Nova"));
+    game.GetPhysicsSystem().Teleport(theirs.get<PhysicsRef>(), Vector2d{9000., 500.},
+                                     Vector2d{120., -40.});
+    game.Update();
+
+    // Aimed at somebody else, by a name typed in whatever case.
+    theirs.get_mut<Damageable>().hp = 5.f;
+    RunCheatCommand(game, mine, TeamId::Blue, "/heal @NOVA");
+    Require(theirs.get<Damageable>().hp == theirs.get<Damageable>().maxHp,
+            "callsign: @name runs the cheat on that player's ship, whatever case it is typed in");
+    Require(mine.get<Damageable>().hp == mine.get<Damageable>().maxHp,
+            "callsign: ...and not on the issuer's own");
+
+    const CheatResult unknown = RunCheatCommand(game, mine, TeamId::Blue, "/heal @nobody");
+    Require(!unknown.reply.empty(), "callsign: an unknown name is reported, not silently ignored");
+
+    // Rendezvous: beside them, and at their velocity rather than at rest.
+    RunCheatCommand(game, mine, TeamId::Blue, "/tp nova");
+    game.Update();
+    const Vector2d gap = mine.get<Transform>().pos - theirs.get<Transform>().pos;
+    Require(gap.length() < 400., "callsign: /tp <player> arrives alongside them");
+    Require((mine.get<Transform>().vel - theirs.get<Transform>().vel).length() < 30.,
+            "callsign: /tp <player> matches their velocity rather than arriving at rest");
+
+    Require(RunCheatCommand(game, mine, TeamId::Blue, "/players").reply.size() >= 2,
+            "callsign: /players lists everyone flying");
+
+    // Friendly fire is a round-wide rule, and one worth announcing.
+    Require(!game.GetDamageSystem().IsFriendlyFire(), "cheat: friendly fire is off by default");
+    const CheatResult ff = RunCheatCommand(game, flown, TeamId::Blue, "/ff on");
+    Require(game.GetDamageSystem().IsFriendlyFire(), "cheat: /ff on turns friendly fire on");
+    Require(ff.announce, "cheat: a rule change for the whole round is announced, not whispered");
+    RunCheatCommand(game, flown, TeamId::Blue, "/ff off");
+    Require(!game.GetDamageSystem().IsFriendlyFire(), "cheat: /ff off turns it back off");
+
+    fs.Shutdown();
+}
+
+// A round with friendly fire on: a side's own rounds have to reach its own
+// hulls, which is exactly what the default rule refuses.
+void TestFriendlyFire()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    const auto shootAlly = [&fs](bool friendlyFire) {
+        Game game(fs);
+        game.GetDamageSystem().SetFriendlyFire(friendlyFire);
+
+        flecs::entity shooter = game.GetEntitySpawner().SpawnPlayer(
+                "models/ships/fighter-1"_id, Vector2d{0., 0.}, TeamId::Blue);
+        flecs::entity ally = game.GetEntitySpawner().SpawnPlayer(
+                "models/ships/fighter-1"_id, Vector2d{200., 0.}, TeamId::Blue);
+
+        // Pointed at the ally and holding the trigger. Both are weightless
+        // here -- no world was built, so nothing pulls the rounds off course.
+        cpBody* body = game.GetPhysicsSystem().GetBody(shooter.get<PhysicsRef>()).cp.body.get();
+        cpBodySetAngle(body, CP_PI / 2.); // nose at +X, where the ally is
+        const float startHp = ally.get<Damageable>().hp;
+
+        for (int tick = 0; tick < 120 && ally.is_alive(); ++tick) {
+            InputCommand cmd;
+            cmd.tick = game.GetStep();
+            cmd.flags.firePrimary = true;
+            shooter.get_mut<InputQueue>().Push(cmd);
+            game.Update();
+        }
+        return !ally.is_alive() || ally.get<Damageable>().hp < startHp;
+    };
+
+    Require(!shootAlly(false), "friendly fire: off, a side's rounds pass through its own hulls");
+    Require(shootAlly(true), "friendly fire: on, they land");
+
+    fs.Shutdown();
+}
+
 // The overburn: while it is burning a hull exceeds the speed its own engine
 // could otherwise reach, and having spent it, it has to wait.
 void TestBoost()
@@ -2996,8 +3161,7 @@ void TestSnapshotRoundtrip(Game& game)
 void TestNetRoundtrip(Game& game)
 {
     auto [serverTransport, clientTransport] = LoopbackTransport::CreatePair();
-    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
-                     *serverTransport);
+    NetServer server(game, *serverTransport);
     NetClient client(*clientTransport, "sim-test-client");
     // The client has no sector of its own; the seed reaches it in the welcome
     // and nowhere else, so the HUD can name the round it is playing.
@@ -3097,8 +3261,7 @@ void TestNetRoundtrip(Game& game)
 void TestPeerRespawn(Game& game)
 {
     auto [serverTransport, clientTransport] = LoopbackTransport::CreatePair();
-    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
-                     *serverTransport);
+    NetServer server(game, *serverTransport);
     NetClient client(*clientTransport, "sim-test-respawn-client");
 
     for (int i = 0; i < 5; ++i) {
@@ -3180,8 +3343,7 @@ void TestPeerRespawn(Game& game)
 void TestTeamAssignment(Game& game)
 {
     auto [serverTransport, clientTransport] = LoopbackTransport::CreatePair();
-    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
-                     *serverTransport);
+    NetServer server(game, *serverTransport);
     NetClient client(*clientTransport, "sim-test-team-client");
     client.SetRequestedTeam(TeamId::Red);
 
@@ -3283,8 +3445,7 @@ void TestWebRtcRoundtrip()
     serverTransport.Connect();
     clientTransport.Connect();
 
-    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
-                     serverTransport);
+    NetServer server(game, serverTransport);
     NetClient client(clientTransport, "sim-test-webrtc-client");
 
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
@@ -3345,8 +3506,7 @@ void TestWebRtcSignalingRoundtrip()
     // reasons that have nothing to do with the code under test.
     constexpr std::uint16_t port = 17899;
     WebRtcServerTransport serverTransport(port);
-    NetServer server(game.GetRegistry(), game.GetEntitySpawner(), game.GetEventQueue(), game.GetFactionSystem(),
-                     serverTransport);
+    NetServer server(game, serverTransport);
 
     WebRtcTransport clientTransport(WebRtcTransport::Role::Offerer);
     NetClient client(clientTransport, "sim-test-signaling-client");
@@ -3519,6 +3679,8 @@ int main()
     TestResearch();
     TestResearchQueue();
     TestSunIsLethal();
+    TestCheats();
+    TestFriendlyFire();
     TestBoost();
     TestFactionDefeatAndWin();
     TestSectorGeneration();

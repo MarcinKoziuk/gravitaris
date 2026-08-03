@@ -106,7 +106,8 @@ void StructureDefenseSystem::Update()
 
             const flecs::entity bullet =
                     m_entitySpawner.SpawnBullet(round->modelId, transf.pos, vel, /*sensor=*/true, rot);
-            bullet.emplace<Bullet>(round->lifetimeSeconds, turretTeam.id, round->damage);
+            bullet.emplace<Bullet>(round->lifetimeSeconds, turretTeam.id, round->damage,
+                                   /*ownerNetId=*/0u, turret.id());
 
             m_eventQueue.Emit(GameEventType::BulletFired, turret,
                               Magnum::Vector2{static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())},

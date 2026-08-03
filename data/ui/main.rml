@@ -7,8 +7,43 @@
 			body
 			{
 				width: 440dp;
-				height: 250dp;
+				height: 310dp;
 				margin: auto;
+			}
+			/* Same row shape as team_row below. */
+			div#name_row
+			{
+				display: flex;
+				align-items: center;
+				margin-top: 14dp;
+			}
+			div#name_row p
+			{
+				flex: 0 0 auto;
+				margin-right: 12dp;
+				margin-bottom: 0;
+				font-size: 12dp;
+				letter-spacing: 5dp;
+				color: #588;
+			}
+			input#name_input
+			{
+				flex: 1 1 auto;
+				box-sizing: border-box;
+				padding: 8dp 10dp;
+
+				color: #cff;
+				font-size: 14dp;
+				font-weight: bold;
+				letter-spacing: 2dp;
+				background-color: #0cf1;
+				border-width: 1dp;
+				border-color: #0cf8;
+				cursor: text;
+			}
+			input#name_input:focus
+			{
+				border-color: #bff;
 			}
 			/* Same row shape as team_row below: label, then the control it
 			   labels, on one line. */
@@ -120,6 +155,13 @@
 			<input type="text" id="seed_input" value="0" />
 			<button id="apply_seed" class="small">Apply</button>
 			<button id="randomize_seed" class="small">Random</button>
+		</div>
+
+		<!-- What everyone else sees on your chat lines. maxlength matches
+		     MAX_PLAYER_NAME, which the server truncates to regardless. -->
+		<div id="name_row">
+			<p>CALL SIGN</p>
+			<input type="text" id="name_input" maxlength="24" value="Pilot" />
 		</div>
 
 		<div id="team_row">

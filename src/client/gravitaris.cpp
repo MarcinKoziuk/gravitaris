@@ -100,6 +100,8 @@ private:
     // Chat is only useful once the round is running, and the intro dialog owns
     // enter until then.
     bool m_sessionStarted = false;
+    // Last CGame::GetChatRevision the HUD was built from.
+    std::uint64_t m_shownChatRevision = 0;
 
     // True if the key was consumed by chat composition.
     bool HandleChatKey(KeyEvent& event);
@@ -119,7 +121,7 @@ private:
     // Apply/Randomize rewrite the seed and rebuild in place.
     SectorParams m_sectorParams;
 
-    void StartSession(TeamId team);
+    void StartSession(TeamId team, const std::string& name);
 
     // Rebuilds the backdrop sector on `seed` and refreshes what the dialog
     // shows for it.
@@ -129,6 +131,7 @@ private:
     void StartReplay();
     void StopReplay();
     void UpdateUi();
+    void RefreshChatLog();
     void RefreshHudReadout();
     void RefreshResearchReadout();
 
@@ -224,7 +227,8 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     m_ui.RegisterLiveTexture("compass", m_game->GetCompassRenderer().TextureId(),
                              CompassRenderer::TextureSize().x(), CompassRenderer::TextureSize().y());
 
-    m_ui.SetIntroConfirmCallback([this](TeamId team) { StartSession(team); });
+    m_ui.SetIntroConfirmCallback(
+            [this](TeamId team, const std::string& name) { StartSession(team, name); });
     // Reseeding only makes sense for a world this process owns; a connected
     // client's sector belongs to the server.
     if (m_connectUrl.empty()) {
@@ -372,8 +376,12 @@ void GravitarisApplication::ApplySectorSeed(std::uint32_t seed)
     m_ui.SetTeamOptions(m_game->GetRoster());
 }
 
-void GravitarisApplication::StartSession(TeamId team)
+void GravitarisApplication::StartSession(TeamId team, const std::string& name)
 {
+    // Before ConnectToServer either way: ClientHello carries the name, and it
+    // is built the moment the transport connects.
+    m_game->SetPlayerName(name);
+
     if (m_connectUrl.empty()) m_game->SpawnCombatants(team);
     else m_game->ConnectToServer(m_connectUrl, team);
     m_sessionStarted = true;
@@ -402,6 +410,20 @@ void GravitarisApplication::UpdateUi()
     }
     m_ui.SetUpgradeOffers(offers);
 
+    if (m_shownChatRevision != m_game->GetChatRevision()) {
+        m_shownChatRevision = m_game->GetChatRevision();
+        RefreshChatLog();
+    }
+    m_ui.SetChatInput(m_chatActive, m_chatDraft);
+
+    m_ui.SetRecenterVisible(!m_game->IsCameraFollowing());
+
+    ScopedPerfTimer timer(m_game->GetPerfMonitor(), "UI Update");
+    m_ui.Update();
+}
+
+void GravitarisApplication::RefreshChatLog()
+{
     std::vector<ChatLineView> chat;
     for (const CGame::ChatLine& line : m_game->GetChatLog()) {
         // A line with no sender is a notice (the kill feed, server messages),
@@ -415,12 +437,6 @@ void GravitarisApplication::UpdateUi()
                                     TeamColorCss(line.team)});
     }
     m_ui.SetChatLog(chat);
-    m_ui.SetChatInput(m_chatActive, m_chatDraft);
-
-    m_ui.SetRecenterVisible(!m_game->IsCameraFollowing());
-
-    ScopedPerfTimer timer(m_game->GetPerfMonitor(), "UI Update");
-    m_ui.Update();
 }
 
 // Build identity, the measured round-trip when connected to a server, and the
@@ -902,6 +918,14 @@ void GravitarisApplication::textInputEvent(TextInputEvent& event)
 void GravitarisApplication::scrollEvent(ScrollEvent& event)
 {
     if (m_debugUi->HandleScroll(event)) {
+        event.setAccepted();
+        return;
+    }
+
+    // The chat scrollback is the only thing that takes the wheel; anywhere
+    // else it stays the camera's. RmlUi counts notches downward, the platform
+    // upward.
+    if (m_ui.ProcessMouseWheel(-event.offset().y())) {
         event.setAccepted();
         return;
     }

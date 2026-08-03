@@ -256,6 +256,12 @@ public:
     void SetKinematicMotion(const PhysicsRef& ref, Magnum::Vector2d pos, Magnum::Vector2d vel,
                             std::optional<double> angle = std::nullopt);
 
+    // Puts a dynamic body somewhere it could not have flown to, and stops it
+    // spinning. Cheats and dev tools only -- the sim moves ships by
+    // integrating forces, and a client predicting one will have to reconcile
+    // whatever this does.
+    void Teleport(const PhysicsRef& ref, Magnum::Vector2d pos, Magnum::Vector2d vel);
+
     void Simulate(double dt);
 
     void Update();

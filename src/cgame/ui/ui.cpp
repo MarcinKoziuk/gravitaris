@@ -119,8 +119,22 @@ bool UI::Init()
         m_shieldFill = hud->GetElementById("shield_fill");
         m_shieldValue = hud->GetElementById("shield_value");
         m_shieldSegments = hud->GetElementById("shield_segments");
+        m_chat = hud->GetElementById("chat");
         m_chatLog = hud->GetElementById("chat_log");
         m_chatInput = hud->GetElementById("chat_input");
+
+        if (Rml::Element* grip = hud->GetElementById("chat_grip")) {
+            // ElementHandle drags by writing top/left, so the window's
+            // bottom-left anchor has to go before the first of those lands --
+            // otherwise a definite top and bottom stretch the box between them.
+            // Pinning top to where it already is keeps it still meanwhile.
+            Listen(*grip, "dragstart", [this](Rml::Event&) {
+                if (!m_chat) return;
+                const int top = static_cast<int>(std::lround(m_chat->GetOffsetTop()));
+                m_chat->SetProperty("top", std::to_string(top) + "px");
+                m_chat->SetProperty("bottom", "auto");
+            });
+        }
         m_boostFill = hud->GetElementById("boost_fill");
         m_boostValue = hud->GetElementById("boost_value");
         m_researchFill = hud->GetElementById("research_fill");
@@ -163,6 +177,7 @@ bool UI::Init()
 
         m_seedRow = m_document->GetElementById("seed_row");
         m_seedInput = m_document->GetElementById("seed_input");
+        m_nameInput = m_document->GetElementById("name_input");
 
         if (Rml::Element* button = m_document->GetElementById("apply_seed")) {
             Listen(*button, "click", [this](Rml::Event&) {
@@ -184,7 +199,9 @@ bool UI::Init()
         if (Rml::Element* button = m_document->GetElementById("dismiss_intro")) {
             Listen(*button, "click", [this](Rml::Event&) {
                 m_document->Hide();
-                if (m_onIntroConfirm) m_onIntroConfirm(m_introTeam);
+                const Rml::String name =
+                        m_nameInput ? m_nameInput->GetAttribute<Rml::String>("value", "") : "";
+                if (m_onIntroConfirm) m_onIntroConfirm(m_introTeam, name);
             });
         }
 
@@ -231,6 +248,12 @@ bool UI::ProcessMouseButton(int rmlButtonIndex, bool down)
     if (!m_context) return false;
     return down ? !m_context->ProcessMouseButtonDown(rmlButtonIndex, 0)
                 : !m_context->ProcessMouseButtonUp(rmlButtonIndex, 0);
+}
+
+bool UI::ProcessMouseWheel(float delta)
+{
+    if (!m_context) return false;
+    return !m_context->ProcessMouseWheel(delta, 0);
 }
 
 void UI::SetHudStatus(const std::string& build, const std::string& ping)
@@ -387,6 +410,14 @@ void UI::SetChatLog(const std::vector<ChatLineView>& lines)
 
     m_shownChat = lines;
 
+    // Somebody scrolled up is reading history, and yanking them back to the
+    // bottom on the next line would make the scrollback useless. Anyone
+    // already at the end keeps following. The slack absorbs the fractional
+    // remainder a partly-visible line leaves.
+    static constexpr float AT_END_SLACK = 2.f;
+    m_chatScrollToEnd = m_chatLog->GetScrollTop() + m_chatLog->GetClientHeight()
+                        >= m_chatLog->GetScrollHeight() - AT_END_SLACK;
+
     std::string markup;
     for (const ChatLineView& line : lines) {
         markup += "<div class=\"chat_line\"><span class=\"chat_sender\" style=\"color: "
@@ -526,7 +557,7 @@ int UI::GetSidebarWidthPx() const
     return m_sidebar ? static_cast<int>(m_sidebar->GetOffsetWidth()) : 0;
 }
 
-void UI::SetIntroConfirmCallback(std::function<void(TeamId)> callback)
+void UI::SetIntroConfirmCallback(std::function<void(TeamId, const std::string&)> callback)
 {
     m_onIntroConfirm = std::move(callback);
 }
@@ -700,6 +731,13 @@ void UI::ToggleDebugger()
 void UI::Update()
 {
     m_context->Update();
+
+    // After the update, not inside SetChatLog: the fresh markup has no scroll
+    // extents to pin to until the context has laid it out.
+    if (m_chatScrollToEnd && m_chatLog) {
+        m_chatScrollToEnd = false;
+        m_chatLog->SetScrollTop(m_chatLog->GetScrollHeight());
+    }
 
     RefreshActiveDocument();
 }

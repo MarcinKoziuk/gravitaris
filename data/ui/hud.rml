@@ -343,17 +343,61 @@
 				pointer-events: none;
 			}
 
-			/* Chat sits above the recenter button in the view's bottom-left
-			   corner: the log fades line by line (CGame::GetChatLog) and the
-			   compose row appears under it only while a line is being typed.
-			   Click-through -- nothing here is clickable, and it must never
-			   take the mouse away from the game view. */
+			/* Chat is a window rather than a fading overlay: the grip drags
+			   it anywhere over the view, and the log keeps a scrollback
+			   (CGame::CHAT_HISTORY_LINES) instead of erasing itself. It opts
+			   back into the mouse -- dragging and scrolling need it -- so it
+			   is deliberately the smallest box that holds a readable log.
+			   The starting corner is bottom-left; UI's grip handler swaps
+			   `bottom` for a pinned `top` the moment it is dragged, since
+			   ElementHandle drives top/left. */
 			div#chat
 			{
 				position: absolute;
 				left: 16dp;
 				bottom: 60dp;
-				width: 640dp;
+				width: 480dp;
+				height: 190dp;
+				box-sizing: border-box;
+
+				display: flex;
+				flex-direction: column;
+
+				background-color: #0006;
+				pointer-events: auto;
+			}
+
+			div#chat:hover
+			{
+				background-color: #000c;
+			}
+
+			handle#chat_grip
+			{
+				display: block;
+				flex: 0 0 auto;
+				padding: 3dp 9dp;
+
+				font-size: 11dp;
+				letter-spacing: 4dp;
+				color: #588;
+				background-color: #0cf1;
+				border-bottom-width: 1dp;
+				border-bottom-color: #0cf4;
+				cursor: move;
+			}
+
+			div#chat:hover handle#chat_grip
+			{
+				color: #9dd;
+				background-color: #0cf3;
+			}
+
+			div#chat_log
+			{
+				flex: 1 1 auto;
+				overflow: hidden auto;
+				padding: 5dp 9dp;
 			}
 
 			div.chat_line
@@ -373,14 +417,51 @@
 			div#chat_input
 			{
 				display: none;
-				margin-top: 6dp;
+				flex: 0 0 auto;
+				padding: 5dp 9dp;
+
 				font-size: 15dp;
 				color: #ffa;
+				border-top-width: 1dp;
+				border-top-color: #0cf4;
 			}
 
 			div#chat_input.active
 			{
 				display: block;
+			}
+
+			/* The scrollback's own bar: a bare cyan slider, no arrows and no
+			   track fill, so it reads as one more hairline in the frame. */
+			div#chat_log scrollbarvertical
+			{
+				width: 6dp;
+				cursor: arrow;
+			}
+
+			div#chat_log scrollbarvertical slidertrack
+			{
+				background-color: #0cf1;
+			}
+
+			div#chat_log scrollbarvertical sliderbar
+			{
+				width: 6dp;
+				min-height: 24dp;
+				background-color: #0cf8;
+			}
+
+			div#chat_log scrollbarvertical sliderbar:hover,
+			div#chat_log scrollbarvertical sliderbar:active
+			{
+				background-color: #bff;
+			}
+
+			div#chat_log scrollbarvertical sliderarrowdec,
+			div#chat_log scrollbarvertical sliderarrowinc
+			{
+				width: 0;
+				height: 0;
 			}
 
 			button#recenter
@@ -578,7 +659,14 @@
 		</div>
 
 		<div id="view_overlay">
-			<div id="chat">
+			<div id="chat" class="frame">
+				<div class="corner tl"/><div class="corner tr"/>
+				<div class="corner bl"/><div class="corner br"/>
+
+				<!-- #parent, not an id: ElementHandle resolves the token
+				     against itself, so the grip moves the box it sits in
+				     without either knowing the other's name. -->
+				<handle id="chat_grip" move_target="#parent">COMMS</handle>
 				<div id="chat_log"></div>
 				<div id="chat_input" class="readout"></div>
 			</div>

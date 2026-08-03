@@ -267,6 +267,14 @@ void PhysicsSystem::SetKinematicMotion(const PhysicsRef& ref, Magnum::Vector2d p
     if (angle) cpBodySetAngle(body, cpFloat(*angle));
 }
 
+void PhysicsSystem::Teleport(const PhysicsRef& ref, Magnum::Vector2d pos, Magnum::Vector2d vel)
+{
+    cpBody* body = GetBody(ref).cp.body.get();
+    cpBodySetPosition(body, cpv(pos.x(), pos.y()));
+    cpBodySetVelocity(body, cpv(vel.x(), vel.y()));
+    cpBodySetAngularVelocity(body, 0.0);
+}
+
 void PhysicsSystem::InitBody(PhysicsBody& slot, const Transform& transf)
 {
     const Body& bodyResource = *slot.body;

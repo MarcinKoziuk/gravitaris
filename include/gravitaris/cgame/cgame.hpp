@@ -115,9 +115,8 @@ protected:
 
     void ReconcileOwnShipIfNeeded();
 
-    // Moves whatever the server sent into m_chatLog and drops expired lines.
-    // Called from Render, so chat keeps flowing on both the net-client and
-    // single-player paths.
+    // Moves whatever the server sent into m_chatLog. Called from Render, so
+    // chat keeps flowing on both the net-client and single-player paths.
     void DrainChat();
 
     void PushChatLine(std::string sender, TeamId team, std::string text);
@@ -148,13 +147,12 @@ public:
     };
 
 protected:
-    static constexpr std::size_t CHAT_LOG_LINES = 6;
-    static constexpr float CHAT_LINE_LIFETIME = 14.f;
-    struct TimedChatLine {
-        ChatLine line;
-        float arrivedAt = 0.f; // m_renderTimeSeconds, so it ages on wall clock
-    };
-    std::deque<TimedChatLine> m_chatLog;
+    // Scrollback depth. Lines are kept until they fall off the end rather than
+    // ageing out: the HUD's chat is a window you can scroll, so a line that
+    // erased itself would take the history with it.
+    static constexpr std::size_t CHAT_HISTORY_LINES = 256;
+    std::deque<ChatLine> m_chatLog;
+    std::uint64_t m_chatRevision = 0;
 
     // Unit the camera is following instead of the own ship; empty = not
     // spectating. May live in either world (see CycleSpectate).
@@ -418,10 +416,12 @@ public:
     // pressing enter twice costs nothing.
     void SubmitChat(const std::string& text);
 
-    // The lines still worth drawing, oldest first: the newest CHAT_LOG_LINES,
-    // each until it ages out (chat is an overlay on the game view, not a
-    // window, so it has to get out of the way on its own).
+    // The scrollback, oldest first: the newest CHAT_HISTORY_LINES.
     [[nodiscard]] std::vector<ChatLine> GetChatLog() const;
+
+    // Bumped by every line pushed. A scrollback this deep is not worth copying
+    // and diffing per frame, so the HUD rebuilds only when this moves.
+    [[nodiscard]] std::uint64_t GetChatRevision() const { return m_chatRevision; }
 
     // Spectating: the camera (and everything framed off it) follows another
     // unit instead of your own ship. Cycles NetId order across both worlds,

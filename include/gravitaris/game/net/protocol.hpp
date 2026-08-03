@@ -36,6 +36,11 @@ inline constexpr std::uint32_t PROTOCOL_VERSION = 5; // v5: +chat
 // harmless.
 inline constexpr std::size_t CLIENT_INPUT_BACKUP = 8;
 
+// Longest player name a client may announce, in bytes. Enforced on both ends:
+// the intro dialog stops accepting characters there, and the server truncates
+// whatever arrives regardless of what sent it.
+inline constexpr std::size_t MAX_PLAYER_NAME = 24;
+
 struct ClientHelloPacket {
     std::uint32_t protocolVersion = PROTOCOL_VERSION;
     std::string name;

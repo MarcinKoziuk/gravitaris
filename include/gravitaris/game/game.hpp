@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -118,6 +119,11 @@ protected:
 
     std::optional<flecs::entity> m_player;
 
+    // What this process's own player is called, stamped onto every hull it
+    // flies (Callsign) so a respawn keeps the name. A server has one of these
+    // per peer instead (NetServer::PeerState::name) and never uses this one.
+    std::string m_playerName = "Pilot";
+
     // Countdown after a ship's death before TickRespawn starts retrying
     // TryRespawn. -1 means no respawn pending (alive, or permanently gone).
     int m_playerRespawnTimer = -1;
@@ -163,6 +169,10 @@ protected:
     void HandlePlayerRespawn();
 
     void HandleAILeaderRespawns();
+
+    // The Callsign an AI faction's leader flies under, so it can be addressed
+    // by name the same way a human can.
+    [[nodiscard]] static std::string LeaderCallsign(TeamId team);
 
     virtual std::unique_ptr<EntitySpawner> CreateEntitySpawner();
 
@@ -244,6 +254,15 @@ public:
     std::optional<flecs::entity> GetPlayer()
     { return m_player; }
 
+    // The name this player flies under. Trimmed and truncated to
+    // MAX_PLAYER_NAME; a blank one is ignored, so the default stands. Set
+    // before spawning or connecting -- ClientHello is built the moment the
+    // transport connects, and a hull already in the world keeps whatever
+    // Callsign it launched with.
+    void SetPlayerName(const std::string& name);
+
+    [[nodiscard]] const std::string& GetPlayerName() const { return m_playerName; }
+
     // The tick the next Update() will run. Producers stamp commands with this
     // before calling Update() so InputSystem consumes them on the right tick.
     std::uint64_t GetStep() const
@@ -263,6 +282,9 @@ public:
 
     DamageSystem::LandingParams& GetLandingDamageParams()
     { return m_damageSystem.GetLandingParams(); }
+
+    DamageSystem& GetDamageSystem()
+    { return m_damageSystem; }
 
     // Every ship destroyed, for whoever writes the kill feed -- single-player
     // straight into its own chat log, a server out to its peers.

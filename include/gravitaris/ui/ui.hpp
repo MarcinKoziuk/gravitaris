@@ -81,7 +81,8 @@ private:
     // to them.
     std::vector<std::unique_ptr<Rml::EventListener>> m_listeners;
 
-    std::function<void(TeamId)> m_onIntroConfirm;
+    std::function<void(TeamId, const std::string&)> m_onIntroConfirm;
+    Rml::Element* m_nameInput = nullptr;
     std::function<void(std::uint32_t)> m_onSeedApply;
     std::function<void()> m_onSeedRandomize;
     Rml::Element* m_seedRow = nullptr;
@@ -142,11 +143,16 @@ private:
     int m_researchStocked = -1;
     std::string m_researchText;
 
+    Rml::Element* m_chat = nullptr;
     Rml::Element* m_chatLog = nullptr;
     Rml::Element* m_chatInput = nullptr;
     std::vector<ChatLineView> m_shownChat;
     std::string m_shownChatInput;
     bool m_chatInputActive = false;
+    // Set when a rebuild should leave the log pinned to its newest line, and
+    // consumed by the next Update(): the scroll extents only exist once the
+    // context has laid the fresh markup out.
+    bool m_chatScrollToEnd = false;
 
     Rml::Element* m_upgradeDraft = nullptr;
     Rml::Element* m_upgradeOffers = nullptr;
@@ -197,6 +203,12 @@ public:
     bool ProcessMouseMove(int x, int y);
     bool ProcessMouseButton(int rmlButtonIndex, bool down);
 
+    // `delta` in notches, positive scrolling down (RmlUi's sign, which is the
+    // opposite of the platform's). True if a document took it -- the chat
+    // scrollback is the only thing that does today, and the caller must not
+    // also zoom the camera with it.
+    bool ProcessMouseWheel(float delta);
+
     // Sidebar footer: build identity on one line, ping on the next (empty
     // when there's no server). The caller formats both; this layer holds no
     // game or net state. Repeated identical text is ignored, so calling it
@@ -246,9 +258,10 @@ public:
     // Unchanged values are ignored, so calling it every frame is fine.
     void SetResearchReadout(float fraction, int stocked, const std::string& text);
 
-    // Chat lines over the game view, oldest first; an empty list clears the
-    // log. Only rebuilt when the contents actually change, so calling it every
-    // frame is fine.
+    // The chat window's scrollback, oldest first; an empty list clears the
+    // log. A rebuild keeps the player's scroll position unless they were
+    // already reading the newest line, in which case it follows. Only rebuilt
+    // when the contents actually change, so calling it every frame is fine.
     void SetChatLog(const std::vector<ChatLineView>& lines);
 
     // The line being composed, shown under the log while `active`. The caret
@@ -265,8 +278,10 @@ public:
     void SetUpgradePickCallback(std::function<void(int)> callback);
 
     // Fired when the intro dialog's OK is clicked, with the side the player
-    // picked. Set before Init(), which is what shows the dialog.
-    void SetIntroConfirmCallback(std::function<void(TeamId)> callback);
+    // picked and the call sign they typed (empty if they cleared the field --
+    // naming the default is the caller's business, not this layer's). Set
+    // before Init(), which is what shows the dialog.
+    void SetIntroConfirmCallback(std::function<void(TeamId, const std::string&)> callback);
 
     // Rebuilds the side dropdown to offer exactly `teams`, keeping the
     // current pick if it survives. Call after every world build -- the sides
