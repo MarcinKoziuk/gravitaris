@@ -121,6 +121,26 @@
                 "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_OSX_ARCHITECTURES": "arm64"
             }
+        },
+        {
+            "name": "server-base",
+            "hidden": true,
+            "inherits": "base",
+            "cacheVariables": {
+                "GRAVITARIS_BUILD_CLIENT": "OFF"
+            }
+        },
+        {
+            "name": "server-debug",
+            "displayName": "Dedicated server Debug",
+            "inherits": "server-base",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+        },
+        {
+            "name": "server-release",
+            "displayName": "Dedicated server Release",
+            "inherits": "server-base",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
         }
     ],
     "buildPresets": [
@@ -155,6 +175,14 @@
         {
             "name": "macos-clang-arm64-release",
             "configurePreset": "macos-clang-arm64-release"
+        },
+        {
+            "name": "server-debug",
+            "configurePreset": "server-debug"
+        },
+        {
+            "name": "server-release",
+            "configurePreset": "server-release"
         }
     ]
 }

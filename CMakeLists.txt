@@ -8,6 +8,22 @@ endif()
 
 project(GravitarisNG CXX C)
 
+# ---------------------------------------------------------------------------
+# Build scope. With this OFF the configure never fetches SDL2, Freetype,
+# RmlUi, poly2tri, ImGui or magnum-integration and never enables Magnum's GL
+# module, so a headless host needs no OpenGL/X11/Wayland development packages
+# to configure -- only gravitaris-server and gravitaris-sim-test are built.
+# ---------------------------------------------------------------------------
+option(GRAVITARIS_BUILD_CLIENT "Build the windowed client (needs OpenGL)" ON)
+
+# The Emscripten build is client-only by definition: gravitaris-server needs
+# rtc::WebSocketServer, and a browser can't listen.
+if(EMSCRIPTEN AND NOT GRAVITARIS_BUILD_CLIENT)
+    message(FATAL_ERROR
+        "GRAVITARIS_BUILD_CLIENT=OFF builds nothing under Emscripten -- "
+        "the server targets are native-only.")
+endif()
+
 # Corrade v2020.06 (and a few other deps) use cmake_minimum_required(VERSION 2.x)
 # which CMake 3.27+ rejects. This variable, also supported in 3.27+, instructs
 # CMake to accept any minimum version >= 3.5 in subdirectories.
@@ -18,6 +34,13 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 if(WIN32)
     add_compile_definitions(NOMINMAX)
 endif()
+
+# We build and run in the build tree and never invoke `cmake --install`, and
+# the fetched dependencies' own install rules actively get in the way: with
+# BUILD_SHARED_LIBS off, libdatachannel's static `datachannel` puts its PRIVATE
+# MbedTLS::MbedTLS link in its interface, and its install(EXPORT ...) then
+# fails to generate because mbedtls is in no export set of ours.
+set(CMAKE_SKIP_INSTALL_RULES ON)
 
 include(FetchContent)
 
@@ -111,7 +134,7 @@ endif()
 # fails find_package_handle_standard_args. Simplest correct thing: just don't
 # fetch real SDL2 and let Magnum's module do its own thing, untouched.
 # ---------------------------------------------------------------------------
-if(NOT EMSCRIPTEN)
+if(GRAVITARIS_BUILD_CLIENT AND NOT EMSCRIPTEN)
     FetchContent_Declare(SDL2
         GIT_REPOSITORY  https://github.com/libsdl-org/SDL.git
         GIT_TAG         ${GT_SDL2_TAG}
@@ -132,34 +155,46 @@ endif()
 # Freetype — fetched before RmlUi; OVERRIDE_FIND_PACKAGE so RmlUi's
 # find_package(Freetype) resolves to the fetched copy.
 # ---------------------------------------------------------------------------
-FetchContent_Declare(Freetype
-    GIT_REPOSITORY  https://github.com/freetype/freetype.git
-    GIT_TAG         ${GT_FREETYPE_TAG}
-    GIT_SHALLOW     TRUE
-    OVERRIDE_FIND_PACKAGE
-)
-FetchContent_MakeAvailable(Freetype)
+if(GRAVITARIS_BUILD_CLIENT)
+    FetchContent_Declare(Freetype
+        GIT_REPOSITORY  https://github.com/freetype/freetype.git
+        GIT_TAG         ${GT_FREETYPE_TAG}
+        GIT_SHALLOW     TRUE
+        OVERRIDE_FIND_PACKAGE
+    )
+    FetchContent_MakeAvailable(Freetype)
 
-# Freetype's EXPORT_NAME "Freetype::Freetype" only applies to its install
-# targets, not the in-build target. Create the alias manually so that
-# consumers (RmlUi) that look for TARGET Freetype::Freetype find it.
-# Also set FREETYPE_FOUND because OVERRIDE_FIND_PACKAGE no-ops subsequent
-# find_package(Freetype) calls without setting it.
-if(TARGET freetype AND NOT TARGET Freetype::Freetype)
-    add_library(Freetype::Freetype ALIAS freetype)
+    # Freetype's EXPORT_NAME "Freetype::Freetype" only applies to its install
+    # targets, not the in-build target. Create the alias manually so that
+    # consumers (RmlUi) that look for TARGET Freetype::Freetype find it.
+    # Also set FREETYPE_FOUND because OVERRIDE_FIND_PACKAGE no-ops subsequent
+    # find_package(Freetype) calls without setting it.
+    if(TARGET freetype AND NOT TARGET Freetype::Freetype)
+        add_library(Freetype::Freetype ALIAS freetype)
+    endif()
+    set(FREETYPE_FOUND TRUE)
 endif()
-set(FREETYPE_FOUND TRUE)
 
 # ---------------------------------------------------------------------------
 # Magnum — requires Corrade and SDL2 to already be available
 # ---------------------------------------------------------------------------
-# v2020.06 used WITH_*, master uses MAGNUM_WITH_* — set both for safety
-set(WITH_SDL2APPLICATION        ON  CACHE BOOL "" FORCE)
-set(MAGNUM_WITH_SDL2APPLICATION ON  CACHE BOOL "" FORCE)
-set(WITH_GL                     ON  CACHE BOOL "" FORCE)
-set(MAGNUM_WITH_GL              ON  CACHE BOOL "" FORCE)
-set(WITH_SHADERS                ON  CACHE BOOL "" FORCE)
-set(MAGNUM_WITH_SHADERS         ON  CACHE BOOL "" FORCE)
+# v2020.06 used WITH_*, master uses MAGNUM_WITH_* — set both for safety.
+# The server side only ever touches Magnum's header-only Math and the core
+# Magnum library, so a server-only build leaves these OFF and Magnum's own
+# find_package(OpenGL) never runs. Set explicitly rather than omitted for the
+# same reason as WITH_AUDIO below: a build tree first configured as a client
+# has ON baked into its CMakeCache.txt.
+if(GRAVITARIS_BUILD_CLIENT)
+    set(GT_MAGNUM_GL ON)
+else()
+    set(GT_MAGNUM_GL OFF)
+endif()
+set(WITH_SDL2APPLICATION        ${GT_MAGNUM_GL} CACHE BOOL "" FORCE)
+set(MAGNUM_WITH_SDL2APPLICATION ${GT_MAGNUM_GL} CACHE BOOL "" FORCE)
+set(WITH_GL                     ${GT_MAGNUM_GL} CACHE BOOL "" FORCE)
+set(MAGNUM_WITH_GL              ${GT_MAGNUM_GL} CACHE BOOL "" FORCE)
+set(WITH_SHADERS                ${GT_MAGNUM_GL} CACHE BOOL "" FORCE)
+set(MAGNUM_WITH_SHADERS         ${GT_MAGNUM_GL} CACHE BOOL "" FORCE)
 # Magnum defaults an Emscripten build to GLES2/WebGL1 (widest device reach).
 # Our shaders request GLES300 explicitly (see line2-shader.cpp and friends)
 # and the code uses GLES3/WebGL2-only GL features (RGBA8 texture format,
@@ -297,71 +332,75 @@ FetchContent_MakeAvailable(tomlplusplus)
 # ---------------------------------------------------------------------------
 # RmlUi
 # ---------------------------------------------------------------------------
-set(RMLUI_BACKEND   "native"    CACHE STRING  "" FORCE)
-set(RMLUI_SAMPLES   OFF         CACHE BOOL    "" FORCE)
-set(RMLUI_TESTS     OFF         CACHE BOOL    "" FORCE)
-set(RMLUI_LUA_BINDINGS OFF      CACHE BOOL    "" FORCE)
+if(GRAVITARIS_BUILD_CLIENT)
+    set(RMLUI_BACKEND   "native"    CACHE STRING  "" FORCE)
+    set(RMLUI_SAMPLES   OFF         CACHE BOOL    "" FORCE)
+    set(RMLUI_TESTS     OFF         CACHE BOOL    "" FORCE)
+    set(RMLUI_LUA_BINDINGS OFF      CACHE BOOL    "" FORCE)
 
-# RmlUi's own BUILD_SHARED_LIBS option defaults ON, and poly2tri's untyped
-# add_library() (below) inherits the same ambient cache variable -- fine
-# natively (plain .dylib/.so + an RPATH fixup), but Emscripten's "shared
-# library" is a side module requiring -fPIC/-sMAIN_MODULE, which is more
-# complexity than a single statically-linked wasm binary needs.
-if(EMSCRIPTEN)
-    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    # RmlUi's own BUILD_SHARED_LIBS option defaults ON, and poly2tri's untyped
+    # add_library() (below) inherits the same ambient cache variable -- fine
+    # natively (plain .dylib/.so + an RPATH fixup), but Emscripten's "shared
+    # library" is a side module requiring -fPIC/-sMAIN_MODULE, which is more
+    # complexity than a single statically-linked wasm binary needs.
+    if(EMSCRIPTEN)
+        set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    endif()
+
+    FetchContent_Declare(RmlUi
+        GIT_REPOSITORY  https://github.com/mikke89/RmlUi.git
+        GIT_TAG         ${GT_RMLUI_TAG}
+        GIT_SHALLOW     TRUE
+        OVERRIDE_FIND_PACKAGE
+    )
+    FetchContent_MakeAvailable(RmlUi)
+
+    # -----------------------------------------------------------------------
+    # poly2tri
+    # -----------------------------------------------------------------------
+    FetchContent_Declare(poly2tri
+        GIT_REPOSITORY  https://github.com/jhasse/poly2tri.git
+        GIT_TAG         ${GT_POLY2TRI_TAG}
+        GIT_SHALLOW     FALSE
+    )
+    FetchContent_MakeAvailable(poly2tri)
 endif()
-
-FetchContent_Declare(RmlUi
-    GIT_REPOSITORY  https://github.com/mikke89/RmlUi.git
-    GIT_TAG         ${GT_RMLUI_TAG}
-    GIT_SHALLOW     TRUE
-    OVERRIDE_FIND_PACKAGE
-)
-FetchContent_MakeAvailable(RmlUi)
-
-# ---------------------------------------------------------------------------
-# poly2tri
-# ---------------------------------------------------------------------------
-FetchContent_Declare(poly2tri
-    GIT_REPOSITORY  https://github.com/jhasse/poly2tri.git
-    GIT_TAG         ${GT_POLY2TRI_TAG}
-    GIT_SHALLOW     FALSE
-)
-FetchContent_MakeAvailable(poly2tri)
 
 # ---------------------------------------------------------------------------
 # Dear ImGui + Magnum's ImGuiIntegration (dev/debug overlay only)
 # ---------------------------------------------------------------------------
 # ImGui ships no CMakeLists.txt, so it's only populated (not add_subdirectory'd);
 # magnum-integration compiles the needed imgui .cpp itself, given IMGUI_DIR.
-FetchContent_Declare(ImGui
-    GIT_REPOSITORY  https://github.com/ocornut/imgui.git
-    GIT_TAG         ${GT_IMGUI_TAG}
-    GIT_SHALLOW     TRUE
-)
-FetchContent_MakeAvailable(ImGui)
-set(IMGUI_DIR "${imgui_SOURCE_DIR}" CACHE PATH "" FORCE)
+if(GRAVITARIS_BUILD_CLIENT)
+    FetchContent_Declare(ImGui
+        GIT_REPOSITORY  https://github.com/ocornut/imgui.git
+        GIT_TAG         ${GT_IMGUI_TAG}
+        GIT_SHALLOW     TRUE
+    )
+    FetchContent_MakeAvailable(ImGui)
+    set(IMGUI_DIR "${imgui_SOURCE_DIR}" CACHE PATH "" FORCE)
 
-# Only the ImGui integration is needed; keep everything else off.
-set(WITH_IMGUI        ON  CACHE BOOL "" FORCE)
-set(MAGNUM_WITH_IMGUI ON  CACHE BOOL "" FORCE)
+    # Only the ImGui integration is needed; keep everything else off.
+    set(WITH_IMGUI        ON  CACHE BOOL "" FORCE)
+    set(MAGNUM_WITH_IMGUI ON  CACHE BOOL "" FORCE)
 
-# magnum-integration's CMakeLists has unconditional install(FILES ...) calls
-# using these dir variables. When Magnum is a fetched subproject they're set
-# only in Magnum's own scope, so they arrive here empty and install() errors
-# out at configure time. We never run `cmake --install`, so just give them
-# Magnum's own default values to keep the install() calls well-formed.
-set(MAGNUM_BINARY_INSTALL_DIR  bin)
-set(MAGNUM_LIBRARY_INSTALL_DIR lib)
-set(MAGNUM_INCLUDE_INSTALL_DIR include/Magnum)
+    # magnum-integration's CMakeLists has unconditional install(FILES ...) calls
+    # using these dir variables. When Magnum is a fetched subproject they're set
+    # only in Magnum's own scope, so they arrive here empty and install() errors
+    # out at configure time. We never run `cmake --install`, so just give them
+    # Magnum's own default values to keep the install() calls well-formed.
+    set(MAGNUM_BINARY_INSTALL_DIR  bin)
+    set(MAGNUM_LIBRARY_INSTALL_DIR lib)
+    set(MAGNUM_INCLUDE_INSTALL_DIR include/Magnum)
 
-FetchContent_Declare(MagnumIntegration
-    GIT_REPOSITORY  https://github.com/mosra/magnum-integration.git
-    GIT_TAG         ${GT_MAGNUMINT_TAG}
-    GIT_SHALLOW     FALSE
-    OVERRIDE_FIND_PACKAGE
-)
-FetchContent_MakeAvailable(MagnumIntegration)
+    FetchContent_Declare(MagnumIntegration
+        GIT_REPOSITORY  https://github.com/mosra/magnum-integration.git
+        GIT_TAG         ${GT_MAGNUMINT_TAG}
+        GIT_SHALLOW     FALSE
+        OVERRIDE_FIND_PACKAGE
+    )
+    FetchContent_MakeAvailable(MagnumIntegration)
+endif()
 
 # ---------------------------------------------------------------------------
 # WebRTC transport (docs/networking-plan.md 3.1b): libdatachannel (native) /
@@ -486,393 +525,395 @@ add_custom_target(gravitaris-build-info ALL
 # ---------------------------------------------------------------------------
 # Main target
 # ---------------------------------------------------------------------------
-add_executable(GravitarisNG
-    src/client/gravitaris.cpp
-    src/cgame/input/replay-controller.hpp
-    src/cgame/input/replay-controller.cpp
-    src/game/resource/body.cpp
-    src/game/resource/body-query.cpp
-    extlibs/nanosvg/nanosvg.c
-    include/gravitaris/game/resource/common/iresource.hpp
-    include/gravitaris/game/resource/common/detail/resource-loader.inl
-    include/gravitaris/game/id.hpp
-    include/gravitaris/game/resource/common/detail/typed-resource-id.inl
-    include/gravitaris/game/fs/ifilesystem.hpp
-    include/gravitaris/game/fs/filesystem-physfs.hpp
-    src/game/fs/filesystem-phys-fs.cpp
-    extlibs/clipper/clipper.cpp
-    extlibs/clipper/clipper.hpp
-    extlibs/physfs/physfs.cpp
-    extlibs/physfs/physfs.hpp
-    include/gravitaris/game/logging.hpp
-    include/gravitaris/game/resource/common/resource-loader.hpp
-    include/gravitaris/game/resource/common/resource-ptr.hpp
-    src/game/id.cpp
-    include/gravitaris/game/resource/body.hpp
-    src/game/resource/detail/shape-common.hpp
-    src/game/resource/detail/shape-common.cpp
-    src/game/resource/detail/casteljau.cpp
-    src/game/resource/detail/casteljau.hpp
-    src/game/logging.cpp
-    include/gravitaris/gravitaris.hpp
-    include/gravitaris/cgame/resource/shape.hpp
-    src/cgame/resource/shape.cpp
-    src/client/triangle-example.cpp
-    src/client/triangle-example.hpp
-    include/gravitaris/game/game.hpp
-    include/gravitaris/game/component/transform.hpp
-    include/gravitaris/game/util/chipmunk-safe.hpp
-    include/gravitaris/game/component/physics.hpp
-    include/gravitaris/game/component/controls.hpp
-    include/gravitaris/game/component/input-queue.hpp
-    include/gravitaris/game/component/team.hpp
-    include/gravitaris/game/component/bullet.hpp
-    include/gravitaris/game/component/damageable.hpp
-    include/gravitaris/game/component/planet.hpp
-    include/gravitaris/game/component/gravity-source.hpp
-    include/gravitaris/game/component/orbit.hpp
-    include/gravitaris/game/component/net-id.hpp
-    include/gravitaris/game/event/game-event.hpp
-    include/gravitaris/game/net/byte-stream.hpp
-    include/gravitaris/game/net/snapshot.hpp
-    src/game/net/snapshot.cpp
-    include/gravitaris/game/net/transport.hpp
-    include/gravitaris/game/net/loopback-transport.hpp
-    src/game/net/loopback-transport.cpp
-    include/gravitaris/game/net/protocol.hpp
-    src/game/net/protocol.cpp
-    include/gravitaris/game/net/net-server.hpp
-    src/game/net/net-server.cpp
-    include/gravitaris/game/net/net-client.hpp
-    src/game/net/net-client.cpp
-    include/gravitaris/game/net/client-prediction.hpp
-    src/game/net/client-prediction.cpp
-    include/gravitaris/game/net/predicted-tick-clock.hpp
-    include/gravitaris/cgame/net/own-ship-sync.hpp
-    src/cgame/net/own-ship-sync.cpp
-    include/gravitaris/game/net/webrtc-signaling.hpp
-    src/game/net/webrtc-signaling.cpp
-    include/gravitaris/game/net/webrtc-transport.hpp
-    src/game/net/webrtc-transport.cpp
-    include/gravitaris/game/net/simulated-net-transport.hpp
-    src/game/net/simulated-net-transport.cpp
-    include/gravitaris/cgame/net/rolling-history.hpp
-    include/gravitaris/cgame/net/net-diagnostics.hpp
-    include/gravitaris/cgame/net/cosmetic-bullet-despawner.hpp
-    src/cgame/net/cosmetic-bullet-despawner.cpp
-    include/gravitaris/cgame/net/remote-event-applier.hpp
-    src/cgame/net/remote-event-applier.cpp
-    include/gravitaris/cgame/net/snapshot-applier.hpp
-    src/cgame/net/snapshot-applier.cpp
-    include/gravitaris/cgame/net/snapshot-interpolator.hpp
-    src/cgame/net/snapshot-interpolator.cpp
-    include/gravitaris/game/util/splitmix.hpp
-    include/gravitaris/game/input/input-command.hpp
-    include/gravitaris/game/input/input-log.hpp
-    src/game/input/input-log.cpp
-    include/gravitaris/game/system/ship/input-system.hpp
-    src/game/system/ship/input-system.cpp
-    include/gravitaris/game/component/ai-pilot.hpp
-    include/gravitaris/game/system/ship/ai-pilot-system.hpp
-    src/game/system/ship/ai-pilot-system.cpp
-    include/gravitaris/game/component/ai-strategy.hpp
-    include/gravitaris/game/system/ship/ai-strategy-system.hpp
-    src/game/system/ship/ai-strategy-system.cpp
-    include/gravitaris/game/gnc/nav/trajectory-predictor.hpp
-    src/game/gnc/nav/trajectory-predictor.cpp
-    include/gravitaris/game/gnc/control/flight-controller.hpp
-    src/game/gnc/control/flight-controller.cpp
-    include/gravitaris/game/gnc/guidance/behaviors.hpp
-    src/game/gnc/guidance/behaviors.cpp
-    include/gravitaris/game/ai/ai-preset-library.hpp
-    src/game/ai/ai-preset-library.cpp
-    include/gravitaris/game/debug/debug-spawn.hpp
-    src/game/debug/debug-spawn.cpp
-    include/gravitaris/game/cheat/cheat-console.hpp
-    src/game/cheat/cheat-console.cpp
-    include/gravitaris/game/system/combat/bullet-lifetime-system.hpp
-    src/game/system/combat/bullet-lifetime-system.cpp
-    include/gravitaris/game/event/death-report.hpp
-    src/game/event/death-report.cpp
-    include/gravitaris/game/system/combat/damage-system.hpp
-    src/game/system/combat/damage-system.cpp
-    include/gravitaris/game/system/combat/shield-system.hpp
-    src/game/system/combat/shield-system.cpp
-    include/gravitaris/game/component/missile.hpp
-    include/gravitaris/game/system/combat/missile-system.hpp
-    src/game/system/combat/missile-system.cpp
-    include/gravitaris/game/system/gwell/faction-system.hpp
-    src/game/system/gwell/faction-system.cpp
-    include/gravitaris/game/component/faction-state.hpp
-    include/gravitaris/game/system/ship/landing-state-system.hpp
-    src/game/system/ship/landing-state-system.cpp
-    include/gravitaris/game/system/gwell/conquest-system.hpp
-    src/game/system/gwell/conquest-system.cpp
-    include/gravitaris/game/system/gwell/home-site.hpp
-    src/game/system/gwell/home-site.cpp
-    include/gravitaris/game/system/ship/repair-system.hpp
-    src/game/system/ship/repair-system.cpp
-    include/gravitaris/game/system/core/structure-attachment-system.hpp
-    src/game/system/core/structure-attachment-system.cpp
-    include/gravitaris/game/system/combat/structure-defense-system.hpp
-    src/game/system/combat/structure-defense-system.cpp
-    include/gravitaris/game/system/gwell/freighter-system.hpp
-    src/game/system/gwell/freighter-system.cpp
-    include/gravitaris/game/system/gwell/economy-system.hpp
-    src/game/system/gwell/economy-system.cpp
-    include/gravitaris/game/system/gwell/research-system.hpp
-    src/game/system/gwell/research-system.cpp
-    include/gravitaris/game/component/ship-loadout.hpp
-    include/gravitaris/game/component/upgrade-draft.hpp
-    include/gravitaris/game/upgrade/upgrade-def.hpp
-    include/gravitaris/game/upgrade/upgrade-catalog.hpp
-    src/game/upgrade/upgrade-catalog.cpp
-    include/gravitaris/game/config/economy-config.hpp
-    src/game/config/economy-config.cpp
-    include/gravitaris/game/component/structure.hpp
-    include/gravitaris/game/component/planet-attachment.hpp
-    include/gravitaris/game/component/freighter.hpp
-    include/gravitaris/game/system/combat/death-system.hpp
-    src/game/system/combat/death-system.cpp
-    include/gravitaris/game/system/core/physics-system.hpp
-    src/game/system/core/physics-system.cpp
-    include/gravitaris/game/system/core/orbit-system.hpp
-    src/game/system/core/orbit-system.cpp
-    include/gravitaris/game/perf-monitor.hpp
-    src/game/perf-monitor.cpp
-    src/game/game.cpp
-    include/gravitaris/cgame/cgame.hpp
-    include/gravitaris/cgame/team-color.hpp
-    src/cgame/cgame.cpp
-    include/gravitaris/cgame/audio/audio-system.hpp
-    src/cgame/audio/audio-system.cpp
-    include/gravitaris/cgame/audio/audio-backend.hpp
-    include/gravitaris/cgame/audio/backend/miniaudio-backend.hpp
-    src/cgame/audio/backend/miniaudio-backend.cpp
-    extlibs/miniaudio/miniaudio_impl.c
-    include/gravitaris/cgame/fx/lab-glow.hpp
-    include/gravitaris/cgame/fx/hit-flash-system.hpp
-    src/cgame/fx/hit-flash-system.cpp
-    include/gravitaris/cgame/resource/audio-clip.hpp
-    src/cgame/resource/audio-clip.cpp
-    include/gravitaris/cgame/resource/model.hpp
-    src/cgame/resource/model.cpp
-    include/gravitaris/cgame/renderer/simple-model-renderer.hpp
-    include/gravitaris/cgame/component/renderable.hpp
-    include/gravitaris/cgame/component/hit-flash.hpp
-    include/gravitaris/cgame/component/remote-smoothing.hpp
-    src/cgame/renderer/simple-model-renderer.cpp
-    include/gravitaris/game/resource/common/detail/resource-wrapper.hpp
-    include/gravitaris/game/system/ship/ship-controls-system.hpp
-    include/gravitaris/game/spawner/entity-spawner.hpp
-    src/game/spawner/entity-spawner.cpp
-    include/gravitaris/game/scenario/classic-scenario.hpp
-    src/game/scenario/classic-scenario.cpp
-    include/gravitaris/game/scenario/starting-complex.hpp
-    src/game/scenario/starting-complex.cpp
-    include/gravitaris/game/scenario/sector-scenario.hpp
-    src/game/scenario/sector-scenario.cpp
-    include/gravitaris/cgame/spawner/centity-spawner.hpp
-    src/cgame/spawner/centity-spawner.cpp
-    include/gravitaris/cgame/fwd.hpp
-    src/game/system/ship/ship-controls-system.cpp
-    include/gravitaris/cgame/renderer/shader/simple-line-shader.hpp
-    src/cgame/renderer/shader/basic-lines-shader.cpp
-    include/gravitaris/cgame/renderer/shader/line2-shader.hpp
-    src/cgame/renderer/shader/line2-shader.cpp
-    include/gravitaris/cgame/renderer/model-renderer2.hpp
-    src/cgame/renderer/model-renderer2.cpp
-    include/gravitaris/cgame/renderer/shader/starfield-shader.hpp
-    src/cgame/renderer/shader/starfield-shader.cpp
-    include/gravitaris/cgame/renderer/starfield-renderer.hpp
-    src/cgame/renderer/starfield-renderer.cpp
-    include/gravitaris/cgame/renderer/gl-safe-upload.hpp
-    src/cgame/renderer/detail/line2-batch.hpp
-    include/gravitaris/cgame/renderer/minimap-renderer.hpp
-    src/cgame/renderer/minimap-renderer.cpp
-    include/gravitaris/cgame/renderer/compass-renderer.hpp
-    src/cgame/renderer/compass-renderer.cpp
-    include/gravitaris/cgame/camera.hpp
-    include/gravitaris/cgame/camera-director.hpp
-    src/cgame/camera-director.cpp
-    include/gravitaris/game/gnc/autopilot.hpp
-    src/game/gnc/autopilot.cpp
-    include/gravitaris/cgame/hud/indicator-renderer.hpp
-    src/cgame/hud/indicator-renderer.cpp
-    include/gravitaris/cgame/renderer/shader/glow-threshold-shader.hpp
-    src/cgame/renderer/shader/glow-threshold-shader.cpp
-    include/gravitaris/cgame/renderer/shader/glow-blur-shader.hpp
-    src/cgame/renderer/shader/glow-blur-shader.cpp
-    include/gravitaris/cgame/renderer/shader/glow-composite-shader.hpp
-    src/cgame/renderer/shader/glow-composite-shader.cpp
-    include/gravitaris/cgame/renderer/shader/crt-shader.hpp
-    src/cgame/renderer/shader/crt-shader.cpp
-    include/gravitaris/cgame/renderer/glow-post-process.hpp
-    src/cgame/renderer/glow-post-process.cpp
-    src/cgame/ui/detail/system-interface.hpp
-    src/cgame/ui/detail/system-interface.cpp
-    src/cgame/ui/detail/render-interface-gl3.hpp
-    src/cgame/ui/detail/render-interface-gl3.cpp
-    include/gravitaris/ui/ui.hpp
-    src/cgame/ui/ui.cpp
-    src/cgame/ui/detail/file-interface.hpp
-    src/cgame/ui/detail/file-interface.cpp
-    src/cgame/ui/debug/debug-ui.hpp
-    src/cgame/ui/debug/debug-ui.cpp
-    src/cgame/ui/debug/post-process-panel.hpp
-    src/cgame/ui/debug/post-process-panel.cpp
-    src/cgame/ui/debug/audio-panel.hpp
-    src/cgame/ui/debug/audio-panel.cpp
-    src/cgame/ui/debug/renderer-panel.hpp
-    src/cgame/ui/debug/renderer-panel.cpp
-    src/cgame/ui/debug/net-panel.hpp
-    src/cgame/ui/debug/net-panel.cpp
-    src/cgame/ui/debug/spawn-panel.hpp
-    src/cgame/ui/debug/spawn-panel.cpp
-    src/cgame/ui/debug/ai-panel.hpp
-    src/cgame/ui/debug/ai-panel.cpp
-    src/cgame/ui/debug/ai-names.hpp
-    src/cgame/ui/debug/ai-label-overlay.hpp
-    src/cgame/ui/debug/ai-label-overlay.cpp
-    src/cgame/ui/debug/trajectory-panel.hpp
-    src/cgame/ui/debug/trajectory-panel.cpp
-    src/cgame/ui/debug/flight-panel.hpp
-    src/cgame/ui/debug/flight-panel.cpp
-    src/cgame/ui/debug/physics-panel.hpp
-    src/cgame/ui/debug/physics-panel.cpp
-    src/cgame/ui/debug/perf-panel.hpp
-    src/cgame/ui/debug/perf-panel.cpp
-    src/cgame/ui/debug/starfield-panel.hpp
-    src/cgame/ui/debug/starfield-panel.cpp
-    src/cgame/ui/debug/camera-panel.hpp
-    src/cgame/ui/debug/camera-panel.cpp
-    src/cgame/ui/debug/hud-panel.hpp
-    src/cgame/ui/debug/hud-panel.cpp
-    src/cgame/ui/debug/world-to-ui.hpp
-    include/gravitaris/game/build-info.hpp
-    src/game/build-info.cpp
-)
+if(GRAVITARIS_BUILD_CLIENT)
+    add_executable(GravitarisNG
+        src/client/gravitaris.cpp
+        src/cgame/input/replay-controller.hpp
+        src/cgame/input/replay-controller.cpp
+        src/game/resource/body.cpp
+        src/game/resource/body-query.cpp
+        extlibs/nanosvg/nanosvg.c
+        include/gravitaris/game/resource/common/iresource.hpp
+        include/gravitaris/game/resource/common/detail/resource-loader.inl
+        include/gravitaris/game/id.hpp
+        include/gravitaris/game/resource/common/detail/typed-resource-id.inl
+        include/gravitaris/game/fs/ifilesystem.hpp
+        include/gravitaris/game/fs/filesystem-physfs.hpp
+        src/game/fs/filesystem-phys-fs.cpp
+        extlibs/clipper/clipper.cpp
+        extlibs/clipper/clipper.hpp
+        extlibs/physfs/physfs.cpp
+        extlibs/physfs/physfs.hpp
+        include/gravitaris/game/logging.hpp
+        include/gravitaris/game/resource/common/resource-loader.hpp
+        include/gravitaris/game/resource/common/resource-ptr.hpp
+        src/game/id.cpp
+        include/gravitaris/game/resource/body.hpp
+        src/game/resource/detail/shape-common.hpp
+        src/game/resource/detail/shape-common.cpp
+        src/game/resource/detail/casteljau.cpp
+        src/game/resource/detail/casteljau.hpp
+        src/game/logging.cpp
+        include/gravitaris/gravitaris.hpp
+        include/gravitaris/cgame/resource/shape.hpp
+        src/cgame/resource/shape.cpp
+        src/client/triangle-example.cpp
+        src/client/triangle-example.hpp
+        include/gravitaris/game/game.hpp
+        include/gravitaris/game/component/transform.hpp
+        include/gravitaris/game/util/chipmunk-safe.hpp
+        include/gravitaris/game/component/physics.hpp
+        include/gravitaris/game/component/controls.hpp
+        include/gravitaris/game/component/input-queue.hpp
+        include/gravitaris/game/component/team.hpp
+        include/gravitaris/game/component/bullet.hpp
+        include/gravitaris/game/component/damageable.hpp
+        include/gravitaris/game/component/planet.hpp
+        include/gravitaris/game/component/gravity-source.hpp
+        include/gravitaris/game/component/orbit.hpp
+        include/gravitaris/game/component/net-id.hpp
+        include/gravitaris/game/event/game-event.hpp
+        include/gravitaris/game/net/byte-stream.hpp
+        include/gravitaris/game/net/snapshot.hpp
+        src/game/net/snapshot.cpp
+        include/gravitaris/game/net/transport.hpp
+        include/gravitaris/game/net/loopback-transport.hpp
+        src/game/net/loopback-transport.cpp
+        include/gravitaris/game/net/protocol.hpp
+        src/game/net/protocol.cpp
+        include/gravitaris/game/net/net-server.hpp
+        src/game/net/net-server.cpp
+        include/gravitaris/game/net/net-client.hpp
+        src/game/net/net-client.cpp
+        include/gravitaris/game/net/client-prediction.hpp
+        src/game/net/client-prediction.cpp
+        include/gravitaris/game/net/predicted-tick-clock.hpp
+        include/gravitaris/cgame/net/own-ship-sync.hpp
+        src/cgame/net/own-ship-sync.cpp
+        include/gravitaris/game/net/webrtc-signaling.hpp
+        src/game/net/webrtc-signaling.cpp
+        include/gravitaris/game/net/webrtc-transport.hpp
+        src/game/net/webrtc-transport.cpp
+        include/gravitaris/game/net/simulated-net-transport.hpp
+        src/game/net/simulated-net-transport.cpp
+        include/gravitaris/cgame/net/rolling-history.hpp
+        include/gravitaris/cgame/net/net-diagnostics.hpp
+        include/gravitaris/cgame/net/cosmetic-bullet-despawner.hpp
+        src/cgame/net/cosmetic-bullet-despawner.cpp
+        include/gravitaris/cgame/net/remote-event-applier.hpp
+        src/cgame/net/remote-event-applier.cpp
+        include/gravitaris/cgame/net/snapshot-applier.hpp
+        src/cgame/net/snapshot-applier.cpp
+        include/gravitaris/cgame/net/snapshot-interpolator.hpp
+        src/cgame/net/snapshot-interpolator.cpp
+        include/gravitaris/game/util/splitmix.hpp
+        include/gravitaris/game/input/input-command.hpp
+        include/gravitaris/game/input/input-log.hpp
+        src/game/input/input-log.cpp
+        include/gravitaris/game/system/ship/input-system.hpp
+        src/game/system/ship/input-system.cpp
+        include/gravitaris/game/component/ai-pilot.hpp
+        include/gravitaris/game/system/ship/ai-pilot-system.hpp
+        src/game/system/ship/ai-pilot-system.cpp
+        include/gravitaris/game/component/ai-strategy.hpp
+        include/gravitaris/game/system/ship/ai-strategy-system.hpp
+        src/game/system/ship/ai-strategy-system.cpp
+        include/gravitaris/game/gnc/nav/trajectory-predictor.hpp
+        src/game/gnc/nav/trajectory-predictor.cpp
+        include/gravitaris/game/gnc/control/flight-controller.hpp
+        src/game/gnc/control/flight-controller.cpp
+        include/gravitaris/game/gnc/guidance/behaviors.hpp
+        src/game/gnc/guidance/behaviors.cpp
+        include/gravitaris/game/ai/ai-preset-library.hpp
+        src/game/ai/ai-preset-library.cpp
+        include/gravitaris/game/debug/debug-spawn.hpp
+        src/game/debug/debug-spawn.cpp
+        include/gravitaris/game/cheat/cheat-console.hpp
+        src/game/cheat/cheat-console.cpp
+        include/gravitaris/game/system/combat/bullet-lifetime-system.hpp
+        src/game/system/combat/bullet-lifetime-system.cpp
+        include/gravitaris/game/event/death-report.hpp
+        src/game/event/death-report.cpp
+        include/gravitaris/game/system/combat/damage-system.hpp
+        src/game/system/combat/damage-system.cpp
+        include/gravitaris/game/system/combat/shield-system.hpp
+        src/game/system/combat/shield-system.cpp
+        include/gravitaris/game/component/missile.hpp
+        include/gravitaris/game/system/combat/missile-system.hpp
+        src/game/system/combat/missile-system.cpp
+        include/gravitaris/game/system/gwell/faction-system.hpp
+        src/game/system/gwell/faction-system.cpp
+        include/gravitaris/game/component/faction-state.hpp
+        include/gravitaris/game/system/ship/landing-state-system.hpp
+        src/game/system/ship/landing-state-system.cpp
+        include/gravitaris/game/system/gwell/conquest-system.hpp
+        src/game/system/gwell/conquest-system.cpp
+        include/gravitaris/game/system/gwell/home-site.hpp
+        src/game/system/gwell/home-site.cpp
+        include/gravitaris/game/system/ship/repair-system.hpp
+        src/game/system/ship/repair-system.cpp
+        include/gravitaris/game/system/core/structure-attachment-system.hpp
+        src/game/system/core/structure-attachment-system.cpp
+        include/gravitaris/game/system/combat/structure-defense-system.hpp
+        src/game/system/combat/structure-defense-system.cpp
+        include/gravitaris/game/system/gwell/freighter-system.hpp
+        src/game/system/gwell/freighter-system.cpp
+        include/gravitaris/game/system/gwell/economy-system.hpp
+        src/game/system/gwell/economy-system.cpp
+        include/gravitaris/game/system/gwell/research-system.hpp
+        src/game/system/gwell/research-system.cpp
+        include/gravitaris/game/component/ship-loadout.hpp
+        include/gravitaris/game/component/upgrade-draft.hpp
+        include/gravitaris/game/upgrade/upgrade-def.hpp
+        include/gravitaris/game/upgrade/upgrade-catalog.hpp
+        src/game/upgrade/upgrade-catalog.cpp
+        include/gravitaris/game/config/economy-config.hpp
+        src/game/config/economy-config.cpp
+        include/gravitaris/game/component/structure.hpp
+        include/gravitaris/game/component/planet-attachment.hpp
+        include/gravitaris/game/component/freighter.hpp
+        include/gravitaris/game/system/combat/death-system.hpp
+        src/game/system/combat/death-system.cpp
+        include/gravitaris/game/system/core/physics-system.hpp
+        src/game/system/core/physics-system.cpp
+        include/gravitaris/game/system/core/orbit-system.hpp
+        src/game/system/core/orbit-system.cpp
+        include/gravitaris/game/perf-monitor.hpp
+        src/game/perf-monitor.cpp
+        src/game/game.cpp
+        include/gravitaris/cgame/cgame.hpp
+        include/gravitaris/cgame/team-color.hpp
+        src/cgame/cgame.cpp
+        include/gravitaris/cgame/audio/audio-system.hpp
+        src/cgame/audio/audio-system.cpp
+        include/gravitaris/cgame/audio/audio-backend.hpp
+        include/gravitaris/cgame/audio/backend/miniaudio-backend.hpp
+        src/cgame/audio/backend/miniaudio-backend.cpp
+        extlibs/miniaudio/miniaudio_impl.c
+        include/gravitaris/cgame/fx/lab-glow.hpp
+        include/gravitaris/cgame/fx/hit-flash-system.hpp
+        src/cgame/fx/hit-flash-system.cpp
+        include/gravitaris/cgame/resource/audio-clip.hpp
+        src/cgame/resource/audio-clip.cpp
+        include/gravitaris/cgame/resource/model.hpp
+        src/cgame/resource/model.cpp
+        include/gravitaris/cgame/renderer/simple-model-renderer.hpp
+        include/gravitaris/cgame/component/renderable.hpp
+        include/gravitaris/cgame/component/hit-flash.hpp
+        include/gravitaris/cgame/component/remote-smoothing.hpp
+        src/cgame/renderer/simple-model-renderer.cpp
+        include/gravitaris/game/resource/common/detail/resource-wrapper.hpp
+        include/gravitaris/game/system/ship/ship-controls-system.hpp
+        include/gravitaris/game/spawner/entity-spawner.hpp
+        src/game/spawner/entity-spawner.cpp
+        include/gravitaris/game/scenario/classic-scenario.hpp
+        src/game/scenario/classic-scenario.cpp
+        include/gravitaris/game/scenario/starting-complex.hpp
+        src/game/scenario/starting-complex.cpp
+        include/gravitaris/game/scenario/sector-scenario.hpp
+        src/game/scenario/sector-scenario.cpp
+        include/gravitaris/cgame/spawner/centity-spawner.hpp
+        src/cgame/spawner/centity-spawner.cpp
+        include/gravitaris/cgame/fwd.hpp
+        src/game/system/ship/ship-controls-system.cpp
+        include/gravitaris/cgame/renderer/shader/simple-line-shader.hpp
+        src/cgame/renderer/shader/basic-lines-shader.cpp
+        include/gravitaris/cgame/renderer/shader/line2-shader.hpp
+        src/cgame/renderer/shader/line2-shader.cpp
+        include/gravitaris/cgame/renderer/model-renderer2.hpp
+        src/cgame/renderer/model-renderer2.cpp
+        include/gravitaris/cgame/renderer/shader/starfield-shader.hpp
+        src/cgame/renderer/shader/starfield-shader.cpp
+        include/gravitaris/cgame/renderer/starfield-renderer.hpp
+        src/cgame/renderer/starfield-renderer.cpp
+        include/gravitaris/cgame/renderer/gl-safe-upload.hpp
+        src/cgame/renderer/detail/line2-batch.hpp
+        include/gravitaris/cgame/renderer/minimap-renderer.hpp
+        src/cgame/renderer/minimap-renderer.cpp
+        include/gravitaris/cgame/renderer/compass-renderer.hpp
+        src/cgame/renderer/compass-renderer.cpp
+        include/gravitaris/cgame/camera.hpp
+        include/gravitaris/cgame/camera-director.hpp
+        src/cgame/camera-director.cpp
+        include/gravitaris/game/gnc/autopilot.hpp
+        src/game/gnc/autopilot.cpp
+        include/gravitaris/cgame/hud/indicator-renderer.hpp
+        src/cgame/hud/indicator-renderer.cpp
+        include/gravitaris/cgame/renderer/shader/glow-threshold-shader.hpp
+        src/cgame/renderer/shader/glow-threshold-shader.cpp
+        include/gravitaris/cgame/renderer/shader/glow-blur-shader.hpp
+        src/cgame/renderer/shader/glow-blur-shader.cpp
+        include/gravitaris/cgame/renderer/shader/glow-composite-shader.hpp
+        src/cgame/renderer/shader/glow-composite-shader.cpp
+        include/gravitaris/cgame/renderer/shader/crt-shader.hpp
+        src/cgame/renderer/shader/crt-shader.cpp
+        include/gravitaris/cgame/renderer/glow-post-process.hpp
+        src/cgame/renderer/glow-post-process.cpp
+        src/cgame/ui/detail/system-interface.hpp
+        src/cgame/ui/detail/system-interface.cpp
+        src/cgame/ui/detail/render-interface-gl3.hpp
+        src/cgame/ui/detail/render-interface-gl3.cpp
+        include/gravitaris/ui/ui.hpp
+        src/cgame/ui/ui.cpp
+        src/cgame/ui/detail/file-interface.hpp
+        src/cgame/ui/detail/file-interface.cpp
+        src/cgame/ui/debug/debug-ui.hpp
+        src/cgame/ui/debug/debug-ui.cpp
+        src/cgame/ui/debug/post-process-panel.hpp
+        src/cgame/ui/debug/post-process-panel.cpp
+        src/cgame/ui/debug/audio-panel.hpp
+        src/cgame/ui/debug/audio-panel.cpp
+        src/cgame/ui/debug/renderer-panel.hpp
+        src/cgame/ui/debug/renderer-panel.cpp
+        src/cgame/ui/debug/net-panel.hpp
+        src/cgame/ui/debug/net-panel.cpp
+        src/cgame/ui/debug/spawn-panel.hpp
+        src/cgame/ui/debug/spawn-panel.cpp
+        src/cgame/ui/debug/ai-panel.hpp
+        src/cgame/ui/debug/ai-panel.cpp
+        src/cgame/ui/debug/ai-names.hpp
+        src/cgame/ui/debug/ai-label-overlay.hpp
+        src/cgame/ui/debug/ai-label-overlay.cpp
+        src/cgame/ui/debug/trajectory-panel.hpp
+        src/cgame/ui/debug/trajectory-panel.cpp
+        src/cgame/ui/debug/flight-panel.hpp
+        src/cgame/ui/debug/flight-panel.cpp
+        src/cgame/ui/debug/physics-panel.hpp
+        src/cgame/ui/debug/physics-panel.cpp
+        src/cgame/ui/debug/perf-panel.hpp
+        src/cgame/ui/debug/perf-panel.cpp
+        src/cgame/ui/debug/starfield-panel.hpp
+        src/cgame/ui/debug/starfield-panel.cpp
+        src/cgame/ui/debug/camera-panel.hpp
+        src/cgame/ui/debug/camera-panel.cpp
+        src/cgame/ui/debug/hud-panel.hpp
+        src/cgame/ui/debug/hud-panel.cpp
+        src/cgame/ui/debug/world-to-ui.hpp
+        include/gravitaris/game/build-info.hpp
+        src/game/build-info.cpp
+    )
 
-add_dependencies(GravitarisNG gravitaris-build-info)
+    add_dependencies(GravitarisNG gravitaris-build-info)
 
-# DPI-aware manifest, per https://doc.magnum.graphics/magnum/platforms-windows.html --
-# without it, Windows doesn't consider the app DPI-aware and dpiScaling()/
-# framebufferSize() report meaningless values on scaled displays. On MSVC the
-# raw .manifest is listed directly as a source so CMake merges it into the
-# linker's own auto-generated manifest (/MANIFESTINPUT); wrapping it in an
-# RT_MANIFEST .rc resource instead collides with that auto-generated manifest
-# at the same resource ID and silently loses. MinGW has no such auto-manifest,
-# so it uses the .rc route instead.
-if(WIN32)
-    if(MSVC)
-        target_sources(GravitarisNG PRIVATE src/client/windows-hidpi.manifest)
-    elseif(MINGW)
-        target_sources(GravitarisNG PRIVATE src/client/windows-hidpi.rc)
+    # DPI-aware manifest, per https://doc.magnum.graphics/magnum/platforms-windows.html --
+    # without it, Windows doesn't consider the app DPI-aware and dpiScaling()/
+    # framebufferSize() report meaningless values on scaled displays. On MSVC the
+    # raw .manifest is listed directly as a source so CMake merges it into the
+    # linker's own auto-generated manifest (/MANIFESTINPUT); wrapping it in an
+    # RT_MANIFEST .rc resource instead collides with that auto-generated manifest
+    # at the same resource ID and silently loses. MinGW has no such auto-manifest,
+    # so it uses the .rc route instead.
+    if(WIN32)
+        if(MSVC)
+            target_sources(GravitarisNG PRIVATE src/client/windows-hidpi.manifest)
+        elseif(MINGW)
+            target_sources(GravitarisNG PRIVATE src/client/windows-hidpi.rc)
+        endif()
     endif()
-endif()
 
-target_compile_features(GravitarisNG PRIVATE cxx_std_20)
+    target_compile_features(GravitarisNG PRIVATE cxx_std_20)
 
-target_include_directories(GravitarisNG PRIVATE
-    src/
-    include/
-    extlibs/
-    "${GT_GENERATED_INCLUDE_DIR}"
-)
-
-target_compile_definitions(GravitarisNG PRIVATE
-    GRAVITARIS_COMPILETIME_SOURCE_PATH="${CMAKE_SOURCE_DIR}"
-)
-
-# ---------------------------------------------------------------------------
-# Chipmunk2D doesn't always export its include dir via its target in older
-# versions of its CMakeLists, so we add it explicitly as a fallback.
-# ---------------------------------------------------------------------------
-target_include_directories(GravitarisNG PRIVATE
-    ${chipmunk2d_SOURCE_DIR}/include
-)
-
-# ---------------------------------------------------------------------------
-# Link libraries
-# ---------------------------------------------------------------------------
-target_link_libraries(GravitarisNG PRIVATE
-    flecs::flecs_static
-
-    # Chipmunk2D — BUILD_SHARED OFF so only chipmunk_static is built
-    chipmunk_static
-
-    tomlplusplus::tomlplusplus
-
-    Magnum::Magnum
-    Magnum::GL
-    Magnum::Shaders
-    Magnum::Sdl2Application
-
-    MagnumIntegration::ImGui
-
-    Freetype::Freetype
-
-    RmlUi::Core
-    RmlUi::Debugger
-
-    poly2tri
-
-    Gravitaris::WebRTC
-
-    "${CMAKE_DL_LIBS}"
-)
-
-# PhysFS target name varies across versions — resolve whichever exists
-if(TARGET PhysFS::PhysFS)
-    target_link_libraries(GravitarisNG PRIVATE PhysFS::PhysFS)
-elseif(TARGET physfs-static)
-    target_link_libraries(GravitarisNG PRIVATE physfs-static)
-elseif(TARGET physfs)
-    target_link_libraries(GravitarisNG PRIVATE physfs)
-endif()
-
-# WebGL2/GLES3: -sFULL_ES3 is needed at COMPILE time too (it's what gates
-# GLES3 declarations like glGenVertexArrays/GL_RGBA8 being visible at all in
-# Emscripten's GL headers, independent of the MAGNUM_TARGET_GLES2 OFF setting
-# above, which only affects Magnum's own C++ API surface). MIN/MAX_WEBGL_VERSION
-# pins the actual browser context Sdl2Application requests to WebGL2 --
-# without it Emscripten still defaults to negotiating WebGL1.
-if(EMSCRIPTEN)
-    target_compile_options(GravitarisNG PRIVATE "-sFULL_ES3=1")
-    target_link_options(GravitarisNG PRIVATE
-        "-sFULL_ES3=1"
-        "-sMIN_WEBGL_VERSION=2"
-        "-sMAX_WEBGL_VERSION=2"
-        # Total memory isn't known upfront (flecs/RmlUi/asset resources all
-        # grow dynamically) -- without this, allocation past the default
-        # initial heap just aborts instead of growing it.
-        "-sALLOW_MEMORY_GROWTH=1"
-        # Emscripten's 64KB default stack is too small for this codebase
-        # (flecs queries, RmlUi layout, deep template call chains) and
-        # overflowed silently at boot; 1MB matches what desktop OSes give a
-        # thread's stack by default.
-        "-sSTACK_SIZE=1048576"
-        # Embeds data/ into MEMFS at /data, populated before main() runs; see
-        # the matching PHYSFS_mount("/data", ...) in filesystem-phys-fs.cpp.
-        "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/data@/data"
-        # datachannel-wasm's JS glue (wasm/js/webrtc.js) reaches into the
-        # wasm heap directly (HEAPU8/HEAPU32) to marshal SDP/candidate
-        # strings and binary data-channel payloads across the JS/C++
-        # boundary -- not exported by default in this Emscripten version,
-        # which aborted the whole module (not a GL/rendering issue) the
-        # moment signaling actually tried to send anything.
-        "-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAPU32,UTF8ToString,stringToUTF8,lengthBytesUTF8"
+    target_include_directories(GravitarisNG PRIVATE
+        src/
+        include/
+        extlibs/
+        "${GT_GENERATED_INCLUDE_DIR}"
     )
-endif()
 
-# On macOS the fetched shared libs (Magnum, Corrade, etc.) carry no install
-# name fixup, and the executable gets no LC_RPATH by default, so it can't
-# find them at runtime. Point it at its own lib output directory.
-if(APPLE)
-    set_target_properties(GravitarisNG PROPERTIES
-        BUILD_RPATH "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}"
+    target_compile_definitions(GravitarisNG PRIVATE
+        GRAVITARIS_COMPILETIME_SOURCE_PATH="${CMAKE_SOURCE_DIR}"
     )
-endif()
+
+    # ---------------------------------------------------------------------------
+    # Chipmunk2D doesn't always export its include dir via its target in older
+    # versions of its CMakeLists, so we add it explicitly as a fallback.
+    # ---------------------------------------------------------------------------
+    target_include_directories(GravitarisNG PRIVATE
+        ${chipmunk2d_SOURCE_DIR}/include
+    )
+
+    # ---------------------------------------------------------------------------
+    # Link libraries
+    # ---------------------------------------------------------------------------
+    target_link_libraries(GravitarisNG PRIVATE
+        flecs::flecs_static
+
+        # Chipmunk2D — BUILD_SHARED OFF so only chipmunk_static is built
+        chipmunk_static
+
+        tomlplusplus::tomlplusplus
+
+        Magnum::Magnum
+        Magnum::GL
+        Magnum::Shaders
+        Magnum::Sdl2Application
+
+        MagnumIntegration::ImGui
+
+        Freetype::Freetype
+
+        RmlUi::Core
+        RmlUi::Debugger
+
+        poly2tri
+
+        Gravitaris::WebRTC
+
+        "${CMAKE_DL_LIBS}"
+    )
+
+    # PhysFS target name varies across versions — resolve whichever exists
+    if(TARGET PhysFS::PhysFS)
+        target_link_libraries(GravitarisNG PRIVATE PhysFS::PhysFS)
+    elseif(TARGET physfs-static)
+        target_link_libraries(GravitarisNG PRIVATE physfs-static)
+    elseif(TARGET physfs)
+        target_link_libraries(GravitarisNG PRIVATE physfs)
+    endif()
+
+    # WebGL2/GLES3: -sFULL_ES3 is needed at COMPILE time too (it's what gates
+    # GLES3 declarations like glGenVertexArrays/GL_RGBA8 being visible at all in
+    # Emscripten's GL headers, independent of the MAGNUM_TARGET_GLES2 OFF setting
+    # above, which only affects Magnum's own C++ API surface). MIN/MAX_WEBGL_VERSION
+    # pins the actual browser context Sdl2Application requests to WebGL2 --
+    # without it Emscripten still defaults to negotiating WebGL1.
+    if(EMSCRIPTEN)
+        target_compile_options(GravitarisNG PRIVATE "-sFULL_ES3=1")
+        target_link_options(GravitarisNG PRIVATE
+            "-sFULL_ES3=1"
+            "-sMIN_WEBGL_VERSION=2"
+            "-sMAX_WEBGL_VERSION=2"
+            # Total memory isn't known upfront (flecs/RmlUi/asset resources all
+            # grow dynamically) -- without this, allocation past the default
+            # initial heap just aborts instead of growing it.
+            "-sALLOW_MEMORY_GROWTH=1"
+            # Emscripten's 64KB default stack is too small for this codebase
+            # (flecs queries, RmlUi layout, deep template call chains) and
+            # overflowed silently at boot; 1MB matches what desktop OSes give a
+            # thread's stack by default.
+            "-sSTACK_SIZE=1048576"
+            # Embeds data/ into MEMFS at /data, populated before main() runs; see
+            # the matching PHYSFS_mount("/data", ...) in filesystem-phys-fs.cpp.
+            "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/data@/data"
+            # datachannel-wasm's JS glue (wasm/js/webrtc.js) reaches into the
+            # wasm heap directly (HEAPU8/HEAPU32) to marshal SDP/candidate
+            # strings and binary data-channel payloads across the JS/C++
+            # boundary -- not exported by default in this Emscripten version,
+            # which aborted the whole module (not a GL/rendering issue) the
+            # moment signaling actually tried to send anything.
+            "-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAPU32,UTF8ToString,stringToUTF8,lengthBytesUTF8"
+        )
+    endif()
+
+    # On macOS the fetched shared libs (Magnum, Corrade, etc.) carry no install
+    # name fixup, and the executable gets no LC_RPATH by default, so it can't
+    # find them at runtime. Point it at its own lib output directory.
+    if(APPLE)
+        set_target_properties(GravitarisNG PROPERTIES
+            BUILD_RPATH "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}"
+        )
+    endif()
+endif() # GRAVITARIS_BUILD_CLIENT
 
 # ---------------------------------------------------------------------------
 # gravitaris-sim-test — headless determinism harness (docs/networking-plan.md
