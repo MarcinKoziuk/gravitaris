@@ -21,7 +21,8 @@ work.
 - Chipmunk2D (physics)
 - PhysFS (vfs)
 - RmlUI (game ui)
-- nanosvg (svg parsing)
+- nanosvg (svg parsing) -- unmaintained; replace with lunasvg, which RmlUi's
+  own SVG plugin already uses, when UI icon art lands
 - ankerl::unordered_dense (open-addressing hash map/set, vendored in `extlibs/ankerl/`)
 - TODO: Dear ImGui for dev/debug UI
 - Config parsing: toml++
