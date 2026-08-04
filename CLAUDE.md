@@ -48,6 +48,13 @@ Eventually the game should be multiplayer, so the game is split into separate mo
 
 ## Known gotchas
 
+- **flecs: no nested queries.** A `world::each` (or any query) run *inside*
+  another query's callback yields nothing — it doesn't assert, it just
+  silently iterates zero entities. A mid-walk lookup has to gather what it
+  needs into a plain container first, then act on it after the walk. This cost
+  an hour in `ResearchSystem`: the account lookup nested inside the walk over
+  `PilotRef`s found nobody and opened every pilot a fresh account every tick.
+
 - **macOS DPI**: `Sdl2Application::dpiScaling()` reports `{1, 1}` on macOS
   even on Retina displays where `windowSize()` and `framebufferSize()`
   genuinely differ. Use `framebufferSize() / windowSize()` for the real
