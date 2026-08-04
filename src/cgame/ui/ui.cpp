@@ -31,6 +31,9 @@ static constexpr float SEGMENT_GAP_PERCENT = 2.f;
 // disappearing into the track -- the gap is the reading.
 static constexpr float SEGMENT_FLOOR = 0.18f;
 
+static Rml::Input::KeyIdentifier RmlKey(UiKey key);
+static int RmlModifiers(int modifiers);
+
 static std::optional<TeamId> TeamIdFromOption(const Rml::String& value);
 static const char* TeamOptionValue(TeamId team);
 static const char* TeamLabel(TeamId team);
@@ -254,6 +257,33 @@ bool UI::ProcessMouseWheel(float delta)
 {
     if (!m_context) return false;
     return !m_context->ProcessMouseWheel(delta, 0);
+}
+
+bool UI::ProcessKeyDown(UiKey key, int modifiers)
+{
+    if (!m_context) return false;
+
+    const Rml::Input::KeyIdentifier identifier = RmlKey(key);
+    if (identifier == Rml::Input::KI_UNKNOWN) return false;
+
+    return !m_context->ProcessKeyDown(identifier, RmlModifiers(modifiers));
+}
+
+bool UI::ProcessTextInput(const std::string& text)
+{
+    if (!m_context) return false;
+    return !m_context->ProcessTextInput(Rml::String(text));
+}
+
+bool UI::IsKeyboardCaptured() const
+{
+    if (!m_context) return false;
+
+    const Rml::Element* focused = m_context->GetFocusElement();
+    if (!focused) return false;
+
+    const Rml::String& tag = focused->GetTagName();
+    return tag == "input" || tag == "textarea" || tag == "select";
 }
 
 void UI::SetHudStatus(const std::string& build, const std::string& ping)
@@ -625,6 +655,43 @@ void UI::Listen(Rml::Element& element, const char* event, std::function<void(Rml
 {
     m_listeners.push_back(std::make_unique<FunctionListener>(std::move(handler)));
     element.AddEventListener(event, m_listeners.back().get());
+}
+
+static Rml::Input::KeyIdentifier RmlKey(UiKey key)
+{
+    switch (key) {
+    case UiKey::Backspace: return Rml::Input::KI_BACK;
+    case UiKey::Delete: return Rml::Input::KI_DELETE;
+    case UiKey::Tab: return Rml::Input::KI_TAB;
+    case UiKey::Return: return Rml::Input::KI_RETURN;
+    case UiKey::Escape: return Rml::Input::KI_ESCAPE;
+    case UiKey::Left: return Rml::Input::KI_LEFT;
+    case UiKey::Right: return Rml::Input::KI_RIGHT;
+    case UiKey::Up: return Rml::Input::KI_UP;
+    case UiKey::Down: return Rml::Input::KI_DOWN;
+    case UiKey::Home: return Rml::Input::KI_HOME;
+    case UiKey::End: return Rml::Input::KI_END;
+    case UiKey::PageUp: return Rml::Input::KI_PRIOR;
+    case UiKey::PageDown: return Rml::Input::KI_NEXT;
+    case UiKey::A: return Rml::Input::KI_A;
+    case UiKey::C: return Rml::Input::KI_C;
+    case UiKey::V: return Rml::Input::KI_V;
+    case UiKey::X: return Rml::Input::KI_X;
+    case UiKey::Y: return Rml::Input::KI_Y;
+    case UiKey::Z: return Rml::Input::KI_Z;
+    case UiKey::None: break;
+    }
+    return Rml::Input::KI_UNKNOWN;
+}
+
+static int RmlModifiers(int modifiers)
+{
+    int state = 0;
+    if (modifiers & UiKeyModifier_Ctrl) state |= Rml::Input::KM_CTRL;
+    if (modifiers & UiKeyModifier_Shift) state |= Rml::Input::KM_SHIFT;
+    if (modifiers & UiKeyModifier_Alt) state |= Rml::Input::KM_ALT;
+    if (modifiers & UiKeyModifier_Meta) state |= Rml::Input::KM_META;
+    return state;
 }
 
 // The dropdown carries these as its option values, and SetTeamOptions writes

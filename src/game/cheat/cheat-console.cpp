@@ -80,6 +80,7 @@ static void CheatWhere(Cheat& c);
 static void CheatSpawn(Cheat& c);
 static void CheatFriendlyFire(Cheat& c);
 static void CheatPlayers(Cheat& c);
+static void CheatNotify(Cheat& c);
 
 bool IsCheatCommand(const std::string& text)
 {
@@ -130,6 +131,7 @@ CheatResult RunCheatCommand(Game& game, flecs::entity subject, TeamId team, cons
     else if (verb == "spawn") CheatSpawn(cheat);
     else if (verb == "ff" || verb == "friendlyfire") CheatFriendlyFire(cheat);
     else if (verb == "players" || verb == "who") CheatPlayers(cheat);
+    else if (verb == "notify") CheatNotify(cheat);
     else result.reply.push_back("no such cheat: /" + verb + " -- try /help");
 
     LOG(info) << "cheat: " << TeamName(team) << " ran " << text;
@@ -150,6 +152,7 @@ static void CheatHelp(Cheat& c)
     c.Say("/players - who is flying, and what they are called");
     c.Say("/spawn [n] [team] - n AI fighters at that team's home");
     c.Say("/ff [on|off] - friendly fire, for the whole round");
+    c.Say("/notify [on|off] - webhook a line when somebody joins");
     c.Say("add @<player> to any of the above to run it on their ship instead");
 }
 
@@ -404,6 +407,33 @@ static void CheatPlayers(Cheat& c)
     });
 
     if (found == 0) c.Say("players: nobody is flying");
+}
+
+static void CheatNotify(Cheat& c)
+{
+    if (!c.game.HasNotifier()) {
+        c.Say("notify: this server has no webhook configured (GRAVITARIS_NOTIFY_WEBHOOK)");
+        return;
+    }
+
+    bool enabled = !c.game.AreNotificationsEnabled();
+    if (c.args.size() > 1) {
+        const std::string& arg = c.args[1];
+        if (arg == "on" || arg == "1" || arg == "true") enabled = true;
+        else if (arg == "off" || arg == "0" || arg == "false") enabled = false;
+        else {
+            c.Say("notify: /notify on, /notify off, or /notify to flip it");
+            return;
+        }
+    }
+    c.game.SetNotificationsEnabled(enabled);
+
+    // Sent through the same path it just switched on, so "it says it's on" and
+    // "something actually arrives" are one test rather than two.
+    if (enabled) c.game.Notify("Notifications on.");
+
+    c.Say(enabled ? "notify: on -- a line goes out when somebody joins"
+                  : "notify: off");
 }
 
 static void CheatFriendlyFire(Cheat& c)

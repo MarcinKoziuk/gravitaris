@@ -167,6 +167,9 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             LOG(info) << "net: peer " << peer << " welcomed, ship NetId " << welcome.yourShipNetId
                       << " at (" << spawn.pos.x() << ", " << spawn.pos.y() << "), team "
                       << static_cast<int>(it->second.team);
+
+            m_game.Notify(PeerCallsign(peer, it->second) + " joined -- "
+                          + std::to_string(WelcomedPeerCount()) + " flying");
             break;
         }
         case PacketType::ClientInput: {
@@ -267,6 +270,15 @@ std::string NetServer::PeerCallsign(PeerId peer, const PeerState& state)
     // The fallback is built here rather than stored on the peer, so it can't
     // be mistaken for a name somebody actually chose.
     return state.name.empty() ? "player " + std::to_string(peer) : state.name;
+}
+
+std::size_t NetServer::WelcomedPeerCount() const
+{
+    std::size_t count = 0;
+    for (const auto& [peer, state] : m_peers) {
+        if (state.welcomed) ++count;
+    }
+    return count;
 }
 
 void NetServer::SendChat(PeerId peer, const ChatMessagePacket& message)

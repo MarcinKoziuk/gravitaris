@@ -37,6 +37,7 @@
 #include <gravitaris/game/system/ship/ai-strategy-system.hpp>
 #include <gravitaris/game/ai/ai-preset-library.hpp>
 #include <gravitaris/game/config/economy-config.hpp>
+#include <gravitaris/game/notify/notifier.hpp>
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
 #include <gravitaris/game/scenario/sector-scenario.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
@@ -158,6 +159,12 @@ protected:
     // there; CGame sets its own tuned default at startup.
     float m_shipWeightMultiplier = 1.f;
 
+    // Where notifications go, and whether anyone asked for them. Both null and
+    // off by default: a headless sim-test and a single-player client have
+    // nobody to notify.
+    std::unique_ptr<INotifier> m_notifier;
+    bool m_notificationsEnabled = false;
+
     // Death -> delay -> funded respawn, one tick's worth. Returns the spawn
     // point on the tick a replacement should be created (its materials are
     // already spent by then); nullopt while alive, waiting out the delay, or
@@ -228,6 +235,25 @@ public:
     void SettleScenario();
 
     void Update();
+
+    // Takes ownership of where notifications go (game/notify). Null, the
+    // default, means nowhere.
+    void SetNotifier(std::unique_ptr<INotifier> notifier);
+
+    // Reaches whoever is watching this server from outside it. Silently does
+    // nothing with no notifier configured or notifications switched off, so
+    // call sites don't branch on either.
+    void Notify(const std::string& text);
+
+    // Off until something asks for it (the /notify cheat), so a server started
+    // with a webhook configured doesn't start posting unbidden.
+    void SetNotificationsEnabled(bool enabled) { m_notificationsEnabled = enabled; }
+
+    [[nodiscard]] bool AreNotificationsEnabled() const { return m_notificationsEnabled; }
+
+    // True when a notifier exists at all, which is what separates "switched
+    // off" from "this build/server has nowhere to send them".
+    [[nodiscard]] bool HasNotifier() const { return m_notifier != nullptr; }
 
     flecs::world& GetRegistry()
     { return m_registry; }

@@ -70,6 +70,7 @@ set(GT_IMGUI_TAG      "v1.91.5")
 set(GT_MAGNUMINT_TAG  "af4754a1cf736901626fdd8d7b8fd739f7a02112") # master @ 2026-07-19
 set(GT_MBEDTLS_TAG    "v3.6.2")
 set(GT_LIBDATACHANNEL_TAG "d5d31c7d794345d7aa536c074a9e17cbec95089d") # master @ 2026-07-19
+set(GT_CURL_TAG       "curl-8_11_1")
 
 # ---------------------------------------------------------------------------
 # Corrade — must be fetched before Magnum; OVERRIDE_FIND_PACKAGE so that
@@ -486,6 +487,77 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# libcurl — outbound webhook notifications only (src/game/notify/). Off under
+# Emscripten: a wasm client has no business holding the webhook credential,
+# and the browser wouldn't let it POST cross-origin anyway.
+#
+# TLS backend is the platform's own: Schannel on Windows and SecureTransport
+# on macOS both verify against the OS trust store, so there's no CA bundle to
+# ship or keep current. Elsewhere curl picks its default (system OpenSSL),
+# which is the one case that wants a distro dev package -- turn the option off
+# if that's unwelcome.
+# ---------------------------------------------------------------------------
+option(GRAVITARIS_WITH_NOTIFICATIONS "Webhook notifications (needs libcurl)" ON)
+
+if(GRAVITARIS_WITH_NOTIFICATIONS AND NOT EMSCRIPTEN)
+    set(BUILD_CURL_EXE      OFF CACHE BOOL "" FORCE)
+    set(BUILD_LIBCURL_DOCS  OFF CACHE BOOL "" FORCE)
+    set(BUILD_MISC_DOCS     OFF CACHE BOOL "" FORCE)
+    set(ENABLE_CURL_MANUAL  OFF CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_TESTS  ON  CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBPSL     OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBSSH2    OFF CACHE BOOL "" FORCE)
+    set(CURL_ZLIB           OFF CACHE STRING "" FORCE)
+    set(CURL_BROTLI         OFF CACHE BOOL "" FORCE)
+    set(CURL_ZSTD           OFF CACHE BOOL "" FORCE)
+
+    # MbedTLS is already in this build tree for libdatachannel, and curl's
+    # detection would otherwise pick it up as a second backend -- which one
+    # then serves as the default is not something to leave to curl's
+    # preference order, since only the platform backends verify against the OS
+    # trust store without a CA bundle to ship.
+    if(WIN32)
+        set(CURL_USE_SCHANNEL ON  CACHE BOOL "" FORCE)
+        set(CURL_USE_MBEDTLS  OFF CACHE BOOL "" FORCE)
+    elseif(APPLE)
+        set(CURL_USE_SECTRANSP ON  CACHE BOOL "" FORCE)
+        set(CURL_USE_MBEDTLS   OFF CACHE BOOL "" FORCE)
+    endif()
+
+    # libdatachannel's block above leaves USE_MBEDTLS=ON in the cache, and
+    # that is the exact variable name curl's own CMake tests to decide it has
+    # an MbedTLS backend -- so without clearing it curl compiles its MbedTLS
+    # paths (curl_ntlm_core.c reaching for mbedtls/des.h) while linking
+    # against none of it.
+    set(_gtSavedUseMbedTls "${USE_MBEDTLS}")
+    set(USE_MBEDTLS OFF CACHE BOOL "" FORCE)
+
+    # Same DLL-without-exports problem the MbedTLS block above documents: the
+    # ambient BUILD_SHARED_LIBS is ON for RmlUi/SDL2, and a shared libcurl
+    # would have to be copied next to every binary for no benefit here.
+    set(_gtSavedBuildSharedLibs "${BUILD_SHARED_LIBS}")
+    set(BUILD_SHARED_LIBS OFF)
+    FetchContent_Declare(CURL
+        GIT_REPOSITORY  https://github.com/curl/curl.git
+        GIT_TAG         ${GT_CURL_TAG}
+        GIT_SHALLOW     TRUE
+    )
+    FetchContent_MakeAvailable(CURL)
+    set(BUILD_SHARED_LIBS "${_gtSavedBuildSharedLibs}")
+    set(USE_MBEDTLS "${_gtSavedUseMbedTls}" CACHE BOOL "" FORCE)
+endif()
+
+# Notifications: one definition and one link per target, so a build with
+# GRAVITARIS_WITH_NOTIFICATIONS off compiles the same sources into a
+# do-nothing notifier instead of needing them excluded.
+function(gt_link_notifications target)
+    if(GRAVITARIS_WITH_NOTIFICATIONS AND NOT EMSCRIPTEN)
+        target_compile_definitions(${target} PRIVATE GRAVITARIS_WITH_NOTIFICATIONS)
+        target_link_libraries(${target} PRIVATE CURL::libcurl)
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # Generated build-info header (build tree only, never the tracked source
 # tree). Regenerated as a build step, not just at configure time, so the git
 # hash and timestamp it carries describe the binary you just built.
@@ -630,6 +702,8 @@ if(GRAVITARIS_BUILD_CLIENT)
         src/game/debug/debug-spawn.cpp
         include/gravitaris/game/cheat/cheat-console.hpp
         src/game/cheat/cheat-console.cpp
+        include/gravitaris/game/notify/notifier.hpp
+        src/game/notify/webhook-notifier.cpp
         include/gravitaris/game/system/combat/bullet-lifetime-system.hpp
         src/game/system/combat/bullet-lifetime-system.cpp
         include/gravitaris/game/event/death-report.hpp
@@ -871,6 +945,8 @@ if(GRAVITARIS_BUILD_CLIENT)
         target_link_libraries(GravitarisNG PRIVATE physfs)
     endif()
 
+    gt_link_notifications(GravitarisNG)
+
     # WebGL2/GLES3: -sFULL_ES3 is needed at COMPILE time too (it's what gates
     # GLES3 declarations like glGenVertexArrays/GL_RGBA8 being visible at all in
     # Emscripten's GL headers, independent of the MAGNUM_TARGET_GLES2 OFF setting
@@ -966,6 +1042,7 @@ add_executable(gravitaris-sim-test
     src/game/ai/ai-preset-library.cpp
     src/game/debug/debug-spawn.cpp
     src/game/cheat/cheat-console.cpp
+    src/game/notify/webhook-notifier.cpp
     src/game/spawner/entity-spawner.cpp
     src/game/scenario/classic-scenario.cpp
     src/game/scenario/starting-complex.cpp
@@ -1027,6 +1104,8 @@ elseif(TARGET physfs)
     target_link_libraries(gravitaris-sim-test PRIVATE physfs)
 endif()
 
+gt_link_notifications(gravitaris-sim-test)
+
 # ---------------------------------------------------------------------------
 # gravitaris-server -- headless dedicated server (docs/networking-plan.md
 # 3.5.2). Same game/-only sources as gravitaris-sim-test plus WebRtcServerTransport,
@@ -1077,6 +1156,7 @@ if(NOT EMSCRIPTEN)
         src/game/ai/ai-preset-library.cpp
         src/game/debug/debug-spawn.cpp
         src/game/cheat/cheat-console.cpp
+        src/game/notify/webhook-notifier.cpp
         src/game/spawner/entity-spawner.cpp
         src/game/scenario/classic-scenario.cpp
         src/game/scenario/starting-complex.cpp
@@ -1119,4 +1199,6 @@ if(NOT EMSCRIPTEN)
     elseif(TARGET physfs)
         target_link_libraries(gravitaris-server PRIVATE physfs)
     endif()
+
+    gt_link_notifications(gravitaris-server)
 endif()

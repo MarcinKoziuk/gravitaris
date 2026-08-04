@@ -1,3 +1,6 @@
+#include <SDL_clipboard.h>
+#include <SDL_stdinc.h>
+
 #include <gravitaris/game/logging.hpp>
 
 #include "system-interface.hpp"
@@ -45,6 +48,20 @@ bool SystemInterface::LogMessage(Rml::Log::Type type, const Rml::String& message
         default:
             return false;
     }
+}
+
+void SystemInterface::SetClipboardText(const Rml::String& text)
+{
+    SDL_SetClipboardText(text.c_str());
+}
+
+void SystemInterface::GetClipboardText(Rml::String& text)
+{
+    char* owned = SDL_GetClipboardText();
+    if (!owned) return;
+
+    text = owned;
+    SDL_free(owned);
 }
 
 } // namespace Gravitaris

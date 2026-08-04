@@ -22,6 +22,7 @@
 #include <gravitaris/game/debug/debug-spawn.hpp>
 #include <gravitaris/game/event/death-report.hpp>
 #include <gravitaris/game/fs/filesystem-physfs.hpp>
+#include <gravitaris/game/notify/notifier.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/ai/ai-preset-library.hpp>
 #include <gravitaris/game/id.hpp>
@@ -269,6 +270,13 @@ int main(int argc, char** argv)
     game.OnDeath().connect([&server](const DeathReport& report) {
         server.BroadcastNotice(FormatDeathMessage(report));
     });
+
+    // On from the start on a dedicated server: nobody is sitting at its
+    // console to type /notify, and the whole point is being told about a join
+    // you weren't there for. Still a no-op without a webhook configured.
+    game.SetNotifier(MakeWebhookNotifier(WebhookUrlFromEnvironment()));
+    game.SetNotificationsEnabled(game.HasNotifier());
+    game.Notify("Gravitaris server up on port " + std::to_string(port) + ".");
 
     LOG(info) << "gravitaris-server: listening on ws://" << (bindAddress.empty() ? "0.0.0.0" : bindAddress)
               << ":" << port;

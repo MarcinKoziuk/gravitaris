@@ -197,6 +197,17 @@ void Game::SettleScenario()
     m_structureAttachmentSystem.Update();
 }
 
+void Game::SetNotifier(std::unique_ptr<INotifier> notifier)
+{
+    m_notifier = std::move(notifier);
+}
+
+void Game::Notify(const std::string& text)
+{
+    if (!m_notifier || !m_notificationsEnabled) return;
+    m_notifier->Notify(text);
+}
+
 void Game::Update()
 {
     // Emitters read the current tick off the queue rather than threading the

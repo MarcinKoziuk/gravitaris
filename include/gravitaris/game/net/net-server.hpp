@@ -131,6 +131,10 @@ class NetServer {
     // what the cheats address each other by.
     [[nodiscard]] static std::string PeerCallsign(PeerId peer, const PeerState& state);
 
+    // Peers past the handshake, which is what "players on the server" means --
+    // m_peers also holds sockets that connected and never said hello.
+    [[nodiscard]] std::size_t WelcomedPeerCount() const;
+
 public:
     // Takes the Game rather than the four pieces of it this used to name:
     // chat cheats (CheatConsole) run against the whole sim, so the pieces had

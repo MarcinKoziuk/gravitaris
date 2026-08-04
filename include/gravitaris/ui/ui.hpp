@@ -62,6 +62,41 @@ struct ChatLineView {
     }
 };
 
+// The keys a focused control needs that don't arrive as characters: editing,
+// navigation, and the letters behind the ctrl-combos. Printable input comes
+// through UI::ProcessTextInput instead, so this list stays short rather than
+// mirroring a keyboard. Kept as our own enum so this header stays free of
+// RmlUi's.
+enum class UiKey {
+    None,
+    Backspace,
+    Delete,
+    Tab,
+    Return,
+    Escape,
+    Left,
+    Right,
+    Up,
+    Down,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    A,
+    C,
+    V,
+    X,
+    Y,
+    Z,
+};
+
+enum UiKeyModifier {
+    UiKeyModifier_Ctrl = 1 << 0,
+    UiKeyModifier_Shift = 1 << 1,
+    UiKeyModifier_Alt = 1 << 2,
+    UiKeyModifier_Meta = 1 << 3,
+};
+
 class SystemInterface;
 class FileInterface;
 class RenderInterfaceGL3;
@@ -208,6 +243,20 @@ public:
     // scrollback is the only thing that does today, and the caller must not
     // also zoom the camera with it.
     bool ProcessMouseWheel(float delta);
+
+    // Editing and navigation keys for whatever holds focus; `modifiers` is a
+    // mask of UiKeyModifier. UiKey::None is ignored, so an unmapped key can be
+    // passed straight through.
+    bool ProcessKeyDown(UiKey key, int modifiers);
+
+    // Printable input for whatever holds focus, as UTF-8.
+    bool ProcessTextInput(const std::string& text);
+
+    // True while a control that wants the keyboard -- a text field or a
+    // dropdown -- holds focus. The caller must then route keys here and keep
+    // them away from gameplay entirely, including its own unmapped bindings:
+    // typing "god" into the call sign field must not engage the autopilot.
+    [[nodiscard]] bool IsKeyboardCaptured() const;
 
     // Sidebar footer: build identity on one line, ping on the next (empty
     // when there's no server). The caller formats both; this layer holds no

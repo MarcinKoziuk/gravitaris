@@ -187,8 +187,18 @@ private:
     }
 
     static int RmlButtonIndex(Pointer pointer);
+
+    // SDL only delivers textInputEvent while text input is on, and focus moves
+    // on mouse clicks the client never sees the consequences of, so the state
+    // is reconciled once a frame rather than at every point that could change
+    // it.
+    void SyncTextInput();
+
     void RenderUi();
 };
+
+static UiKey UiKeyFromEvent(Application::KeyEvent::Key key);
+static int UiModifiersFromEvent(Application::Modifiers modifiers);
 
 GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     : Magnum::Platform::Application{arguments, CreateConfiguration(arguments), CreateGLConfiguration(arguments)}
@@ -420,6 +430,19 @@ void GravitarisApplication::UpdateUi()
 
     ScopedPerfTimer timer(m_game->GetPerfMonitor(), "UI Update");
     m_ui.Update();
+
+    // After the update: a click this frame may have moved focus into or out of
+    // a text field, and Update() is what settles that.
+    SyncTextInput();
+}
+
+void GravitarisApplication::SyncTextInput()
+{
+    const bool wanted = m_chatActive || m_debugUi->IsVisible() || m_ui.IsKeyboardCaptured();
+    if (wanted == isTextInputActive()) return;
+
+    if (wanted) startTextInput();
+    else stopTextInput();
 }
 
 void GravitarisApplication::RefreshChatLog()
@@ -661,15 +684,20 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         return;
     }
 
+    // Same rule for a focused RmlUi control: every key goes to it, including
+    // the ones it has no use for. Forwarding only the mapped ones would leave
+    // "h" toggling the dev overlay while somebody types a call sign.
+    if (m_ui.IsKeyboardCaptured()) {
+        m_ui.ProcessKeyDown(UiKeyFromEvent(event.key()), UiModifiersFromEvent(event.modifiers()));
+        event.setAccepted();
+        return;
+    }
+
     // F1 toggles the dev overlay; H is an alternate on the same action, since
     // bare F1 is a hardware brightness key on Mac laptops and never reaches
-    // the app without holding Fn. Text input is enabled only while the
-    // overlay is shown so ImGui text fields work without stealing keystrokes
-    // during gameplay.
+    // the app without holding Fn.
     if (event.key() == KeyEvent::Key::F1 || event.key() == KeyEvent::Key::H) {
         m_debugUi->Toggle();
-        if (m_debugUi->IsVisible()) startTextInput();
-        else stopTextInput();
         event.setAccepted();
         return;
     }
@@ -842,7 +870,6 @@ void GravitarisApplication::OpenChat()
 {
     m_chatActive = true;
     m_chatDraft.clear();
-    startTextInput();
 
     // Held movement keys would otherwise stay latched for as long as the line
     // takes to type, since their key-up lands while chat owns the keyboard.
@@ -853,14 +880,16 @@ void GravitarisApplication::CloseChat()
 {
     m_chatActive = false;
     m_chatDraft.clear();
-    // The debug overlay wants text input for its own fields; only take it back
-    // when nothing else is using it.
-    if (!m_debugUi->IsVisible()) stopTextInput();
 }
 
 void GravitarisApplication::keyReleaseEvent(Magnum::Platform::Sdl2Application::KeyEvent& event)
 {
     if (m_debugUi->HandleKeyRelease(event)) {
+        event.setAccepted();
+        return;
+    }
+
+    if (m_ui.IsKeyboardCaptured()) {
         event.setAccepted();
         return;
     }
@@ -910,6 +939,12 @@ void GravitarisApplication::textInputEvent(TextInputEvent& event)
         return;
     }
 
+    if (m_ui.IsKeyboardCaptured()) {
+        m_ui.ProcessTextInput(std::string(event.text().data(), event.text().size()));
+        event.setAccepted();
+        return;
+    }
+
     if (m_debugUi->HandleTextInput(event)) {
         event.setAccepted();
     }
@@ -938,6 +973,48 @@ void GravitarisApplication::scrollEvent(ScrollEvent& event)
     const float notches = std::clamp(event.offset().y(), -3.f, 3.f);
     m_game->NudgeManualZoom(notches);
     event.setAccepted();
+}
+
+// Only the keys a focused control can't get as characters; everything else
+// reaches it through textInputEvent.
+static UiKey UiKeyFromEvent(Application::KeyEvent::Key key)
+{
+    using Key = Application::KeyEvent::Key;
+    switch (key) {
+        case Key::Backspace:  return UiKey::Backspace;
+        case Key::Delete:     return UiKey::Delete;
+        case Key::Tab:        return UiKey::Tab;
+        case Key::Enter:
+        case Key::NumEnter:   return UiKey::Return;
+        case Key::Esc:        return UiKey::Escape;
+        case Key::Left:       return UiKey::Left;
+        case Key::Right:      return UiKey::Right;
+        case Key::Up:         return UiKey::Up;
+        case Key::Down:       return UiKey::Down;
+        case Key::Home:       return UiKey::Home;
+        case Key::End:        return UiKey::End;
+        case Key::PageUp:     return UiKey::PageUp;
+        case Key::PageDown:   return UiKey::PageDown;
+        // Carried for the ctrl-combos only -- unmodified they arrive as text.
+        case Key::A:          return UiKey::A;
+        case Key::C:          return UiKey::C;
+        case Key::V:          return UiKey::V;
+        case Key::X:          return UiKey::X;
+        case Key::Y:          return UiKey::Y;
+        case Key::Z:          return UiKey::Z;
+        default:              return UiKey::None;
+    }
+}
+
+static int UiModifiersFromEvent(Application::Modifiers modifiers)
+{
+    using Modifier = Application::Modifier;
+    int mask = 0;
+    if (modifiers & Modifier::Ctrl) mask |= UiKeyModifier_Ctrl;
+    if (modifiers & Modifier::Shift) mask |= UiKeyModifier_Shift;
+    if (modifiers & Modifier::Alt) mask |= UiKeyModifier_Alt;
+    if (modifiers & Modifier::Super) mask |= UiKeyModifier_Meta;
+    return mask;
 }
 
 int GravitarisApplication::RmlButtonIndex(Pointer pointer)

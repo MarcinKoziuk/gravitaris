@@ -6,9 +6,47 @@
 			/* margin: auto centres the document in the context. */
 			body
 			{
-				width: 440dp;
-				height: 310dp;
+				width: 560dp;
+				height: 470dp;
 				margin: auto;
+			}
+			/* Two columns of key/action pairs, so the whole control set fits
+			   above the fold of a dialog this size. */
+			div#controls
+			{
+				display: flex;
+				margin-top: 4dp;
+			}
+			div#controls div.column
+			{
+				flex: 1 1 auto;
+			}
+			div#controls div.binding
+			{
+				display: flex;
+				align-items: center;
+				margin-bottom: 3dp;
+			}
+			div#controls span.key
+			{
+				flex: 0 0 92dp;
+				color: #0cf;
+				font-size: 11dp;
+				font-weight: bold;
+				letter-spacing: 1dp;
+			}
+			div#controls span.action
+			{
+				flex: 1 1 auto;
+				color: #588;
+				font-size: 11dp;
+			}
+			p.section
+			{
+				margin-bottom: 2dp;
+				font-size: 12dp;
+				letter-spacing: 5dp;
+				color: #588;
 			}
 			/* Same row shape as team_row below. */
 			div#name_row
@@ -28,9 +66,11 @@
 			}
 			input#name_input
 			{
-				flex: 1 1 auto;
+				flex: 1 1 0;
 				box-sizing: border-box;
-				padding: 8dp 10dp;
+				height: 34dp;
+				padding: 0 10dp;
+				line-height: 32dp;
 
 				color: #cff;
 				font-size: 14dp;
@@ -50,6 +90,7 @@
 			div#seed_row
 			{
 				display: flex;
+				flex-wrap: nowrap;
 				align-items: center;
 				margin-top: 14dp;
 			}
@@ -62,12 +103,16 @@
 				letter-spacing: 5dp;
 				color: #588;
 			}
+			/* Basis 0 rather than auto: a text input's intrinsic width is wide
+			   enough to push the label out of the row on its own. */
 			input#seed_input
 			{
-				flex: 1 1 auto;
+				flex: 1 1 0;
 				box-sizing: border-box;
-				padding: 8dp 10dp;
+				height: 34dp;
+				padding: 0 10dp;
 				margin-right: 4dp;
+				line-height: 32dp;
 
 				color: #bee;
 				font-size: 14dp;
@@ -81,13 +126,20 @@
 				border-color: #bff;
 			}
 			/* The two seed buttons sit inside a row, so they can't carry the
-			   full-size button's padding without pushing the field out. */
+			   full-size button's padding without pushing the field out.
+			   display: block rather than the theme's inline-block, and a
+			   height matching the field's: an inline-block flex item is laid
+			   out on its baseline, which no align-items setting overrides. */
 			button.small
 			{
 				flex: 0 0 auto;
-				padding: 8dp 12dp;
+				display: block;
+				box-sizing: border-box;
+				height: 34dp;
+				padding: 0 12dp;
 				margin: 0 0 0 4dp;
 				font-size: 12dp;
+				line-height: 32dp;
 				letter-spacing: 2dp;
 			}
 			div#title_bar span#title
@@ -145,7 +197,27 @@
 		</style>
 	</head>
 	<body template="vector-window">
-		<p>This is a game in development. Thanks for testing!</p>
+		<p>This is a game in development by Marcin / Lalatina. Thanks for testing!</p>
+
+		<p class="section">CONTROLS</p>
+		<div id="controls">
+			<div class="column">
+				<div class="binding"><span class="key">UP</span><span class="action">Thrust</span></div>
+				<div class="binding"><span class="key">LEFT RIGHT</span><span class="action">Turn</span></div>
+				<div class="binding"><span class="key">SHIFT</span><span class="action">Overburn</span></div>
+				<div class="binding"><span class="key">DOWN / F</span><span class="action">Guns</span></div>
+				<div class="binding"><span class="key">SPACE / D</span><span class="action">Missile</span></div>
+				<div class="binding"><span class="key">1 2 3</span><span class="action">Take upgrade</span></div>
+			</div>
+			<div class="column">
+				<div class="binding"><span class="key">K</span><span class="action">Kill velocity</span></div>
+				<div class="binding"><span class="key">P</span><span class="action">Hold position</span></div>
+				<div class="binding"><span class="key">O</span><span class="action">Orbit</span></div>
+				<div class="binding"><span class="key">[ ]</span><span class="action">Spectate</span></div>
+				<div class="binding"><span class="key">ENTER</span><span class="action">Chat (/help)</span></div>
+				<div class="binding"><span class="key">H</span><span class="action">Dev overlay</span></div>
+			</div>
+		</div>
 
 		<!-- The sector behind this dialog is the one this seed built.
 		     Applying or randomizing rebuilds it in place, so a seed can be
