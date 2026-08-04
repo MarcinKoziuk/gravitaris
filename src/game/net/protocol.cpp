@@ -98,7 +98,12 @@ bool ReadClientInputBody(ByteReader& in, ClientInputPacket& out)
         cmd.tick = in.ReadU64();
         cmd.flags = UnpackControlFlags(in.ReadU8());
         cmd.techPick.node = in.ReadU32();
-        cmd.techPick.tab = static_cast<TechTab>(in.ReadU8());
+        // Range-checked rather than cast straight through: this byte comes
+        // from a peer, and an out-of-range enum is UB the moment anything
+        // switches on it.
+        const std::uint8_t tab = in.ReadU8();
+        cmd.techPick.tab = tab == static_cast<std::uint8_t>(TechTab::Permanent) ? TechTab::Permanent
+                                                                               : TechTab::Ship;
         cmd.techPick.rank = in.ReadU8();
         out.commands.push_back(cmd);
     }

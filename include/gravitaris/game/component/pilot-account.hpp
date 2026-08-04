@@ -26,6 +26,14 @@ struct PilotAccount {
     // *spend* Supplies (every ship node checks it), so gating the accrual on a
     // landing too would be a second lock on the same door.
     std::uint32_t supplies = 0;
+
+    // Whether this account outlives the hull that opened it. True for a human
+    // pilot, whose whole point is banking across lives; false for an AI, which
+    // gets a fresh identity with every airframe -- so its account is closed
+    // when the ship is gone, rather than left accruing for a pilot who no
+    // longer exists. Without this a match of respawning AI grows an account
+    // per hull ever flown, each one still being paid every tick.
+    bool persistent = false;
 };
 
 // Who is flying this hull. An id rather than an entity handle, because it has

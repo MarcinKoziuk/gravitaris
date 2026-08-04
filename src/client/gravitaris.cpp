@@ -87,6 +87,9 @@ private:
     // One-shot, cleared once the tick that carries it has been submitted:
     // the tech-tree rank the player just bought, if any.
     TechPick m_techPick;
+    // Whether a refit was possible last frame, so the tree window can be
+    // opened on the rising edge rather than held open by the condition.
+    bool m_refitWasAvailable = false;
 
     // Record/replay: F5 toggles recording to disk, F6 replays it back, F7 stops.
     ReplayController m_replay;
@@ -560,6 +563,10 @@ void GravitarisApplication::RefreshTechTree()
     const CGame::TechReadout readout = m_game->GetTechReadout();
     m_ui.SetCurrencies(static_cast<int>(readout.tech), static_cast<int>(readout.supplies));
 
+    // Whether a refit is on the table right now: landed somewhere that will
+    // fit parts, with something affordable to fit.
+    bool canRefit = false;
+
     std::vector<TechNodeView> nodes;
     for (const CGame::TechNode& node : m_game->GetTechTree()) {
         TechNodeView view;
@@ -575,10 +582,22 @@ void GravitarisApplication::RefreshTechTree()
         view.requiresId = node.requiresId;
         for (const CGame::TechRank& rank : node.ranks) {
             view.ranks.push_back(TechRankView{rank.cost, static_cast<TechRankState>(rank.state)});
+            canRefit = canRefit
+                    || (node.tab == TechTab::Ship && rank.state == TechNodeState::Available);
         }
         nodes.push_back(std::move(view));
     }
     m_ui.SetTechTree(nodes);
+
+    // Opened on the edge, not while the condition holds: a player who closes
+    // the window while still standing on the pad has said no, and reopening it
+    // under them every frame would be the panel that appears at you all over
+    // again. Landing somewhere new asks once more.
+    if (canRefit && !m_refitWasAvailable) {
+        m_ui.SetTechTab(0);
+        m_ui.SetTechTreeVisible(true);
+    }
+    m_refitWasAvailable = canRefit;
 }
 
 // One command for the tick Update() is about to run: keyboard, autopilot and

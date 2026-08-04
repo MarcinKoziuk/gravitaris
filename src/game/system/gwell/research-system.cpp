@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 #include <gravitaris/game/component/ai-pilot.hpp>
@@ -309,18 +310,46 @@ void ResearchSystem::EnsureAccounts()
         m_accounts.push_back(Account{account.pilotId, entity});
     });
 
-    std::vector<std::uint32_t> missing;
-    m_registry.each([&](const PilotRef& ref) {
+    // Gathered in the same pass the missing ones are, since pruning needs to
+    // know exactly which ids still have a hull behind them.
+    std::vector<std::uint32_t> referenced;
+    std::vector<std::pair<std::uint32_t, bool>> missing; // id, outlives its hull
+    m_registry.each([&](flecs::entity ship, const PilotRef& ref) {
         if (ref.pilotId == 0) return;
+        referenced.push_back(ref.pilotId);
         if (FindAccountEntity(ref.pilotId).is_alive()) return;
-        if (std::find(missing.begin(), missing.end(), ref.pilotId) != missing.end()) return;
-        missing.push_back(ref.pilotId);
+
+        const auto known = [&](const std::pair<std::uint32_t, bool>& entry) {
+            return entry.first == ref.pilotId;
+        };
+        if (std::find_if(missing.begin(), missing.end(), known) != missing.end()) return;
+        missing.emplace_back(ref.pilotId, !ship.has<AIPilot>());
     });
 
-    for (const std::uint32_t pilotId : missing) {
+    for (const auto& [pilotId, persistent] : missing) {
         PilotAccount account;
         account.pilotId = pilotId;
+        account.persistent = persistent;
         m_accounts.push_back(Account{pilotId, m_registry.entity().set<PilotAccount>(account)});
+    }
+
+    // A human's account survives their death -- that is the whole of banking
+    // across lives, and a peer's next hull carries the same PilotRef back to
+    // it. An AI's does not: it flies one airframe under one identity, so once
+    // that hull is gone nothing will ever ask for the account again.
+    std::vector<flecs::entity> closed;
+    for (const Account& account : m_accounts) {
+        if (!account.entity.is_alive()) continue;
+        const PilotAccount* held = account.entity.try_get<PilotAccount>();
+        if (!held || held->persistent) continue;
+        if (std::find(referenced.begin(), referenced.end(), account.pilotId) != referenced.end()) continue;
+        closed.push_back(account.entity);
+    }
+    for (flecs::entity entity : closed) entity.destruct();
+    if (!closed.empty()) {
+        m_accounts.erase(std::remove_if(m_accounts.begin(), m_accounts.end(),
+                                        [](const Account& a) { return !a.entity.is_alive(); }),
+                         m_accounts.end());
     }
 }
 

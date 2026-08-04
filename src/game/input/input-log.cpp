@@ -80,7 +80,8 @@ bool InputLog::Load(const std::string& path)
             return false;
         }
         cmd.flags = UnpackControlFlags(packed);
-        cmd.techPick.tab = static_cast<TechTab>(tab);
+        cmd.techPick.tab = tab == static_cast<std::uint8_t>(TechTab::Permanent) ? TechTab::Permanent
+                                                                                   : TechTab::Ship;
         loaded.push_back(cmd);
     }
 

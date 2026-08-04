@@ -176,27 +176,21 @@ bool UI::Init()
         m_techGrid = m_techTree->GetElementById("tech_grid");
         m_techCurrencies = m_techTree->GetElementById("tech_currencies");
 
-        if (Rml::Element* hint = m_techTree->GetElementById("tech_hint")) {
-            hint->SetInnerRML("SHIP fits a rank to this hull, and needs a landing. "
-                              "PERMANENT teaches your side to build it, from anywhere.");
+        m_techHint = m_techTree->GetElementById("tech_hint");
+        m_techBuy = m_techTree->GetElementById("tech_buy");
+
+        if (m_techBuy) {
+            Listen(*m_techBuy, "click", [this](Rml::Event&) {
+                if (!m_onTechPick || m_selectedId == 0) return;
+                m_onTechPick(m_selectedId, m_techTab, m_selectedRank);
+            });
         }
 
-        const auto selectTab = [this](int tab) {
-            if (!m_techTree || tab == m_techTab) return;
-            m_techTab = tab;
-            if (Rml::Element* ship = m_techTree->GetElementById("tab_ship")) {
-                ship->SetClass("active", tab == 0);
-            }
-            if (Rml::Element* permanent = m_techTree->GetElementById("tab_permanent")) {
-                permanent->SetClass("active", tab == 1);
-            }
-            RebuildTechTree();
-        };
         if (Rml::Element* tab = m_techTree->GetElementById("tab_ship")) {
-            Listen(*tab, "click", [selectTab](Rml::Event&) { selectTab(0); });
+            Listen(*tab, "click", [this](Rml::Event&) { SetTechTab(0); });
         }
         if (Rml::Element* tab = m_techTree->GetElementById("tab_permanent")) {
-            Listen(*tab, "click", [selectTab](Rml::Event&) { selectTab(1); });
+            Listen(*tab, "click", [this](Rml::Event&) { SetTechTab(1); });
         }
     }
 
@@ -569,6 +563,7 @@ static constexpr int COL_PITCH = 216;
 static constexpr int ROW_PITCH = 112;
 
 static const char* RankClass(TechRankState state);
+static const char* RankNumeral(int rank);
 
 void UI::SetTechTree(const std::vector<TechNodeView>& nodes)
 {
@@ -619,7 +614,8 @@ void UI::RebuildTechTree()
         rml += "<div class=\"node_ranks\">";
         for (const TechRankView& rank : node.ranks) {
             rml += "<div class=\"rank " + std::string(RankClass(rank.state)) + "\">"
-                   + std::to_string(rank.cost) + "</div>";
+                   + std::string(RankNumeral(static_cast<int>(&rank - node.ranks.data()) + 1))
+                   + "</div>";
         }
         rml += "</div></div>";
     }
@@ -669,17 +665,116 @@ void UI::RebuildTechTree()
 
         for (int i = 0; i < ranks->GetNumChildren(); ++i) {
             if (static_cast<std::size_t>(i) >= node.ranks.size()) break;
-            if (node.ranks[static_cast<std::size_t>(i)].state != TechRankState::Available) continue;
+            Rml::Element* pip = ranks->GetChild(i);
 
+            // Every rank is selectable, buyable or not: the footer is where a
+            // rank gets to explain why it is out of reach, and that is worth
+            // more than a pip nobody can click.
             const std::uint32_t id = node.id;
-            const int tab = node.tab;
             const int rank = i + 1;
-            m_techListeners.push_back(std::make_unique<FunctionListener>([this, id, tab, rank](Rml::Event&) {
-                if (m_onTechPick) m_onTechPick(id, tab, rank);
+            if (id == m_selectedId && rank == m_selectedRank) pip->SetClass("selected", true);
+
+            m_techListeners.push_back(std::make_unique<FunctionListener>([this, id, rank](Rml::Event&) {
+                m_selectedId = id;
+                m_selectedRank = rank;
+                RebuildTechTree();
             }));
-            ranks->GetChild(i)->AddEventListener("click", m_techListeners.back().get());
+            pip->AddEventListener("click", m_techListeners.back().get());
         }
     }
+
+    RefreshTechFooter();
+}
+
+const TechNodeView* UI::SelectedNode() const
+{
+    if (m_selectedId == 0) return nullptr;
+    for (const TechNodeView& node : m_shownNodes) {
+        if (node.tab == m_techTab && node.id == m_selectedId) return &node;
+    }
+    return nullptr;
+}
+
+// Roman for the pips and the footer alike: a rank is a mark on a hull, not a
+// quantity, and "II" reads as one where "2" reads as two of something.
+static const char* RankNumeral(int rank)
+{
+    switch (rank) {
+    case 1: return "I";
+    case 2: return "II";
+    case 3: return "III";
+    case 4: return "IV";
+    case 5: return "V";
+    case 6: return "VI";
+    case 7: return "VII";
+    case 8: return "VIII";
+    }
+    return "";
+}
+
+void UI::RefreshTechFooter()
+{
+    if (!m_techHint || !m_techBuy) return;
+
+    const TechNodeView* node = SelectedNode();
+    const TechRankView* rank =
+            node && m_selectedRank >= 1 && static_cast<std::size_t>(m_selectedRank) <= node->ranks.size()
+                    ? &node->ranks[static_cast<std::size_t>(m_selectedRank - 1)]
+                    : nullptr;
+
+    if (!rank) {
+        m_techBuy->SetProperty("display", "none");
+        m_techHint->SetInnerRML(m_techTab == 0
+                                        ? "Pick a rank to fit. Fitting needs a landing at one of your labs."
+                                        : "Pick a rank to research. Your side can learn from anywhere.");
+        return;
+    }
+
+    const std::string label = node->name + " " + RankNumeral(m_selectedRank);
+    const std::string currency = m_techTab == 0 ? " SUP" : " TECH";
+
+    const char* reason = nullptr;
+    switch (rank->state) {
+    case TechRankState::Held:
+        reason = m_techTab == 0 ? "already fitted" : "already researched";
+        break;
+    case TechRankState::Locked:
+        reason = m_techTab == 0 ? "fit what it hangs off first" : "research what it hangs off first";
+        break;
+    case TechRankState::NotUnlocked:
+        reason = "your side has not researched this yet -- see PERMANENT";
+        break;
+    case TechRankState::Unaffordable:
+        reason = "not enough to spend";
+        break;
+    case TechRankState::NeedsLanding:
+        reason = "land at one of your labs, or hold station at its High Port";
+        break;
+    case TechRankState::Available:
+        break;
+    }
+
+    if (reason) {
+        m_techBuy->SetProperty("display", "none");
+        m_techHint->SetInnerRML(label + " &mdash; " + reason);
+        return;
+    }
+
+    m_techHint->SetInnerRML(label + " &mdash; " + node->description);
+    m_techBuy->SetProperty("display", "block");
+    m_techBuy->SetInnerRML((m_techTab == 0 ? "FIT &mdash; " : "RESEARCH &mdash; ")
+                           + std::to_string(rank->cost) + currency);
+}
+
+void UI::SetTechTab(int tab)
+{
+    if (!m_techTree || tab == m_techTab) return;
+    m_techTab = tab;
+    if (Rml::Element* ship = m_techTree->GetElementById("tab_ship")) ship->SetClass("active", tab == 0);
+    if (Rml::Element* permanent = m_techTree->GetElementById("tab_permanent")) {
+        permanent->SetClass("active", tab == 1);
+    }
+    RebuildTechTree();
 }
 
 void UI::SetCurrencies(int tech, int supplies)

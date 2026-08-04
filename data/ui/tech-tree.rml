@@ -129,7 +129,7 @@
 				padding: 3dp 0;
 				text-align: center;
 
-				font-family: ShareTechMono;
+				font-family: Share Tech Mono;
 				font-size: 10dp;
 				color: #566;
 				border-width: 1dp;
@@ -155,6 +155,15 @@
 				color: #012;
 				background-color: #bff;
 				border-color: #fff;
+			}
+
+			/* The pick, not the purchase: selection is deliberately its own
+			   state so a misclick costs nothing. */
+			div.rank.selected
+			{
+				color: #fc0;
+				background-color: #fc02;
+				border-color: #fc0;
 			}
 
 			/* Short of the price, or short of a landing: both are "not now"
@@ -186,12 +195,46 @@
 			div.link_h { height: 1dp; }
 			div.link_v { width: 1dp; }
 
+			/* The footer says what is selected and what it costs, and
+			   carries the one button that spends anything. */
+			div#tech_footer
+			{
+				display: flex;
+				align-items: center;
+				margin-top: 8dp;
+			}
+
 			div#tech_hint
 			{
-				margin-top: 6dp;
-				font-size: 10dp;
+				flex: 1 1 auto;
+				font-size: 11dp;
 				letter-spacing: 1dp;
-				color: #566;
+				color: #588;
+			}
+
+			/* Filled, unlike the tabs: this is the one control here that
+			   commits. Hidden outright when the selection cannot be bought --
+			   a button that never works is worse than no button. */
+			button#tech_buy
+			{
+				flex: 0 0 auto;
+				display: none;
+				box-sizing: border-box;
+				margin: 0;
+				padding: 8dp 16dp;
+				font-size: 12dp;
+				letter-spacing: 2dp;
+
+				background-color: #0cf;
+				color: #012;
+				font-effect: none;
+			}
+
+			button#tech_buy:hover
+			{
+				background-color: #bff;
+				border-color: #fff;
+				color: #012;
 			}
 		</style>
 	</head>
@@ -208,6 +251,9 @@
 		     the toml places itself here with no markup to write. -->
 		<div id="tech_grid"></div>
 
-		<div id="tech_hint"></div>
+		<div id="tech_footer">
+			<div id="tech_hint"></div>
+			<button id="tech_buy"></button>
+		</div>
 	</body>
 </rml>

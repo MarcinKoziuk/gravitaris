@@ -229,6 +229,13 @@ private:
     int m_shownTech = -1;
     int m_shownSupplies = -1;
     std::function<void(std::uint32_t, int, int)> m_onTechPick;
+    Rml::Element* m_techHint = nullptr;
+    Rml::Element* m_techBuy = nullptr;
+    // What the footer would commit. Selection is its own state, separate from
+    // the purchase, so a misclick on a grid this dense costs nothing.
+    // Zero id means nothing picked.
+    std::uint32_t m_selectedId = 0;
+    int m_selectedRank = 0;
     // Held separately from m_listeners: the nodes they belong to are destroyed
     // and rebuilt on every tree change, so these are dropped with them rather
     // than accumulating for the session.
@@ -236,6 +243,14 @@ private:
 
     // Rebuilds the grid from m_shownNodes for the active tab.
     void RebuildTechTree();
+
+    // Rewrites the footer for the current selection: what it is, what it
+    // costs, and whether the button that buys it has any business existing.
+    void RefreshTechFooter();
+
+    // The selected node in the active tab, or null if the selection is stale
+    // (a different tab, or a node that has left the tree).
+    [[nodiscard]] const TechNodeView* SelectedNode() const;
 
     int m_width = 1280;
     int m_height = 720;
@@ -368,6 +383,10 @@ public:
     // The tree is a window the player opens, not a panel that appears at them
     // -- so it is browsable in flight, and it is theirs to close.
     void SetTechTreeVisible(bool visible);
+
+    // Which tree is showing: 0 the ship's, 1 the faction's. The client uses
+    // this to put the ship tab up when it opens the window for a refit.
+    void SetTechTab(int tab);
 
     [[nodiscard]] bool IsTechTreeVisible() const;
 
