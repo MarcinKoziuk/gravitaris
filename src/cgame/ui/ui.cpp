@@ -712,9 +712,25 @@ static const char* RankNumeral(int rank)
     return "";
 }
 
+void UI::SetTechNotice(const std::string& text)
+{
+    if (text == m_techNotice) return;
+    m_techNotice = text;
+    RefreshTechFooter();
+}
+
 void UI::RefreshTechFooter()
 {
     if (!m_techHint || !m_techBuy) return;
+
+    // A refusal outranks whatever the selection was going to say: it is the
+    // answer to the last thing the player actually did.
+    if (!m_techNotice.empty()) {
+        m_techBuy->SetProperty("display", "none");
+        m_techHint->SetInnerRML("<span style=\"color: #fc0;\">PORT AUTHORITY &mdash; "
+                                + m_techNotice + "</span>");
+        return;
+    }
 
     const TechNodeView* node = SelectedNode();
     const TechRankView* rank =

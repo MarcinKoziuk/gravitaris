@@ -1899,12 +1899,36 @@ void TestResearch()
     Require(research().unlocked.rank[game.GetUpgradeCatalog().IndexOf(bay->id)] == rankInFlight,
             "research: the PERMANENT tree commits in flight");
 
-    for (int tick = 0; tick < 10; ++tick) {
+    // Just off the pad, the yard is still serving: the commonest way to be
+    // refused is drifting a metre out of tolerance during the round trip
+    // between the click and the server hearing it, and that is latency to
+    // absorb rather than a refusal to report (REFIT_GRACE_TICKS).
+    for (int tick = 0; tick < 5; ++tick) {
         pressPick(*bay, TechTab::Ship, rankInFlight);
         game.Update();
     }
-    Require(ship.get<ShipLoadout>().levels.missileTier == 1,
-            "research: the SHIP tree does not, however much the side knows");
+    Require(ship.get<ShipLoadout>().levels.missileTier == rankInFlight,
+            "research: a purchase moments off the pad is still honoured");
+
+    // Long gone, though, and it is shut. Put the ship somewhere it cannot
+    // simply fall back onto the pad -- left to itself it settles again within
+    // a few seconds, which is the behaviour the grace window is built on.
+    const std::uint8_t rankAway = 3;
+    for (int tick = 0; tick < 10; ++tick) {
+        pressPick(*bay, TechTab::Permanent, rankAway);
+        game.Update();
+    }
+    cpBodySetPosition(shipBody, cpv(40000., 40000.));
+    cpBodySetVelocity(shipBody, cpv(0., 0.));
+    for (int tick = 0; tick < 90; ++tick) game.Update();
+    Require(!ship.get<ResearchAccess>().atLab, "research: the yard is shut out here (setup check)");
+
+    for (int tick = 0; tick < 10; ++tick) {
+        pressPick(*bay, TechTab::Ship, rankAway);
+        game.Update();
+    }
+    Require(ship.get<ShipLoadout>().levels.missileTier == rankInFlight,
+            "research: the SHIP tree shuts once the ship is really away");
 
     // Second lab: the pooled bar fills twice as fast.
     const std::uint32_t techBefore = research().techPoints;

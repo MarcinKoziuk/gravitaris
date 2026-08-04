@@ -236,6 +236,7 @@ private:
     // Zero id means nothing picked.
     std::uint32_t m_selectedId = 0;
     int m_selectedRank = 0;
+    std::string m_techNotice;
     // Held separately from m_listeners: the nodes they belong to are destroyed
     // and rebuilt on every tree change, so these are dropped with them rather
     // than accumulating for the session.
@@ -387,6 +388,11 @@ public:
     // Which tree is showing: 0 the ship's, 1 the faction's. The client uses
     // this to put the ship tab up when it opens the window for a refit.
     void SetTechTab(int tab);
+
+    // A line the footer shows over its usual contents -- what the port said
+    // when it turned a purchase away. Empty restores the normal footer. The
+    // caller decides how long it stays: this layer holds no timers.
+    void SetTechNotice(const std::string& text);
 
     [[nodiscard]] bool IsTechTreeVisible() const;
 

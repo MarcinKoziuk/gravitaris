@@ -33,6 +33,11 @@ static constexpr std::size_t NUM_TEAMS = 7; // TeamId::Blue..None
 static constexpr double DOCK_RADIUS = 90.0;
 static constexpr double DOCK_RELATIVE_SPEED = 25.0;
 
+// How long a purchase is still honoured after the yard closes. Generous
+// against any plausible round trip, and far too short to fly anywhere on: a
+// ship that has been away this long is away.
+static constexpr std::uint16_t REFIT_GRACE_TICKS = 45;
+
 // How much of its Tech an AI faction will commit at once. Below 1 so a side
 // keeps something back rather than emptying the pool on the first thing it can
 // reach, which would starve the deeper ranks it is saving toward.
@@ -113,6 +118,7 @@ void ResearchSystem::Update(std::uint64_t step)
     // planet, or one docked at that planet's High Port. Unlike the old draft
     // this is not one per faction -- a yard serves everyone who reaches it.
     m_registry.each([&](flecs::entity ship, ResearchAccess& access, const Team& team) {
+        if (access.ticksSinceLab < 0xFFFF) ++access.ticksSinceLab;
         access.atLab = false;
         if (team.id == TeamId::None) return;
         const std::vector<std::uint32_t>& labPlanets = byTeam[static_cast<std::size_t>(team.id)].labPlanets;
@@ -135,6 +141,7 @@ void ResearchSystem::Update(std::uint64_t step)
             if (ownSite
                 && std::find(labPlanets.begin(), labPlanets.end(), sitePlanetNetId) != labPlanets.end()) {
                 access.atLab = true;
+                access.ticksSinceLab = 0;
                 return;
             }
         }
@@ -150,6 +157,7 @@ void ResearchSystem::Update(std::uint64_t step)
             if ((dock.pos - transf->pos).length() > DOCK_RADIUS) continue;
             if ((transf->vel - dock.vel).length() > DOCK_RELATIVE_SPEED) continue;
             access.atLab = true;
+            access.ticksSinceLab = 0;
             return;
         }
     });
@@ -258,17 +266,41 @@ void ResearchSystem::ApplyPurchases()
         const UpgradeDef* def = m_catalog.Find(pick.node);
         if (!def) continue;
 
+        const Transform& transf = ship.get<Transform>();
+        const Magnum::Vector2 where{static_cast<float>(transf.pos.x()),
+                                    static_cast<float>(transf.pos.y())};
+
+        // What the port would say about it, if it says anything.
+        const auto deny = [&](TechNodeState reason) {
+            m_eventQueue.Emit(GameEventType::RefitDenied, ship, where,
+                              static_cast<std::uint32_t>(reason));
+        };
+
         if (pick.tab == TechTab::Permanent) {
             // Nothing about learning a part needs the hull to be anywhere in
             // particular, so this commits in flight.
-            if (!m_catalog.UnlockRank(*def, pick.rank, fs->unlocked, fs->techPoints)) continue;
+            if (!m_catalog.UnlockRank(*def, pick.rank, fs->unlocked, fs->techPoints)) {
+                if (!ship.has<AIPilot>()) {
+                    deny(m_catalog.PermanentState(*def, pick.rank, fs->unlocked, fs->techPoints));
+                }
+                continue;
+            }
             LOG(info) << "research: team " << static_cast<int>(team.id) << " unlocked " << def->key
                       << " " << static_cast<int>(pick.rank);
             continue;
         }
 
         if (!account) continue;
-        if (!m_catalog.FitRank(*def, pick.rank, loadout, fs->unlocked, account->supplies, access.atLab)) {
+
+        // The yard counts as open for a moment after it closes -- see
+        // REFIT_GRACE_TICKS. A pilot who was on the pad when they clicked gets
+        // served, whatever the round trip did to them in between.
+        const bool served = access.atLab || access.ticksSinceLab <= REFIT_GRACE_TICKS;
+        if (!m_catalog.FitRank(*def, pick.rank, loadout, fs->unlocked, account->supplies, served)) {
+            if (!ship.has<AIPilot>()) {
+                const UpgradeCatalog::ShipContext why{&loadout, &fs->unlocked, account->supplies, served};
+                deny(m_catalog.ShipState(*def, pick.rank, why));
+            }
             continue;
         }
 
@@ -276,10 +308,7 @@ void ResearchSystem::ApplyPurchases()
             --aiPilot->upgradesWanted;
         }
 
-        const Transform& transf = ship.get<Transform>();
-        m_eventQueue.Emit(GameEventType::UpgradeCollected, ship,
-                          Magnum::Vector2{static_cast<float>(transf.pos.x()),
-                                          static_cast<float>(transf.pos.y())},
+        m_eventQueue.Emit(GameEventType::UpgradeCollected, ship, where,
                           static_cast<std::uint32_t>(team.id));
         LOG(info) << "research: team " << static_cast<int>(team.id) << " fitted " << def->key << " "
                   << static_cast<int>(pick.rank);

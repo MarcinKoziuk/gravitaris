@@ -49,6 +49,11 @@
 
 namespace Gravitaris {
 
+// How long the port's refusal stays in the tree's footer before the panel
+// goes back to talking about whatever is selected.
+static constexpr float TECH_NOTICE_SECONDS = 5.f;
+
+
 using Magnum::Platform::Application;
 
 bool HasEnteredMain = false;
@@ -90,6 +95,10 @@ private:
     // Whether a refit was possible last frame, so the tree window can be
     // opened on the rising edge rather than held open by the condition.
     bool m_refitWasAvailable = false;
+    // Seconds left on the footer's refusal line before the panel goes back to
+    // talking about the selection.
+    float m_techNoticeRemaining = 0.f;
+    float m_lastFrameDelta = 0.f;
 
     // Record/replay: F5 toggles recording to disk, F6 replays it back, F7 stops.
     ReplayController m_replay;
@@ -344,6 +353,7 @@ void GravitarisApplication::tickEvent()
     const double frameTime = std::min(rawFrameTime, .25);
 
     m_prevTime = curTime;
+    m_lastFrameDelta = static_cast<float>(frameTime);
 
     // Multiplayer client: the server is authoritative, but the own ship is
     // locally predicted (docs/networking-plan.md Phase 5) and needs the
@@ -560,6 +570,17 @@ void GravitarisApplication::RefreshResearchReadout()
 // rebuilds, so the cost of this is the copy rather than a relayout.
 void GravitarisApplication::RefreshTechTree()
 {
+    // The port's answer to a refused purchase, if there was one. Shown for a
+    // few seconds and then the footer goes back to its own business.
+    if (const std::optional<std::string> denied = m_game->TakeRefitDenial()) {
+        m_ui.SetTechNotice(*denied);
+        m_techNoticeRemaining = TECH_NOTICE_SECONDS;
+    }
+    else if (m_techNoticeRemaining > 0.f) {
+        m_techNoticeRemaining -= m_lastFrameDelta;
+        if (m_techNoticeRemaining <= 0.f) m_ui.SetTechNotice("");
+    }
+
     const CGame::TechReadout readout = m_game->GetTechReadout();
     m_ui.SetCurrencies(static_cast<int>(readout.tech), static_cast<int>(readout.supplies));
 

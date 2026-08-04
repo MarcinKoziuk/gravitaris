@@ -34,6 +34,14 @@ enum class GameEventType : std::uint8_t {
     // param = plate index << 16 | absorbed*10.
     PlatingHit,
     ResearchComplete, // source = a lab of the faction, pos = its position, param = its TeamId
+    // A purchase the server would not honour: the world moved between the
+    // click and its arrival. source = the refused ship, pos = its position,
+    // param = the TechNodeState that blocked it. Never raised for a mistake a
+    // player could have avoided -- the client only offers a rank it believes
+    // is buyable -- so this is always latency being reported, and the grace
+    // window (ResearchAccess::ticksSinceLab) has already absorbed the common
+    // case by the time one of these goes out.
+    RefitDenied,
 };
 
 // PlatingHit packs which plate was struck into the low/high halves of `param`

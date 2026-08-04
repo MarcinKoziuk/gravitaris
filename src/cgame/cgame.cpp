@@ -245,6 +245,45 @@ CGame::BoostReadout CGame::GetBoostReadout()
     return BoostReadout{true, 1.f, false};
 }
 
+// What the port says when it turns a refit away. Worded as the yard talking
+// rather than as a validation error, because a refusal is never the player
+// getting it wrong: the panel only offers a rank it believes is buyable, so
+// one of these means the world moved during the round trip.
+static const char* DenialLine(TechNodeState reason)
+{
+    switch (reason) {
+    case TechNodeState::NotUnlocked:  return "that pattern isn't on file here";
+    case TechNodeState::Unaffordable: return "your account won't cover it";
+    case TechNodeState::NeedsLanding: return "you've drifted out of the yard";
+    case TechNodeState::Held:         return "you're already carrying it";
+    case TechNodeState::Locked:       return "you're missing what it bolts onto";
+    case TechNodeState::Available:    break;
+    }
+    return "order refused";
+}
+
+std::optional<std::string> CGame::TakeRefitDenial()
+{
+    const std::optional<flecs::entity> player = GetPlayer();
+    if (!player) return std::nullopt;
+    const NetId* ownNetId = player->try_get<NetId>();
+    if (!ownNetId) return std::nullopt;
+
+    std::optional<std::uint32_t> reason;
+    GetEventQueue().ConsumeSince(m_lastDenialSeq, [&](const GameEvent& event) {
+        m_lastDenialSeq = std::max(m_lastDenialSeq, event.seq);
+        if (event.type != GameEventType::RefitDenied) return;
+        if (event.sourceNetId != ownNetId->value) return;
+        reason = event.param;
+    });
+
+    if (!reason) return std::nullopt;
+
+    std::string line = DenialLine(static_cast<TechNodeState>(*reason));
+    PushChatLine("PORT AUTHORITY", TeamId::None, line);
+    return line;
+}
+
 CGame::TechReadout CGame::GetTechReadout()
 {
     TechReadout readout;

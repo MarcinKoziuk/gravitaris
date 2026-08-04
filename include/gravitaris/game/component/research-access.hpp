@@ -15,6 +15,18 @@ namespace Gravitaris {
 // tree out with it, but never decides it.
 struct ResearchAccess {
     bool atLab = false;
+
+    // Ticks since the yard was last open to this ship. A purchase is honoured
+    // for a short window after it closes, because the commonest way to be
+    // refused is not being anywhere near a lab -- it is drifting a metre
+    // outside the dock tolerance during the round trip between the click and
+    // the server hearing about it. The player did everything right and the
+    // latency took it, which is not a thing to report; it is a thing to
+    // absorb.
+    //
+    // Server-only, unlike the flag above: a client greys its tree out on
+    // where the ship *is*, not on how long ago it was somewhere.
+    std::uint16_t ticksSinceLab = 0xFFFF;
 };
 
 } // namespace Gravitaris

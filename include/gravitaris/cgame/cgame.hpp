@@ -164,6 +164,10 @@ protected:
     // its loadout -- a predicted own ship never passes through SnapshotApplier,
     // so nothing else would deliver them.
     std::uint32_t m_ownSupplies = 0;
+    // How far this client has read the event stream looking for refusals.
+    // Its own cursor: ConsumeSince is non-destructive, so the audio system
+    // and this walk the same events without either seeing the other.
+    std::uint32_t m_lastDenialSeq = 0;
     bool m_ownAtLab = false;
 
     // Unit the camera is following instead of the own ship; empty = not
@@ -434,6 +438,16 @@ public:
         bool atLab = false;
     };
     [[nodiscard]] TechReadout GetTechReadout();
+
+    // What the port said about a purchase it would not honour, or nullopt
+    // when nothing has been refused since the last call. Own ship only -- a
+    // teammate being turned away at their own port is not this player's
+    // business.
+    //
+    // Writes the same line into the chat log on its way out, so the refusal is
+    // answered in the world's voice as well as in the panel, and the two can
+    // never word it differently.
+    [[nodiscard]] std::optional<std::string> TakeRefitDenial();
 
     // One node of one tree, already resolved to what the panel draws -- so
     // ui/ stays independent of the upgrade catalog, exactly as the draft
