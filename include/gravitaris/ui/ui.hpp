@@ -20,20 +20,51 @@ class EventListener;
 
 namespace Gravitaris {
 
-// One entry of the research draft as the HUD needs it -- already resolved to
-// display text, so ui/ stays independent of the upgrade catalog.
-struct UpgradeOfferView {
+// Why a rank is or isn't for sale, mirrored out of the catalog so ui/ can
+// style a pip without knowing what an upgrade is.
+enum class TechRankState {
+    Locked,       // the prerequisite isn't met
+    Held,         // already unlocked, or already fitted at this rank or better
+    NotUnlocked,  // ship tree: above what the faction has learned
+    Unaffordable,
+    NeedsLanding, // ship tree: affordable, but the hull isn't at a lab
+    Available,
+};
+
+// One buyable rank of one node. The ship tree sells a named rank outright, so
+// the pips are the buttons and each carries its own price and its own reason
+// for being greyed out.
+struct TechRankView {
+    int cost = 0;
+    TechRankState state = TechRankState::Locked;
+
+    bool operator==(const TechRankView& other) const
+    { return cost == other.cost && state == other.state; }
+};
+
+// One node of one tree as the HUD needs it -- already resolved to display
+// text and grid position, so ui/ stays independent of the upgrade catalog.
+struct TechNodeView {
+    std::uint32_t id = 0;
+    // 0 the ship's own tree, 1 the faction's. Matches TechTab's order.
+    int tab = 0;
+    int col = 0;
+    int row = 0;
     std::string name;
     std::string description;
-    // Currently held / how far it goes; maxLevel 0 marks a repeatable
-    // restock, which gets no tier line at all.
-    int level = 0;
-    int maxLevel = 1;
+    int rank = 0;    // what this track holds
+    int maxRank = 1;
+    int cap = 0;     // ship tree: the faction's unlocked ceiling
+    // The node this one hangs off, for the connector; 0 for a root.
+    std::uint32_t requiresId = 0;
+    std::vector<TechRankView> ranks;
 
-    bool operator==(const UpgradeOfferView& other) const
+    bool operator==(const TechNodeView& other) const
     {
-        return name == other.name && description == other.description && level == other.level
-               && maxLevel == other.maxLevel;
+        return id == other.id && tab == other.tab && col == other.col && row == other.row
+               && name == other.name && description == other.description && rank == other.rank
+               && maxRank == other.maxRank && cap == other.cap && requiresId == other.requiresId
+               && ranks == other.ranks;
     }
 };
 
@@ -173,10 +204,11 @@ private:
 
     Rml::Element* m_researchFill = nullptr;
     Rml::Element* m_researchValue = nullptr;
-    Rml::Element* m_researchTicks = nullptr;
     float m_researchFraction = -2.f;
-    int m_researchStocked = -1;
     std::string m_researchText;
+
+    Rml::Element* m_techValue = nullptr;
+    Rml::Element* m_suppliesValue = nullptr;
 
     Rml::Element* m_chat = nullptr;
     Rml::Element* m_chatLog = nullptr;
@@ -189,14 +221,21 @@ private:
     // context has laid the fresh markup out.
     bool m_chatScrollToEnd = false;
 
-    Rml::Element* m_upgradeDraft = nullptr;
-    Rml::Element* m_upgradeOffers = nullptr;
-    std::vector<UpgradeOfferView> m_shownOffers;
-    std::function<void(int)> m_onUpgradePick;
-    // Held separately from m_listeners: the cards they belong to are destroyed
-    // and rebuilt on every draft change, so these are dropped with them rather
+    Rml::ElementDocument* m_techTree = nullptr;
+    Rml::Element* m_techGrid = nullptr;
+    Rml::Element* m_techCurrencies = nullptr;
+    std::vector<TechNodeView> m_shownNodes;
+    int m_techTab = 0;
+    int m_shownTech = -1;
+    int m_shownSupplies = -1;
+    std::function<void(std::uint32_t, int, int)> m_onTechPick;
+    // Held separately from m_listeners: the nodes they belong to are destroyed
+    // and rebuilt on every tree change, so these are dropped with them rather
     // than accumulating for the session.
-    std::vector<std::unique_ptr<Rml::EventListener>> m_offerListeners;
+    std::vector<std::unique_ptr<Rml::EventListener>> m_techListeners;
+
+    // Rebuilds the grid from m_shownNodes for the active tab.
+    void RebuildTechTree();
 
     int m_width = 1280;
     int m_height = 720;
@@ -300,12 +339,9 @@ public:
 
     // The faction's research bar, 0..1, with `text` the countdown beside it --
     // this layer formats no times, the same way it holds no game state. A
-    // negative fraction blanks the row (no lab). `stocked` is how many
-    // finished upgrades are queued up for collection: one pip each, and the
-    // bar takes a "ready" class while any are waiting. The two are separate
-    // readings -- the bar keeps filling behind a non-empty queue.
-    // Unchanged values are ignored, so calling it every frame is fine.
-    void SetResearchReadout(float fraction, int stocked, const std::string& text);
+    // negative fraction blanks the row (no lab). Unchanged values are ignored,
+    // so calling it every frame is fine.
+    void SetResearchReadout(float fraction, const std::string& text);
 
     // The chat window's scrollback, oldest first; an empty list clears the
     // log. A rebuild keeps the player's scroll position unless they were
@@ -317,14 +353,23 @@ public:
     // is this layer's own decoration -- pass the text alone.
     void SetChatInput(bool active, const std::string& text);
 
-    // The Lab's offers, in 1/2/3 order; an empty list hides the panel. Only
-    // rebuilt when the contents actually change, so calling it every frame is
-    // fine.
-    void SetUpgradeOffers(const std::vector<UpgradeOfferView>& offers);
+    // Every node of both trees, in catalog order. Only rebuilt when the
+    // contents actually change, so calling it every frame is fine.
+    void SetTechTree(const std::vector<TechNodeView>& nodes);
 
-    // Fired when an offer card is clicked, with its 1-based slot -- the same
-    // number the keyboard sends. Set before Init().
-    void SetUpgradePickCallback(std::function<void(int)> callback);
+    // The two counters in the tree window's header. Unchanged values are
+    // ignored, so calling it every frame is fine.
+    void SetCurrencies(int tech, int supplies);
+
+    // Fired when a rank pip is clicked, with the node's id, its tab and the
+    // rank being bought. Set before Init().
+    void SetTechPickCallback(std::function<void(std::uint32_t, int, int)> callback);
+
+    // The tree is a window the player opens, not a panel that appears at them
+    // -- so it is browsable in flight, and it is theirs to close.
+    void SetTechTreeVisible(bool visible);
+
+    [[nodiscard]] bool IsTechTreeVisible() const;
 
     // Fired when the intro dialog's OK is clicked, with the side the player
     // picked and the call sign they typed (empty if they cleared the field --

@@ -17,7 +17,9 @@
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
-#include <gravitaris/game/component/upgrade-draft.hpp>
+#include <gravitaris/game/component/research-access.hpp>
+#include <gravitaris/game/component/pilot-account.hpp>
+#include <gravitaris/game/component/faction-state.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/event/death-report.hpp>
@@ -243,35 +245,113 @@ CGame::BoostReadout CGame::GetBoostReadout()
     return BoostReadout{true, 1.f, false};
 }
 
-std::vector<CGame::UpgradeOffer> CGame::GetUpgradeOffers()
+CGame::TechReadout CGame::GetTechReadout()
 {
-    std::vector<UpgradeOffer> offers;
+    TechReadout readout;
 
     const std::optional<flecs::entity> player = GetPlayer();
-    if (!player) return offers;
+    if (!player) return readout;
 
-    const UpgradeDraft* draft = player->try_get<UpgradeDraft>();
-    const ShipLoadout* loadout = player->try_get<ShipLoadout>();
-    if (!draft || !loadout || !draft->available) return offers;
-
-    // A faction-scope card is at the tier the side holds, not the hull -- and
-    // the labs are where that reaches a client (Structure::researchStockLevel).
-    UpgradeLevels faction;
     const Team* playerTeam = player->try_get<Team>();
-    CurrentSceneView().Each([&](const Structure& structure, const Team& team) {
-        if (structure.type != StructureType::Lab || !playerTeam || team.id != playerTeam->id) return;
-        faction.researchStock = structure.researchStockLevel;
-    });
-    const UpgradeLevels levels = UpgradeCatalog::Combined(loadout->levels, faction);
+    if (!playerTeam || playerTeam->id == TeamId::None) return readout;
 
-    for (const id_t id : draft->offers) {
-        if (id == 0) continue;
-        const UpgradeDef* def = m_upgradeCatalog.Find(id);
-        if (!def) continue;
-        offers.push_back(UpgradeOffer{def->name, def->description,
-                                      UpgradeCatalog::LevelOf(*def, levels), def->maxLevel});
+    if (m_netClient) {
+        // Connected: both numbers arrive on the wire, since neither the
+        // faction's pool nor the pilot's account exists in this registry.
+        readout.supplies = m_ownSupplies;
+        readout.atLab = m_ownAtLab;
+        for (const FactionSnapshot& faction : m_factionSnapshots) {
+            if (faction.team == static_cast<std::uint8_t>(playerTeam->id)) readout.tech = faction.techPoints;
+        }
+        return readout;
     }
-    return offers;
+
+    if (const ResearchAccess* access = player->try_get<ResearchAccess>()) readout.atLab = access->atLab;
+    m_registry.each([&](const FactionState& faction) {
+        if (faction.team == playerTeam->id) readout.tech = faction.techPoints;
+    });
+    if (const PilotRef* ref = player->try_get<PilotRef>()) {
+        m_registry.each([&](const PilotAccount& account) {
+            if (account.pilotId == ref->pilotId) readout.supplies = account.supplies;
+        });
+    }
+    return readout;
+}
+
+// The faction's unlock track, from whichever side of the wire this build is
+// on. Both trees are drawn against it: the permanent one shows what it holds,
+// the ship one what it permits.
+TechUnlocks CGame::OwnUnlocks()
+{
+    TechUnlocks unlocked;
+
+    const std::optional<flecs::entity> player = GetPlayer();
+    if (!player) return unlocked;
+    const Team* playerTeam = player->try_get<Team>();
+    if (!playerTeam || playerTeam->id == TeamId::None) return unlocked;
+
+    if (m_netClient) {
+        for (const FactionSnapshot& faction : m_factionSnapshots) {
+            if (faction.team == static_cast<std::uint8_t>(playerTeam->id)) unlocked = faction.unlocked;
+        }
+        return unlocked;
+    }
+
+    m_registry.each([&](const FactionState& faction) {
+        if (faction.team == playerTeam->id) unlocked = faction.unlocked;
+    });
+    return unlocked;
+}
+
+std::vector<CGame::TechNode> CGame::GetTechTree()
+{
+    std::vector<TechNode> nodes;
+
+    const std::optional<flecs::entity> player = GetPlayer();
+    const ShipLoadout* loadout = player ? player->try_get<ShipLoadout>() : nullptr;
+    if (!loadout) return nodes;
+
+    const TechReadout readout = GetTechReadout();
+    const TechUnlocks unlocked = OwnUnlocks();
+    const UpgradeCatalog::ShipContext context{loadout, &unlocked, readout.supplies, readout.atLab};
+
+    const std::vector<UpgradeDef>& defs = m_upgradeCatalog.Defs();
+    nodes.reserve(defs.size() * 2);
+    for (std::size_t i = 0; i < defs.size(); ++i) {
+        const UpgradeDef& def = defs[i];
+        const UpgradeCatalog::TreeSlot slot = m_upgradeCatalog.SlotOf(i);
+        const std::uint8_t ranks = UpgradeCatalog::RankCount(def);
+
+        for (const TechTab tab : {TechTab::Ship, TechTab::Permanent}) {
+            TechNode node;
+            node.id = def.id;
+            node.tab = tab;
+            node.col = slot.col;
+            node.row = slot.row;
+            node.name = def.name;
+            node.description = def.description;
+            node.maxRank = ranks;
+            node.cap = m_upgradeCatalog.UnlockedRank(def, unlocked);
+            node.requiresId = def.requiresId;
+            node.rank = tab == TechTab::Ship ? UpgradeCatalog::LevelOf(def, loadout->levels) : node.cap;
+
+            node.ranks.reserve(ranks);
+            for (std::uint8_t rank = 1; rank <= ranks; ++rank) {
+                TechRank entry;
+                if (tab == TechTab::Ship) {
+                    entry.cost = UpgradeCatalog::SupplyCostOf(def, rank);
+                    entry.state = m_upgradeCatalog.ShipState(def, rank, context);
+                }
+                else {
+                    entry.cost = UpgradeCatalog::TechCostOf(def, rank);
+                    entry.state = m_upgradeCatalog.PermanentState(def, rank, unlocked, readout.tech);
+                }
+                node.ranks.push_back(entry);
+            }
+            nodes.push_back(std::move(node));
+        }
+    }
+    return nodes;
 }
 
 std::optional<CGame::ResearchReadout> CGame::GetResearchReadout()
@@ -288,7 +368,6 @@ std::optional<CGame::ResearchReadout> CGame::GetResearchReadout()
         // Every lab of a faction carries the same pooled copy, so the last one
         // seen is as good as any.
         readout.progress = std::clamp(structure.researchProgress, 0.f, 1.f);
-        readout.ready = structure.upgradesReady;
     });
     if (readout.labs == 0) return std::nullopt;
 
@@ -296,7 +375,7 @@ std::optional<CGame::ResearchReadout> CGame::GetResearchReadout()
     // second lab halves the wait -- which is the whole reason to show a time
     // rather than just the bar.
     readout.secondsRemaining = static_cast<float>((1. - readout.progress)
-                                                  * GetEconomyConfig().research.secondsPerUpgrade
+                                                  * GetEconomyConfig().research.secondsPerTech
                                                   / static_cast<double>(readout.labs));
     return readout;
 }
@@ -544,7 +623,7 @@ void CGame::ConnectToServer(const std::string& wsUrl, TeamId requestedTeam)
     m_netTransport->ConnectSignaling(wsUrl);
 }
 
-void CGame::TickNetClient(const ControlFlags& flags, UpgradePick upgradePick)
+void CGame::TickNetClient(const ControlFlags& flags, const TechPick& techPick)
 {
     if (!m_netClient->IsWelcomed()) return;
 
@@ -588,16 +667,18 @@ void CGame::TickNetClient(const ControlFlags& flags, UpgradePick upgradePick)
     }
 
     const std::uint64_t tick = advance.tick;
-    m_netClient->SendInput(tick, flags, upgradePick);
+    m_netClient->SendInput(tick, flags, techPick);
 
     if (const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot()) {
         m_clientPrediction.Step(tick, flags, snapshot->entities, snapshot->tick, m_netClient->GetYourShipNetId());
+        m_factionSnapshots = snapshot->factions;
         m_bulletLifetimeSystem.Update(PHYSICS_DELTA);
 
         // The own ship is predicted locally, so it never passes through
-        // SnapshotApplier -- its loadout and the Lab's draft have to be
-        // copied off the wire here or the sidebar would report the state it
-        // spawned with forever. Neither missile fire nor a pick is predicted,
+        // SnapshotApplier -- its loadout, its yard access and its pilot's
+        // Supplies have to be copied off the wire here or the sidebar would
+        // report the state it spawned with forever. Neither missile fire nor a
+        // purchase is predicted,
         // so this arriving a round trip late is the whole story of the
         // readouts' latency.
         const std::uint32_t yourShipNetId = m_netClient->GetYourShipNetId();
@@ -614,10 +695,11 @@ void CGame::TickNetClient(const ControlFlags& flags, UpgradePick upgradePick)
                     loadout->plateCount = state.plateCount;
                     loadout->plates = state.plates;
                 }
-                if (UpgradeDraft* draft = player->try_get_mut<UpgradeDraft>()) {
-                    draft->offers = state.upgradeOffers;
-                    draft->available = state.upgradeDraftAvailable;
+                if (ResearchAccess* access = player->try_get_mut<ResearchAccess>()) {
+                    access->atLab = state.atLab;
                 }
+                m_ownAtLab = state.atLab;
+                m_ownSupplies = state.supplies;
                 break;
             }
         }

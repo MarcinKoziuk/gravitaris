@@ -215,8 +215,7 @@
 
 			/* The faction's pooled research bar (UI::SetResearchReadout), on
 			   the same track the hull and shield use. Blanked with no lab to
-			   advance it; the "ready" colour marks an upgrade waiting to be
-			   collected rather than one still being worked on. */
+			   advance it. What it fills into is Tech, counted below it. */
 			div#research_fill
 			{
 				height: 100%;
@@ -224,34 +223,7 @@
 				background-color: #8af;
 			}
 
-			div#research_fill.ready
-			{
-				background-color: #fc0;
-			}
-
-			/* One pip per finished upgrade waiting on the pad, in the bar's
-			   own "ready" colour. Its own row rather than a number beside the
-			   countdown: the bar behind the queue keeps filling, so the two
-			   are separate readings and a pilot deciding whether to fly home
-			   wants the count at a glance. Written from code
-			   (UI::SetResearchReadout). */
-			div#research_ticks
-			{
-				min-height: 10dp;
-				margin-top: 6dp;
-			}
-
-			span.research_tick
-			{
-				display: inline-block;
-				vertical-align: top;
-				width: 10dp;
-				height: 10dp;
-				margin-right: 4dp;
-				background-color: #fc0;
-			}
-
-				/* One tick per stored missile. A full rack is wider than the
+			/* One tick per stored missile. A full rack is wider than the
 			   sidebar, so the ticks wrap -- hence a min-height rather than a
 			   fixed one. Written from code (UI::SetMissileAmmo). */
 			div#missile_ticks
@@ -472,105 +444,19 @@
 				pointer-events: auto;
 			}
 
-			/* The Lab's draft, centred over the game view: three offers, each
-			   either clicked or keyed 1/2/3. Shown only while a ship is
-			   actually being offered something (UI::SetUpgradeOffers). Centred
-			   with the same negative-half-size trick the theme uses elsewhere,
-			   since RCSS has no transform-based centring here. */
-			div#upgrade_draft
+			/* Sidebar button that opens the tech tree. Outlined rather
+			   than filled: it opens a window, it doesn't commit anything. */
+			button#open_tech_tree
 			{
-				position: absolute;
-				left: 50%;
-				top: 50%;
-				width: 660dp;
-				height: 232dp;
-				margin-left: -330dp;
-				margin-top: -116dp;
-				display: none;
-
-				/* The cards take the mouse; the panel around them has to opt
-				   back in first, since div#view_overlay is click-through. */
-				pointer-events: auto;
-			}
-
-			div#upgrade_offers
-			{
-				display: flex;
-				padding: 12dp;
-			}
-
-			/* Only the panel itself wears corner brackets: three bracketed
-			   cards inside a bracketed frame is twelve of them competing for
-			   one glance. The cards carry the hairline alone and let the key
-			   badge do their accenting. */
-			div.offer
-			{
-				flex: 1 1 0;
-				margin: 0dp 6dp;
-				padding: 12dp;
+				display: block;
+				width: 100%;
 				box-sizing: border-box;
-
-				background-color: #0cf1;
-				border-width: 1dp;
-				border-color: #0cf6;
-				cursor: pointer;
-				transition: background-color 0.12s cubic-in-out, border-color 0.12s cubic-in-out;
+				margin-top: 10dp;
+				padding: 7dp 0;
+				font-size: 11dp;
+				letter-spacing: 2dp;
 			}
 
-			div.offer:hover
-			{
-				background-color: #0cf3;
-				border-color: #bff;
-			}
-
-			div.offer:hover div.offer_key
-			{
-				color: #dff;
-				border-color: #dff;
-			}
-
-			/* The key you press, boxed like the button it stands in for. */
-			div.offer_key
-			{
-				display: inline-block;
-				width: 22dp;
-				height: 22dp;
-				line-height: 22dp;
-				margin-bottom: 9dp;
-
-				color: #0cf;
-				font-size: 15dp;
-				font-weight: bold;
-				text-align: center;
-				border-width: 1dp;
-				border-color: #0cf;
-				font-effect: glow(2dp #0cf6);
-			}
-
-			div.offer_name
-			{
-				margin-bottom: 6dp;
-				font-size: 15dp;
-				letter-spacing: 3dp;
-				text-transform: uppercase;
-				color: #eff;
-				font-effect: glow(3dp #0cf8);
-			}
-
-			div.offer_desc
-			{
-				font-size: 13dp;
-				color: #7cc;
-			}
-
-			div.offer_tier
-			{
-				margin-top: 9dp;
-				font-size: 12dp;
-				letter-spacing: 3dp;
-				text-transform: uppercase;
-				color: #588;
-			}
 		</style>
 	</head>
 	<body>
@@ -647,8 +533,20 @@
 						<div class="bar_track">
 							<div id="research_fill"></div>
 						</div>
-						<div id="research_ticks"></div>
 					</div>
+					<div class="stat">
+						<div class="stat_head">
+							<span>Tech</span>
+							<span id="tech_value" class="stat_value readout">0</span>
+						</div>
+					</div>
+					<div class="stat">
+						<div class="stat_head">
+							<span>Supplies</span>
+							<span id="supplies_value" class="stat_value readout">0</span>
+						</div>
+					</div>
+					<button id="open_tech_tree">Tech tree &mdash; T</button>
 				</div>
 
 				<div id="panel_footer">
@@ -673,13 +571,6 @@
 
 			<button id="recenter">Focus my ship</button>
 
-			<div id="upgrade_draft" class="frame">
-				<div class="corner tl"/><div class="corner tr"/>
-				<div class="corner bl"/><div class="corner br"/>
-
-				<div class="frame_label">Research complete &mdash; select an upgrade</div>
-				<div id="upgrade_offers"></div>
-			</div>
 		</div>
 	</body>
 </rml>

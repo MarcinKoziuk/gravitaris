@@ -8,7 +8,7 @@
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
-#include <gravitaris/game/component/upgrade-draft.hpp>
+#include <gravitaris/game/component/research-access.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/structure.hpp>
@@ -93,7 +93,7 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
                 // but never Damageable, so gating like this matches that.
                 entity.emplace<Damageable>(state.hp, 100.f);
                 entity.emplace<ShipLoadout>();
-                entity.emplace<UpgradeDraft>();
+                entity.emplace<ResearchAccess>();
                 // Presence-only marker, same idiom as Orbit below: nothing in
                 // this world drives a freighter, but the minimap asks
                 // `has<Freighter>()` of both worlds, and without this a
@@ -106,8 +106,7 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
                 entity.emplace<Damageable>(state.hp, 100.f);
                 entity.emplace<HitOutline>(m_resourceLoader.Load<Body>(state.modelId));
                 entity.emplace<Structure>(Structure{state.structureType, state.rawMaterials,
-                                                    state.finishedMaterials, state.researchProgress,
-                                                    state.upgradesReady, state.researchStockLevel});
+                                                    state.finishedMaterials, state.researchProgress});
             }
             if (state.type == NetEntityType::Planet) {
                 entity.emplace<GravitySource>(GravitySource{state.gravityMass, state.gravityMultiplier});
@@ -208,8 +207,6 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
             structure->rawMaterials = state.rawMaterials;
             structure->finishedMaterials = state.finishedMaterials;
             structure->researchProgress = state.researchProgress;
-            structure->upgradesReady = state.upgradesReady;
-            structure->researchStockLevel = state.researchStockLevel;
         }
         if (GravitySource* source = entity.try_get_mut<GravitySource>()) {
             source->mass = state.gravityMass;
@@ -218,9 +215,9 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
     }
 }
 
-// The replicated half of a ship's ShipLoadout/UpgradeDraft. The mirror world
-// never runs ResearchSystem or ShieldSystem, so every field here is a plain
-// copy of what the server decided.
+// The replicated half of a ship's ShipLoadout and its yard access. The mirror
+// world never runs ResearchSystem or ShieldSystem, so every field here is a
+// plain copy of what the server decided.
 static void ApplyLoadout(flecs::entity entity, const EntityState& state)
 {
     if (ShipLoadout* loadout = entity.try_get_mut<ShipLoadout>()) {
@@ -234,9 +231,8 @@ static void ApplyLoadout(flecs::entity entity, const EntityState& state)
         loadout->plateCount = state.plateCount;
         loadout->plates = state.plates;
     }
-    if (UpgradeDraft* draft = entity.try_get_mut<UpgradeDraft>()) {
-        draft->offers = state.upgradeOffers;
-        draft->available = state.upgradeDraftAvailable;
+    if (ResearchAccess* access = entity.try_get_mut<ResearchAccess>()) {
+        access->atLab = state.atLab;
     }
 }
 

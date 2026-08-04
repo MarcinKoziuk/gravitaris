@@ -207,7 +207,7 @@
 				<div class="binding"><span class="key">SHIFT</span><span class="action">Overburn</span></div>
 				<div class="binding"><span class="key">DOWN / F</span><span class="action">Guns</span></div>
 				<div class="binding"><span class="key">SPACE / D</span><span class="action">Missile</span></div>
-				<div class="binding"><span class="key">1 2 3</span><span class="action">Take upgrade</span></div>
+				<div class="binding"><span class="key">T</span><span class="action">Tech tree</span></div>
 			</div>
 			<div class="column">
 				<div class="binding"><span class="key">K</span><span class="action">Kill velocity</span></div>

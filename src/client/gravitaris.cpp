@@ -85,8 +85,8 @@ private:
     // command per sim tick. The sim never reads the keyboard directly.
     ControlFlags m_currentInput{};
     // One-shot, cleared once the tick that carries it has been submitted:
-    // which of the Lab's three offers the player just accepted (0 = none).
-    UpgradePick m_upgradePick = 0;
+    // the tech-tree rank the player just bought, if any.
+    TechPick m_techPick;
 
     // Record/replay: F5 toggles recording to disk, F6 replays it back, F7 stops.
     ReplayController m_replay;
@@ -219,6 +219,9 @@ private:
     void SyncTextInput();
 
     void RenderUi();
+
+    // Feeds both tech trees and the two currency counters to the HUD.
+    void RefreshTechTree();
 };
 
 static UiKey UiKeyFromEvent(Application::KeyEvent::Key key);
@@ -285,10 +288,10 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
         m_game->LookAtMapPoint(Magnum::Vector2{nx, ny});
     });
     m_ui.SetRecenterCallback([this] { m_game->FocusCamera(); });
-    // Clicking an offer card goes through the same one-shot the 1/2/3 keys
-    // set, so mouse and keyboard reach the sim by exactly one path.
-    m_ui.SetUpgradePickCallback([this](int slot) {
-        m_upgradePick = static_cast<UpgradePick>(slot);
+    // A rank pip is the only way to buy anything -- there is no keyboard
+    // shortcut for a purchase, since naming a node and a rank needs a pointer.
+    m_ui.SetTechPickCallback([this](std::uint32_t id, int tab, int rank) {
+        m_techPick = TechPick{id, static_cast<TechTab>(tab), static_cast<std::uint8_t>(rank)};
     });
 
     // Before Init(), which is where the documents load and are first laid out.
@@ -354,8 +357,8 @@ void GravitarisApplication::tickEvent()
                 m_frameTimeAccumulator = 0.0;
                 break;
             }
-            m_game->TickNetClient(m_currentInput, m_upgradePick);
-            m_upgradePick = 0;
+            m_game->TickNetClient(m_currentInput, m_techPick);
+            m_techPick = {};
             m_frameTimeAccumulator -= Game::PHYSICS_DELTA;
             ++steps;
         }
@@ -444,11 +447,7 @@ void GravitarisApplication::UpdateUi()
     const CGame::BoostReadout boost = m_game->GetBoostReadout();
     m_ui.SetBoostReadout(boost.fitted ? boost.fraction : -1.f, boost.cooling);
 
-    std::vector<UpgradeOfferView> offers;
-    for (const CGame::UpgradeOffer& offer : m_game->GetUpgradeOffers()) {
-        offers.push_back(UpgradeOfferView{offer.name, offer.description, offer.level, offer.maxLevel});
-    }
-    m_ui.SetUpgradeOffers(offers);
+    RefreshTechTree();
 
     if (m_shownChatRevision != m_game->GetChatRevision()) {
         m_shownChatRevision = m_game->GetChatRevision();
@@ -536,7 +535,7 @@ void GravitarisApplication::RefreshResearchReadout()
 {
     const std::optional<CGame::ResearchReadout> research = m_game->GetResearchReadout();
     if (!research) {
-        m_ui.SetResearchReadout(-1.f, 0, "");
+        m_ui.SetResearchReadout(-1.f, "");
         return;
     }
 
@@ -551,7 +550,35 @@ void GravitarisApplication::RefreshResearchReadout()
     // moves faster than the wall clock.
     if (research->labs > 1) text += " x" + std::to_string(research->labs);
 
-    m_ui.SetResearchReadout(research->progress, research->ready, text);
+    m_ui.SetResearchReadout(research->progress, text);
+}
+
+// Both trees and both counters, every frame. The UI compares before it
+// rebuilds, so the cost of this is the copy rather than a relayout.
+void GravitarisApplication::RefreshTechTree()
+{
+    const CGame::TechReadout readout = m_game->GetTechReadout();
+    m_ui.SetCurrencies(static_cast<int>(readout.tech), static_cast<int>(readout.supplies));
+
+    std::vector<TechNodeView> nodes;
+    for (const CGame::TechNode& node : m_game->GetTechTree()) {
+        TechNodeView view;
+        view.id = node.id;
+        view.tab = static_cast<int>(node.tab);
+        view.col = node.col;
+        view.row = node.row;
+        view.name = node.name;
+        view.description = node.description;
+        view.rank = node.rank;
+        view.maxRank = node.maxRank;
+        view.cap = node.cap;
+        view.requiresId = node.requiresId;
+        for (const CGame::TechRank& rank : node.ranks) {
+            view.ranks.push_back(TechRankView{rank.cost, static_cast<TechRankState>(rank.state)});
+        }
+        nodes.push_back(std::move(view));
+    }
+    m_ui.SetTechTree(nodes);
 }
 
 // One command for the tick Update() is about to run: keyboard, autopilot and
@@ -571,7 +598,7 @@ void GravitarisApplication::FeedInput()
     }
     else {
         cmd.flags = m_currentInput;
-        cmd.upgradePick = m_upgradePick;
+        cmd.techPick = m_techPick;
         // Autopilot overrides movement but not fire.
         if (std::optional<ControlFlags> autopilot = m_game->ComputeAutopilotControls()) {
             cmd.flags = *autopilot;
@@ -588,7 +615,7 @@ void GravitarisApplication::FeedInput()
     // One-shot actions apply only for the tick they were pressed on.
     // (firePrimary is held; released on key-up.)
     m_currentInput.fireSecondary = false;
-    m_upgradePick = 0;
+    m_techPick = {};
 }
 
 void GravitarisApplication::ToggleRecording()
@@ -857,16 +884,8 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
             m_game->StopSpectating();
             m_currentInput.fireSecondary = true; // one-shot, cleared after the tick
             break;
-        // Accepting one of the Lab's three offers. Harmless with no draft
-        // open -- ResearchSystem ignores a pick nobody is being offered.
-        case KeyEvent::Key::One:
-            m_upgradePick = 1;
-            break;
-        case KeyEvent::Key::Two:
-            m_upgradePick = 2;
-            break;
-        case KeyEvent::Key::Three:
-            m_upgradePick = 3;
+        case KeyEvent::Key::T:
+            m_ui.SetTechTreeVisible(!m_ui.IsTechTreeVisible());
             break;
         default:
             (void)0;

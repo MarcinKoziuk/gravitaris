@@ -32,16 +32,13 @@ struct Structure {
     StructureType type = StructureType::Base;
     float rawMaterials = 0.f;
     float finishedMaterials = 0.f;
-    // Only written on a Lab: its faction's pooled research state (owned by
-    // FactionState, which is server-only), copied here every tick by
-    // ResearchSystem so it rides the existing Structure replication -- the
-    // client's lab glow and the sidebar's readout are the only readers.
+    // Only written on a Lab: how far along its faction's pooled research bar
+    // is (owned by FactionState, which is server-only), copied here every tick
+    // by ResearchSystem so it rides the existing Structure replication -- the
+    // client's lab glow and the sidebar's readout are the only readers. What
+    // the bar pays out travels in the snapshot's own faction block instead,
+    // since a side that has lost every lab still has a tree to show.
     float researchProgress = 0.f;
-    std::uint8_t upgradesReady = 0;
-    // The faction's RESEARCH QUEUE level, so a client can label that card with
-    // the tier its side actually holds -- FactionState's levels block is
-    // server-only, and this is the same ride its progress already takes.
-    std::uint8_t researchStockLevel = 0;
 };
 
 // Marks a structure as an auto-firing defense installation (Base, High

@@ -1,0 +1,213 @@
+<rml>
+	<head>
+		<title>Technology</title>
+		<link type="text/template" href="vector-window.rml" />
+		<style>
+			body
+			{
+				width: 720dp;
+				height: 520dp;
+				margin: auto;
+			}
+
+			/* The two trees are the same graph, so the tabs swap the grid's
+			   contents rather than sitting over two separate layouts. */
+			div#tech_tabs
+			{
+				display: flex;
+				margin-bottom: 10dp;
+			}
+
+			div#tech_tabs button
+			{
+				flex: 1 1 0;
+				display: block;
+				box-sizing: border-box;
+				margin: 0 4dp 0 0;
+				padding: 8dp 0;
+				font-size: 12dp;
+				letter-spacing: 3dp;
+			}
+
+			div#tech_tabs button.active
+			{
+				background-color: #0cf;
+				border-color: #bff;
+				color: #012;
+				font-effect: none;
+			}
+
+			/* Both counters on one line, right-aligned against the tabs. */
+			div#tech_currencies
+			{
+				display: flex;
+				justify-content: flex-end;
+				margin-bottom: 8dp;
+				font-size: 12dp;
+				letter-spacing: 2dp;
+				color: #588;
+			}
+
+			div#tech_currencies span.amount
+			{
+				margin-left: 6dp;
+				color: #bff;
+				font-weight: bold;
+			}
+
+			div#tech_currencies span.gap
+			{
+				width: 22dp;
+			}
+
+			/* Nodes are absolutely positioned off their derived col/row, so
+			   the grid needs to be a positioning context that scrolls when the
+			   pool outgrows the window. */
+			div#tech_grid
+			{
+				position: relative;
+				overflow: auto;
+				height: 396dp;
+			}
+
+			div.tech_node
+			{
+				position: absolute;
+				width: 176dp;
+				padding: 8dp;
+				box-sizing: border-box;
+
+				background-color: #0cf1;
+				border-width: 1dp;
+				border-color: #0cf4;
+			}
+
+			div.tech_node.held
+			{
+				border-color: #0cf9;
+				background-color: #0cf2;
+			}
+
+			div.tech_node.locked
+			{
+				border-color: #3442;
+			}
+
+			div.node_name
+			{
+				color: #bff;
+				font-size: 12dp;
+				font-weight: bold;
+				letter-spacing: 2dp;
+			}
+
+			div.tech_node.locked div.node_name
+			{
+				color: #566;
+			}
+
+			div.node_desc
+			{
+				margin-top: 3dp;
+				color: #588;
+				font-size: 10dp;
+			}
+
+			/* The pips are the buttons: clicking one buys that rank at that
+			   rank's own price. */
+			div.node_ranks
+			{
+				display: flex;
+				margin-top: 6dp;
+			}
+
+			div.rank
+			{
+				flex: 0 0 auto;
+				width: 40dp;
+				margin-right: 4dp;
+				padding: 3dp 0;
+				text-align: center;
+
+				font-family: ShareTechMono;
+				font-size: 10dp;
+				color: #566;
+				border-width: 1dp;
+				border-color: #3443;
+			}
+
+			div.rank.held
+			{
+				color: #012;
+				background-color: #0cf;
+				border-color: #0cf;
+			}
+
+			div.rank.available
+			{
+				color: #bff;
+				border-color: #0cf9;
+				cursor: pointer;
+			}
+
+			div.rank.available:hover
+			{
+				color: #012;
+				background-color: #bff;
+				border-color: #fff;
+			}
+
+			/* Short of the price, or short of a landing: both are "not now"
+			   rather than "not ever", so they stay legible where a locked
+			   rank fades out. */
+			div.rank.unaffordable,
+			div.rank.needs_landing
+			{
+				color: #886;
+				border-color: #8863;
+			}
+
+			div.rank.not_unlocked
+			{
+				color: #647;
+				border-color: #6473;
+			}
+
+			/* Connectors: a node's prerequisite is always exactly one column
+			   left, so the run between them is a horizontal rule and a
+			   vertical one rather than a diagonal RCSS can't draw. */
+			div.link_h,
+			div.link_v
+			{
+				position: absolute;
+				background-color: #0cf5;
+			}
+
+			div.link_h { height: 1dp; }
+			div.link_v { width: 1dp; }
+
+			div#tech_hint
+			{
+				margin-top: 6dp;
+				font-size: 10dp;
+				letter-spacing: 1dp;
+				color: #566;
+			}
+		</style>
+	</head>
+	<body template="vector-window">
+		<div id="tech_tabs">
+			<button id="tab_ship" class="active">SHIP</button>
+			<button id="tab_permanent">PERMANENT</button>
+		</div>
+
+		<div id="tech_currencies"></div>
+
+		<!-- Filled from code (UI::SetTechTree): nodes are placed off the
+		     depth-derived layout the catalog builds, so adding an upgrade to
+		     the toml places itself here with no markup to write. -->
+		<div id="tech_grid"></div>
+
+		<div id="tech_hint"></div>
+	</body>
+</rml>

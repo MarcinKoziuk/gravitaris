@@ -26,6 +26,8 @@
 #include <gravitaris/cgame/net/net-diagnostics.hpp>
 #include <gravitaris/cgame/net/remote-event-applier.hpp>
 #include <gravitaris/cgame/net/snapshot-applier.hpp>
+#include <gravitaris/game/net/snapshot.hpp>
+#include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/cgame/net/snapshot-interpolator.hpp>
 #include <gravitaris/cgame/camera-director.hpp>
 #include <gravitaris/game/gnc/autopilot.hpp>
@@ -153,6 +155,16 @@ protected:
     static constexpr std::size_t CHAT_HISTORY_LINES = 256;
     std::deque<ChatLine> m_chatLog;
     std::uint64_t m_chatRevision = 0;
+
+    // The latest faction block off the wire, one entry per side that has ever
+    // fielded anything. Empty in single-player, which reads FactionState out
+    // of its own registry instead.
+    std::vector<FactionSnapshot> m_factionSnapshots;
+    // The own ship's Supplies and yard access, copied off the wire alongside
+    // its loadout -- a predicted own ship never passes through SnapshotApplier,
+    // so nothing else would deliver them.
+    std::uint32_t m_ownSupplies = 0;
+    bool m_ownAtLab = false;
 
     // Unit the camera is following instead of the own ship; empty = not
     // spectating. May live in either world (see CycleSpectate).
@@ -413,17 +425,48 @@ public:
     };
     [[nodiscard]] BoostReadout GetBoostReadout();
 
-    // The Lab draft the player's own ship is being offered, in panel order --
-    // empty when there is nothing to pick. Only the own ship's: a spectated
-    // unit's draft isn't the player's to spend, so the camera subject is
-    // deliberately not what this follows.
-    struct UpgradeOffer {
+    // What the player can spend, and whether the yard is open to them. Only
+    // the own ship's: a spectated unit's purse is not the player's to spend,
+    // so the camera subject is deliberately not what this follows.
+    struct TechReadout {
+        std::uint32_t tech = 0;      // the faction's, shared
+        std::uint32_t supplies = 0;  // this pilot's own
+        bool atLab = false;
+    };
+    [[nodiscard]] TechReadout GetTechReadout();
+
+    // One node of one tree, already resolved to what the panel draws -- so
+    // ui/ stays independent of the upgrade catalog, exactly as the draft
+    // panel's view did.
+    struct TechRank {
+        int cost = 0;
+        TechNodeState state = TechNodeState::Locked;
+    };
+    struct TechNode {
+        id_t id = 0;
+        TechTab tab = TechTab::Ship;
+        int col = 0;
+        int row = 0;
         std::string name;
         std::string description;
-        std::uint8_t level = 0;    // what the ship holds now
-        std::uint8_t maxLevel = 1; // 0 for a repeatable restock
+        int rank = 0;     // what this track holds
+        int maxRank = 1;
+        int cap = 0;      // ship tab: the faction's unlocked ceiling
+        // What this node hangs off, for the connector; 0 for a root.
+        id_t requiresId = 0;
+        std::vector<TechRank> ranks;
     };
-    [[nodiscard]] std::vector<UpgradeOffer> GetUpgradeOffers();
+
+    // Both trees, every node, in catalog order. Empty only when the pool
+    // failed to load -- the tree is browsable at any time, in flight
+    // included, which is the point of it being a window rather than a panel.
+    [[nodiscard]] std::vector<TechNode> GetTechTree();
+
+    // The player faction's unlock track, from whichever side of the wire this
+    // build is on. Both trees are drawn against it: the permanent one shows
+    // what it holds, the ship one what it permits.
+    [[nodiscard]] TechUnlocks OwnUnlocks();
+
 
     // The player faction's research bar, read off its Labs (FactionState is
     // server-only; ResearchSystem mirrors the pooled state onto each Lab).
@@ -433,7 +476,6 @@ public:
         float progress = 0.f;        // 0..1
         float secondsRemaining = 0.f;
         int labs = 0;
-        int ready = 0; // finished upgrades queued up for someone to collect
     };
     [[nodiscard]] std::optional<ResearchReadout> GetResearchReadout();
 
@@ -558,7 +600,7 @@ public:
     // predicts one more tick of its own movement and sends `flags` to the
     // server. Call from the same fixed-step accumulator loop single-player
     // drives Game::Update() from.
-    void TickNetClient(const ControlFlags& flags, UpgradePick upgradePick = 0);
+    void TickNetClient(const ControlFlags& flags, const TechPick& techPick = {});
 
     // Net debug tab (Phase 4 interpolation tunables + diagnostics).
     [[nodiscard]] float GetInterpDelaySeconds() const { return m_interpDelaySeconds; }

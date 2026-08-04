@@ -15,12 +15,15 @@ namespace Gravitaris {
 // Seconds one leg of the ready cycle takes (red -> yellow -> blue -> red).
 inline constexpr float LAB_READY_CYCLE_LEG_SECONDS = 0.3f;
 
+// How full the research bar has to be for the lab to start showing it.
+inline constexpr float LAB_READY_PROGRESS = 0.9f;
+
 // What a Lab's team-color strokes render as: pulsing white/blue while its
-// faction researches, then cycling red/yellow/blue twice as fast once the
-// finished upgrade is waiting to be collected -- the speed-up is the tell
-// that it's ready, so the two cadences are deliberately a factor of 2 apart.
-// `timeSeconds` is any continuous client clock; both animations are cosmetic
-// and need no tick agreement between clients.
+// faction researches, then cycling red/yellow/blue twice as fast as the bar
+// comes up on a payout -- the speed-up is the tell, so the two cadences are
+// deliberately a factor of 2 apart. `timeSeconds` is any continuous client
+// clock; both animations are cosmetic and need no tick agreement between
+// clients.
 inline Magnum::Color3 LabGlowColor(const Structure& structure, float timeSeconds)
 {
     // Ping-pong across `legs` (there and back for the two-color case, round
@@ -31,7 +34,7 @@ inline Magnum::Color3 LabGlowColor(const Structure& structure, float timeSeconds
         return Magnum::Math::lerp(legs[leg], legs[(leg + 1) % count], phase - static_cast<float>(leg));
     };
 
-    if (structure.upgradesReady > 0) {
+    if (structure.researchProgress >= LAB_READY_PROGRESS) {
         const Magnum::Color3 legs[]{TeamColor(TeamId::Red), TeamColor(TeamId::Yellow),
                                     TeamColor(TeamId::Blue)};
         return cycle(legs, 3, LAB_READY_CYCLE_LEG_SECONDS);
