@@ -459,6 +459,10 @@ public:
     struct TechNode {
         id_t id = 0;
         TechTab tab = TechTab::Ship;
+        // 0 weapons, 1 mobility, 2 defense. Mapped from the def's kind rather
+        // than authored, since three branches over six kinds needs no data.
+        int branch = 0;
+        std::string icon;
         int col = 0;
         int row = 0;
         std::string name;

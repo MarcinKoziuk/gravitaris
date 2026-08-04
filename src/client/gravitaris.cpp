@@ -92,9 +92,6 @@ private:
     // One-shot, cleared once the tick that carries it has been submitted:
     // the tech-tree rank the player just bought, if any.
     TechPick m_techPick;
-    // Whether a refit was possible last frame, so the tree window can be
-    // opened on the rising edge rather than held open by the condition.
-    bool m_refitWasAvailable = false;
     // Seconds left on the footer's refusal line before the panel goes back to
     // talking about the selection.
     float m_techNoticeRemaining = 0.f;
@@ -592,6 +589,8 @@ void GravitarisApplication::RefreshTechTree()
     for (const CGame::TechNode& node : m_game->GetTechTree()) {
         TechNodeView view;
         view.id = node.id;
+        view.branch = node.branch;
+        view.icon = node.icon;
         view.tab = static_cast<int>(node.tab);
         view.col = node.col;
         view.row = node.row;
@@ -610,15 +609,10 @@ void GravitarisApplication::RefreshTechTree()
     }
     m_ui.SetTechTree(nodes);
 
-    // Opened on the edge, not while the condition holds: a player who closes
-    // the window while still standing on the pad has said no, and reopening it
-    // under them every frame would be the panel that appears at you all over
-    // again. Landing somewhere new asks once more.
-    if (canRefit && !m_refitWasAvailable) {
-        m_ui.SetTechTab(0);
-        m_ui.SetTechTreeVisible(true);
-    }
-    m_refitWasAvailable = canRefit;
+    // Asked, never forced: the sidebar blinks while a refit is possible and
+    // the player opens the board themselves. An earlier version opened it for
+    // them, which was the panel-that-appears-at-you this replaced.
+    m_ui.SetRefitHintVisible(canRefit);
 }
 
 // One command for the tick Update() is about to run: keyboard, autopilot and

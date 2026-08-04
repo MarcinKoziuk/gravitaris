@@ -147,6 +147,7 @@ fire_cooldown_ticks = 90
 # standoff weapon.
 [[upgrade]]
 key = "missile_bay"
+icon = "bay"
 name = "MISSILE BAY"
 description = "Fits the launcher, then a harder round. Four more tubes each time."
 kind = "missile_tier"
@@ -163,6 +164,7 @@ supply_cost = [12, 26, 44]
 # change of a landing, since that is what it is.
 [[upgrade]]
 key = "missile_rack"
+icon = "rld"
 name = "MISSILE RACK"
 description = "Reload. Fills the tubes you have."
 kind = "missile_rack"
@@ -175,6 +177,7 @@ supply_cost = 5
 
 [[upgrade]]
 key = "autoloader"
+icon = "ald"
 name = "AUTOLOADER"
 description = "Cannon cycles a third faster. Same round, more of them."
 kind = "fire_rate"
@@ -186,6 +189,7 @@ supply_cost = [8, 18, 32]
 
 [[upgrade]]
 key = "heavy_rounds"
+icon = "hvy"
 name = "HEAVY ROUNDS"
 description = "Depleted-slug ammunition. Hits far harder and flies flatter."
 kind = "weapon_tier"
@@ -207,6 +211,7 @@ supply_cost = [14, 30, 52]
 # burn and shorten the wait instead.
 [[upgrade]]
 key = "overburn"
+icon = "ovb"
 name = "OVERBURN"
 description = "Injector overrun: hard thrust, briefly past the redline. Then it has to cool."
 kind = "boost"
@@ -222,6 +227,7 @@ supply_cost = [10, 22, 38]
 
 [[upgrade]]
 key = "bubble_shield"
+icon = "bub"
 name = "BUBBLE FIELD"
 description = "Wide reservoir, absorbs a hit whole -- but slow to come back."
 kind = "shield"
@@ -237,6 +243,7 @@ supply_cost = [15, 32, 55]
 
 [[upgrade]]
 key = "plating_shield"
+icon = "plt"
 name = "FIELD PLATING"
 description = "Hull-hugging. Some rounds get through it -- fewer with every layer."
 kind = "shield"

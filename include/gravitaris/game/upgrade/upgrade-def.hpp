@@ -99,6 +99,10 @@ struct UpgradeDef {
     std::string key;
     std::string name;
     std::string description;
+    // Which art the tech screen draws for this entry. Defaults to the first
+    // three letters of the key, which is exactly what the placeholder tiles
+    // show; real icon art is keyed by the same string.
+    std::string icon;
 
     UpgradeKind kind = UpgradeKind::MissileRack;
 

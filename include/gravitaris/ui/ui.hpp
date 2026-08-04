@@ -46,6 +46,8 @@ struct TechRankView {
 // text and grid position, so ui/ stays independent of the upgrade catalog.
 struct TechNodeView {
     std::uint32_t id = 0;
+    int branch = 0;         // 0 weapons, 1 mobility, 2 defense
+    std::string icon;       // three-letter placeholder code, later a sprite
     // 0 the ship's own tree, 1 the faction's. Matches TechTab's order.
     int tab = 0;
     int col = 0;
@@ -61,7 +63,8 @@ struct TechNodeView {
 
     bool operator==(const TechNodeView& other) const
     {
-        return id == other.id && tab == other.tab && col == other.col && row == other.row
+        return id == other.id && branch == other.branch && icon == other.icon
+               && tab == other.tab && col == other.col && row == other.row
                && name == other.name && description == other.description && rank == other.rank
                && maxRank == other.maxRank && cap == other.cap && requiresId == other.requiresId
                && ranks == other.ranks;
@@ -223,19 +226,17 @@ private:
 
     Rml::ElementDocument* m_techTree = nullptr;
     Rml::Element* m_techGrid = nullptr;
-    Rml::Element* m_techCurrencies = nullptr;
+    Rml::Element* m_techFitted = nullptr;
+    Rml::Element* m_techTip = nullptr;
+    Rml::Element* m_supplyValue = nullptr;
+    Rml::Element* m_techNoticeElement = nullptr;
+    Rml::Element* m_refitHint = nullptr;
+    bool m_refitHintShown = false;
     std::vector<TechNodeView> m_shownNodes;
     int m_techTab = 0;
     int m_shownTech = -1;
     int m_shownSupplies = -1;
     std::function<void(std::uint32_t, int, int)> m_onTechPick;
-    Rml::Element* m_techHint = nullptr;
-    Rml::Element* m_techBuy = nullptr;
-    // What the footer would commit. Selection is its own state, separate from
-    // the purchase, so a misclick on a grid this dense costs nothing.
-    // Zero id means nothing picked.
-    std::uint32_t m_selectedId = 0;
-    int m_selectedRank = 0;
     std::string m_techNotice;
     // Held separately from m_listeners: the nodes they belong to are destroyed
     // and rebuilt on every tree change, so these are dropped with them rather
@@ -245,13 +246,17 @@ private:
     // Rebuilds the grid from m_shownNodes for the active tab.
     void RebuildTechTree();
 
+    // Re-attaches the click and hover handlers after a rebuild.
+    void AttachTechListeners();
+
+    // Raises / drops the hover tooltip for a node.
+    void ShowTechTip(std::uint32_t id);
+    void HideTechTip();
+
     // Rewrites the footer for the current selection: what it is, what it
     // costs, and whether the button that buys it has any business existing.
     void RefreshTechFooter();
 
-    // The selected node in the active tab, or null if the selection is stale
-    // (a different tab, or a node that has left the tree).
-    [[nodiscard]] const TechNodeView* SelectedNode() const;
 
     int m_width = 1280;
     int m_height = 720;
@@ -388,6 +393,10 @@ public:
     // Which tree is showing: 0 the ship's, 1 the faction's. The client uses
     // this to put the ship tab up when it opens the window for a refit.
     void SetTechTab(int tab);
+
+    // Blinks a prompt in the sidebar while a refit is possible. The window
+    // itself is never opened for the player: it asks, it doesn't interrupt.
+    void SetRefitHintVisible(bool visible);
 
     // A line the footer shows over its usual contents -- what the port said
     // when it turned a purchase away. Empty restores the normal footer. The

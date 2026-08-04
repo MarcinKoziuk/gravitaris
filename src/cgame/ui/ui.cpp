@@ -142,6 +142,7 @@ bool UI::Init()
         m_boostValue = hud->GetElementById("boost_value");
         m_researchFill = hud->GetElementById("research_fill");
         m_researchValue = hud->GetElementById("research_value");
+        m_refitHint = hud->GetElementById("refit_hint");
         m_techValue = hud->GetElementById("tech_value");
         m_suppliesValue = hud->GetElementById("supplies_value");
         if (Rml::Element* button = hud->GetElementById("open_tech_tree")) {
@@ -174,17 +175,11 @@ bool UI::Init()
             title->SetInnerRML(m_techTree->GetTitle());
         }
         m_techGrid = m_techTree->GetElementById("tech_grid");
-        m_techCurrencies = m_techTree->GetElementById("tech_currencies");
-
-        m_techHint = m_techTree->GetElementById("tech_hint");
-        m_techBuy = m_techTree->GetElementById("tech_buy");
-
-        if (m_techBuy) {
-            Listen(*m_techBuy, "click", [this](Rml::Event&) {
-                if (!m_onTechPick || m_selectedId == 0) return;
-                m_onTechPick(m_selectedId, m_techTab, m_selectedRank);
-            });
-        }
+        m_techFitted = m_techTree->GetElementById("tech_fitted");
+        m_techValue = m_techTree->GetElementById("tech_value");
+        m_supplyValue = m_techTree->GetElementById("supply_value");
+        m_techTip = m_techTree->GetElementById("tech_tip");
+        m_techNoticeElement = m_techTree->GetElementById("tech_notice");
 
         if (Rml::Element* tab = m_techTree->GetElementById("tab_ship")) {
             Listen(*tab, "click", [this](Rml::Event&) { SetTechTab(0); });
@@ -553,150 +548,24 @@ void UI::SetResearchReadout(float fraction, const std::string& text)
     m_researchValue->SetInnerRML(text);
 }
 
-// Node geometry, in the same density-independent units the document is
-// written in. Here rather than in RCSS because the code places the nodes: a
-// class per grid cell would be a stylesheet that has to be reissued every
-// time a line is added to upgrades.toml.
-static constexpr int NODE_WIDTH = 176;
-static constexpr int NODE_HEIGHT = 96;
-static constexpr int COL_PITCH = 216;
-static constexpr int ROW_PITCH = 112;
-
-static const char* RankClass(TechRankState state);
 static const char* RankNumeral(int rank);
 
-void UI::SetTechTree(const std::vector<TechNodeView>& nodes)
+// Pip colours are their own vocabulary, not the footer's: a pip says whether
+// this rank is owned, buyable, out of pocket or not researched, in one glance
+// and no words.
+static const char* PipClass(TechRankState state)
 {
-    if (nodes == m_shownNodes) return;
-    m_shownNodes = nodes;
-    RebuildTechTree();
+    switch (state) {
+    case TechRankState::Held:         return "fitted";
+    case TechRankState::Available:    return "buy";
+    case TechRankState::Unaffordable:
+    case TechRankState::NeedsLanding: return "poor";
+    default:                          return "";
+    }
 }
 
-void UI::RebuildTechTree()
-{
-    if (!m_techGrid) return;
-
-    // Where each node of the active tab sits, so a connector can find the one
-    // it hangs off without searching the list again per link.
-    struct Placed {
-        std::uint32_t id;
-        int x;
-        int y;
-    };
-    std::vector<Placed> placed;
-    std::string rml;
-
-    for (const TechNodeView& node : m_shownNodes) {
-        if (node.tab != m_techTab) continue;
-
-        const int x = node.col * COL_PITCH;
-        const int y = node.row * ROW_PITCH;
-        placed.push_back(Placed{node.id, x, y});
-
-        // A node reads as locked when nothing on it can be bought and nothing
-        // on it is held -- the prerequisite case, which is the only one worth
-        // fading the whole box for.
-        bool anyHeld = false;
-        bool anyOffered = false;
-        for (const TechRankView& rank : node.ranks) {
-            anyHeld = anyHeld || rank.state == TechRankState::Held;
-            anyOffered = anyOffered || rank.state != TechRankState::Locked;
-        }
-
-        std::string classes = "tech_node";
-        if (anyHeld) classes += " held";
-        else if (!anyOffered) classes += " locked";
-
-        rml += "<div class=\"" + classes + "\" style=\"left: " + std::to_string(x)
-               + "dp; top: " + std::to_string(y) + "dp;\">";
-        rml += "<div class=\"node_name\">" + node.name + "</div>";
-        rml += "<div class=\"node_desc\">" + node.description + "</div>";
-        rml += "<div class=\"node_ranks\">";
-        for (const TechRankView& rank : node.ranks) {
-            rml += "<div class=\"rank " + std::string(RankClass(rank.state)) + "\">"
-                   + std::string(RankNumeral(static_cast<int>(&rank - node.ranks.data()) + 1))
-                   + "</div>";
-        }
-        rml += "</div></div>";
-    }
-
-    // Connectors after the nodes: a prerequisite is always exactly one column
-    // left, so each run is a horizontal rule, a vertical one and another
-    // horizontal -- an elbow RCSS can draw, where a diagonal is not.
-    for (const TechNodeView& node : m_shownNodes) {
-        if (node.tab != m_techTab || node.requiresId == 0) continue;
-
-        const auto self = std::find_if(placed.begin(), placed.end(),
-                                       [&](const Placed& p) { return p.id == node.id; });
-        const auto parent = std::find_if(placed.begin(), placed.end(),
-                                         [&](const Placed& p) { return p.id == node.requiresId; });
-        if (self == placed.end() || parent == placed.end()) continue;
-
-        const int fromX = parent->x + NODE_WIDTH;
-        const int midY = parent->y + NODE_HEIGHT / 2;
-        const int toY = self->y + NODE_HEIGHT / 2;
-        const int gap = self->x - fromX;
-        if (gap <= 0) continue;
-        const int elbow = fromX + gap / 2;
-
-        rml += "<div class=\"link_h\" style=\"left: " + std::to_string(fromX) + "dp; top: "
-               + std::to_string(midY) + "dp; width: " + std::to_string(gap / 2) + "dp;\"></div>";
-        rml += "<div class=\"link_v\" style=\"left: " + std::to_string(elbow) + "dp; top: "
-               + std::to_string(std::min(midY, toY)) + "dp; height: "
-               + std::to_string(std::abs(toY - midY)) + "dp;\"></div>";
-        rml += "<div class=\"link_h\" style=\"left: " + std::to_string(elbow) + "dp; top: "
-               + std::to_string(toY) + "dp; width: " + std::to_string(gap - gap / 2) + "dp;\"></div>";
-    }
-
-    m_techGrid->SetInnerRML(rml);
-
-    // SetInnerRML destroyed the previous pips, so the handlers are attached to
-    // the fresh ones -- and the old handler objects dropped -- every rebuild.
-    // Only the buyable ones get one: a pip nobody can click needs no listener
-    // to tell them so.
-    m_techListeners.clear();
-    int child = 0;
-    for (const TechNodeView& node : m_shownNodes) {
-        if (node.tab != m_techTab) continue;
-        Rml::Element* box = m_techGrid->GetChild(child++);
-        if (!box) continue;
-        Rml::Element* ranks = box->GetChild(2); // name, desc, then the pips
-        if (!ranks) continue;
-
-        for (int i = 0; i < ranks->GetNumChildren(); ++i) {
-            if (static_cast<std::size_t>(i) >= node.ranks.size()) break;
-            Rml::Element* pip = ranks->GetChild(i);
-
-            // Every rank is selectable, buyable or not: the footer is where a
-            // rank gets to explain why it is out of reach, and that is worth
-            // more than a pip nobody can click.
-            const std::uint32_t id = node.id;
-            const int rank = i + 1;
-            if (id == m_selectedId && rank == m_selectedRank) pip->SetClass("selected", true);
-
-            m_techListeners.push_back(std::make_unique<FunctionListener>([this, id, rank](Rml::Event&) {
-                m_selectedId = id;
-                m_selectedRank = rank;
-                RebuildTechTree();
-            }));
-            pip->AddEventListener("click", m_techListeners.back().get());
-        }
-    }
-
-    RefreshTechFooter();
-}
-
-const TechNodeView* UI::SelectedNode() const
-{
-    if (m_selectedId == 0) return nullptr;
-    for (const TechNodeView& node : m_shownNodes) {
-        if (node.tab == m_techTab && node.id == m_selectedId) return &node;
-    }
-    return nullptr;
-}
-
-// Roman for the pips and the footer alike: a rank is a mark on a hull, not a
-// quantity, and "II" reads as one where "2" reads as two of something.
+// Roman on the pips and in the tooltip alike: a rank is a mark on a hull, not
+// a quantity, and "II" reads as one where "2" reads as two of something.
 static const char* RankNumeral(int rank)
 {
     switch (rank) {
@@ -712,6 +581,246 @@ static const char* RankNumeral(int rank)
     return "";
 }
 
+static std::string Upper(std::string text)
+{
+    for (char& c : text) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return text;
+}
+
+// The three role branches, in board order. Names and classes only -- what goes
+// in them is whatever the pool says belongs there (TechNodeView::branch).
+static constexpr const char* BRANCH_NAMES[] = {"WEAPONS", "MOBILITY", "DEFENSE"};
+static constexpr const char* BRANCH_CLASSES[] = {"weapons", "mobility", "defense"};
+static constexpr int BRANCH_COUNT = 3;
+
+void UI::SetTechTree(const std::vector<TechNodeView>& nodes)
+{
+    if (nodes == m_shownNodes) return;
+    m_shownNodes = nodes;
+    RebuildTechTree();
+}
+
+void UI::RebuildTechTree()
+{
+    if (!m_techGrid) return;
+
+    // Header count: how much of the whole board this hull (or this side) is
+    // carrying. Computed, never authored -- a new [[upgrade]] moves it.
+    int fittedTotal = 0;
+    int rankTotal = 0;
+    for (const TechNodeView& node : m_shownNodes) {
+        if (node.tab != m_techTab) continue;
+        fittedTotal += node.rank;
+        rankTotal += node.maxRank;
+    }
+    if (m_techFitted) {
+        m_techFitted->SetInnerRML("FITTED " + std::to_string(fittedTotal) + " / "
+                                  + std::to_string(rankTotal));
+    }
+
+    std::string rml;
+    for (int branch = 0; branch < BRANCH_COUNT; ++branch) {
+        int branchFitted = 0;
+        int branchTotal = 0;
+        for (const TechNodeView& node : m_shownNodes) {
+            if (node.tab != m_techTab || node.branch != branch) continue;
+            branchFitted += node.rank;
+            branchTotal += node.maxRank;
+        }
+
+        rml += "<div class=\"branch " + std::string(BRANCH_CLASSES[branch]) + "\">";
+        rml += "<div class=\"branch_head\"><span class=\"role\">" + std::string(BRANCH_NAMES[branch])
+               + "</span><span class=\"count\">" + std::to_string(branchFitted) + " / "
+               + std::to_string(branchTotal) + "</span></div>";
+
+        for (const TechNodeView& node : m_shownNodes) {
+            if (node.tab != m_techTab || node.branch != branch) continue;
+
+            bool anyHeld = false;
+            bool anyOffered = false;
+            for (const TechRankView& rank : node.ranks) {
+                anyHeld = anyHeld || rank.state == TechRankState::Held;
+                anyOffered = anyOffered || rank.state != TechRankState::Locked;
+            }
+            const bool fitted = node.rank > 0;
+            const bool dim = !fitted && !anyOffered;
+
+            // Only a node that genuinely hangs off another gets a run down to
+            // it. That is also what keeps the two shields unconnected: they
+            // are alternatives, and a line between them would read as one
+            // being progress toward the other.
+            if (node.requiresId != 0) {
+                rml += std::string("<div class=\"connector") + (dim ? " dim" : "") + "\"></div>";
+            }
+
+            std::string rowClass = "tile_row";
+            if (fitted) rowClass += " fitted";
+            else if (dim) rowClass += " dim";
+
+            std::string tileClass = "tile";
+            if (fitted) tileClass += " fitted";
+            else if (dim) tileClass += " dim";
+
+            // A restock has no rank to report, only that it can be bought
+            // again. No loaded font is guaranteed to carry U+21BB, so this
+            // says RE rather than risking a box.
+            const std::string counterText = std::to_string(node.rank) + "/"
+                                            + std::to_string(node.maxRank);
+
+            rml += "<div class=\"" + rowClass + "\">";
+            rml += "<div class=\"" + tileClass + "\">";
+            rml += "<div class=\"glyph\">" + Upper(node.icon) + "</div>";
+            rml += "<div class=\"counter\">" + counterText + "</div>";
+            rml += "</div>";
+            rml += "<div class=\"tile_text\"><span class=\"name\">" + node.name + "</span><div class=\"pips\">";
+            for (const TechRankView& rank : node.ranks) {
+                rml += "<div class=\"pip " + std::string(PipClass(rank.state)) + "\"></div>";
+            }
+            rml += "</div></div></div>";
+        }
+        rml += "</div>";
+    }
+
+    m_techGrid->SetInnerRML(rml);
+    AttachTechListeners();
+    RefreshTechFooter();
+}
+
+// SetInnerRML destroyed the previous elements, so the handlers go on the fresh
+// ones -- and the old handler objects are dropped -- on every rebuild. A tile
+// buys the next rank up; a pip buys the rank it is, which is the whole point
+// of a price that is absolute rather than a step.
+void UI::AttachTechListeners()
+{
+    m_techListeners.clear();
+    if (!m_techGrid) return;
+
+    for (int b = 0; b < m_techGrid->GetNumChildren(); ++b) {
+        Rml::Element* column = m_techGrid->GetChild(b);
+        int cursor = 0;
+        for (const TechNodeView& node : m_shownNodes) {
+            if (node.tab != m_techTab || node.branch != b) continue;
+
+            // The column holds a header, then a connector-and-row per node.
+            Rml::Element* row = nullptr;
+            for (int i = cursor + 1; i < column->GetNumChildren(); ++i) {
+                if (column->GetChild(i)->GetTagName() == "div"
+                    && column->GetChild(i)->IsClassSet("tile_row")) {
+                    row = column->GetChild(i);
+                    cursor = i;
+                    break;
+                }
+            }
+            if (!row) break;
+
+            const std::uint32_t id = node.id;
+
+            // Hover anywhere on the row raises the tooltip for it.
+            m_techListeners.push_back(std::make_unique<FunctionListener>([this, id](Rml::Event&) {
+                ShowTechTip(id);
+            }));
+            row->AddEventListener("mouseover", m_techListeners.back().get());
+            m_techListeners.push_back(std::make_unique<FunctionListener>([this](Rml::Event&) {
+                HideTechTip();
+            }));
+            row->AddEventListener("mouseout", m_techListeners.back().get());
+
+            // The tile: the next rank this track hasn't got.
+            if (Rml::Element* tile = row->GetChild(0)) {
+                int next = 0;
+                for (std::size_t i = 0; i < node.ranks.size(); ++i) {
+                    if (node.ranks[i].state == TechRankState::Available) {
+                        next = static_cast<int>(i) + 1;
+                        break;
+                    }
+                }
+                if (next != 0) {
+                    m_techListeners.push_back(
+                            std::make_unique<FunctionListener>([this, id, next](Rml::Event&) {
+                                if (m_onTechPick) m_onTechPick(id, m_techTab, next);
+                            }));
+                    tile->AddEventListener("click", m_techListeners.back().get());
+                }
+            }
+
+            Rml::Element* text = row->GetChild(1);
+            Rml::Element* pips = text ? text->GetChild(1) : nullptr;
+            if (!pips) continue;
+            for (int i = 0; i < pips->GetNumChildren(); ++i) {
+                if (static_cast<std::size_t>(i) >= node.ranks.size()) break;
+                if (node.ranks[static_cast<std::size_t>(i)].state != TechRankState::Available) continue;
+
+                const int rank = i + 1;
+                m_techListeners.push_back(
+                        std::make_unique<FunctionListener>([this, id, rank](Rml::Event&) {
+                            if (m_onTechPick) m_onTechPick(id, m_techTab, rank);
+                        }));
+                pips->GetChild(i)->AddEventListener("click", m_techListeners.back().get());
+            }
+        }
+    }
+}
+
+// All the prose lives here rather than on the board: the tiles carry an icon,
+// a rank count and a row of pips, and nothing else competes for the glance.
+void UI::ShowTechTip(std::uint32_t id)
+{
+    if (!m_techTip) return;
+
+    const TechNodeView* node = nullptr;
+    for (const TechNodeView& candidate : m_shownNodes) {
+        if (candidate.tab == m_techTab && candidate.id == id) node = &candidate;
+    }
+    if (!node) return;
+
+    // The rank the tooltip is about: the next one on offer, or the last one
+    // held if the line is finished.
+    std::size_t index = 0;
+    for (std::size_t i = 0; i < node->ranks.size(); ++i) {
+        index = i;
+        if (node->ranks[i].state != TechRankState::Held) break;
+    }
+    const TechRankView& rank = node->ranks[index];
+
+    const char* costClass = "unres";
+    switch (rank.state) {
+    case TechRankState::Held:         costClass = "paid"; break;
+    case TechRankState::Available:    costClass = "ok"; break;
+    case TechRankState::Unaffordable:
+    case TechRankState::NeedsLanding: costClass = "short"; break;
+    default:                          costClass = "unres"; break;
+    }
+
+    std::string body = node->description;
+    if (rank.state == TechRankState::Locked) body = "Locked -- fit what it bolts onto first.";
+    else if (rank.state == TechRankState::NotUnlocked) body = "Not researched. See the PERMANENT tab.";
+    else if (rank.state == TechRankState::NeedsLanding) body = "Land at one of your labs to fit this.";
+
+    std::string tip = "<div class=\"tip_head\"><span class=\"tip_title\">" + node->name + " "
+                      + RankNumeral(static_cast<int>(index) + 1) + "</span>";
+    tip += "<span class=\"tip_cost " + std::string(costClass) + "\">" + std::to_string(rank.cost)
+           + (m_techTab == 0 ? " SUP" : " TECH") + "</span></div>";
+    tip += "<div class=\"tip_body\">" + body + "</div>";
+
+    m_techTip->SetInnerRML(tip);
+    m_techTip->SetProperty("display", "block");
+}
+
+void UI::HideTechTip()
+{
+    if (m_techTip) m_techTip->SetProperty("display", "none");
+}
+
+// The design puts every word in the tooltip, so what is left down here is the
+// port's answer when it turns a purchase away -- and nothing else.
+void UI::RefreshTechFooter()
+{
+    if (!m_techNoticeElement) return;
+    m_techNoticeElement->SetInnerRML(m_techNotice.empty()
+                                             ? ""
+                                             : "PORT AUTHORITY &mdash; " + m_techNotice);
+}
+
 void UI::SetTechNotice(const std::string& text)
 {
     if (text == m_techNotice) return;
@@ -719,67 +828,11 @@ void UI::SetTechNotice(const std::string& text)
     RefreshTechFooter();
 }
 
-void UI::RefreshTechFooter()
+void UI::SetRefitHintVisible(bool visible)
 {
-    if (!m_techHint || !m_techBuy) return;
-
-    // A refusal outranks whatever the selection was going to say: it is the
-    // answer to the last thing the player actually did.
-    if (!m_techNotice.empty()) {
-        m_techBuy->SetProperty("display", "none");
-        m_techHint->SetInnerRML("<span style=\"color: #fc0;\">PORT AUTHORITY &mdash; "
-                                + m_techNotice + "</span>");
-        return;
-    }
-
-    const TechNodeView* node = SelectedNode();
-    const TechRankView* rank =
-            node && m_selectedRank >= 1 && static_cast<std::size_t>(m_selectedRank) <= node->ranks.size()
-                    ? &node->ranks[static_cast<std::size_t>(m_selectedRank - 1)]
-                    : nullptr;
-
-    if (!rank) {
-        m_techBuy->SetProperty("display", "none");
-        m_techHint->SetInnerRML(m_techTab == 0
-                                        ? "Pick a rank to fit. Fitting needs a landing at one of your labs."
-                                        : "Pick a rank to research. Your side can learn from anywhere.");
-        return;
-    }
-
-    const std::string label = node->name + " " + RankNumeral(m_selectedRank);
-    const std::string currency = m_techTab == 0 ? " SUP" : " TECH";
-
-    const char* reason = nullptr;
-    switch (rank->state) {
-    case TechRankState::Held:
-        reason = m_techTab == 0 ? "already fitted" : "already researched";
-        break;
-    case TechRankState::Locked:
-        reason = m_techTab == 0 ? "fit what it hangs off first" : "research what it hangs off first";
-        break;
-    case TechRankState::NotUnlocked:
-        reason = "your side has not researched this yet -- see PERMANENT";
-        break;
-    case TechRankState::Unaffordable:
-        reason = "not enough to spend";
-        break;
-    case TechRankState::NeedsLanding:
-        reason = "land at one of your labs, or hold station at its High Port";
-        break;
-    case TechRankState::Available:
-        break;
-    }
-
-    if (reason) {
-        m_techBuy->SetProperty("display", "none");
-        m_techHint->SetInnerRML(label + " &mdash; " + reason);
-        return;
-    }
-
-    m_techHint->SetInnerRML(label + " &mdash; " + node->description);
-    m_techBuy->SetProperty("display", "block");
-    m_techBuy->SetInnerRML((m_techTab == 0 ? "FIT &mdash; " : "RESEARCH &mdash; ")
-                           + std::to_string(rank->cost) + currency);
+    if (!m_refitHint || visible == m_refitHintShown) return;
+    m_refitHintShown = visible;
+    m_refitHint->SetProperty("display", visible ? "block" : "none");
 }
 
 void UI::SetTechTab(int tab)
@@ -790,19 +843,18 @@ void UI::SetTechTab(int tab)
     if (Rml::Element* permanent = m_techTree->GetElementById("tab_permanent")) {
         permanent->SetClass("active", tab == 1);
     }
+    HideTechTip();
     RebuildTechTree();
 }
 
 void UI::SetCurrencies(int tech, int supplies)
 {
-    if (!m_techCurrencies) return;
     if (tech == m_shownTech && supplies == m_shownSupplies) return;
-
     m_shownTech = tech;
     m_shownSupplies = supplies;
-    m_techCurrencies->SetInnerRML("TECH<span class=\"amount\">" + std::to_string(tech)
-                                  + "</span><span class=\"gap\"></span>SUPPLIES<span class=\"amount\">"
-                                  + std::to_string(supplies) + "</span>");
+
+    if (m_techValue) m_techValue->SetInnerRML(std::to_string(tech));
+    if (m_supplyValue) m_supplyValue->SetInnerRML(std::to_string(supplies));
 }
 
 void UI::SetTechPickCallback(std::function<void(std::uint32_t, int, int)> callback)

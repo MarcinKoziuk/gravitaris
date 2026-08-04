@@ -1,259 +1,320 @@
 <rml>
 	<head>
 		<title>Technology</title>
-		<link type="text/template" href="vector-window.rml" />
+		<link type="text/rcss" href="rml.rcss"/>
+		<link type="text/rcss" href="vector.rcss"/>
 		<style>
+			/* The chamfer is an overlay frame rather than a border: RCSS has no
+			   clip-path, and a rounded corner would be the wrong read. One PNG
+			   per state, since an image decorator cannot be tinted. Real icon
+			   art drops in over the hatch and leaves these alone. */
+			@spritesheet tech
+			{
+				src: tech-frame-normal.png;
+				tech-frame-normal: 0px 0px 54px 54px;
+			}
+			@spritesheet tech_fitted
+			{
+				src: tech-frame-fitted.png;
+				tech-frame-fitted: 0px 0px 54px 54px;
+			}
+			@spritesheet tech_dim
+			{
+				src: tech-frame-dim.png;
+				tech-frame-dim: 0px 0px 54px 54px;
+			}
+			@spritesheet tech_hatch
+			{
+				src: tech-hatch.png;
+				tech-hatch: 0px 0px 54px 54px;
+			}
+
+			/* Centred over live gameplay, which keeps running behind it. Not a
+			   draggable window: this is a screen you open, read and dismiss. */
 			body
 			{
-				width: 720dp;
-				height: 520dp;
+				width: 880dp;
+				height: auto;
 				margin: auto;
+				padding: 20dp 22dp 22dp 22dp;
+
+				background-color: #060d12f7;
+				border-width: 1dp;
+				border-color: #1b5a6b;
+				font-family: Chakra Petch;
 			}
 
-			/* The two trees are the same graph, so the tabs swap the grid's
-			   contents rather than sitting over two separate layouts. */
-			div#tech_tabs
-			{
-				display: flex;
-				margin-bottom: 10dp;
-			}
-
-			div#tech_tabs button
-			{
-				flex: 1 1 0;
-				display: block;
-				box-sizing: border-box;
-				margin: 0 4dp 0 0;
-				padding: 8dp 0;
-				font-size: 12dp;
-				letter-spacing: 3dp;
-			}
-
-			div#tech_tabs button.active
-			{
-				background-color: #0cf;
-				border-color: #bff;
-				color: #012;
-				font-effect: none;
-			}
-
-			/* Both counters on one line, right-aligned against the tabs. */
-			div#tech_currencies
-			{
-				display: flex;
-				justify-content: flex-end;
-				margin-bottom: 8dp;
-				font-size: 12dp;
-				letter-spacing: 2dp;
-				color: #588;
-			}
-
-			div#tech_currencies span.amount
-			{
-				margin-left: 6dp;
-				color: #bff;
-				font-weight: bold;
-			}
-
-			div#tech_currencies span.gap
-			{
-				width: 22dp;
-			}
-
-			/* Nodes are absolutely positioned off their derived col/row, so
-			   the grid needs to be a positioning context that scrolls when the
-			   pool outgrows the window. */
-			div#tech_grid
-			{
-				position: relative;
-				overflow: auto;
-				height: 396dp;
-			}
-
-			div.tech_node
+			/* Two brackets, not four -- the deliberate difference from the HUD
+			   frames, which wear all four. */
+			div.corner
 			{
 				position: absolute;
-				width: 176dp;
-				padding: 8dp;
-				box-sizing: border-box;
-
-				background-color: #0cf1;
-				border-width: 1dp;
-				border-color: #0cf4;
+				width: 14dp;
+				height: 14dp;
+				border-color: #56d9f2;
 			}
+			div.corner.tl { top: 0; left: 0; border-top-width: 2dp; border-left-width: 2dp; }
+			div.corner.br { bottom: 0; right: 0; border-bottom-width: 2dp; border-right-width: 2dp; }
 
-			div.tech_node.held
-			{
-				border-color: #0cf9;
-				background-color: #0cf2;
-			}
-
-			div.tech_node.locked
-			{
-				border-color: #3442;
-			}
-
-			div.node_name
-			{
-				color: #bff;
-				font-size: 12dp;
-				font-weight: bold;
-				letter-spacing: 2dp;
-			}
-
-			div.tech_node.locked div.node_name
-			{
-				color: #566;
-			}
-
-			div.node_desc
-			{
-				margin-top: 3dp;
-				color: #588;
-				font-size: 10dp;
-			}
-
-			/* The pips are the buttons: clicking one buys that rank at that
-			   rank's own price. */
-			div.node_ranks
-			{
-				display: flex;
-				margin-top: 6dp;
-			}
-
-			div.rank
-			{
-				flex: 0 0 auto;
-				width: 40dp;
-				margin-right: 4dp;
-				padding: 3dp 0;
-				text-align: center;
-
-				font-family: Share Tech Mono;
-				font-size: 10dp;
-				color: #566;
-				border-width: 1dp;
-				border-color: #3443;
-			}
-
-			div.rank.held
-			{
-				color: #012;
-				background-color: #0cf;
-				border-color: #0cf;
-			}
-
-			div.rank.available
-			{
-				color: #bff;
-				border-color: #0cf9;
-				cursor: pointer;
-			}
-
-			div.rank.available:hover
-			{
-				color: #012;
-				background-color: #bff;
-				border-color: #fff;
-			}
-
-			/* The pick, not the purchase: selection is deliberately its own
-			   state so a misclick costs nothing. */
-			div.rank.selected
-			{
-				color: #fc0;
-				background-color: #fc02;
-				border-color: #fc0;
-			}
-
-			/* Short of the price, or short of a landing: both are "not now"
-			   rather than "not ever", so they stay legible where a locked
-			   rank fades out. */
-			div.rank.unaffordable,
-			div.rank.needs_landing
-			{
-				color: #886;
-				border-color: #8863;
-			}
-
-			div.rank.not_unlocked
-			{
-				color: #647;
-				border-color: #6473;
-			}
-
-			/* Connectors: a node's prerequisite is always exactly one column
-			   left, so the run between them is a horizontal rule and a
-			   vertical one rather than a diagonal RCSS can't draw. */
-			div.link_h,
-			div.link_v
-			{
-				position: absolute;
-				background-color: #0cf5;
-			}
-
-			div.link_h { height: 1dp; }
-			div.link_v { width: 1dp; }
-
-			/* The footer says what is selected and what it costs, and
-			   carries the one button that spends anything. */
-			div#tech_footer
+			div#tech_header
 			{
 				display: flex;
 				align-items: center;
-				margin-top: 8dp;
+				padding-bottom: 12dp;
+				border-bottom-width: 1dp;
+				border-bottom-color: #123742;
 			}
 
-			div#tech_hint
+			span#tech_title
+			{
+				font-size: 17dp;
+				letter-spacing: 4.8dp;
+				color: #cff6ff;
+			}
+
+			span#tech_fitted
+			{
+				flex: 1 1 auto;
+				margin-left: 14dp;
+				font-size: 11dp;
+				letter-spacing: 2dp;
+				color: #2f6270;
+			}
+
+			div.currency
+			{
+				margin-right: 18dp;
+				text-align: right;
+			}
+			div.currency span.label
+			{
+				display: block;
+				font-size: 10dp;
+				letter-spacing: 1.8dp;
+				color: #3f7f90;
+			}
+			div.currency span.value
+			{
+				display: block;
+				font-size: 17dp;
+				color: #7fe4f5;
+			}
+
+			div#tech_tabs { display: flex; }
+			div#tech_tabs button
+			{
+				display: block;
+				margin: 0 0 0 6dp;
+				padding: 6dp 14dp;
+				font-size: 11dp;
+				letter-spacing: 2dp;
+
+				color: #3f8fa2;
+				background-color: transparent;
+				border-width: 1dp;
+				border-color: #1b5a6b;
+				font-effect: none;
+			}
+			div#tech_tabs button.active
+			{
+				color: #06121a;
+				background-color: #56d9f2;
+				border-color: #56d9f2;
+			}
+
+			/* Three equal branches. No `gap` in RCSS -- the spacing is a margin
+			   on each column, cleared on the last. */
+			div#tech_branches
+			{
+				display: flex;
+				margin-top: 16dp;
+			}
+			div.branch { flex: 1 1 0; margin-right: 18dp; }
+			div.branch:last-child { margin-right: 0; }
+
+			div.branch_head
+			{
+				display: flex;
+				align-items: center;
+				padding-bottom: 7dp;
+				border-bottom-width: 1dp;
+			}
+			div.branch_head span.role
+			{
+				flex: 1 1 auto;
+				font-size: 12dp;
+				letter-spacing: 2.6dp;
+			}
+			div.branch_head span.count
+			{
+				font-size: 10dp;
+				letter-spacing: 1.4dp;
+				color: #2f6270;
+			}
+
+			div.branch.weapons  div.branch_head { border-bottom-color: #56d9f2; }
+			div.branch.weapons  span.role { color: #56d9f2; }
+			div.branch.mobility div.branch_head { border-bottom-color: #8ee9fb; }
+			div.branch.mobility span.role { color: #8ee9fb; }
+			div.branch.defense  div.branch_head { border-bottom-color: #7fe4f5; }
+			div.branch.defense  span.role { color: #7fe4f5; }
+
+			/* One row per upgrade: tile, then name and pips beside it. */
+			div.tile_row
+			{
+				display: flex;
+				align-items: center;
+				padding: 7dp 0;
+			}
+
+			/* The run down to the tile below. Sits at the tile's centre line,
+			   and is simply absent on the first tile of a branch and between
+			   the two shields, which are alternatives rather than a ladder. */
+			div.connector
+			{
+				width: 1dp;
+				height: 14dp;
+				margin-left: 27dp;
+				background-color: #1b5a6b;
+			}
+			div.connector.dim { background-color: #12333c; }
+
+			div.tile
+			{
+				position: relative;
+				width: 54dp;
+				height: 54dp;
+				margin-right: 12dp;
+				decorator: image(tech-frame-normal);
+			}
+			div.tile.fitted { decorator: image(tech-frame-fitted); }
+			div.tile.dim    { decorator: image(tech-frame-dim); opacity: 0.75; }
+
+			/* The placeholder texture. Real art replaces this element's
+			   decorator and its three-letter code with a sprite. */
+			div.tile div.glyph
+			{
+				position: absolute;
+				top: 1dp; left: 1dp; right: 1dp; bottom: 1dp;
+				decorator: image(tech-hatch);
+
+				text-align: center;
+				line-height: 52dp;
+				font-size: 12dp;
+				letter-spacing: 1dp;
+				color: #7fe4f5;
+			}
+			div.tile.fitted div.glyph { color: #ffb340; }
+			div.tile.dim    div.glyph { color: #4a7a86; }
+
+			div.tile div.counter
+			{
+				position: absolute;
+				right: 3dp;
+				bottom: 2dp;
+				font-family: Share Tech Mono;
+				font-size: 9dp;
+				color: #7fe4f5;
+			}
+			div.tile.fitted div.counter { color: #ffb340; }
+			div.tile.dim    div.counter { color: #4a7a86; }
+
+			div.tile:hover { }
+
+			div.tile_text { flex: 1 1 auto; }
+
+			div.tile_text span.name
+			{
+				display: block;
+				font-size: 12dp;
+				letter-spacing: 1.4dp;
+				color: #cfeef7;
+			}
+			div.tile_row.fitted div.tile_text span.name { color: #ffb340; }
+			div.tile_row.dim    div.tile_text span.name { color: #3f7f90; }
+
+			/* One bar per rank, and each bar is a buy button: a rank's price is
+			   the whole price of that rank, so buying II directly when you
+			   cannot afford III has to be expressible. */
+			div.pips { display: flex; margin-top: 4dp; }
+			div.pip
+			{
+				width: 16dp;
+				height: 4dp;
+				margin-right: 3dp;
+				background-color: #10333c;
+			}
+			div.pip.fitted { background-color: #ffb340; }
+			div.pip.buy    { background-color: #2f8ea6; cursor: pointer; }
+			div.pip.poor   { background-color: #4a2c2c; }
+			div.pip.buy:hover { background-color: #7fe4f5; }
+
+			/* Anchored beside the hovered tile, written from code. */
+			div#tech_tip
+			{
+				position: absolute;
+				display: none;
+				width: 226dp;
+				padding: 9dp 11dp;
+				z-index: 10;
+
+				background-color: #030c11;
+				border-width: 1dp;
+				border-color: #56d9f2;
+			}
+			div#tech_tip div.tip_head
+			{
+				display: flex;
+				margin-bottom: 4dp;
+			}
+			div#tech_tip span.tip_title
 			{
 				flex: 1 1 auto;
 				font-size: 11dp;
+				letter-spacing: 1.5dp;
+				color: #8ee9fb;
+			}
+			div#tech_tip span.tip_cost { font-size: 10dp; }
+			div#tech_tip span.tip_cost.paid  { color: #ffb340; }
+			div#tech_tip span.tip_cost.ok    { color: #7fe4f5; }
+			div#tech_tip span.tip_cost.short { color: #8a5252; }
+			div#tech_tip span.tip_cost.unres { color: #2f6270; }
+			div#tech_tip div.tip_body
+			{
+				font-size: 10dp;
+				line-height: 15dp;
+				color: #9dc4cf;
+			}
+
+			div#tech_notice
+			{
+				margin-top: 14dp;
+				font-size: 11dp;
 				letter-spacing: 1dp;
-				color: #588;
-			}
-
-			/* Filled, unlike the tabs: this is the one control here that
-			   commits. Hidden outright when the selection cannot be bought --
-			   a button that never works is worse than no button. */
-			button#tech_buy
-			{
-				flex: 0 0 auto;
-				display: none;
-				box-sizing: border-box;
-				margin: 0;
-				padding: 8dp 16dp;
-				font-size: 12dp;
-				letter-spacing: 2dp;
-
-				background-color: #0cf;
-				color: #012;
-				font-effect: none;
-			}
-
-			button#tech_buy:hover
-			{
-				background-color: #bff;
-				border-color: #fff;
-				color: #012;
+				color: #fc0;
 			}
 		</style>
 	</head>
-	<body template="vector-window">
-		<div id="tech_tabs">
-			<button id="tab_ship" class="active">SHIP</button>
-			<button id="tab_permanent">PERMANENT</button>
+	<body>
+		<div class="corner tl"></div><div class="corner br"></div>
+
+		<div id="tech_header">
+			<span id="tech_title">TECHNOLOGY</span>
+			<span id="tech_fitted"></span>
+			<div class="currency"><span class="label">TECH</span><span id="tech_value" class="value">0</span></div>
+			<div class="currency"><span class="label">SUPPLY</span><span id="supply_value" class="value">0</span></div>
+			<div id="tech_tabs">
+				<button id="tab_ship" class="active">SHIP</button>
+				<button id="tab_permanent">PERMANENT</button>
+			</div>
 		</div>
 
-		<div id="tech_currencies"></div>
+		<!-- Branches and their tiles are written from code (UI::SetTechTree):
+		     everything is keyed by the toml `key`, so adding an [[upgrade]]
+		     adds a tile with no markup to touch. -->
+		<div id="tech_branches"></div>
 
-		<!-- Filled from code (UI::SetTechTree): nodes are placed off the
-		     depth-derived layout the catalog builds, so adding an upgrade to
-		     the toml places itself here with no markup to write. -->
-		<div id="tech_grid"></div>
-
-		<div id="tech_footer">
-			<div id="tech_hint"></div>
-			<button id="tech_buy"></button>
-		</div>
+		<div id="tech_notice"></div>
+		<div id="tech_tip"></div>
 	</body>
 </rml>

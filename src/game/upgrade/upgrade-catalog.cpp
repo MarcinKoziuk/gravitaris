@@ -95,6 +95,7 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
             def.id = ID(key->c_str());
             def.name = (*entry)["name"].value_or(*key);
             def.description = (*entry)["description"].value_or("");
+            def.icon = (*entry)["icon"].value_or(key->substr(0, std::min<std::size_t>(3, key->size())));
             def.maxLevel = static_cast<std::uint8_t>(
                     std::min<std::size_t>((*entry)["max_level"].value_or<std::uint8_t>(1),
                                           MAX_UPGRADE_RANKS));

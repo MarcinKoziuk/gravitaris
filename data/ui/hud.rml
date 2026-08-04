@@ -446,6 +446,29 @@
 
 			/* Sidebar button that opens the tech tree. Outlined rather
 			   than filled: it opens a window, it doesn't commit anything. */
+			/* Blinks while a refit is possible -- landed somewhere that fits
+			   parts, with something affordable to fit. Replaces the panel that
+			   used to open itself at you: it asks rather than interrupts. */
+			div#refit_hint
+			{
+				display: none;
+				margin-top: 10dp;
+				padding: 6dp 0;
+				text-align: center;
+
+				font-size: 11dp;
+				letter-spacing: 2dp;
+				color: #012;
+				background-color: #fc0;
+				animation: 1.1s cubic-in-out infinite alternate refit-blink;
+			}
+
+			@keyframes refit-blink
+			{
+				from { background-color: #fc0; }
+				to   { background-color: #fc06; }
+			}
+
 			button#open_tech_tree
 			{
 				display: block;
@@ -546,6 +569,7 @@
 							<span id="supplies_value" class="stat_value readout">0</span>
 						</div>
 					</div>
+					<div id="refit_hint">REFIT AVAILABLE &mdash; T</div>
 					<button id="open_tech_tree">Tech tree &mdash; T</button>
 				</div>
 

@@ -342,6 +342,18 @@ TechUnlocks CGame::OwnUnlocks()
     return unlocked;
 }
 
+// Three role branches over the six kinds. A map rather than a toml field:
+// there is nothing to author yet, and the day a branch stops matching a kind
+// is the day it earns one.
+static int BranchOf(UpgradeKind kind)
+{
+    switch (kind) {
+    case UpgradeKind::Boost:  return 1; // MOBILITY
+    case UpgradeKind::Shield: return 2; // DEFENSE
+    default:                  return 0; // WEAPONS
+    }
+}
+
 std::vector<CGame::TechNode> CGame::GetTechTree()
 {
     std::vector<TechNode> nodes;
@@ -368,6 +380,8 @@ std::vector<CGame::TechNode> CGame::GetTechTree()
             node.col = slot.col;
             node.row = slot.row;
             node.name = def.name;
+            node.icon = def.icon;
+            node.branch = BranchOf(def.kind);
             node.description = def.description;
             node.maxRank = ranks;
             node.cap = m_upgradeCatalog.UnlockedRank(def, unlocked);
