@@ -31,7 +31,10 @@ struct NetId;
 struct GravitySource;
 struct Orbit;
 struct ShipLoadout;
-struct UpgradeDraft;
+struct ResearchAccess;
+struct PilotAccount;
+struct PilotRef;
+struct FactionState;
 
 // upgrade
 struct UpgradeDef;

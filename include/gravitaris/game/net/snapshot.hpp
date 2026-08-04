@@ -104,19 +104,20 @@ struct EntityState {
     // once these are actually delta-compressed.
     std::uint8_t plateCount = 0;
     std::array<float, MAX_SHIELD_PLATES> plates{};
-    // The Lab draft this ship is being offered, if any (UpgradeDraft): three
-    // upgrade ids, all zero when there is nothing on the table. The client
-    // resolves them against its own copy of data/upgrades.toml.
-    UpgradeCatalog::Offers upgradeOffers{};
-    bool upgradeDraftAvailable = false;
+    // Whether this ship can commit a SHIP-tree purchase where it is standing
+    // (ResearchAccess). The client greys the tree out with it.
+    bool atLab = false;
+    // What this ship's pilot can spend (PilotAccount). Sent per ship rather
+    // than per peer because one snapshot serves every client -- so it is
+    // visible to everyone, which costs four bytes and reveals only how much
+    // shopping somebody has left to do.
+    std::uint32_t supplies = 0;
     StructureType structureType = StructureType::Base;
     float rawMaterials = 0.f;
     float finishedMaterials = 0.f;
     // Only written on a Lab (see Structure's own fields): what the client's
     // lab glow animates off.
     float researchProgress = 0.f;
-    std::uint8_t upgradesReady = 0;
-    std::uint8_t researchStockLevel = 0;
 
     // Non-zero when this entity rides a fixed-radius offset off a (possibly
     // moving) parent planet -- PlanetSurfaceAttachment (attachAngularSpeed
@@ -139,9 +140,20 @@ struct EntityState {
 // order is not stable, and a canonical order makes snapshots byte-comparable
 // and delta-able later), plus every buffered event newer than the seq the
 // writer was asked for.
+// A faction's own block. Sent for every side that has ever fielded anything,
+// so the PERMANENT tree still draws when a side has lost every lab -- which is
+// exactly when a player wants to look at it.
+struct FactionSnapshot {
+    std::uint8_t team = 0;
+    std::uint32_t techPoints = 0;
+    TechUnlocks unlocked;
+    bool defeated = false;
+};
+
 struct SnapshotData {
     std::uint64_t tick = 0;
     std::vector<EntityState> entities;
+    std::vector<FactionSnapshot> factions;
     std::vector<GameEvent> events;
 };
 

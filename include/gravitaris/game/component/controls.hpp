@@ -2,6 +2,9 @@
 
 #include <cstdint>
 
+#include <gravitaris/game/id.hpp>
+#include <gravitaris/game/upgrade/upgrade-def.hpp>
+
 namespace Gravitaris {
 
 // One tick's requested ship actions. Shared by Controls (resolved state the
@@ -21,10 +24,21 @@ struct ControlFlags {
     bool boost : 1 = false;
 };
 
-// Which of the Lab's three offers this tick's command accepts: 1..3, or 0 for
-// "no pick". Kept out of ControlFlags because it isn't a held state and needs
-// more than a bit -- see UpgradeDraft.
-using UpgradePick = std::uint8_t;
+// One tech-tree purchase this tick's command is committing. Kept out of
+// ControlFlags because it isn't a held state and needs far more than a bit --
+// see ResearchSystem.
+//
+// All three parts are load-bearing. The same def id names a node in both
+// trees, so `tab` is what separates "the faction learns this" from "this hull
+// fits it"; and the ship tree sells a rank outright rather than the next one
+// up, so `rank` is what lets a pilot buy II while holding III unlocked.
+struct TechPick {
+    id_t node = 0; // zero means no purchase this tick
+    TechTab tab = TechTab::Ship;
+    std::uint8_t rank = 0;
+
+    [[nodiscard]] bool IsSet() const { return node != 0 && rank != 0; }
+};
 
 // Written each tick by InputSystem from the entity's InputQueue, consumed by
 // ShipControlsSystem.
@@ -41,8 +55,8 @@ struct Controls {
     std::uint8_t gunMount = 0;
     std::uint8_t missileMount = 0;
     // One-shot, unlike actionFlags: ResearchSystem clears it the tick it acts
-    // on it, so a held key can't spend two upgrades.
-    UpgradePick upgradePick = 0;
+    // on it, so one click can't spend two purchases.
+    TechPick techPick;
 
     // The overburn's two timers, both in ticks (see UpgradeDef::Boost).
     // `boostTicks` is what is left of the current burn and is only ever

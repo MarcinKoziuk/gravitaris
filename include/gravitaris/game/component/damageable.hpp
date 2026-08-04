@@ -41,6 +41,11 @@ struct Damageable {
     // nothing has a side to blame (a crash, own shrapnel).
     DamageCause lastDamageCause = DamageCause::Unknown;
     TeamId lastDamageTeam = TeamId::None;
+    // Which pilot gets paid for this kill (PilotRef), beside the side that
+    // gets the kill-feed line. Zero when nobody is credited -- a crash, or
+    // ownerless shrapnel -- and also when a structure's turret did it, since
+    // a gun emplacement has no account to pay into.
+    std::uint32_t lastDamagePilotId = 0;
     // Cheated (chat's /god): hp still comes off normally, but DeathSystem puts
     // it back rather than destroying the hull -- one choke point catches every
     // damage source, suns and crashes included. Deliberately NOT serialized:

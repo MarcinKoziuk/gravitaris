@@ -36,6 +36,13 @@ protected:
     // every Spawn* method before the entity is returned.
     void AssignNetId(flecs::entity entity);
 
+    // A fresh pilot identity, which every spawned ship gets. Whoever respawns
+    // a pilot overwrites the PilotRef with the id that ship was flying under,
+    // so the account it built up carries over -- see NetServer's PeerState and
+    // Game::HandlePlayerRespawn. A ship nobody claims keeps the fresh one,
+    // which is what an AI wants: a new hull is a new pilot.
+    std::uint32_t AllocatePilotId() { return m_nextPilotId++; }
+
     // Shared setup for stars and planets: a kinematic body (per the Body's
     // physics.kinematic) tagged Planet, with a GravitySource attached when the
     // Body declares one.
@@ -51,6 +58,7 @@ protected:
 
 private:
     std::uint32_t m_nextNetId = 1; // 0 stays reserved as "invalid" (see NetId)
+    std::uint32_t m_nextPilotId = 1; // 0 stays reserved as "nobody" (see PilotRef)
     ankerl::unordered_dense::map<std::uint32_t, flecs::entity> m_netIdToEntity;
     flecs::observer m_netIdRemovedObserver;
 

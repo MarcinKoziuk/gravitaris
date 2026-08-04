@@ -36,14 +36,22 @@ cargo_one_raw_materials = 25.0
 [conquest]
 claim_ticks = 60
 
-# Seconds one Lab needs to finish an upgrade alone; N labs finish N times as
-# fast. Research is unfunded -- no materials cost yet.
+# Seconds one Lab needs to pay out a batch of Tech alone; N labs pay out N
+# times as fast. Research is unfunded -- no materials cost yet.
 #
-# stock_capacity is how many finished upgrades may wait uncollected before the
-# labs idle; the RESEARCH QUEUE upgrade widens it, to 10 at its last level.
+# Tech is the PERMANENT tree's currency, shared across the faction and
+# uncapped: nothing idles a lab, because the pressure to come home is that a
+# hull stays stock until its pilot lands, not that the side stops learning.
 [research]
-seconds_per_upgrade = 30.0
-stock_capacity = 3
+seconds_per_tech = 30.0
+tech_per_fill = 2
+
+# Supplies are the SHIP tree's currency and a pilot's own, banked across every
+# life. They accrue simply for being out there, and faster for winning fights;
+# spending them needs a landing, which is the whole of the come-home rule.
+[supplies]
+per_second = 0.6
+per_kill = 8
 
 # Hull per second restored to a ship standing on one of its own developed
 # planets (a Base and a Colony, the same pairing a respawn needs). Free --

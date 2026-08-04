@@ -73,6 +73,10 @@ class NetServer {
         // request, or auto-assigned) and kept across every respawn -- a
         // fresh ship after death must not silently switch sides.
         TeamId team = TeamId::Blue;
+        // Which pilot this peer is, kept across respawns so the Supplies they
+        // banked follow them onto the fresh hull (see PilotRef). Taken from
+        // the first ship they were given; zero until then.
+        std::uint32_t pilotId = 0;
     };
     ankerl::unordered_dense::map<PeerId, PeerState> m_peers;
 

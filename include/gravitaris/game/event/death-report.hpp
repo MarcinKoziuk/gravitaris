@@ -16,6 +16,10 @@ struct DeathReport {
     // The side credited with the kill, None when nothing is (a crash, or the
     // ownerless shrapnel of an earlier death).
     TeamId killerTeam = TeamId::None;
+    // The individual pilot credited, for paying Supplies into their account
+    // (PilotRef). Zero whenever killerTeam is None, and also when the kill
+    // belongs to a side rather than a person -- a turret, or shrapnel.
+    std::uint32_t killerPilotId = 0;
     DamageCause cause = DamageCause::Unknown;
 };
 

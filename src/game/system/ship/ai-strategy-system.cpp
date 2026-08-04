@@ -159,11 +159,12 @@ void AIStrategySystem::Update()
         }
     });
 
-    // An upgrade finished and waiting to be collected is a live reason to fly
-    // home, on its own -- see the `shopping` term below.
+    // Anything the side has learned to build is a live reason to fly home,
+    // since a hull can only be fitted at a lab -- see the `shopping` term
+    // below. Whether this pilot can afford it is its own business.
     std::array<bool, NUM_TEAMS> teamUpgradeReady{};
     m_registry.each([&](const FactionState& fs) {
-        teamUpgradeReady[static_cast<std::size_t>(fs.team)] = fs.upgradesReady > 0;
+        teamUpgradeReady[static_cast<std::size_t>(fs.team)] = AnyRankUnlocked(fs.unlocked);
     });
 
     const auto addStructure = [&](flecs::entity ent, const Damageable& hp, std::uint32_t planetNetId) {

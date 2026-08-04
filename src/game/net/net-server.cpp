@@ -5,6 +5,7 @@
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/component/callsign.hpp>
+#include <gravitaris/game/component/pilot-account.hpp>
 #include <gravitaris/game/net/byte-stream.hpp>
 #include <gravitaris/game/net/protocol.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
@@ -88,6 +89,10 @@ void NetServer::HandleRespawns()
         const id_t playerModel = "models/ships/fighter-1"_id;
         state.ship = m_entitySpawner.SpawnPlayer(playerModel, spawn->pos, state.team, spawn->vel, spawn->rot);
         state.ship.emplace<Callsign>(PeerCallsign(peer, state));
+        // The fresh hull spawned with a pilot identity of its own; overwrite
+        // it with the one this peer has been flying under, so the account it
+        // built up is still theirs.
+        if (state.pilotId != 0) state.ship.emplace<PilotRef>(PilotRef{state.pilotId});
 
         ServerWelcomePacket welcome;
         welcome.clientId = peer;
@@ -150,6 +155,9 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             const flecs::entity ship = m_entitySpawner.SpawnPlayer(playerModel, spawn.pos, it->second.team,
                                                                    spawn.vel, spawn.rot);
             ship.emplace<Callsign>(PeerCallsign(peer, it->second));
+            // Whatever identity this first hull spawned with is the one this
+            // peer keeps, so every later respawn finds the same account.
+            it->second.pilotId = ship.get<PilotRef>().pilotId;
             it->second.ship = ship;
             it->second.welcomed = true;
             it->second.lastQueuedInputTick = currentTick; // dead-man baseline: "joined now", not tick 0

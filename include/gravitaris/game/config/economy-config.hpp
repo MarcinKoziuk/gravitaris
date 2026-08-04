@@ -51,12 +51,18 @@ struct EconomyConfig {
     } conquest;
 
     struct Research {
-        // Seconds one Lab needs alone; N labs finish N times as fast.
-        double secondsPerUpgrade = 30.0;
-        // Finished upgrades a faction can leave uncollected before its labs
-        // idle. The RESEARCH QUEUE upgrade widens it from here.
-        int stockCapacity = 3;
+        // Seconds one Lab needs alone; N labs pay out N times as fast.
+        double secondsPerTech = 30.0;
+        // Technology points each fill of the bar pays into the faction's pool.
+        int techPerFill = 2;
     } research;
+
+    // A pilot's own currency, spent in the SHIP tree. Accrues wherever they
+    // are; only spending it needs a landing.
+    struct Supplies {
+        float perSecond = 0.6f;
+        int perKill = 8;
+    } supplies;
 
     // Hull restored to a ship standing on one of its faction's developed
     // planets (RepairSystem) -- the same Base+Colony pairing a respawn needs,

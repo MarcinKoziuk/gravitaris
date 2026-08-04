@@ -14,7 +14,9 @@
 #include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
-#include <gravitaris/game/component/upgrade-draft.hpp>
+#include <gravitaris/game/component/research-access.hpp>
+#include <gravitaris/game/component/pilot-account.hpp>
+#include <gravitaris/game/component/faction-state.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/input/input-command.hpp>
@@ -25,7 +27,7 @@ namespace Gravitaris {
 
 // Bump on any wire-layout change; ReadSnapshot rejects mismatches outright
 // (no cross-version compatibility until there's a reason to have it).
-static constexpr std::uint8_t SNAPSHOT_VERSION = 11; // v11: missile-bay tier, research queue depth
+static constexpr std::uint8_t SNAPSHOT_VERSION = 12; // v12: tech tree -- faction block, supplies, no draft
 
 // Sanity caps so a garbage buffer can't make ReadSnapshot allocate wildly.
 static constexpr std::uint32_t MAX_ENTITIES = 4096;
@@ -85,9 +87,8 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             state.plateCount = loadout->plateCount;
             state.plates = loadout->plates;
         }
-        if (const UpgradeDraft* draft = entity.try_get<UpgradeDraft>()) {
-            state.upgradeOffers = draft->offers;
-            state.upgradeDraftAvailable = draft->available;
+        if (const ResearchAccess* access = entity.try_get<ResearchAccess>()) {
+            state.atLab = access->atLab;
         }
         if (const GravitySource* source = entity.try_get<GravitySource>()) {
             state.gravityMass = static_cast<float>(source->mass);
@@ -111,8 +112,6 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             state.rawMaterials = structure->rawMaterials;
             state.finishedMaterials = structure->finishedMaterials;
             state.researchProgress = structure->researchProgress;
-            state.upgradesReady = structure->upgradesReady;
-            state.researchStockLevel = structure->researchStockLevel;
         }
         if (const PlanetSurfaceAttachment* attach = entity.try_get<PlanetSurfaceAttachment>()) {
             state.attachParentNetId = attach->planetNetId;
@@ -131,6 +130,31 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
 
     std::sort(out.entities.begin(), out.entities.end(),
               [](const EntityState& a, const EntityState& b) { return a.netId < b.netId; });
+
+    // A pilot's Supplies live on their own account entity, which has no NetId
+    // of its own -- so they are copied onto whichever hull that pilot is
+    // flying, which is the thing the client already tracks.
+    world.each([&](const PilotAccount& account) {
+        world.each([&](const NetId& netId, const PilotRef& ref) {
+            if (ref.pilotId != account.pilotId) return;
+            const auto it = std::lower_bound(out.entities.begin(), out.entities.end(), netId.value,
+                                             [](const EntityState& e, std::uint32_t id) {
+                                                 return e.netId < id;
+                                             });
+            if (it != out.entities.end() && it->netId == netId.value) it->supplies = account.supplies;
+        });
+    });
+
+    world.each([&](const FactionState& fs) {
+        FactionSnapshot f;
+        f.team = static_cast<std::uint8_t>(fs.team);
+        f.techPoints = fs.techPoints;
+        f.unlocked = fs.unlocked;
+        f.defeated = fs.defeated;
+        out.factions.push_back(f);
+    });
+    std::sort(out.factions.begin(), out.factions.end(),
+              [](const FactionSnapshot& a, const FactionSnapshot& b) { return a.team < b.team; });
 
     eventQueue.ConsumeSince(eventsSinceSeq, [&](const GameEvent& event) {
         out.events.push_back(event);
@@ -167,8 +191,8 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteF32(e.shieldHp);
         out.WriteU8(e.plateCount);
         for (std::uint8_t i = 0; i < e.plateCount; ++i) out.WriteF32(e.plates[i]);
-        for (const id_t offer : e.upgradeOffers) out.WriteU32(offer);
-        out.WriteU8(e.upgradeDraftAvailable ? 1 : 0);
+        out.WriteU8(e.atLab ? 1 : 0);
+        out.WriteU32(e.supplies);
         out.WriteF32(e.gravityMass);
         out.WriteF32(e.gravityMultiplier);
         out.WriteU8(e.isStar ? 1 : 0);
@@ -182,12 +206,18 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteF32(e.rawMaterials);
         out.WriteF32(e.finishedMaterials);
         out.WriteF32(e.researchProgress);
-        out.WriteU8(e.upgradesReady);
-        out.WriteU8(e.researchStockLevel);
         out.WriteU32(e.attachParentNetId);
         out.WriteF32(e.attachRadius);
         out.WriteF32(e.attachTheta);
         out.WriteF32(e.attachAngularSpeed);
+    }
+
+    out.WriteU8(static_cast<std::uint8_t>(snapshot.factions.size()));
+    for (const FactionSnapshot& f : snapshot.factions) {
+        out.WriteU8(f.team);
+        out.WriteU32(f.techPoints);
+        for (const std::uint8_t rank : f.unlocked.rank) out.WriteU8(rank);
+        out.WriteU8(f.defeated ? 1 : 0);
     }
 
     out.WriteU32(static_cast<std::uint32_t>(snapshot.events.size()));
@@ -262,8 +292,8 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
             const float charge = in.ReadF32();
             if (i < MAX_SHIELD_PLATES) e.plates[i] = charge;
         }
-        for (id_t& offer : e.upgradeOffers) offer = in.ReadU32();
-        e.upgradeDraftAvailable = in.ReadU8() != 0;
+        e.atLab = in.ReadU8() != 0;
+        e.supplies = in.ReadU32();
         e.gravityMass = in.ReadF32();
         e.gravityMultiplier = in.ReadF32();
         e.isStar = in.ReadU8() != 0;
@@ -277,13 +307,23 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.rawMaterials = in.ReadF32();
         e.finishedMaterials = in.ReadF32();
         e.researchProgress = in.ReadF32();
-        e.upgradesReady = in.ReadU8();
-        e.researchStockLevel = in.ReadU8();
         e.attachParentNetId = in.ReadU32();
         e.attachRadius = in.ReadF32();
         e.attachTheta = in.ReadF32();
         e.attachAngularSpeed = in.ReadF32();
         out.entities.push_back(e);
+    }
+
+    const std::uint8_t factionCount = in.ReadU8();
+    out.factions.clear();
+    out.factions.reserve(factionCount);
+    for (std::uint8_t i = 0; i < factionCount; ++i) {
+        FactionSnapshot f;
+        f.team = in.ReadU8();
+        f.techPoints = in.ReadU32();
+        for (std::uint8_t& rank : f.unlocked.rank) rank = in.ReadU8();
+        f.defeated = in.ReadU8() != 0;
+        out.factions.push_back(f);
     }
 
     const std::uint32_t eventCount = in.ReadU32();

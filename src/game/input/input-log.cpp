@@ -8,7 +8,7 @@
 namespace Gravitaris {
 
 static constexpr char          REPLAY_MAGIC[4] = {'G', 'R', 'P', 'L'};
-static constexpr std::uint32_t REPLAY_VERSION  = 2; // v2: +upgradePick
+static constexpr std::uint32_t REPLAY_VERSION  = 3; // v3: techPick replaces the draft slot
 
 template <typename T>
 static void WritePod(std::ostream& os, const T& value)
@@ -44,7 +44,9 @@ bool InputLog::Save(const std::string& path) const
     for (const InputCommand& cmd : m_commands) {
         WritePod(os, cmd.tick);
         WritePod(os, PackControlFlags(cmd.flags));
-        WritePod(os, cmd.upgradePick);
+        WritePod(os, cmd.techPick.node);
+        WritePod(os, static_cast<std::uint8_t>(cmd.techPick.tab));
+        WritePod(os, cmd.techPick.rank);
     }
 
     return static_cast<bool>(os);
@@ -72,8 +74,13 @@ bool InputLog::Load(const std::string& path)
     for (std::uint64_t i = 0; i < count; ++i) {
         InputCommand cmd;
         std::uint8_t packed = 0;
-        if (!ReadPod(is, cmd.tick) || !ReadPod(is, packed) || !ReadPod(is, cmd.upgradePick)) return false;
+        std::uint8_t tab = 0;
+        if (!ReadPod(is, cmd.tick) || !ReadPod(is, packed) || !ReadPod(is, cmd.techPick.node)
+            || !ReadPod(is, tab) || !ReadPod(is, cmd.techPick.rank)) {
+            return false;
+        }
         cmd.flags = UnpackControlFlags(packed);
+        cmd.techPick.tab = static_cast<TechTab>(tab);
         loaded.push_back(cmd);
     }
 

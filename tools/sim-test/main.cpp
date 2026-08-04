@@ -42,7 +42,8 @@
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/transform.hpp>
-#include <gravitaris/game/component/upgrade-draft.hpp>
+#include <gravitaris/game/component/research-access.hpp>
+#include <gravitaris/game/component/pilot-account.hpp>
 #include <gravitaris/game/event/death-report.hpp>
 #include <gravitaris/game/ai/ai-preset-library.hpp>
 #include <gravitaris/game/resource/body.hpp>
@@ -1326,12 +1327,23 @@ void TestPlanetsideStructureHits()
     fs.Shutdown();
 }
 
-// ResearchSystem: a faction's labs pool their progress (two finish sooner
-// than one), the bar's state is mirrored onto each lab for replication, and a
-// same-team ship landed at a lab's planet is offered a draft of three
-// upgrades, one of which it picks -- restarting research.
-// UpgradeCatalog: the pool loads, offers respect a maxed tier, and the
-// resolved stats move the right way with each level.
+// Fits a rank straight onto a hull, bypassing both currencies and the faction
+// gate: a test setting a ship up is exercising what the part does, not the
+// shop that sells it.
+static void FitFree(const UpgradeCatalog& catalog, const UpgradeDef& def, std::uint8_t rank,
+                    ShipLoadout& loadout)
+{
+    TechUnlocks all;
+    for (std::size_t i = 0; i < catalog.Defs().size(); ++i) {
+        all.rank[i] = UpgradeCatalog::RankCount(catalog.Defs()[i]);
+    }
+    std::uint32_t purse = UpgradeCatalog::SupplyCostOf(def, rank);
+    catalog.FitRank(def, rank, loadout, all, purse, /*atLab=*/true);
+}
+
+// UpgradeCatalog: the pool loads, the two rank tracks gate each other (a hull
+// may fit only what its faction has learned), a named rank is bought outright
+// at its own price, and the resolved stats move the right way with each rank.
 void TestUpgradeCatalog()
 {
     FilesystemPhysFS fs;
@@ -1346,6 +1358,15 @@ void TestUpgradeCatalog()
     const UpgradeDef* fireRate = catalog.FindKind(UpgradeKind::FireRate);
     Require(fireRate != nullptr, "catalog: the pool has a fire-rate upgrade");
 
+    // Every rank of everything, so the ship-tree assertions below are about
+    // the hull's own rules rather than about what the side happens to know.
+    TechUnlocks all;
+    for (std::size_t i = 0; i < catalog.Defs().size(); ++i) {
+        all.rank[i] = UpgradeCatalog::RankCount(catalog.Defs()[i]);
+    }
+    // Enough Supplies that nothing below is refused for being unaffordable.
+    constexpr std::uint32_t RICH = 100000;
+
     UpgradeLevels levels;
     const ShipStats base = catalog.ResolveStats(levels);
     Require(base.gun != nullptr && base.gun->id == catalog.Fitted().shipGun,
@@ -1355,8 +1376,14 @@ void TestUpgradeCatalog()
 
     levels.fireRate = fireRate->maxLevel;
     Require(catalog.ResolveStats(levels).fireCooldownTicks < base.fireCooldownTicks,
-            "catalog: fire-rate levels shorten the gun's cooldown");
-    Require(!catalog.IsEligible(*fireRate, levels), "catalog: a maxed tier stops being offered");
+            "catalog: fire-rate ranks shorten the gun's cooldown");
+    {
+        ShipLoadout maxed;
+        maxed.levels = levels;
+        const UpgradeCatalog::ShipContext ctx{&maxed, &all, RICH, true};
+        Require(catalog.ShipState(*fireRate, fireRate->maxLevel, ctx) == TechNodeState::Held,
+                "catalog: a rank already fitted is not for sale again");
+    }
 
     // The missile line: nothing to fire, nowhere to put rounds and no restock
     // on the table until a bay is fitted, and each tier widens all three.
@@ -1365,17 +1392,57 @@ void TestUpgradeCatalog()
     Require(bay != nullptr && rack != nullptr, "catalog: the pool has a missile bay and a restock");
     Require(base.missile == nullptr && base.missileCapacity == 0,
             "catalog: an unupgraded hull carries no launcher at all");
-    Require(!catalog.IsEligible(*rack, levels),
-            "catalog: rounds are not offered to a hull with nothing to fire them from");
 
     ShipLoadout racked;
-    Require(catalog.Apply(*bay, racked), "catalog: the bay can be fitted");
-    Require(catalog.IsEligible(*rack, racked.levels),
-            "catalog: the restock joins the table once the bay is fitted");
-    Require(catalog.IsEligible(*rack, racked.levels) && catalog.Apply(*rack, racked),
-            "catalog: a repeatable restock is always eligible once unlocked");
+    std::uint32_t purse = RICH;
+    {
+        const UpgradeCatalog::ShipContext ctx{&racked, &all, purse, true};
+        Require(catalog.ShipState(*rack, 1, ctx) == TechNodeState::Locked,
+                "catalog: rounds are not sold to a hull with nothing to fire them from");
+    }
+    Require(catalog.FitRank(*bay, 1, racked, all, purse, true), "catalog: the bay can be fitted");
+    Require(purse < RICH, "catalog: fitting a rank spends Supplies");
+    // The fitting comes with rounds in it, so the restock has nothing to sell
+    // until some have been spent.
+    Require(racked.missileAmmo == catalog.ResolveStats(racked.levels).missileCapacity,
+            "catalog: fitting the bay fills the rack it decides the width of");
+    {
+        const UpgradeCatalog::ShipContext ctx{&racked, &all, purse, true};
+        Require(catalog.ShipState(*rack, 1, ctx) == TechNodeState::Held,
+                "catalog: a full rack is not sold another reload");
+    }
+
+    racked.missileAmmo = 0;
+    {
+        const UpgradeCatalog::ShipContext ctx{&racked, &all, purse, true};
+        Require(catalog.ShipState(*rack, 1, ctx) == TechNodeState::Available,
+                "catalog: an empty rack is for sale a reload once the bay is fitted");
+    }
+    Require(catalog.FitRank(*rack, 1, racked, all, purse, true),
+            "catalog: a repeatable restock can always be bought again");
     Require(racked.missileAmmo == catalog.ResolveStats(racked.levels).missileCapacity,
             "catalog: a restock fills the rack the fitted bay decides, and no further");
+
+    // The two gates, each reported as itself so the UI can explain which one
+    // is in the way.
+    {
+        ShipLoadout gated;
+        TechUnlocks none;
+        const UpgradeCatalog::ShipContext locked{&gated, &none, RICH, true};
+        Require(catalog.ShipState(*bay, 1, locked) == TechNodeState::NotUnlocked,
+                "catalog: a hull cannot fit what its faction has not learned");
+        const UpgradeCatalog::ShipContext flying{&gated, &all, RICH, false};
+        Require(catalog.ShipState(*bay, 1, flying) == TechNodeState::NeedsLanding,
+                "catalog: fitting a part needs a landing");
+        const UpgradeCatalog::ShipContext broke{&gated, &all, 0, true};
+        Require(catalog.ShipState(*bay, 1, broke) == TechNodeState::Unaffordable,
+                "catalog: a rank nobody can pay for is not on offer");
+        std::uint32_t nothing = 0;
+        Require(!catalog.FitRank(*bay, 1, gated, all, nothing, true),
+                "catalog: a refused rank changes neither the hull nor the purse");
+        Require(gated.levels.missileTier == 0 && nothing == 0,
+                "catalog: ...and leaves both exactly as they were");
+    }
 
     const WeaponDef* previous = nullptr;
     int previousCapacity = 0;
@@ -1400,20 +1467,28 @@ void TestUpgradeCatalog()
     Require(previous->lifetimeSeconds <= 4.0, "catalog: even the top missile burns out in four seconds");
     Require(previousCapacity <= 12, "catalog: the widest rack is twelve rounds");
 
-    // Widening the research queue is the one faction-scope pick, so it lands
-    // on a levels block of its own and never on a hull.
-    const UpgradeDef* queue = catalog.FindKind(UpgradeKind::ResearchStock);
-    Require(queue != nullptr && queue->scope == UpgradeScope::Faction,
-            "catalog: the research queue is a faction-scope upgrade");
-    UpgradeLevels faction;
-    ShipLoadout hull;
-    Require(!catalog.Apply(*queue, hull), "catalog: a faction pick is not applied to a ship");
-    Require(catalog.ResearchStockCapacity(faction, 3) == 3, "catalog: an unwidened queue is the base");
-    for (std::uint8_t level = 0; level < queue->maxLevel; ++level) {
-        Require(catalog.ApplyFaction(*queue, faction), "catalog: the queue widens a level at a time");
+    // The PERMANENT tree is a ladder: ranks are learned in order, each spends
+    // Tech, and nothing is offered past the last one.
+    {
+        TechUnlocks unlocked;
+        std::uint32_t tech = 1000;
+        Require(catalog.PermanentState(*bay, 2, unlocked, tech) == TechNodeState::Locked,
+                "catalog: a side cannot skip to rank II of a line it has not started");
+        for (std::uint8_t rank = 1; rank <= bay->maxLevel; ++rank) {
+            Require(catalog.UnlockRank(*bay, rank, unlocked, tech),
+                    "catalog: the faction learns a line one rank at a time");
+        }
+        Require(catalog.UnlockedRank(*bay, unlocked) == bay->maxLevel,
+                "catalog: ...up to the line's last rank");
+        Require(!catalog.UnlockRank(*bay, static_cast<std::uint8_t>(bay->maxLevel + 1), unlocked, tech),
+                "catalog: and no further");
+        Require(tech < 1000, "catalog: learning a rank spends Tech");
+
+        std::uint32_t broke = 0;
+        TechUnlocks fresh;
+        Require(catalog.PermanentState(*bay, 1, fresh, broke) == TechNodeState::Unaffordable,
+                "catalog: a side short of Tech is told so rather than refused silently");
     }
-    Require(!catalog.ApplyFaction(*queue, faction), "catalog: the queue stops at its last level");
-    Require(catalog.ResearchStockCapacity(faction, 3) == 10, "catalog: a fully widened queue holds ten");
 
     const UpgradeDef* gun = catalog.FindKind(UpgradeKind::WeaponTier);
     Require(gun != nullptr && !gun->tiers.empty(), "catalog: the pool has a weapon-tier upgrade");
@@ -1458,22 +1533,44 @@ void TestUpgradeCatalog()
     const UpgradeDef* bubble = catalog.FindKind(UpgradeKind::Shield, ShieldType::Bubble);
     const UpgradeDef* plating = catalog.FindKind(UpgradeKind::Shield, ShieldType::Plating);
     Require(bubble && plating, "catalog: the pool has both shield types");
-    Require(catalog.Apply(*bubble, loadout) && catalog.Apply(*bubble, loadout),
-            "catalog: a shield stacks with itself");
+    std::uint32_t shieldPurse = RICH;
+    Require(catalog.FitRank(*bubble, 2, loadout, all, shieldPurse, true),
+            "catalog: a rank can be bought outright without owning the ones below it");
     Require(loadout.levels.shield == 2 && loadout.levels.shieldType == ShieldType::Bubble,
-            "catalog: stacking the same shield raises its tier");
+            "catalog: ...and the hull holds exactly the rank it paid for");
+    Require(RICH - shieldPurse == UpgradeCatalog::SupplyCostOf(*bubble, 2),
+            "catalog: a rank costs its own price, not the sum of the ranks below it");
     Require(catalog.ResolveStats(loadout.levels).shieldCapacity > 0.f,
             "catalog: a fitted shield resolves to a real capacity");
-    Require(catalog.Apply(*plating, loadout), "catalog: the other shield type can be swapped in");
+    Require(catalog.FitRank(*plating, 1, loadout, all, shieldPurse, true),
+            "catalog: the other shield type can be swapped in");
     Require(loadout.levels.shieldType == ShieldType::Plating && loadout.levels.shield == 1,
-            "catalog: swapping shield type starts the new emitter at tier 1");
+            "catalog: swapping shield type starts the new emitter at the rank bought");
 
-    // Distinct offers, drawn only from what is still eligible.
-    const UpgradeCatalog::Offers offers = catalog.RollOffers(UpgradeLevels{}, 12345u);
-    Require(offers[0] != offers[1] && offers[1] != offers[2] && offers[0] != offers[2],
-            "catalog: a draft never offers the same upgrade twice");
-    Require(catalog.RollOffers(UpgradeLevels{}, 12345u) == offers,
-            "catalog: the same seed rolls the same draft");
+    // The whole point of an absolute price: a pilot who has III unlocked but
+    // cannot afford it fits II instead of being locked out.
+    {
+        ShipLoadout thrifty;
+        const std::uint16_t cheap = UpgradeCatalog::SupplyCostOf(*bubble, 2);
+        const UpgradeCatalog::ShipContext ctx{&thrifty, &all, cheap, true};
+        Require(catalog.ShipState(*bubble, 3, ctx) == TechNodeState::Unaffordable
+                        && catalog.ShipState(*bubble, 2, ctx) == TechNodeState::Available,
+                "catalog: a hull short of the top rank is still sold the one below it");
+    }
+
+    // Layout: a def sits one column right of what it requires, which is what
+    // lets the tree draw a connector between them.
+    {
+        const std::size_t rackIndex = catalog.IndexOf(rack->id);
+        const std::size_t bayIndex = catalog.IndexOf(bay->id);
+        Require(rackIndex < catalog.Defs().size() && bayIndex < catalog.Defs().size(),
+                "catalog: every def has an index of its own");
+        Require(catalog.SlotOf(bayIndex).col == 0, "catalog: a def with no prerequisite is a root");
+        Require(catalog.SlotOf(rackIndex).col == catalog.SlotOf(bayIndex).col + 1,
+                "catalog: a def sits one column right of what it requires");
+        Require(catalog.TreeColumns() >= 2 && catalog.TreeRows() >= 1,
+                "catalog: the tree has a size to lay out");
+    }
 
     fs.Shutdown();
 }
@@ -1567,7 +1664,7 @@ void TestShields()
     flecs::entity target = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.}, TeamId::Blue);
     const UpgradeDef* bubble = game.GetUpgradeCatalog().FindKind(UpgradeKind::Shield, ShieldType::Bubble);
     Require(bubble != nullptr, "shields: the pool has a bubble shield");
-    game.GetUpgradeCatalog().Apply(*bubble, target.get_mut<ShipLoadout>());
+    FitFree(game.GetUpgradeCatalog(), *bubble, 1, target.get_mut<ShipLoadout>());
 
     // Charges from empty at the emitter's rate.
     for (int tick = 0; tick < 600; ++tick) game.Update();
@@ -1613,7 +1710,7 @@ void TestShields()
     // (stopped whole), or the leak fraction of it (through the plate).
     flecs::entity plated = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{4000., 0.},
                                                TeamId::Blue);
-    game.GetUpgradeCatalog().Apply(*plating, plated.get_mut<ShipLoadout>());
+    FitFree(game.GetUpgradeCatalog(), *plating, 1, plated.get_mut<ShipLoadout>());
     Require(IsPlated(plated.get<ShipLoadout>()), "shields: fighter-1 carries authored plates");
 
     // Under one plate's own charge, or the plate runs out first and both
@@ -1675,20 +1772,23 @@ void TestResearch()
 
     // One lab: a full research period's worth of ticks, no sooner.
     const int soloTicks =
-            static_cast<int>(game.GetEconomyConfig().research.secondsPerUpgrade / Game::PHYSICS_DELTA);
+            static_cast<int>(game.GetEconomyConfig().research.secondsPerTech / Game::PHYSICS_DELTA);
     for (int tick = 0; tick < soloTicks - 1; ++tick) game.Update();
-    Require(research().upgradesReady == 0, "research: one lab is not done before its research period");
+    Require(research().techPoints == 0, "research: one lab pays out nothing before its period");
     Require(lab.get<Structure>().researchProgress > 0.9f,
             "research: the lab mirrors its faction's progress for replication");
-    for (int tick = 0; tick < 5 && research().upgradesReady == 0; ++tick) game.Update();
-    Require(research().upgradesReady == 1, "research: one lab finishes after its research period");
-    Require(lab.get<Structure>().upgradesReady == 1, "research: the queue depth reaches the lab too");
+    for (int tick = 0; tick < 5 && research().techPoints == 0; ++tick) game.Update();
+    Require(research().techPoints == static_cast<std::uint32_t>(game.GetEconomyConfig().research.techPerFill),
+            "research: a filled bar pays tech_per_fill into the faction's pool");
 
-    // Nobody landed, so it just waits.
-    for (int tick = 0; tick < 60; ++tick) game.Update();
-    Require(research().upgradesReady > 0, "research: a finished upgrade waits until someone collects it");
+    // Nothing idles the labs. What grows is not necessarily the pool, though:
+    // a side with nobody reading the tree commits its own Tech, which is the
+    // only thing stopping an AI faction flying stock hulls all match.
+    for (int tick = 0; tick < soloTicks + 5; ++tick) game.Update();
+    Require(AnyRankUnlocked(research().unlocked),
+            "research: a side with no human pilot researches on its own");
 
-    // Pickup: same setup TestLandingAndClaiming uses to get a ship down
+    // Landing: same setup TestLandingAndClaiming uses to get a ship down
     // gently, on the planet the lab sits on.
     const float planetRadius = planet.get<Planet>().radius
             * static_cast<float>(planet.get<Transform>().scale.x());
@@ -1698,92 +1798,125 @@ void TestResearch()
     cpBodySetAngle(shipBody, CP_PI);
     cpBodySetVelocity(shipBody, cpv(0., -8.));
 
-    // A player ship picks nothing on its own, so hold "accept offer 1" down:
-    // the pick is ignored on every tick there is no draft open.
-    const auto pressPick = [&](std::uint8_t slot) {
+    const auto pressPick = [&](const UpgradeDef& def, TechTab tab, std::uint8_t rank) {
         InputCommand cmd;
         cmd.tick = game.GetStep();
-        cmd.upgradePick = slot;
+        cmd.techPick = TechPick{def.id, tab, rank};
         ship.get_mut<InputQueue>().Push(cmd);
     };
+    const auto supplies = [&] {
+        const PilotRef& ref = ship.get<PilotRef>();
+        std::uint32_t found = 0;
+        game.GetRegistry().each([&](const PilotAccount& account) {
+            if (account.pilotId == ref.pilotId) found = account.supplies;
+        });
+        return found;
+    };
 
-    // Touchdown with nothing pressed: the draft opens and stays open, which
-    // is what gives the player time to read it.
-    for (int tick = 0; tick < 900 && ship.is_alive() && !ship.get<UpgradeDraft>().available; ++tick) {
+    for (int tick = 0; tick < 900 && ship.is_alive() && !ship.get<ResearchAccess>().atLab; ++tick) {
         game.Update();
     }
-    Require(ship.is_alive(), "research: the collecting ship survives touchdown");
-    Require(ship.get<UpgradeDraft>().available,
-            "research: landing at the lab's planet opens a draft on the ship");
+    Require(ship.is_alive(), "research: the landing ship survives touchdown");
+    Require(ship.get<ResearchAccess>().atLab,
+            "research: landing at the lab's planet opens the yard to this ship");
+    // Supplies accrue slowly enough that a touchdown this quick banks nothing
+    // yet, so this is measured over a stretch rather than at the moment of
+    // landing.
+    const std::uint32_t supplyBefore = supplies();
+    for (int tick = 0; tick < 300; ++tick) game.Update();
+    Require(supplies() > supplyBefore,
+            "research: a pilot accrues Supplies simply for being out there");
 
-    const UpgradeCatalog::Offers offers = ship.get<UpgradeDraft>().offers;
-    Require(offers[0] != 0 && offers[1] != 0 && offers[2] != 0,
-            "research: the draft is filled from the pool");
-    Require(offers[0] != offers[1] && offers[1] != offers[2] && offers[0] != offers[2],
-            "research: the three offers are distinct");
-
-    for (int tick = 0; tick < 30 && ship.get<UpgradeDraft>().available; ++tick) game.Update();
-    Require(ship.get<UpgradeDraft>().available, "research: an unanswered draft stays open");
-
-    // Bouncing off the pad and settling back must not cost the panel: the
-    // offers survive the hop, so eligibility has to come back with the ship
-    // rather than only being granted on the tick the three were first rolled
-    // (which left the player keying blind at a panel that never returned).
-    cpBodySetVelocity(shipBody, cpv(0., 30.));
-    bool leftThePad = false;
-    for (int tick = 0; tick < 60 && !leftThePad; ++tick) {
-        game.Update();
-        leftThePad = !ship.get<UpgradeDraft>().available;
+    // From here the side has a human pilot, so it stops researching for
+    // itself -- but it has been at it for two periods already. Wound back so
+    // the assertions below are about what this pilot buys rather than about
+    // what the AI got round to first.
+    game.GetRegistry().each([&](FactionState& fs2) {
+        if (fs2.team != TeamId::Blue) return;
+        fs2.unlocked = {};
+        fs2.techPoints = 1000;
+    });
+    // And a purse deep enough that nothing below is refused for being
+    // unaffordable -- what is under test here is the two gates, not the price.
+    {
+        const PilotRef& ref = ship.get<PilotRef>();
+        game.GetRegistry().each([&](PilotAccount& account) {
+            if (account.pilotId == ref.pilotId) account.supplies = 1000;
+        });
     }
-    Require(leftThePad, "research: leaving the pad closes the panel");
-    Require(offers == ship.get<UpgradeDraft>().offers,
-            "research: the rolled offers survive a bounce off the pad");
 
-    for (int tick = 0; tick < 600 && !ship.get<UpgradeDraft>().available; ++tick) game.Update();
-    Require(ship.get<UpgradeDraft>().available,
-            "research: settling back at the lab re-opens the same panel");
+    // The PERMANENT tree commits from anywhere, so it is exercised first --
+    // and nothing in the SHIP tree can be bought until it has.
+    const UpgradeDef* bay = game.GetUpgradeCatalog().FindKind(UpgradeKind::MissileTier);
+    Require(bay != nullptr, "research: the pool has a missile bay");
 
-    // The bar behind a finished upgrade keeps filling while it waits, so what
-    // a pick costs is one place in the queue -- not whatever the labs have
-    // done since.
-    const std::uint8_t queuedBefore = research().upgradesReady;
+    for (int tick = 0; tick < 10; ++tick) {
+        pressPick(*bay, TechTab::Ship, 1);
+        game.Update();
+    }
+    Require(ship.get<ShipLoadout>().levels.missileTier == 0,
+            "research: a hull cannot fit what its faction has not learned");
+
+    for (int tick = 0; tick < 10 && research().unlocked.rank[game.GetUpgradeCatalog().IndexOf(bay->id)] == 0;
+         ++tick) {
+        pressPick(*bay, TechTab::Permanent, 1);
+        game.Update();
+    }
+    Require(research().unlocked.rank[game.GetUpgradeCatalog().IndexOf(bay->id)] == 1,
+            "research: the PERMANENT tree spends Tech to unlock a rank for the side");
+
+    // Now the same purchase lands, and costs Supplies rather than Tech.
+    const std::uint32_t purseBefore = supplies();
     std::uint32_t collectedSeq = 0;
     for (int tick = 0; tick < 60 && ship.is_alive() && !collectedSeq; ++tick) {
-        pressPick(1);
+        pressPick(*bay, TechTab::Ship, 1);
         game.Update();
         game.GetEventQueue().ConsumeSince(0, [&](const GameEvent& event) {
             if (event.type == GameEventType::UpgradeCollected) collectedSeq = event.seq;
         });
     }
-    Require(collectedSeq != 0, "research: picking an offer emits UpgradeCollected");
-    Require(research().upgradesReady == queuedBefore - 1,
-            "research: collecting spends one place in the queue");
-    Require(!ship.get<UpgradeDraft>().available || research().upgradesReady > 0,
-            "research: the draft closes once the queue is empty");
+    Require(collectedSeq != 0, "research: fitting a rank emits UpgradeCollected");
+    Require(ship.get<ShipLoadout>().levels.missileTier == 1,
+            "research: ...and the hull is carrying it");
+    Require(supplies() < purseBefore, "research: fitting a rank spends the pilot's own Supplies");
 
-    // Second lab: the pooled bar now fills twice as fast, and the still
-    // -landed ship collects again.
+    // Leaving the pad closes the yard, and the tree cannot be bought from
+    // while it is shut -- but Tech still commits, since learning a part needs
+    // no landing at all.
+    cpBodySetVelocity(shipBody, cpv(0., 30.));
+    bool leftThePad = false;
+    for (int tick = 0; tick < 120 && !leftThePad; ++tick) {
+        game.Update();
+        leftThePad = !ship.get<ResearchAccess>().atLab;
+    }
+    Require(leftThePad, "research: leaving the pad closes the yard");
+
+    const std::uint8_t rankInFlight = 2;
+    for (int tick = 0; tick < 10; ++tick) {
+        pressPick(*bay, TechTab::Permanent, rankInFlight);
+        game.Update();
+    }
+    Require(research().unlocked.rank[game.GetUpgradeCatalog().IndexOf(bay->id)] == rankInFlight,
+            "research: the PERMANENT tree commits in flight");
+
+    for (int tick = 0; tick < 10; ++tick) {
+        pressPick(*bay, TechTab::Ship, rankInFlight);
+        game.Update();
+    }
+    Require(ship.get<ShipLoadout>().levels.missileTier == 1,
+            "research: the SHIP tree does not, however much the side knows");
+
+    // Second lab: the pooled bar fills twice as fast.
+    const std::uint32_t techBefore = research().techPoints;
     spawner.SpawnStructure(StructureType::Lab, "models/structures/lab"_id, planet, TeamId::Blue);
     int secondCycleTicks = 0;
-    std::uint32_t nextSeq = 0;
-    for (int tick = 0; tick < soloTicks && !nextSeq; ++tick) {
-        pressPick(1);
+    for (int tick = 0; tick < soloTicks && research().techPoints == techBefore; ++tick) {
         game.Update();
         ++secondCycleTicks;
-        game.GetEventQueue().ConsumeSince(collectedSeq, [&](const GameEvent& event) {
-            if (event.type == GameEventType::UpgradeCollected) nextSeq = event.seq;
-        });
     }
-    Require(nextSeq != 0, "research: a second upgrade comes round after the first is collected");
+    Require(research().techPoints > techBefore,
+            "research: a second payout comes round");
     Require(secondCycleTicks < soloTicks * 3 / 4, "research: two labs research faster than one");
-
-    // Both pickups landed on the same ship. Which two upgrades the draft
-    // rolled is deliberately not asserted -- it is seeded off the tick and
-    // the ship's NetId -- but something must have landed on the loadout.
-    const ShipLoadout& collected = ship.get<ShipLoadout>();
-    Require(collected.missileAmmo > 0 || collected.levels.fireRate > 0 || collected.levels.gunTier > 0
-                    || collected.levels.shield > 0,
-            "research: collecting an upgrade changes the ship's loadout");
 
     // Missiles from here on, whether or not the draft happened to offer them:
     // the bay is what fits a launcher at all, so it goes on before the rounds.
@@ -1853,9 +1986,9 @@ void TestResearch()
     fs.Shutdown();
 }
 
-// A faction that never comes home banks a bounded queue of finished upgrades
-// and then idles its labs, rather than saving up a whole match's worth for
-// whoever lands first.
+// Nothing idles a lab. A faction whose pilots never come home keeps earning
+// for the whole match -- what a stock airframe costs them is the pressure to
+// land, not a bar that stops.
 void TestResearchQueue()
 {
     FilesystemPhysFS fs;
@@ -1879,17 +2012,25 @@ void TestResearchQueue()
         return found;
     };
 
-    const int capacity = game.GetEconomyConfig().research.stockCapacity;
-    Require(capacity == 3, "research: three finished upgrades may wait by default");
-
     const int soloTicks =
-            static_cast<int>(game.GetEconomyConfig().research.secondsPerUpgrade / Game::PHYSICS_DELTA);
-    // A period per upgrade plus one more, so a queue that did not stop would
-    // be over its capacity by the end rather than exactly at it.
-    for (int tick = 0; tick < soloTicks * (capacity + 1) + 10; ++tick) game.Update();
+            static_cast<int>(game.GetEconomyConfig().research.secondsPerTech / Game::PHYSICS_DELTA);
 
-    Require(research().upgradesReady == capacity, "research: the queue fills to its capacity and stops");
-    Require(research().researchProgress < 1.f, "research: a full queue leaves the bar short of done");
+    // What the side is worth: banked Tech plus everything it has already spent
+    // on learning. Measured together because a side with nobody reading the
+    // tree commits its own points, so the pool alone can sit flat while the
+    // labs are working perfectly well.
+    const auto earned = [&] {
+        int total = static_cast<int>(research().techPoints);
+        for (const std::uint8_t rank : research().unlocked.rank) total += rank;
+        return total;
+    };
+
+    for (int tick = 0; tick < soloTicks * 2 + 10; ++tick) game.Update();
+    const int early = earned();
+    Require(early > 0, "research: a lab with nobody home still pays out");
+
+    for (int tick = 0; tick < soloTicks * 2 + 10; ++tick) game.Update();
+    Require(earned() > early, "research: and keeps paying out -- nothing caps it, nothing idles it");
 
     fs.Shutdown();
 }
@@ -2168,16 +2309,17 @@ void TestCheats()
     Require(!IsCheatCommand("god"), "cheat: ordinary chat is not a command");
     Require(!run("/nonsense").reply.empty(), "cheat: an unknown command still answers");
 
-    // Research: straight into the faction's collection queue, which is what a
-    // lab would have filled.
-    run("/research 3");
-    int ready = 0;
+    // Tech: straight into the faction's pool, which is what a lab would have
+    // paid in.
+    run("/tech 3");
+    std::uint32_t tech = 0;
     game.GetRegistry().each([&](const FactionState& faction) {
-        if (faction.team == TeamId::Blue) ready = faction.upgradesReady;
+        if (faction.team == TeamId::Blue) tech = faction.techPoints;
     });
-    Require(ready == 3, "cheat: /research queues finished upgrades for the faction");
+    Require(tech == 3, "cheat: /tech pays into the faction's pool");
 
-    // Upgrades land on the hull directly, bypassing the draft entirely.
+    // Upgrades land on the hull directly, bypassing both currencies and the
+    // faction gate entirely.
     run("/upgrade bubble_shield");
     Require(ship.get<ShipLoadout>().levels.shieldType == ShieldType::Bubble,
             "cheat: /upgrade fits a named upgrade straight onto the ship");
@@ -2346,7 +2488,7 @@ void TestBoost()
     Require(speed() <= hullMaxSpeed * 1.02,
             "boost: an unupgraded hull is still held to its own top speed");
 
-    catalog.Apply(*def, ship.get_mut<ShipLoadout>());
+    FitFree(catalog, *def, 1, ship.get_mut<ShipLoadout>());
     const ShipStats stats = catalog.ResolveStats(ship.get<ShipLoadout>().levels);
     Require(stats.boostTicks > 0 && stats.boostCooldownTicks > 0,
             "boost: the fitted upgrade resolves to a real burn and a real wait");
@@ -2809,7 +2951,7 @@ void TestAIUsesItsUpgrades()
 
         const UpgradeDef* boost = game.GetUpgradeCatalog().FindKind(UpgradeKind::Boost);
         Require(boost != nullptr, "ai upgrades: the pool has a boost upgrade (setup check)");
-        game.GetUpgradeCatalog().Apply(*boost, pilot.get_mut<ShipLoadout>());
+        FitFree(game.GetUpgradeCatalog(), *boost, 1, pilot.get_mut<ShipLoadout>());
 
         bool burned = false;
         for (int tick = 0; tick < 600 && pilot.is_alive() && !burned; ++tick) {

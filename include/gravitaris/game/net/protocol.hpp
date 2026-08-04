@@ -27,7 +27,7 @@ enum class PacketType : std::uint8_t {
     ChatMessage = 8, // server -> clients, that line attributed to its sender
 };
 
-inline constexpr std::uint32_t PROTOCOL_VERSION = 5; // v5: +chat
+inline constexpr std::uint32_t PROTOCOL_VERSION = 6; // v6: tech-tree pick replaces the draft slot
 
 // How many trailing commands ClientInput carries per send -- redundancy
 // instead of reliability (quake3-style): as long as one of the last N sends

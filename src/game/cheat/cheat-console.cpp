@@ -13,6 +13,7 @@
 #include <gravitaris/game/component/callsign.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/faction-state.hpp>
+#include <gravitaris/game/component/pilot-account.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/component/transform.hpp>
@@ -35,6 +36,7 @@ static constexpr double TP_STANDOFF = 90.;
 
 static std::vector<std::string> Tokenize(const std::string& text);
 static FactionState* FindFaction(flecs::world& registry, TeamId team);
+static PilotAccount* FindAccount(flecs::world& registry, flecs::entity ship);
 static flecs::entity FindCallsign(flecs::world& registry, const std::string& lowercaseName);
 static std::string Lowercase(std::string text);
 static bool ParseInt(const std::string& token, int& out);
@@ -69,7 +71,8 @@ struct Cheat {
 } // namespace
 
 static void CheatHelp(Cheat& c);
-static void CheatResearch(Cheat& c);
+static void CheatTech(Cheat& c);
+static void CheatSupplies(Cheat& c);
 static void CheatUpgrade(Cheat& c);
 static void CheatHeal(Cheat& c);
 static void CheatGod(Cheat& c);
@@ -120,7 +123,8 @@ CheatResult RunCheatCommand(Game& game, flecs::entity subject, TeamId team, cons
 
     const std::string& verb = args[0];
     if (verb == "help" || verb == "cheats") CheatHelp(cheat);
-    else if (verb == "research") CheatResearch(cheat);
+    else if (verb == "tech") CheatTech(cheat);
+    else if (verb == "supplies") CheatSupplies(cheat);
     else if (verb == "upgrade") CheatUpgrade(cheat);
     else if (verb == "heal") CheatHeal(cheat);
     else if (verb == "god") CheatGod(cheat);
@@ -141,7 +145,8 @@ CheatResult RunCheatCommand(Game& game, flecs::entity subject, TeamId team, cons
 static void CheatHelp(Cheat& c)
 {
     c.Say("cheats (everyone, always):");
-    c.Say("/research [n] - drop n finished upgrades into your faction's queue");
+    c.Say("/tech [n] - n technology points into your faction's pool");
+    c.Say("/supplies [n] - n supplies into your own account");
     c.Say("/upgrade <key|all|list> [n] - fit one straight onto your ship");
     c.Say("/heal - hull and shields back to full");
     c.Say("/god - stop dying (lost on respawn)");
@@ -156,7 +161,7 @@ static void CheatHelp(Cheat& c)
     c.Say("add @<player> to any of the above to run it on their ship instead");
 }
 
-static void CheatResearch(Cheat& c)
+static void CheatTech(Cheat& c)
 {
     FactionState* faction = FindFaction(c.game.GetRegistry(), c.team);
     if (!faction) {
@@ -164,13 +169,25 @@ static void CheatResearch(Cheat& c)
         return;
     }
 
-    const int count = std::clamp(c.IntArg(1, 1), 1, MAX_BULK);
-    faction->upgradesReady = static_cast<std::uint8_t>(
-            std::min(255, static_cast<int>(faction->upgradesReady) + count));
-    faction->researchProgress = 0.f;
+    const int count = std::clamp(c.IntArg(1, 10), 1, MAX_BULK);
+    faction->techPoints += static_cast<std::uint32_t>(count);
 
-    c.Say(Format("research: %d waiting to be collected (land at a lab or high port)",
-                 static_cast<int>(faction->upgradesReady)));
+    c.Say(Format("tech: %u to spend in the PERMANENT tree", faction->techPoints));
+}
+
+static void CheatSupplies(Cheat& c)
+{
+    PilotAccount* account = FindAccount(c.game.GetRegistry(), c.subject);
+    if (!account) {
+        c.Say("no pilot account -- fly something first");
+        return;
+    }
+
+    const int count = std::clamp(c.IntArg(1, 50), 1, MAX_BULK);
+    account->supplies += static_cast<std::uint32_t>(count);
+
+    c.Say(Format("supplies: %u to spend in the SHIP tree (land at a lab or high port)",
+                 account->supplies));
 }
 
 static void CheatUpgrade(Cheat& c)
@@ -191,20 +208,29 @@ static void CheatUpgrade(Cheat& c)
     if (!loadout) return;
 
     FactionState* faction = FindFaction(c.game.GetRegistry(), c.team);
-    UpgradeLevels spare; // stands in for a faction that doesn't exist yet
-    UpgradeLevels& factionLevels = faction ? faction->levels : spare;
+    TechUnlocks spare; // stands in for a faction that doesn't exist yet
+    TechUnlocks& unlocked = faction ? faction->unlocked : spare;
 
-    // `all` walks the pool once per requested level, so a repeatable card
-    // stacks and a tiered one climbs until the catalog refuses it.
+    // Unlocks the rank for the side and fits it in one go, and pays for
+    // neither -- a cheat has no business queueing at the shop. `all` walks the
+    // pool once per requested rank, so a repeatable entry stacks and a tiered
+    // one climbs.
     const int count = std::clamp(c.IntArg(2, 1), 1, MAX_BULK);
     int granted = 0;
     for (int i = 0; i < count; ++i) {
         for (const UpgradeDef& def : catalog.Defs()) {
             if (key != "all" && def.key != key) continue;
-            const bool ok = def.scope == UpgradeScope::Faction
-                                    ? catalog.ApplyFaction(def, factionLevels)
-                                    : catalog.Apply(def, *loadout);
-            if (ok) ++granted;
+
+            const auto rank = static_cast<std::uint8_t>(
+                    def.maxLevel == 0 ? 1 : UpgradeCatalog::LevelOf(def, loadout->levels) + 1);
+            if (rank > UpgradeCatalog::RankCount(def)) continue;
+
+            const std::size_t index = catalog.IndexOf(def.id);
+            if (index >= catalog.Defs().size()) continue;
+            unlocked.rank[index] = std::max(unlocked.rank[index], rank);
+
+            std::uint32_t free = UpgradeCatalog::SupplyCostOf(def, rank);
+            if (catalog.FitRank(def, rank, *loadout, unlocked, free, /*atLab=*/true)) ++granted;
         }
     }
 
@@ -223,10 +249,7 @@ static void CheatHeal(Cheat& c)
     hull->hp = hull->maxHp;
 
     if (ShipLoadout* loadout = c.subject.try_get_mut<ShipLoadout>()) {
-        const FactionState* faction = FindFaction(c.game.GetRegistry(), c.team);
-        const UpgradeLevels levels = UpgradeCatalog::Combined(
-                loadout->levels, faction ? faction->levels : UpgradeLevels{});
-        const ShipStats stats = c.game.GetUpgradeCatalog().ResolveStats(levels);
+        const ShipStats stats = c.game.GetUpgradeCatalog().ResolveStats(loadout->levels);
 
         loadout->shieldHp = stats.shieldCapacity;
         loadout->shieldRegenDelay = 0;
@@ -257,10 +280,7 @@ static void CheatAmmo(Cheat& c)
     ShipLoadout* loadout = c.Loadout();
     if (!loadout) return;
 
-    const FactionState* faction = FindFaction(c.game.GetRegistry(), c.team);
-    const UpgradeLevels levels = UpgradeCatalog::Combined(
-            loadout->levels, faction ? faction->levels : UpgradeLevels{});
-    const int capacity = c.game.GetUpgradeCatalog().ResolveStats(levels).missileCapacity;
+    const int capacity = c.game.GetUpgradeCatalog().ResolveStats(loadout->levels).missileCapacity;
     if (capacity <= 0) {
         c.Say("ammo: no launcher fitted -- /upgrade missile_bay first");
         return;
@@ -508,6 +528,20 @@ static FactionState* FindFaction(flecs::world& registry, TeamId team)
     FactionState* found = nullptr;
     registry.each([&](FactionState& faction) {
         if (faction.team == team) found = &faction;
+    });
+    return found;
+}
+
+// The account of whoever is flying `ship`. Null before ResearchSystem has
+// opened one, which is the first tick of the ship's life.
+static PilotAccount* FindAccount(flecs::world& registry, flecs::entity ship)
+{
+    const PilotRef* ref = ship.is_alive() ? ship.try_get<PilotRef>() : nullptr;
+    if (!ref || ref->pilotId == 0) return nullptr;
+
+    PilotAccount* found = nullptr;
+    registry.each([&](PilotAccount& account) {
+        if (account.pilotId == ref->pilotId) found = &account;
     });
     return found;
 }

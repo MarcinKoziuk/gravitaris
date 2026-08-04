@@ -49,8 +49,12 @@ bool EconomyConfig::Load(IFilesystem& filesystem, const char* path)
         if (const auto v = (*t)["claim_ticks"].value<std::uint32_t>()) conquest.claimTicks = *v;
     }
     if (const toml::table* t = root["research"].as_table()) {
-        if (const auto v = (*t)["seconds_per_upgrade"].value<double>()) research.secondsPerUpgrade = *v;
-        if (const auto v = (*t)["stock_capacity"].value<int>()) research.stockCapacity = *v;
+        if (const auto v = (*t)["seconds_per_tech"].value<double>()) research.secondsPerTech = *v;
+        if (const auto v = (*t)["tech_per_fill"].value<int>()) research.techPerFill = *v;
+    }
+    if (const toml::table* t = root["supplies"].as_table()) {
+        if (const auto v = (*t)["per_second"].value<float>()) supplies.perSecond = *v;
+        if (const auto v = (*t)["per_kill"].value<int>()) supplies.perKill = *v;
     }
     if (const toml::table* t = root["repair"].as_table()) {
         if (const auto v = (*t)["hull_per_second"].value<float>()) repair.hullPerSecond = *v;

@@ -17,10 +17,10 @@ namespace Gravitaris {
 static constexpr std::uint32_t MIN_FIRE_COOLDOWN_TICKS = 2;
 
 static UpgradeKind ParseKind(std::string_view name, bool& ok);
-static UpgradeScope ParseScope(std::string_view name, bool& ok);
 static ShieldType ParseShieldType(std::string_view name, bool& ok);
 static WeaponDef ParseWeapon(const toml::table& entry, const std::string& key);
-static std::uint32_t NextRandom(std::uint32_t& state);
+static void ParseCostCurve(const toml::table& entry, const char* key,
+                           std::uint16_t (&out)[MAX_UPGRADE_RANKS]);
 
 bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
 {
@@ -95,19 +95,16 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
             def.id = ID(key->c_str());
             def.name = (*entry)["name"].value_or(*key);
             def.description = (*entry)["description"].value_or("");
-            def.maxLevel = (*entry)["max_level"].value_or<std::uint8_t>(1);
+            def.maxLevel = static_cast<std::uint8_t>(
+                    std::min<std::size_t>((*entry)["max_level"].value_or<std::uint8_t>(1),
+                                          MAX_UPGRADE_RANKS));
             def.weight = (*entry)["weight"].value_or(1.f);
             // Not named `requires` -- that is a keyword from C++20 on.
             if (const auto prereq = (*entry)["requires"].value<std::string>()) {
                 def.requiresId = ID(prereq->c_str());
             }
-            if (const auto scopeName = (*entry)["scope"].value<std::string>()) {
-                def.scope = ParseScope(*scopeName, ok);
-                if (!ok) {
-                    LOG(error) << "upgrades: " << *key << ": unknown scope `" << *scopeName << "`; skipped";
-                    continue;
-                }
-            }
+            ParseCostCurve(*entry, "tech_cost", def.techCost);
+            ParseCostCurve(*entry, "supply_cost", def.supplyCost);
 
             switch (def.kind) {
             case UpgradeKind::MissileRack:
@@ -137,9 +134,6 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
                         std::min<std::size_t>(def.maxLevel, def.tiers.size()));
                 break;
             }
-            case UpgradeKind::ResearchStock:
-                def.stock.perLevel = (*entry)["per_level"].value_or(0);
-                break;
             case UpgradeKind::Boost:
                 def.boost.thrustScale = (*entry)["thrust_scale"].value_or(1.f);
                 def.boost.maxSpeedScale = (*entry)["max_speed_scale"].value_or(1.f);
@@ -172,6 +166,11 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
             }
             }
 
+            if (defs.size() == MAX_UPGRADE_DEFS) {
+                LOG(error) << "upgrades: more than " << MAX_UPGRADE_DEFS
+                           << " entries; the rest are ignored (TechUnlocks is indexed by this)";
+                break;
+            }
             defs.push_back(std::move(def));
         }
     }
@@ -196,9 +195,52 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
         }
     }
 
+    BuildLayout();
+
     LOG(info) << "upgrades: loaded " << m_weapons.size() << " weapons and " << m_defs.size()
               << " upgrades from " << path;
     return true;
+}
+
+// Column is the length of a def's prerequisite chain, row its order among the
+// defs sharing that column. Walks the chain per def rather than sorting: the
+// pool is a couple of dozen entries and this runs once, at load.
+void UpgradeCatalog::BuildLayout()
+{
+    std::uint8_t nextRow[MAX_UPGRADE_DEFS] = {};
+    m_treeColumns = 0;
+    m_treeRows = 0;
+
+    for (std::size_t i = 0; i < m_defs.size(); ++i) {
+        std::uint8_t depth = 0;
+        // Bounded by the pool size, so a `requires` cycle in a hand-edited
+        // file stops rather than hanging the load.
+        id_t prereq = m_defs[i].requiresId;
+        for (std::size_t step = 0; prereq != 0 && step < m_defs.size(); ++step) {
+            const UpgradeDef* def = Find(prereq);
+            if (!def) break;
+            ++depth;
+            prereq = def->requiresId;
+        }
+
+        m_layout[i].col = depth;
+        m_layout[i].row = nextRow[depth]++;
+        m_treeColumns = std::max(m_treeColumns, static_cast<int>(depth) + 1);
+        m_treeRows = std::max(m_treeRows, static_cast<int>(nextRow[depth]));
+    }
+}
+
+UpgradeCatalog::TreeSlot UpgradeCatalog::SlotOf(std::size_t defIndex) const
+{
+    return defIndex < m_defs.size() ? m_layout[defIndex] : TreeSlot{};
+}
+
+std::size_t UpgradeCatalog::IndexOf(id_t id) const
+{
+    for (std::size_t i = 0; i < m_defs.size(); ++i) {
+        if (m_defs[i].id == id) return i;
+    }
+    return MAX_UPGRADE_DEFS;
 }
 
 const UpgradeDef* UpgradeCatalog::Find(id_t id) const
@@ -286,145 +328,117 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
     return stats;
 }
 
-bool UpgradeCatalog::IsEligible(const UpgradeDef& def, const UpgradeLevels& levels) const
+std::uint16_t UpgradeCatalog::TechCostOf(const UpgradeDef& def, std::uint8_t rank)
 {
+    if (rank < 1 || rank > MAX_UPGRADE_RANKS) return 0;
+    return def.techCost[rank - 1];
+}
+
+std::uint16_t UpgradeCatalog::SupplyCostOf(const UpgradeDef& def, std::uint8_t rank)
+{
+    if (rank < 1 || rank > MAX_UPGRADE_RANKS) return 0;
+    return def.supplyCost[rank - 1];
+}
+
+std::uint8_t UpgradeCatalog::UnlockedRank(const UpgradeDef& def, const TechUnlocks& unlocked) const
+{
+    const std::size_t index = IndexOf(def.id);
+    return index < m_defs.size() ? unlocked.rank[index] : std::uint8_t{0};
+}
+
+TechNodeState UpgradeCatalog::PermanentState(const UpgradeDef& def, std::uint8_t rank,
+                                             const TechUnlocks& unlocked,
+                                             std::uint32_t techPoints) const
+{
+    if (rank < 1 || rank > RankCount(def)) return TechNodeState::Held;
+
+    const std::uint8_t held = UnlockedRank(def, unlocked);
+    if (rank <= held) return TechNodeState::Held;
+    // A ladder: the faction learns the ranks of a line in order, so the only
+    // rank ever on offer is the one past what it holds.
+    if (rank > held + 1) return TechNodeState::Locked;
+
+    // A line is not researched before the thing it hangs off: no rounds before
+    // there is a launcher to fire them from.
     if (def.requiresId != 0) {
         const UpgradeDef* prereq = Find(def.requiresId);
-        if (!prereq || LevelOf(*prereq, levels) == 0) return false;
-    }
-    if (def.maxLevel == 0) return true; // a restock, always on the table
-    return LevelOf(def, levels) < def.maxLevel;
-}
-
-int UpgradeCatalog::ResearchStockCapacity(const UpgradeLevels& levels, int base) const
-{
-    const UpgradeDef* def = FindKind(UpgradeKind::ResearchStock);
-    if (!def) return base;
-    return base + def->stock.perLevel * static_cast<int>(levels.researchStock);
-}
-
-UpgradeLevels UpgradeCatalog::Combined(const UpgradeLevels& ship, const UpgradeLevels& faction)
-{
-    UpgradeLevels levels = ship;
-    levels.researchStock = faction.researchStock;
-    return levels;
-}
-
-UpgradeCatalog::Offers UpgradeCatalog::RollOffers(const UpgradeLevels& levels, std::uint32_t seed) const
-{
-    Offers offers{};
-
-    std::vector<const UpgradeDef*> pool;
-    pool.reserve(m_defs.size());
-    for (const UpgradeDef& def : m_defs) {
-        if (def.weight > 0.f && IsEligible(def, levels)) pool.push_back(&def);
+        if (!prereq || UnlockedRank(*prereq, unlocked) == 0) return TechNodeState::Locked;
     }
 
-    std::uint32_t state = seed | 1u;
-    for (std::size_t slot = 0; slot < OFFER_COUNT && !pool.empty(); ++slot) {
-        float total = 0.f;
-        for (const UpgradeDef* def : pool) total += def->weight;
-
-        // 24 bits of the generator as a 0..1 fraction; the pool is a handful
-        // of entries, so that's resolution to spare.
-        const float roll = total * static_cast<float>(NextRandom(state) & 0xffffffu) / 16777216.f;
-
-        float running = 0.f;
-        std::size_t picked = pool.size() - 1;
-        for (std::size_t i = 0; i < pool.size(); ++i) {
-            running += pool[i]->weight;
-            if (roll < running) {
-                picked = i;
-                break;
-            }
-        }
-
-        offers[slot] = pool[picked]->id;
-        pool.erase(pool.begin() + static_cast<std::ptrdiff_t>(picked)); // distinct offers
-    }
-
-    return offers;
+    if (techPoints < TechCostOf(def, rank)) return TechNodeState::Unaffordable;
+    return TechNodeState::Available;
 }
 
-std::uint8_t UpgradeCatalog::PreferredOffer(const Offers& offers, const ShipLoadout& loadout,
-                                            const UpgradeLevels& levels) const
+TechNodeState UpgradeCatalog::ShipState(const UpgradeDef& def, std::uint8_t rank,
+                                        const ShipContext& context) const
 {
-    const int capacity = ResolveStats(levels).missileCapacity;
+    if (!context.loadout || !context.unlocked) return TechNodeState::Locked;
+    const ShipLoadout& loadout = *context.loadout;
+    const UpgradeLevels& levels = loadout.levels;
 
-    // What each kind is worth to *this* hull right now. The shape of it is
-    // "cover a gap before deepening a strength": the first shield and the
-    // first rounds on an empty rack change what a ship can do at all, while a
-    // fourth cannon tier only makes it better at what it already does.
-    const auto score = [&](const UpgradeDef& def) {
-        const std::uint8_t level = LevelOf(def, levels);
-        switch (def.kind) {
-        case UpgradeKind::Shield:
-            // Nothing keeps a fighter alive like the first shield; a swap to
-            // the other type at the cost of the tiers already paid for is the
-            // one thing a pilot will not do.
-            if (levels.shieldType == ShieldType::None) return 100;
-            if (levels.shieldType != def.shield.type) return 0;
-            return 60 - 10 * static_cast<int>(level);
-        case UpgradeKind::MissileTier:
-            // The launcher is a weapon the hull does not otherwise have; the
-            // tiers above it are only a better round.
-            return level == 0 ? 75 : 45 - 5 * static_cast<int>(level);
-        case UpgradeKind::MissileRack:
-            // An empty rack is a weapon the ship cannot use. A full one is
-            // worth nothing at all, however tempting the card looks.
-            if (loadout.missileAmmo == 0) return 80;
-            return loadout.missileAmmo < capacity / 2 ? 40 : 5;
-        case UpgradeKind::Boost:
-            // The first one is mobility it simply lacked; past that it is
-            // only a longer burn.
-            return level == 0 ? 70 : 30 - 5 * static_cast<int>(level);
-        case UpgradeKind::WeaponTier:
-            return 65 - 5 * static_cast<int>(level);
-        case UpgradeKind::FireRate:
-            return 50 - 5 * static_cast<int>(level);
-        case UpgradeKind::ResearchStock:
-            // A queue only pays off for a side that leaves upgrades waiting,
-            // and an AI wing lands constantly -- so it is the card a pilot
-            // takes when the other two are worse, not one it goes for.
-            return 15;
-        }
-        return 0;
-    };
+    if (rank < 1 || rank > RankCount(def)) return TechNodeState::Held;
 
-    std::uint8_t bestSlot = 0;
-    int bestScore = 0;
-    for (std::size_t i = 0; i < offers.size(); ++i) {
-        const UpgradeDef* def = Find(offers[i]);
-        if (!def || !IsEligible(*def, levels)) continue;
-
-        // Ties break toward the earlier slot, so the same loadout offered the
-        // same three cards always takes the same one.
-        const int value = score(*def);
-        if (bestSlot != 0 && value <= bestScore) continue;
-        bestSlot = static_cast<std::uint8_t>(i + 1);
-        bestScore = value;
+    // The prerequisite has to be on *this* hull, not merely known to the side:
+    // rounds are no use to a fighter with nothing to fire them from, however
+    // well the faction understands them.
+    if (def.requiresId != 0) {
+        const UpgradeDef* prereq = Find(def.requiresId);
+        if (!prereq || LevelOf(*prereq, levels) == 0) return TechNodeState::Locked;
     }
-    return bestSlot;
+
+    if (rank > UnlockedRank(def, *context.unlocked)) return TechNodeState::NotUnlocked;
+
+    if (def.maxLevel == 0) {
+        // A restock is never held -- that is what repeatable means -- but a
+        // full rack would take the payment and give nothing back.
+        if (loadout.missileAmmo >= ResolveStats(levels).missileCapacity) return TechNodeState::Held;
+    }
+    else {
+        // Swapping to the other emitter is always on offer, at every unlocked
+        // rank: it replaces rather than stacks, and swapping down is the
+        // player's call to make.
+        const bool swapping = def.kind == UpgradeKind::Shield && levels.shieldType != def.shield.type;
+        if (!swapping && LevelOf(def, levels) >= rank) return TechNodeState::Held;
+    }
+
+    if (context.supplies < SupplyCostOf(def, rank)) return TechNodeState::Unaffordable;
+    if (!context.atLab) return TechNodeState::NeedsLanding;
+    return TechNodeState::Available;
 }
 
 std::uint8_t UpgradeCatalog::LevelOf(const UpgradeDef& def, const UpgradeLevels& levels)
 {
     switch (def.kind) {
-    case UpgradeKind::MissileRack:  return 0;
+    case UpgradeKind::MissileRack:  return 0; // a restock holds no rank
     case UpgradeKind::FireRate:     return levels.fireRate;
     case UpgradeKind::WeaponTier:   return levels.gunTier;
     case UpgradeKind::MissileTier:  return levels.missileTier;
     case UpgradeKind::Shield:       return levels.shieldType == def.shield.type ? levels.shield : 0;
     case UpgradeKind::Boost:        return levels.boost;
-    case UpgradeKind::ResearchStock: return levels.researchStock;
     }
     return 0;
 }
 
-bool UpgradeCatalog::Apply(const UpgradeDef& def, ShipLoadout& loadout) const
+bool UpgradeCatalog::UnlockRank(const UpgradeDef& def, std::uint8_t rank, TechUnlocks& unlocked,
+                                std::uint32_t& techPoints) const
 {
+    if (PermanentState(def, rank, unlocked, techPoints) != TechNodeState::Available) return false;
+
+    const std::size_t index = IndexOf(def.id);
+    if (index >= m_defs.size()) return false;
+
+    techPoints -= TechCostOf(def, rank);
+    unlocked.rank[index] = rank;
+    return true;
+}
+
+bool UpgradeCatalog::FitRank(const UpgradeDef& def, std::uint8_t rank, ShipLoadout& loadout,
+                             const TechUnlocks& unlocked, std::uint32_t& supplies, bool atLab) const
+{
+    const ShipContext context{&loadout, &unlocked, supplies, atLab};
+    if (ShipState(def, rank, context) != TechNodeState::Available) return false;
+
     UpgradeLevels& levels = loadout.levels;
-    if (def.scope != UpgradeScope::Ship || !IsEligible(def, levels)) return false;
 
     // Rounds are capped by the bay the ship has fitted, resolved rather than
     // authored on the restock: one number decides rack width, and it is the
@@ -434,52 +448,123 @@ bool UpgradeCatalog::Apply(const UpgradeDef& def, ShipLoadout& loadout) const
                 std::min(loadout.missileAmmo + rounds, ResolveStats(levels).missileCapacity));
     };
 
+    // Set, never increment: a supply price buys the rank named, and a hull
+    // that skipped the ranks below it never paid for them.
     switch (def.kind) {
     case UpgradeKind::MissileRack:
         load(def.rack.perPickup);
-        return true;
+        break;
     case UpgradeKind::FireRate:
-        ++levels.fireRate;
-        return true;
+        levels.fireRate = rank;
+        break;
     case UpgradeKind::WeaponTier:
-        ++levels.gunTier;
-        return true;
+        levels.gunTier = rank;
+        break;
     case UpgradeKind::MissileTier:
-        ++levels.missileTier;
+        levels.missileTier = rank;
         load(def.rack.perPickup); // the fitting comes with rounds in it
-        return true;
+        break;
     case UpgradeKind::Boost:
-        ++levels.boost;
-        return true;
-    case UpgradeKind::ResearchStock:
-        return false; // faction scope -- ApplyFaction's business, not a hull's
+        levels.boost = rank;
+        break;
     case UpgradeKind::Shield:
-        // Switching type starts the new emitter at level 1 rather than
-        // carrying the old one's tiers over -- they're different hardware.
+        // Switching type starts the new emitter empty rather than carrying the
+        // old one's charge over -- they're different hardware.
         if (levels.shieldType != def.shield.type) {
             levels.shieldType = def.shield.type;
-            levels.shield = 1;
-            loadout.shieldHp = 0.f; // charges up from empty
+            loadout.shieldHp = 0.f;
             loadout.plates = {};
             loadout.plateRegenDelay = {};
         }
-        else {
-            ++levels.shield;
-        }
-        return true;
+        levels.shield = rank;
+        break;
     }
-    return false;
+
+    supplies -= SupplyCostOf(def, rank);
+    return true;
 }
 
-bool UpgradeCatalog::ApplyFaction(const UpgradeDef& def, UpgradeLevels& levels) const
+// What each kind is worth to *this* hull right now. The shape of it is "cover
+// a gap before deepening a strength": the first shield and the first rounds on
+// an empty rack change what a ship can do at all, while a fourth cannon tier
+// only makes it better at what it already does.
+static int FitScore(const UpgradeDef& def, const ShipLoadout& loadout, int missileCapacity)
 {
-    if (def.scope != UpgradeScope::Faction || !IsEligible(def, levels)) return false;
+    const UpgradeLevels& levels = loadout.levels;
+    const std::uint8_t level = UpgradeCatalog::LevelOf(def, levels);
 
-    if (def.kind == UpgradeKind::ResearchStock) {
-        ++levels.researchStock;
-        return true;
+    switch (def.kind) {
+    case UpgradeKind::Shield:
+        // Nothing keeps a fighter alive like the first shield; a swap to the
+        // other type at the cost of the ranks already paid for is the one
+        // thing a pilot will not do.
+        if (levels.shieldType == ShieldType::None) return 100;
+        if (levels.shieldType != def.shield.type) return 0;
+        return 60 - 10 * static_cast<int>(level);
+    case UpgradeKind::MissileTier:
+        // The launcher is a weapon the hull does not otherwise have; the ranks
+        // above it are only a better round.
+        return level == 0 ? 75 : 45 - 5 * static_cast<int>(level);
+    case UpgradeKind::MissileRack:
+        // An empty rack is a weapon the ship cannot use. A nearly full one is
+        // worth almost nothing, however cheap the restock is.
+        if (loadout.missileAmmo == 0) return 80;
+        return loadout.missileAmmo < missileCapacity / 2 ? 40 : 5;
+    case UpgradeKind::Boost:
+        // The first one is mobility it simply lacked; past that it is only a
+        // longer burn.
+        return level == 0 ? 70 : 30 - 5 * static_cast<int>(level);
+    case UpgradeKind::WeaponTier:
+        return 65 - 5 * static_cast<int>(level);
+    case UpgradeKind::FireRate:
+        return 50 - 5 * static_cast<int>(level);
     }
-    return false;
+    return 0;
+}
+
+UpgradeCatalog::Choice UpgradeCatalog::PreferredFit(const ShipLoadout& loadout,
+                                                    const ShipContext& context) const
+{
+    const int capacity = ResolveStats(loadout.levels).missileCapacity;
+
+    Choice best;
+    int bestScore = 0;
+    for (const UpgradeDef& def : m_defs) {
+        // Highest affordable rank of a line first: an AI that can reach III
+        // has no reason to pay for II on the way, since the price is absolute.
+        for (std::uint8_t rank = RankCount(def); rank >= 1; --rank) {
+            if (ShipState(def, rank, context) != TechNodeState::Available) continue;
+
+            // Ties break toward the earlier def and the higher rank, so the
+            // same hull in the same position always buys the same thing.
+            const int value = FitScore(def, loadout, capacity);
+            if (best.def && value <= bestScore) break;
+            best = Choice{&def, rank};
+            bestScore = value;
+            break;
+        }
+    }
+    return best;
+}
+
+UpgradeCatalog::Choice UpgradeCatalog::PreferredUnlock(const TechUnlocks& unlocked,
+                                                       std::uint32_t budget) const
+{
+    // Breadth before depth: a side that has learned nothing of shields gains
+    // far more from the first rank of them than from a third cannon. `weight`
+    // is what the draft used to roll by and now orders the research plan.
+    Choice best;
+    float bestScore = 0.f;
+    for (const UpgradeDef& def : m_defs) {
+        const std::uint8_t rank = static_cast<std::uint8_t>(UnlockedRank(def, unlocked) + 1);
+        if (PermanentState(def, rank, unlocked, budget) != TechNodeState::Available) continue;
+
+        const float value = def.weight / static_cast<float>(rank);
+        if (best.def && value <= bestScore) continue;
+        best = Choice{&def, rank};
+        bestScore = value;
+    }
+    return best;
 }
 
 static WeaponDef ParseWeapon(const toml::table& entry, const std::string& key)
@@ -513,17 +598,31 @@ static UpgradeKind ParseKind(std::string_view name, bool& ok)
     if (name == "missile_tier")   return UpgradeKind::MissileTier;
     if (name == "shield")         return UpgradeKind::Shield;
     if (name == "boost")          return UpgradeKind::Boost;
-    if (name == "research_stock") return UpgradeKind::ResearchStock;
     ok = false;
     return UpgradeKind::MissileRack;
 }
 
-static UpgradeScope ParseScope(std::string_view name, bool& ok)
+// A scalar charges the same for every rank; a list charges per rank, with its
+// last entry standing for every rank past its end -- so a three-rank line does
+// not have to spell out prices for ranks it can never reach.
+static void ParseCostCurve(const toml::table& entry, const char* key,
+                           std::uint16_t (&out)[MAX_UPGRADE_RANKS])
 {
-    if (name == "ship")    return UpgradeScope::Ship;
-    if (name == "faction") return UpgradeScope::Faction;
-    ok = false;
-    return UpgradeScope::Ship;
+    if (const auto flat = entry[key].value<std::uint16_t>()) {
+        for (std::uint16_t& cost : out) cost = *flat;
+        return;
+    }
+
+    const toml::array* curve = entry[key].as_array();
+    if (!curve || curve->empty()) return;
+
+    std::uint16_t last = 0;
+    for (std::size_t i = 0; i < MAX_UPGRADE_RANKS; ++i) {
+        if (i < curve->size()) {
+            if (const auto v = curve->get(i)->value<std::uint16_t>()) last = *v;
+        }
+        out[i] = last;
+    }
 }
 
 static ShieldType ParseShieldType(std::string_view name, bool& ok)
@@ -532,16 +631,6 @@ static ShieldType ParseShieldType(std::string_view name, bool& ok)
     if (name == "plating") return ShieldType::Plating;
     ok = false;
     return ShieldType::None;
-}
-
-// xorshift32. Sim-visible randomness has to be reproducible from state alone
-// (ADR 0001), so the caller supplies the seed and nothing here is global.
-static std::uint32_t NextRandom(std::uint32_t& state)
-{
-    state ^= state << 13;
-    state ^= state >> 17;
-    state ^= state << 5;
-    return state;
 }
 
 } // namespace Gravitaris

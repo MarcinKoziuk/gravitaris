@@ -125,6 +125,10 @@ protected:
     // per peer instead (NetServer::PeerState::name) and never uses this one.
     std::string m_playerName = "Pilot";
 
+    // Which pilot the local player is, kept across respawns so the Supplies
+    // they banked follow them onto the fresh hull (see PilotRef).
+    std::uint32_t m_playerPilotId = 0;
+
     // Countdown after a ship's death before TickRespawn starts retrying
     // TryRespawn. -1 means no respawn pending (alive, or permanently gone).
     int m_playerRespawnTimer = -1;

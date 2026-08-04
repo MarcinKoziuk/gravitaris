@@ -737,7 +737,8 @@ if(GRAVITARIS_BUILD_CLIENT)
         include/gravitaris/game/system/gwell/research-system.hpp
         src/game/system/gwell/research-system.cpp
         include/gravitaris/game/component/ship-loadout.hpp
-        include/gravitaris/game/component/upgrade-draft.hpp
+        include/gravitaris/game/component/research-access.hpp
+        include/gravitaris/game/component/pilot-account.hpp
         include/gravitaris/game/upgrade/upgrade-def.hpp
         include/gravitaris/game/upgrade/upgrade-catalog.hpp
         src/game/upgrade/upgrade-catalog.cpp

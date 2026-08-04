@@ -79,7 +79,9 @@ void WriteClientInput(const ClientInputPacket& packet, ByteWriter& out)
         const InputCommand& cmd = packet.commands[i];
         out.WriteU64(cmd.tick);
         out.WriteU8(PackControlFlags(cmd.flags));
-        out.WriteU8(cmd.upgradePick);
+        out.WriteU32(cmd.techPick.node);
+        out.WriteU8(static_cast<std::uint8_t>(cmd.techPick.tab));
+        out.WriteU8(cmd.techPick.rank);
     }
 }
 
@@ -95,7 +97,9 @@ bool ReadClientInputBody(ByteReader& in, ClientInputPacket& out)
         InputCommand cmd;
         cmd.tick = in.ReadU64();
         cmd.flags = UnpackControlFlags(in.ReadU8());
-        cmd.upgradePick = in.ReadU8();
+        cmd.techPick.node = in.ReadU32();
+        cmd.techPick.tab = static_cast<TechTab>(in.ReadU8());
+        cmd.techPick.rank = in.ReadU8();
         out.commands.push_back(cmd);
     }
     return in.Ok();

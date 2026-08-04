@@ -123,11 +123,26 @@ weapon = "autocannon"
 fire_range = 400.0
 fire_cooldown_ticks = 90
 
-# ---- the research pool -----------------------------------------------------
+# ---- the tech pool ---------------------------------------------------------
+#
+# Every entry below appears in both trees. A faction spends Tech to learn a
+# rank (`tech_cost`, a ladder -- rank II is only offered once it holds I), and
+# a pilot spends Supplies to fit one onto a hull (`supply_cost`, a menu -- any
+# rank the faction has learned can be bought outright, and never above it).
+#
+# `supply_cost` is the FULL price of that rank, not a step up to it: a hull
+# that skipped I and II pays only what III costs. That is what lets a pilot
+# short on Supplies fit II instead, and what makes refitting after a death one
+# purchase rather than a climb. A shorter list than `max_level` extends its
+# last entry to the ranks above it.
+#
+# Tech is slow and shared, so the prices below buy a handful of strategic
+# decisions across a match; Supplies accrue continuously, so theirs are the
+# small change of every landing.
 
 # The launcher itself, and the only way onto the missile line: a hull that
-# hasn't taken this has no rack, and MISSILE RACK stays off its table
-# (`requires`). Each tier fits the next round up and widens the rack by
+# hasn't fitted this has no rack, and MISSILE RACK stays off its tree
+# (`requires`). Each rank fits the next round up and widens the rack by
 # `capacity`, so the ceiling is 12 rounds -- a handful of kills, not a
 # standoff weapon.
 [[upgrade]]
@@ -140,29 +155,23 @@ weight = 1.0
 tiers = ["missile_mk1", "missile_mk2", "missile_mk3"]
 per_pickup = 4 # rounds that come with the fitting
 capacity = 4   # per level
+tech_cost = [3, 5, 8]
+supply_cost = [12, 26, 44]
 
+# The one repeatable entry: the faction learns to keep the tubes filled once,
+# and a pilot buys a reload every time they come home. Priced as the small
+# change of a landing, since that is what it is.
 [[upgrade]]
 key = "missile_rack"
 name = "MISSILE RACK"
 description = "Reload. Fills the tubes you have."
 kind = "missile_rack"
-max_level = 0 # a restock: always on the table
+max_level = 0 # a restock: buyable again every landing
 requires = "missile_bay"
 weight = 1.4
 per_pickup = 6 # capped at the bay's own capacity
-
-# Where a faction's finished upgrades queue up while nobody is home to collect
-# them. Widening the queue is worth a pick of its own to a side whose pilots
-# fly long sorties -- and worth nothing to one that lands after every kill.
-[[upgrade]]
-key = "research_queue"
-name = "RESEARCH QUEUE"
-description = "One more finished upgrade can wait on the pad before the labs idle."
-kind = "research_stock"
-scope = "faction"
-max_level = 7 # 3 in stock by default, 10 with every level
-weight = 0.7
-per_level = 1
+tech_cost = 2
+supply_cost = 5
 
 [[upgrade]]
 key = "autoloader"
@@ -172,6 +181,8 @@ kind = "fire_rate"
 max_level = 3
 weight = 1.0
 cooldown_scale = 0.72
+tech_cost = [2, 4, 7]
+supply_cost = [8, 18, 32]
 
 [[upgrade]]
 key = "heavy_rounds"
@@ -180,8 +191,10 @@ description = "Depleted-slug ammunition. Hits far harder and flies flatter."
 kind = "weapon_tier"
 max_level = 3
 weight = 1.0
-# One weapon per tier, in order: taking the upgrade fits the next one.
+# One weapon per rank, in order: fitting the rank fits its weapon.
 tiers = ["gatling_1", "gatling_2", "gatling_3"]
+tech_cost = [3, 6, 10]
+supply_cost = [14, 30, 52]
 
 # The overburn. Its real job is arriving: a hull bearing down on a planet at
 # cruise cannot brake in time on its own thrust, and this is what turns that
@@ -204,6 +217,8 @@ max_speed_scale = 1.2
 duration_seconds = 1.6
 cooldown_seconds = 9.0
 min_cooldown_seconds = 3.0
+tech_cost = [2, 4, 7]
+supply_cost = [10, 22, 38]
 
 [[upgrade]]
 key = "bubble_shield"
@@ -217,6 +232,8 @@ capacity = 90.0
 regen_per_second = 2.0
 regen_delay_seconds = 3.0
 leak_chance = 0.0 # a bubble never lets a round through while it has charge
+tech_cost = [3, 5, 9]
+supply_cost = [15, 32, 55]
 
 [[upgrade]]
 key = "plating_shield"
@@ -238,3 +255,5 @@ leak_chance = 0.5
 # One entry per level: a quarter of the round gets through at the first layer,
 # a tenth at the third.
 leak_fraction = [0.25, 0.175, 0.10]
+tech_cost = [3, 5, 9]
+supply_cost = [15, 32, 55]

@@ -7,6 +7,7 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/callsign.hpp>
+#include <gravitaris/game/component/pilot-account.hpp>
 #include <gravitaris/game/net/protocol.hpp>
 #include <gravitaris/game/component/faction-state.hpp>
 #include <gravitaris/game/component/net-id.hpp>
@@ -57,6 +58,13 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
     // By the time this constructor BODY executes, every member above is fully
     // constructed, so it's safe for Init() to touch m_registry now.
     m_entitySpawner->Init();
+
+    // Supplies for a kill are paid here rather than by either frontend: the
+    // victim is destructed the same tick it dies, so this is the last moment
+    // anything knows who to pay, and it is sim business either way.
+    m_deathSystem.OnDeath().connect([this](const DeathReport& report) {
+        m_researchSystem.AwardKill(report.killerPilotId);
+    });
 
     m_upgradeCatalog.Load(m_filesystem);
     m_aiPresets.Load(m_filesystem);
@@ -137,6 +145,7 @@ void Game::SpawnCombatants(TeamId playerTeam)
     m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, spawn.pos, playerTeam,
                                             spawn.vel, spawn.rot);
     m_player->emplace<Callsign>(m_playerName);
+    m_playerPilotId = m_player->get<PilotRef>().pilotId;
 
     // Every complex the player isn't flying for gets a leader that plays the
     // mode, not just a dogfighter. Per-faction presets are U4's round-setup
@@ -310,6 +319,9 @@ void Game::HandlePlayerRespawn()
         m_player = m_entitySpawner->SpawnPlayer("models/ships/fighter-1"_id, spawn->pos, TeamId::Blue,
                                                 spawn->vel, spawn->rot);
         m_player->emplace<Callsign>(m_playerName);
+        // The fresh hull spawned as a pilot of its own; put the player back
+        // behind the identity whose Supplies they have been banking.
+        if (m_playerPilotId != 0) m_player->emplace<PilotRef>(PilotRef{m_playerPilotId});
     }
 }
 

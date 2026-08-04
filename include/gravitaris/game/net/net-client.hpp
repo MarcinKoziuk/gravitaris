@@ -203,7 +203,7 @@ public:
     // directly felt input lag for the owning client too, since nothing
     // local shows the result any sooner. No-ops before the handshake
     // completes (there's no ship to control yet).
-    void SendInput(std::uint64_t tick, const ControlFlags& flags, UpgradePick upgradePick = 0);
+    void SendInput(std::uint64_t tick, const ControlFlags& flags, const TechPick& techPick = {});
 
     // Sends one composed chat line, reliably. No-op before the handshake
     // completes -- the server can't attribute a line to a peer it hasn't

@@ -56,7 +56,6 @@ enum class UpgradeKind : std::uint8_t {
     MissileTier,  // fits the launcher, then the next round up, and widens the rack
     Shield,       // a damage buffer in front of the hull
     Boost,        // an overburn: more thrust, and briefly past the speed cap
-    ResearchStock, // how many finished upgrades a faction can queue up
 };
 
 // Which shield a ship is carrying. Unlike the levels, this is a real choice:
@@ -80,14 +79,19 @@ inline constexpr std::size_t MAX_SHIELD_PLATES = 16;
 // client resolves its own hits with (QueryBodySegment) name the same value.
 inline constexpr std::uint8_t SHIELD_BUBBLE_ELEMENT = 0xFF;
 
-// Where a collected upgrade lands. Only Ship is honored today -- everything
-// is carried by the ship that picked it up and lost with it. Faction is the
-// hook for permanent faction-wide passives (a researched tech every future
-// hull spawns with); nothing rolls it yet.
-enum class UpgradeScope : std::uint8_t {
+// Which tree a pick came from. Every def appears in both: the faction learns
+// how to build a rank (PERMANENT, paid in Tech), and a hull fits one
+// (SHIP, paid in Supplies, never above what the faction has learned).
+enum class TechTab : std::uint8_t {
     Ship,
-    Faction,
+    Permanent,
 };
+
+// Widest rank any def can reach, and the most defs the pool can hold. Both are
+// fixed so the tracks indexed by them stay plain arrays -- see TechUnlocks and
+// MAX_SHIELD_PLATES, which exists for the same reason.
+inline constexpr std::size_t MAX_UPGRADE_RANKS = 8;
+inline constexpr std::size_t MAX_UPGRADE_DEFS = 32;
 
 // One entry of the research pool, loaded from data/upgrades.toml.
 struct UpgradeDef {
@@ -97,13 +101,24 @@ struct UpgradeDef {
     std::string description;
 
     UpgradeKind kind = UpgradeKind::MissileRack;
-    UpgradeScope scope = UpgradeScope::Ship;
 
     // How many times one ship can take it. 0 means unlimited -- a restock,
-    // not a tier, so it can always be rolled.
+    // not a tier, so it can always be bought again.
     std::uint8_t maxLevel = 1;
-    // Relative odds of appearing in a draft, among everything still eligible.
+    // How badly an AI faction wants this line, relative to the others. Only
+    // the research plan reads it (PreferredUnlock) -- a human sees the whole
+    // tree and decides for themselves.
     float weight = 1.f;
+    // What the faction pays in Tech to learn each rank, and what a hull pays
+    // in Supplies to fit it. Both indexed by rank - 1.
+    //
+    // A supply price is absolute, not an increment: fitting rank III costs
+    // supplyCost[2] whether or not this hull ever carried I or II. That is
+    // what lets a pilot who has III unlocked but cannot afford it fit II
+    // instead, and what makes refitting after a death one purchase rather
+    // than a climb.
+    std::uint16_t techCost[MAX_UPGRADE_RANKS] = {};
+    std::uint16_t supplyCost[MAX_UPGRADE_RANKS] = {};
 
     // Another upgrade this one is locked behind: it stays off the table until
     // that one is at level 1. Zero means no prerequisite. This is what makes a
@@ -125,12 +140,6 @@ struct UpgradeDef {
     // WeaponTier/MissileTier only: the weapon fitted at each level, in order.
     // Level N means tiers[N - 1], so maxLevel is bounded by this list's length.
     std::vector<id_t> tiers;
-
-    // ResearchStock only: how much each level widens the faction's queue of
-    // finished-but-uncollected upgrades, over economy.toml's base.
-    struct Stock {
-        int perLevel = 0;
-    } stock;
 
     // Boost only. The whole point is stopping: a ship bearing down on a
     // planet gets the thrust to kill its speed in time, and the same button
@@ -161,9 +170,9 @@ struct UpgradeDef {
     } shield;
 };
 
-// A ship's collected tiers. Split out of ShipLoadout so the same block can
-// later hang off a faction for permanent passives (UpgradeScope::Faction) and
-// be resolved through the same UpgradeCatalog::ResolveStats.
+// What one hull has fitted. Named fields rather than a per-def array because
+// the sim rules read them by name (ResolveStats), and each field is one
+// hand-written behavior.
 struct UpgradeLevels {
     std::uint8_t fireRate = 0;
     std::uint8_t gunTier = 0;
@@ -173,10 +182,31 @@ struct UpgradeLevels {
     std::uint8_t shield = 0;
     ShieldType shieldType = ShieldType::None;
     std::uint8_t boost = 0;
-    // UpgradeScope::Faction, so this one lives on FactionState's own block
-    // rather than a ship's -- see ResearchSystem.
-    std::uint8_t researchStock = 0;
 };
+
+// What a faction has learned how to build: the rank it has unlocked of each
+// def, indexed by that def's position in UpgradeCatalog::Defs(). A ceiling on
+// what any of its hulls may fit, never a contribution to it.
+//
+// Deliberately not UpgradeLevels. That struct carries one shield rank plus the
+// type it belongs to, which says "this hull has one shield fitted" -- a
+// faction can perfectly well have learned both the bubble and the plating and
+// leave the choice to the pilot. Nothing in the sim reads unlock ranks except
+// the tree's own gating, so a flat per-def array is the right shape here even
+// though it would be the wrong one for a hull.
+struct TechUnlocks {
+    std::uint8_t rank[MAX_UPGRADE_DEFS] = {};
+};
+
+// Whether this side has learned to build anything at all, which is what makes
+// a trip home worth an AI's while (see AIPilotSystem).
+inline bool AnyRankUnlocked(const TechUnlocks& unlocked)
+{
+    for (const std::uint8_t rank : unlocked.rank) {
+        if (rank > 0) return true;
+    }
+    return false;
+}
 
 // UpgradeLevels resolved against the catalog into what the sim actually
 // reads. Cheap enough to recompute wherever it's needed rather than cache and

@@ -30,15 +30,13 @@ struct FactionState {
     // restarts from 0 each time it fills. Authoritative copy: clients read it
     // off each Lab's Structure, which ResearchSystem mirrors it into.
     float researchProgress = 0.f;
-    // Finished upgrades waiting for a ship to come and collect them. The bar
-    // above stops advancing once this reaches the faction's queue capacity
-    // (UpgradeCatalog::ResearchStockCapacity) -- labs that nobody collects
-    // from eventually idle, rather than banking a match's worth of upgrades
-    // for whoever lands first.
-    std::uint8_t upgradesReady = 0;
-    // The faction's own UpgradeScope::Faction picks, which outlive every ship
-    // that collected one. Only researchStock is rolled today.
-    UpgradeLevels levels;
+    // Technology points: what the bar above pays out each time it fills, and
+    // what the PERMANENT tree spends. Uncapped -- the pressure to come home is
+    // that a hull stays stock until its pilot lands, not that the labs idle.
+    std::uint32_t techPoints = 0;
+    // What this side has learned how to build, which is the ceiling on what
+    // any of its hulls may fit. Outlives every ship, and every pilot.
+    TechUnlocks unlocked;
 };
 
 } // namespace Gravitaris

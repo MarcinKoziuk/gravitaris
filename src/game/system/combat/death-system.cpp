@@ -72,6 +72,7 @@ void DeathSystem::ReportDeath(flecs::entity ship)
     DeathReport report;
     report.victimTeam = team->id;
     report.killerTeam = dmg.lastDamageTeam;
+    report.killerPilotId = dmg.lastDamagePilotId;
     report.cause = dmg.lastDamageCause;
     m_onDeath(report);
 }

@@ -10,7 +10,8 @@
 #include <gravitaris/game/component/ai-strategy.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
-#include <gravitaris/game/component/upgrade-draft.hpp>
+#include <gravitaris/game/component/research-access.hpp>
+#include <gravitaris/game/component/pilot-account.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/planet.hpp>
@@ -85,7 +86,8 @@ flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position, TeamId
     entity.emplace<Damageable>(MakeDamageable(*body));
     entity.emplace<LandingState>();
     entity.emplace<ShipLoadout>(MakeShipLoadout(*body));
-    entity.emplace<UpgradeDraft>();
+    entity.emplace<ResearchAccess>();
+    entity.emplace<PilotRef>(PilotRef{AllocatePilotId()});
     AssignNetId(entity);
     AddRenderable(entity, modelId);
 
@@ -107,7 +109,8 @@ flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, const 
     entity.emplace<Damageable>(MakeDamageable(*body));
     entity.emplace<LandingState>();
     entity.emplace<ShipLoadout>(MakeShipLoadout(*body));
-    entity.emplace<UpgradeDraft>();
+    entity.emplace<ResearchAccess>();
+    entity.emplace<PilotRef>(PilotRef{AllocatePilotId()});
     AIPresetLibrary::Apply(preset, entity.get_mut<AIPilot>());
     {
         // A fresh pilot launches with a shopping list: whatever its labs have

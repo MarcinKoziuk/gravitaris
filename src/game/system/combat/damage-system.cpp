@@ -8,6 +8,7 @@
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/bullet.hpp>
+#include <gravitaris/game/component/pilot-account.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/missile.hpp>
 #include <gravitaris/game/component/planet.hpp>
@@ -87,6 +88,7 @@ void DamageSystem::Update(std::uint64_t step)
         dmg->hp -= damage;
         dmg->lastDamageCause = DamageCause::Crash;
         dmg->lastDamageTeam = TeamId::None;
+        dmg->lastDamagePilotId = 0;
 
         m_eventQueue.Emit(GameEventType::LandingCrash, hitEntity,
                           Magnum::Vector2{static_cast<float>(ev.contact.x()),
@@ -187,6 +189,12 @@ void DamageSystem::Update(std::uint64_t step)
                                         : bulletEnt.has<Missile>() ? DamageCause::Missile
                                                                    : DamageCause::Gunfire;
             targetDmg.lastDamageTeam = bullet.team;
+            targetDmg.lastDamagePilotId = 0;
+            if (const flecs::entity shooter = m_registry.entity(bullet.shooter); shooter.is_alive()) {
+                if (const PilotRef* ref = shooter.try_get<PilotRef>()) {
+                    targetDmg.lastDamagePilotId = ref->pilotId;
+                }
+            }
 
             m_eventQueue.Emit(GameEventType::Impact, search.target, hitPoint,
                               static_cast<std::uint32_t>(toHull * 10.f));
