@@ -210,8 +210,10 @@ private:
     float m_researchFraction = -2.f;
     std::string m_researchText;
 
-    Rml::Element* m_techValue = nullptr;
-    Rml::Element* m_suppliesValue = nullptr;
+    // The sidebar's pair and the board's pair are different elements with
+    // the same job, so they need handles of their own.
+    Rml::Element* m_hudTechValue = nullptr;
+    Rml::Element* m_hudSuppliesValue = nullptr;
 
     Rml::Element* m_chat = nullptr;
     Rml::Element* m_chatLog = nullptr;
@@ -228,6 +230,7 @@ private:
     Rml::Element* m_techGrid = nullptr;
     Rml::Element* m_techFitted = nullptr;
     Rml::Element* m_techTip = nullptr;
+    Rml::Element* m_techValue = nullptr;
     Rml::Element* m_supplyValue = nullptr;
     Rml::Element* m_techNoticeElement = nullptr;
     Rml::Element* m_refitHint = nullptr;
@@ -424,6 +427,10 @@ public:
     // leaving the row up would show a live-looking field holding a number
     // that isn't the one the world was built from.
     void SetSeedRowVisible(bool visible);
+
+    // Dismisses (or restores) the intro dialog without going through its
+    // button, which is what --autostart needs.
+    void SetIntroVisible(bool visible);
 
     // Fired by the setup dialog's Apply, with whatever is in the seed field
     // (an unparseable field is ignored rather than reported -- the value is

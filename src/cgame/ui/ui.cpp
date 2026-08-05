@@ -8,6 +8,7 @@
 #include <RmlUi/Core/Elements/ElementFormControlSelect.h>
 #include <RmlUi/Debugger.h>
 
+#include <gravitaris/game/logging.hpp>
 #include <gravitaris/ui/ui.hpp>
 
 #include "detail/system-interface.hpp"
@@ -143,8 +144,8 @@ bool UI::Init()
         m_researchFill = hud->GetElementById("research_fill");
         m_researchValue = hud->GetElementById("research_value");
         m_refitHint = hud->GetElementById("refit_hint");
-        m_techValue = hud->GetElementById("tech_value");
-        m_suppliesValue = hud->GetElementById("supplies_value");
+        m_hudTechValue = hud->GetElementById("tech_value");
+        m_hudSuppliesValue = hud->GetElementById("supplies_value");
         if (Rml::Element* button = hud->GetElementById("open_tech_tree")) {
             Listen(*button, "click", [this](Rml::Event&) { SetTechTreeVisible(!IsTechTreeVisible()); });
         }
@@ -174,12 +175,30 @@ bool UI::Init()
         if (Rml::Element* title = m_techTree->GetElementById("title")) {
             title->SetInnerRML(m_techTree->GetTitle());
         }
-        m_techGrid = m_techTree->GetElementById("tech_grid");
+        m_techGrid = m_techTree->GetElementById("tech_branches");
         m_techFitted = m_techTree->GetElementById("tech_fitted");
         m_techValue = m_techTree->GetElementById("tech_value");
         m_supplyValue = m_techTree->GetElementById("supply_value");
+        // Loud rather than silent: without the container the board simply
+        // never draws, which looks like a game bug rather than a typo.
+        if (!m_techGrid) LOG(error) << "ui: tech-tree.rml has no #tech_branches; the board cannot draw";
         m_techTip = m_techTree->GetElementById("tech_tip");
         m_techNoticeElement = m_techTree->GetElementById("tech_notice");
+
+        if (Rml::Element* grip = m_techTree->GetElementById("tech_grip")) {
+            // ElementHandle drags by writing top/left, and the board is centred
+            // with `margin: auto` -- so the margin has to go before the first
+            // of those lands, or the box is stretched between the two. Pinning
+            // it where it already is keeps it still meanwhile.
+            Listen(*grip, "dragstart", [this](Rml::Event&) {
+                if (!m_techTree) return;
+                const int left = static_cast<int>(std::lround(m_techTree->GetAbsoluteLeft()));
+                const int top = static_cast<int>(std::lround(m_techTree->GetAbsoluteTop()));
+                m_techTree->SetProperty("margin", "0px");
+                m_techTree->SetProperty("left", std::to_string(left) + "px");
+                m_techTree->SetProperty("top", std::to_string(top) + "px");
+            });
+        }
 
         if (Rml::Element* tab = m_techTree->GetElementById("tab_ship")) {
             Listen(*tab, "click", [this](Rml::Event&) { SetTechTab(0); });
@@ -853,8 +872,13 @@ void UI::SetCurrencies(int tech, int supplies)
     m_shownTech = tech;
     m_shownSupplies = supplies;
 
-    if (m_techValue) m_techValue->SetInnerRML(std::to_string(tech));
-    if (m_supplyValue) m_supplyValue->SetInnerRML(std::to_string(supplies));
+    const std::string techText = std::to_string(tech);
+    const std::string supplyText = std::to_string(supplies);
+
+    if (m_techValue) m_techValue->SetInnerRML(techText);
+    if (m_supplyValue) m_supplyValue->SetInnerRML(supplyText);
+    if (m_hudTechValue) m_hudTechValue->SetInnerRML(techText);
+    if (m_hudSuppliesValue) m_hudSuppliesValue->SetInnerRML(supplyText);
 }
 
 void UI::SetTechPickCallback(std::function<void(std::uint32_t, int, int)> callback)
@@ -910,6 +934,13 @@ void UI::SetSeedRandomizeCallback(std::function<void()> callback)
 void UI::SetSeedDisplay(std::uint32_t seed)
 {
     if (m_seedInput) m_seedInput->SetAttribute("value", std::to_string(seed));
+}
+
+void UI::SetIntroVisible(bool visible)
+{
+    if (!m_document) return;
+    if (visible) m_document->Show();
+    else m_document->Hide();
 }
 
 void UI::SetSeedRowVisible(bool visible)

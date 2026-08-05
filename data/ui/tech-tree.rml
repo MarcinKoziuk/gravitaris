@@ -10,22 +10,22 @@
 			   art drops in over the hatch and leaves these alone. */
 			@spritesheet tech
 			{
-				src: tech-frame-normal.png;
+				src: tech-frame-normal.tga;
 				tech-frame-normal: 0px 0px 54px 54px;
 			}
 			@spritesheet tech_fitted
 			{
-				src: tech-frame-fitted.png;
+				src: tech-frame-fitted.tga;
 				tech-frame-fitted: 0px 0px 54px 54px;
 			}
 			@spritesheet tech_dim
 			{
-				src: tech-frame-dim.png;
+				src: tech-frame-dim.tga;
 				tech-frame-dim: 0px 0px 54px 54px;
 			}
 			@spritesheet tech_hatch
 			{
-				src: tech-hatch.png;
+				src: tech-hatch.tga;
 				tech-hatch: 0px 0px 54px 54px;
 			}
 
@@ -63,6 +63,14 @@
 				padding-bottom: 12dp;
 				border-bottom-width: 1dp;
 				border-bottom-color: #123742;
+			}
+
+			/* The board is a window you place, so its title doubles as the
+			   grip that moves it. */
+			handle#tech_grip
+			{
+				display: inline-block;
+				cursor: move;
 			}
 
 			span#tech_title
@@ -299,7 +307,7 @@
 		<div class="corner tl"></div><div class="corner br"></div>
 
 		<div id="tech_header">
-			<span id="tech_title">TECHNOLOGY</span>
+			<handle id="tech_grip" move_target="#document"><span id="tech_title">TECHNOLOGY</span></handle>
 			<span id="tech_fitted"></span>
 			<div class="currency"><span class="label">TECH</span><span id="tech_value" class="value">0</span></div>
 			<div class="currency"><span class="label">SUPPLY</span><span id="supply_value" class="value">0</span></div>

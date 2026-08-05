@@ -65,6 +65,10 @@ static Application::GLConfiguration CreateGLConfiguration(const Application::Arg
 // from the page's own URL (argv is never populated from it). Empty string
 // means single-player.
 static std::string GetConnectUrl(const Application::Arguments& arguments);
+// Native only: "--autostart [team]" dismisses the intro dialog and flies
+// immediately. For looking at the HUD without a hand on the mouse -- a
+// screen nothing can reach is a screen nothing can check.
+static bool WantsAutostart(const Application::Arguments& arguments);
 static std::string TeamColorCss(TeamId team);
 static std::vector<ChatSpan> ColorTeamNames(const std::string& text);
 
@@ -89,6 +93,7 @@ private:
     // Live keyboard action state; FeedInput() turns it into one tick-stamped
     // command per sim tick. The sim never reads the keyboard directly.
     ControlFlags m_currentInput{};
+    bool m_autostart = false;
     // One-shot, cleared once the tick that carries it has been submitted:
     // the tech-tree rank the player just bought, if any.
     TechPick m_techPick;
@@ -263,6 +268,7 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     // ?connect=ws://host:port (wasm, read from the page URL) switches into
     // multiplayer-client mode instead of the usual local single-player sim.
     m_connectUrl = GetConnectUrl(arguments);
+    m_autostart = WantsAutostart(arguments);
     if (m_connectUrl.empty()) {
         // World now, combatants once the intro dialog reports which side the
         // player picked -- so the dialog sits over the real solar system
@@ -321,6 +327,13 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     // nothing useful to type (see UI::SetSeedRowVisible).
     m_ui.SetSeedRowVisible(m_connectUrl.empty());
     if (m_connectUrl.empty()) m_ui.SetSeedDisplay(m_sectorParams.seed);
+
+    // Dev shortcut: fly straight past the intro so a HUD change can be looked
+    // at without a hand on the mouse.
+    if (m_autostart) {
+        StartSession(TeamId::Blue, m_game->GetPlayerName());
+        m_ui.SetIntroVisible(false);
+    }
 
     m_ui.SetTeamOptions(m_connectUrl.empty()
                                 ? m_game->GetRoster()
@@ -1263,6 +1276,14 @@ static std::string GetConnectUrl(const Application::Arguments&)
     return url;
 }
 #else
+static bool WantsAutostart(const Application::Arguments& arguments)
+{
+    for (int i = 1; i < arguments.argc; ++i) {
+        if (std::string_view{arguments.argv[i]} == "--autostart") return true;
+    }
+    return false;
+}
+
 static std::string GetConnectUrl(const Application::Arguments& arguments)
 {
     for (int i = 1; i + 1 < arguments.argc; ++i) {

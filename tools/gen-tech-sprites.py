@@ -2,11 +2,14 @@
 
 Placeholders: real icon art (SVG) replaces the hatch, and the frames stay.
 Written by hand rather than with an image library because there isn't one
-installed and a PNG writer is thirty lines.
+installed here.
+
+TGA rather than PNG because that is what the game's own RmlUi render
+interface reads -- see RenderInterfaceGL3::LoadTexture, which handles
+24/32-bit uncompressed TGA and nothing else.
 """
 import os
 import struct
-import zlib
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, 'data', 'ui')
 
@@ -14,19 +17,15 @@ W = H = 54
 CHAMFER = 9
 
 
-def write_png(path, w, h, pixels):
-    raw = b''.join(b'\x00' + bytes(v for px in row for v in px) for row in pixels)
-
-    def chunk(tag, data):
-        return (struct.pack('>I', len(data)) + tag + data
-                + struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff))
-
-    header = struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)
+def write_tga(path, w, h, pixels):
+    # 32-bit uncompressed true-colour, top-left origin, 8 alpha bits.
+    header = struct.pack('<BBBHHBHHHHBB', 0, 0, 2, 0, 0, 0, 0, 0, w, h, 32, 0x28)
+    body = bytearray()
+    for row in pixels:
+        for r, g, b, a in row:
+            body += bytes((b, g, r, a))  # TGA is BGRA
     with open(path, 'wb') as f:
-        f.write(b'\x89PNG\r\n\x1a\n'
-                + chunk(b'IHDR', header)
-                + chunk(b'IDAT', zlib.compress(raw, 9))
-                + chunk(b'IEND', b''))
+        f.write(header + bytes(body))
 
 
 def inside(x, y):
@@ -71,8 +70,8 @@ def hatch():
 for name, rgb in (('tech-frame-fitted', (0x8a, 0x5f, 0x1c)),
                   ('tech-frame-normal', (0x1d, 0x5f, 0x70)),
                   ('tech-frame-dim', (0x12, 0x37, 0x42))):
-    write_png(os.path.join(OUT, name + '.png'), W, H, frame(rgb))
+    write_tga(os.path.join(OUT, name + '.tga'), W, H, frame(rgb))
     print('wrote', name)
 
-write_png(os.path.join(OUT, 'tech-hatch.png'), W, H, hatch())
+write_tga(os.path.join(OUT, 'tech-hatch.tga'), W, H, hatch())
 print('wrote tech-hatch')
