@@ -8,6 +8,51 @@ namespace Gravitaris {
 
 void DrawRendererPanel(CGame& game)
 {
+    ImGui::SeparatorText("Display scale");
+
+    // This overlay is scaled by the very value being dragged, so committing
+    // mid-drag moves the slider out from under the cursor and the drag can't
+    // be finished. Held here until the drag ends instead. Negative = not held.
+    static float heldUiScale = -1.f;
+
+    float uiScale = heldUiScale >= 0.f ? heldUiScale : game.GetUiScale();
+    ImGui::SetNextItemWidth(160.f);
+    if (ImGui::SliderFloat("UI scale", &uiScale, CGame::MIN_UI_SCALE, CGame::MAX_UI_SCALE, "%.2fx",
+                            ImGuiSliderFlags_AlwaysClamp)) {
+        heldUiScale = uiScale;
+    }
+    if (ImGui::IsItemDeactivated()) {
+        if (heldUiScale >= 0.f) game.SetUiScale(heldUiScale);
+        heldUiScale = -1.f;
+    }
+    ImGui::SetItemTooltip(
+            "Multiplies the display's own scaling, and applies to everything sized to be\n"
+            "seen: HUD, this overlay, line widths, scanlines, and how much world fits on\n"
+            "screen. The window keeps rendering at full resolution either way.\n"
+            "Raise it on a dense display the OS is driving at 100%.\n"
+            "\n"
+            "Applied when the drag ends, since this overlay resizes with it.\n"
+            "The minimap and compass textures are sized at startup, so they only\n"
+            "sharpen on the next run.");
+
+    ImGui::SameLine();
+    if (ImGui::Button("Reset##uiscale")) {
+        game.SetUiScale(CGame::Defaults::uiScale);
+    }
+
+    float typedUiScale = game.GetUiScale();
+    ImGui::SetNextItemWidth(160.f);
+    // No step buttons: they'd apply on click and then move themselves away.
+    if (ImGui::InputFloat("##uiscale_typed", &typedUiScale, 0.f, 0.f, "%.2f",
+                           ImGuiInputTextFlags_EnterReturnsTrue)) {
+        game.SetUiScale(typedUiScale);
+    }
+    ImGui::SetItemTooltip("Type an exact value and press Enter.");
+
+    ImGui::SameLine();
+    ImGui::Text("Effective: %.2fx (display %.2fx)", game.GetContentScale(),
+                game.GetUiScale() > 0.f ? game.GetContentScale() / game.GetUiScale() : 0.f);
+
     ImGui::SeparatorText("Active line renderer");
 
     const RendererKind current = game.GetActiveRenderer();

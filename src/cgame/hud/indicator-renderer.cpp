@@ -34,7 +34,7 @@ IndicatorRenderer::IndicatorRenderer(ResourceLoader& resourceLoader)
 
 void IndicatorRenderer::Update(const SceneView& view, std::optional<flecs::entity> player,
                                const Magnum::Vector2& cameraPos, float zoom,
-                               const Magnum::Vector2& viewportSize, float pixelScale)
+                               const Magnum::Vector2& viewportSize)
 {
     if (!m_params.enabled || !m_arrowModel || !view.overlays) return;
     if (!player) return;
@@ -48,12 +48,12 @@ void IndicatorRenderer::Update(const SceneView& view, std::optional<flecs::entit
                                     static_cast<float>(playerTransf->pos.y())};
     if (zoom <= 0.f) return;
 
-    // The renderers map world->screen at `zoom` px per world unit, camera-
-    // centered (see ModelRenderer2::ViewProjection), so screen offsets are just
-    // world offsets from the camera scaled by zoom.
+    // The renderers map world->screen at `zoom` design units per world unit,
+    // camera-centered (see ModelRenderer2::ViewProjection), so screen offsets
+    // are just world offsets from the camera scaled by zoom.
     const Magnum::Vector2 halfExtentPx = viewportSize * 0.5f;
-    const float ringWorld = m_params.ringRadiusPx * pixelScale / zoom;
-    const float arrowWorld = m_params.arrowSizePx * pixelScale / zoom;
+    const float ringWorld = m_params.ringRadiusPx / zoom;
+    const float arrowWorld = m_params.arrowSizePx / zoom;
 
     struct Candidate {
         Magnum::Vector2 pos;
@@ -90,11 +90,11 @@ void IndicatorRenderer::Update(const SceneView& view, std::optional<flecs::entit
         // Ramping the arrow in over fadeBandPx instead of switching it on at the
         // boundary keeps a target that's drifting across the edge from popping.
         const Magnum::Vector2 screenPx = fromCamera * zoom;
-        const Magnum::Vector2 inset = halfExtentPx - Magnum::Vector2{m_params.edgeMarginPx * pixelScale};
+        const Magnum::Vector2 inset = halfExtentPx - Magnum::Vector2{m_params.edgeMarginPx};
         const float past = std::max(std::abs(screenPx.x()) - std::max(inset.x(), 1.f),
                                     std::abs(screenPx.y()) - std::max(inset.y(), 1.f));
         if (past <= 0.f) return; // comfortably on screen: the target speaks for itself
-        const float edgeFade = std::clamp(past / std::max(m_params.fadeBandPx * pixelScale, 1.f), 0.f, 1.f);
+        const float edgeFade = std::clamp(past / std::max(m_params.fadeBandPx, 1.f), 0.f, 1.f);
 
         // Near targets read loud, distant ones stay legible but recede; also
         // fades an arrow out as its target leaves range, so nothing blinks off.

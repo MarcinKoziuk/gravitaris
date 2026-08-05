@@ -37,8 +37,21 @@ using Magnum::Vector3;
 // bloom/CRT treatment.
 class MinimapRenderer {
 public:
-    // Fixed texture resolution; RCSS scales the on-screen panel independently.
+    // Texture resolution at content scale 1; RCSS scales the on-screen panel
+    // independently. The real texture is this times the content scale, so the
+    // panel keeps the same supersampling ratio on a dense display instead of
+    // going soft (see TextureSizeFor).
     static constexpr int TEXTURE_SIZE = 512;
+
+    // Chosen once, at construction: the live-texture bridge hands RmlUi a raw
+    // GL id, and RmlUi caches it when the document loads -- so reallocating
+    // later would leave it drawing a texture that no longer exists. A UI-scale
+    // change therefore only reaches the map on the next run.
+    [[nodiscard]] static Vector2i TextureSizeFor(float contentScale)
+    {
+        const int size = std::clamp(static_cast<int>(TEXTURE_SIZE * contentScale), TEXTURE_SIZE, 2048);
+        return {size, size};
+    }
 
     struct Params {
         bool enabled = true;
@@ -65,6 +78,11 @@ public:
     };
 
 private:
+    // Before the framebuffer: its constructor is initialized from this.
+    Vector2i m_textureSize;
+    // Texels per design unit -- what the texture-pixel-authored stroke widths
+    // are multiplied by so they stay the same thickness on screen.
+    float m_contentScale;
 
     Line2Shader m_shader;
     Magnum::GL::Texture2D m_texture;
@@ -86,7 +104,7 @@ private:
     void FitToSector(const SceneView& view, const Vector2& mapCenter);
 
 public:
-    explicit MinimapRenderer(IFilesystem& filesystem);
+    explicit MinimapRenderer(IFilesystem& filesystem, float contentScale = 1.f);
 
     Params& GetParams() { return m_params; }
 
@@ -103,7 +121,7 @@ public:
 
     // Raw GL id + size, for registering with the RmlUi live-texture bridge.
     [[nodiscard]] unsigned TextureId() { return m_texture.id(); }
-    [[nodiscard]] static Vector2i TextureSize() { return {TEXTURE_SIZE, TEXTURE_SIZE}; }
+    [[nodiscard]] Vector2i TextureSize() const { return m_textureSize; }
 
     // Renders the map: static, centered on `mapCenter` (not the player) so
     // panning the ship doesn't scroll the map. `subjectPos` places the ringed

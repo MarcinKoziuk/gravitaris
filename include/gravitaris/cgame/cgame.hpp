@@ -222,9 +222,13 @@ protected:
     float m_renderTimeSeconds = 0.f;
 
 protected:
-    // framebuffer-pixels per logical-pixel; needed here (not just forwarded to
-    // the renderers) to size the HiDPI-independent indicator ring/arrows.
-    float m_pixelScale = 1.f;
+    // framebuffer-pixels per design unit; needed here (not just forwarded to
+    // the renderers) to size the display-independent indicator ring/arrows.
+    float m_contentScale = 1.f;
+
+    // The player's UI-size preference, multiplied into the content scale the
+    // client computes. 1 = whatever the display's own scaling asks for.
+    float m_uiScale = Defaults::uiScale;
 
     // Shared line-thickness setting (pixels), forwarded to whichever
     // renderer is active; each converts it to its own internal units.
@@ -251,7 +255,13 @@ public:
         // needs it. Headless Games (sim-test) never apply this, so their
         // determinism is unaffected by the value.
         static constexpr float shipWeight = 0.75f;
+        // Multiplier on top of the display's own scaling, not a replacement
+        // for it -- see CGame::SetContentScale.
+        static constexpr float uiScale = 1.f;
     };
+
+    static constexpr float MIN_UI_SCALE = 0.5f;
+    static constexpr float MAX_UI_SCALE = 4.f;
 
     static constexpr float MIN_LINE_WIDTH = 0.5f;
     static constexpr float MAX_LINE_WIDTH = 16.f;
@@ -259,7 +269,10 @@ public:
     static constexpr float MIN_ZOOM_WIDTH_FACTOR = 0.f;
     static constexpr float MAX_ZOOM_WIDTH_FACTOR = 1.f;
 
-    explicit CGame(IFilesystem& filesystem);
+    // `contentScale` only sizes the offscreen HUD textures, which are fixed at
+    // construction (see MinimapRenderer::TextureSizeFor); everything else
+    // follows SetContentScale per frame.
+    explicit CGame(IFilesystem& filesystem, float contentScale = 1.f);
 
     void SetViewport(const Magnum::Vector2& origin, const Magnum::Vector2& size)
     {
@@ -276,14 +289,17 @@ public:
         m_starfieldRenderer.SetViewportSize(size);
     }
 
-    // framebuffer-pixels per logical-pixel; keeps line thickness constant in
-    // logical units across HiDPI/Retina displays.
-    void SetPixelScale(float scale)
+    // framebuffer-pixels per design unit: the display's own scaling times the
+    // UI-size preference. Everything sized to be seen rather than to fill the
+    // window -- line thickness, star radius, world framing -- goes through it,
+    // so a denser display renders the same view more finely.
+    void SetContentScale(float scale)
     {
-        m_pixelScale = scale;
-        m_modelRenderer2.SetPixelScale(scale);
-        m_mirrorRenderer2.SetPixelScale(scale);
-        m_starfieldRenderer.SetPixelScale(scale);
+        m_contentScale = scale;
+        m_simpleModelRenderer.SetContentScale(scale);
+        m_modelRenderer2.SetContentScale(scale);
+        m_mirrorRenderer2.SetContentScale(scale);
+        m_starfieldRenderer.SetContentScale(scale);
     }
 
     StarfieldRenderer& GetStarfieldRenderer() { return m_starfieldRenderer; }
@@ -332,13 +348,22 @@ public:
     // `notches` is the scroll delta (positive = zoom in).
     void NudgeManualZoom(float notches) { m_cameraDirector.NudgeManualZoom(notches); }
 
-    // Framebuffer pixels; world->screen mapping is ppu = zoom (renderers use
-    // 1 px/unit at zoom 1), camera-centered.
+    // Framebuffer pixels -- the size of the rect actually drawn to. World
+    // extent is *not* this over zoom: the mapping is ppu = zoom * contentScale.
+    // Anything asking how much world fits wants GetDesignViewportSize().
     [[nodiscard]] const Magnum::Vector2& GetViewportSize() const { return m_viewportSize; }
 
     [[nodiscard]] const Magnum::Vector2& GetViewportOrigin() const { return m_viewportOrigin; }
 
-    [[nodiscard]] float GetPixelScale() const { return m_pixelScale; }
+    [[nodiscard]] float GetContentScale() const { return m_contentScale; }
+
+    // The scene viewport in design units rather than framebuffer pixels --
+    // what anything reasoning about how much of the world fits on screen wants,
+    // since world->design is exactly `zoom` with no scale left in it.
+    [[nodiscard]] Magnum::Vector2 GetDesignViewportSize() const { return m_viewportSize / m_contentScale; }
+
+    [[nodiscard]] float GetUiScale() const { return m_uiScale; }
+    void SetUiScale(float scale) { m_uiScale = std::clamp(scale, MIN_UI_SCALE, MAX_UI_SCALE); }
 
     // Hull integrity of the unit the HUD represents (the camera subject, so
     // it follows a spectated unit), 0..1. Empty when there's nothing to show.

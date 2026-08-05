@@ -58,15 +58,15 @@ double ComputeRenderTick(double estimatedServerTick, float interpDelaySeconds, s
 
 } // namespace
 
-CGame::CGame(IFilesystem &filesystem)
+CGame::CGame(IFilesystem &filesystem, float contentScale)
     : Game(filesystem, CreateEntitySpawner())
     , m_simpleModelRenderer(m_registry, filesystem, m_resourceLoader)
     , m_modelRenderer2(m_registry, filesystem, m_resourceLoader)
     , m_mirrorRenderer2(m_mirrorWorld, filesystem, m_resourceLoader)
     , m_snapshotApplier(m_mirrorWorld, m_resourceLoader)
     , m_starfieldRenderer(filesystem)
-    , m_minimapRenderer(filesystem)
-    , m_compassRenderer(filesystem, m_modelRenderer2)
+    , m_minimapRenderer(filesystem, contentScale)
+    , m_compassRenderer(filesystem, m_modelRenderer2, contentScale)
     , m_audioSystem(m_registry, m_resourceLoader, m_eventQueue, m_upgradeCatalog)
     , m_hitFlashSystem(m_registry, m_eventQueue, *m_entitySpawner)
     , m_cameraDirector(Defaults::cameraZoom)
@@ -491,7 +491,8 @@ void CGame::RenderMinimap()
     const Team* subjectTeam = subject ? subject->try_get<Team>() : nullptr;
 
     const Camera& camera = m_cameraDirector.GetCamera();
-    const Magnum::Vector2 viewHalfExtent = m_viewportSize / (2.f * std::max(camera.GetZoom(), 1e-3f));
+    const Magnum::Vector2 viewHalfExtent =
+            GetDesignViewportSize() / (2.f * std::max(camera.GetZoom(), 1e-3f));
 
     // In MP, everything but the own ship lives in m_mirrorWorld (see
     // m_netClient's field comment) -- sweep it too so remote ships/planets
@@ -744,7 +745,7 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
     const SceneView view = CurrentSceneView();
     // The smoothed-position override belongs to the own predicted ship alone;
     // a spectated unit's Transform is never reconciled, so it needs none.
-    m_cameraDirector.Update(view, CameraSubject(), m_viewportSize, dtSeconds,
+    m_cameraDirector.Update(view, CameraSubject(), GetDesignViewportSize(), dtSeconds,
                             IsSpectating() ? std::nullopt : std::optional<Magnum::Vector2>(smoothedPlayerPos),
                             SubjectGravity());
     Camera& camera = m_cameraDirector.GetCamera();
@@ -770,8 +771,8 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
     m_starfieldRenderer.Render();
 
     SubmitPlanetOwnershipMarkers(view);
-    m_indicatorRenderer.Update(view, CameraSubject(), camera.GetPosition(), camera.GetZoom(), m_viewportSize,
-                               m_pixelScale);
+    m_indicatorRenderer.Update(view, CameraSubject(), camera.GetPosition(), camera.GetZoom(),
+                               GetDesignViewportSize());
     m_mirrorRenderer2.SetZoom(camera.GetZoom());
     m_mirrorRenderer2.SetCameraPosition(camera.GetPosition());
     m_mirrorRenderer2.SetLineWidth(m_lineWidthPixels);
@@ -843,7 +844,8 @@ void CGame::Render(double delta)
     }
 
     const SceneView view = CurrentSceneView();
-    m_cameraDirector.Update(view, CameraSubject(), m_viewportSize, dtSeconds, std::nullopt, SubjectGravity());
+    m_cameraDirector.Update(view, CameraSubject(), GetDesignViewportSize(), dtSeconds, std::nullopt,
+                            SubjectGravity());
     m_hitFlashSystem.Update(dtSeconds);
 
     const Camera& camera = m_cameraDirector.GetCamera();
@@ -861,8 +863,8 @@ void CGame::Render(double delta)
     // the end of its Render), so only submit them when that renderer actually
     // runs this frame -- otherwise the overlay scratch grows unboundedly.
     if (m_activeRenderer == RendererKind::Baked) {
-        m_indicatorRenderer.Update(view, CameraSubject(), camera.GetPosition(), camera.GetZoom(), m_viewportSize,
-                                   m_pixelScale);
+        m_indicatorRenderer.Update(view, CameraSubject(), camera.GetPosition(), camera.GetZoom(),
+                                   GetDesignViewportSize());
         SubmitPlanetOwnershipMarkers(view);
     }
 

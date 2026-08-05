@@ -234,6 +234,10 @@ public:
     // because summing it means knowing the gravity constant and multiplier,
     // which are the sim's business, not the camera's (see CGame::GravityAt).
     // Zero is a safe value: the lead degrades to plain straight-line velocity.
+    //
+    // `viewportSize` is in design units, not framebuffer pixels -- every rule
+    // here divides it by zoom to get a world extent, and that identity only
+    // holds with the display's scale already out (CGame::GetDesignViewportSize).
     void Update(const SceneView& view, std::optional<flecs::entity> player, const Magnum::Vector2& viewportSize,
                float dtSeconds, std::optional<Magnum::Vector2> positionOverride = std::nullopt,
                const Magnum::Vector2& gravityAccel = {});

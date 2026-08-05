@@ -84,7 +84,7 @@ Matrix3 StarfieldRenderer::ViewProjection() const
     // on why: baking camera position into vertex data the way this used to
     // work meant any camera movement invalidated the whole vertex buffer,
     // forcing a full re-upload every frame).
-    const float ppu = m_pixelsPerUnit * m_zoom;
+    const float ppu = m_pixelsPerUnit * m_zoom * m_contentScale;
     const Vector2 extent = m_viewportSize / ppu;
     return Matrix3::projection(extent);
 }
@@ -98,6 +98,10 @@ bool StarfieldRenderer::NeedsRebuild() const
     // (baked into vertex brightness at rebuild time) -- re-check on any
     // meaningfully large change rather than tracking exact extent math.
     if (std::fabs(m_zoom - m_lastRebuildZoom) > m_lastRebuildZoom * 0.2f) return true;
+
+    // Star radius is baked into the vertex data, so a scale change can't wait
+    // for the movement/zoom thresholds below to notice it.
+    if (m_contentScale != m_lastRebuildContentScale) return true;
 
     // How far the camera has moved since the region below was generated,
     // scaled per layer by its own parallax (a layer's own effective
@@ -116,8 +120,9 @@ void StarfieldRenderer::Rebuild()
     m_scratch.clear();
     m_lastRebuildCameraPos = m_cameraPos;
     m_lastRebuildZoom = m_zoom;
+    m_lastRebuildContentScale = m_contentScale;
 
-    const float ppu = m_pixelsPerUnit * m_zoom;
+    const float ppu = m_pixelsPerUnit * m_zoom * m_contentScale;
     // Generously over-padded past the actual viewport so the camera can move
     // for a while (NeedsRebuild's threshold) before any cell is missing --
     // this, not per-frame rebuilding, is what keeps this cheap: see this
@@ -184,7 +189,7 @@ void StarfieldRenderer::Rebuild()
                     const float fy = (static_cast<float>(cy) + rng.Next()) * m_cellSize;
                     const Vector2 center{fx, fy};
 
-                    const float size = (layer.sizeMin + rng.Next() * (layer.sizeMax - layer.sizeMin)) * m_pixelScale;
+                    const float size = (layer.sizeMin + rng.Next() * (layer.sizeMax - layer.sizeMin)) * m_contentScale;
                     const float bright = layer.brightness * (0.6f + 0.4f * rng.Next()) * zoomFade;
 
                     // Mostly white with a faint cool/warm tint for variety.

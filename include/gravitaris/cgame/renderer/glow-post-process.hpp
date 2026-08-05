@@ -84,11 +84,11 @@ private:
     Magnum::GL::Mesh m_fullscreenTri;
 
     // Sharp passes (scene, composite, present) run at m_fullSize (framebuffer
-    // pixels). The blur runs at m_blurSize, derived from the *logical* window
-    // size, so the halo is the same fraction of the screen regardless of HiDPI
-    // backing scale (and cheaper on Retina, where m_fullSize is much larger).
+    // pixels). The blur runs at m_blurSize, derived from the *design* size, so
+    // the halo is the same fraction of the screen regardless of display density
+    // (and cheaper on dense ones, where m_fullSize is much larger).
     Vector2i m_fullSize{0, 0};
-    Vector2i m_logicalSize{0, 0};
+    Vector2i m_designSize{0, 0};
     Vector2i m_halfSize{0, 0};
     Vector2i m_quarterSize{0, 0};
     Vector2i m_blurSize{0, 0};
@@ -124,7 +124,14 @@ private:
     float m_scanJitterAmplitude = Defaults::scanJitterAmplitude;
     float m_phaseJitterPx = Defaults::phaseJitterPx;
 
-    void Resize(const Vector2i& framebufferSize, const Vector2i& logicalSize);
+    void Resize(const Vector2i& framebufferSize, const Vector2i& designSize);
+
+    // Framebuffer pixels per design unit, recovered from the two sizes the
+    // caller already supplies rather than plumbed through separately.
+    [[nodiscard]] float ContentScale() const
+    {
+        return m_designSize.y() > 0 ? static_cast<float>(m_fullSize.y()) / static_cast<float>(m_designSize.y()) : 1.f;
+    }
 
     // Present `sourceTex` (in `sourceFbo`) into `targetRect` of `target`,
     // through the CRT scanline shader if enabled, else a plain blit.
@@ -182,8 +189,9 @@ public:
 
     // Bind the offscreen scene target and clear it; call before rendering
     // the normal game scene. framebufferSize is the sharp render resolution;
-    // logicalSize (window points) sets the DPI-independent blur resolution.
-    void BeginScene(const Vector2i& framebufferSize, const Vector2i& logicalSize);
+    // designSize sets the display-independent blur resolution, and the ratio
+    // between the two is what the pixel-sized CRT tunables are scaled by.
+    void BeginScene(const Vector2i& framebufferSize, const Vector2i& designSize);
 
     // Blur+composite (or plain blit, if disabled) the scene into `targetRect`
     // of `target` — the rect is in `target`'s pixels and need not start at the

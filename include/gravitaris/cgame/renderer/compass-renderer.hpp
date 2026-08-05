@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 #include <Magnum/Magnum.h>
 #include <Magnum/GL/Framebuffer.h>
 #include <Magnum/GL/Mesh.h>
@@ -32,11 +34,20 @@ using Magnum::Vector3;
 // ui/hud.rml places it, in the telemetry row beside the HDG readout.
 class CompassRenderer {
 public:
-    // Fixed texture resolution. Deliberately larger than the on-screen dial
-    // (~44dp) so the panel's downsample supersamples the strokes -- but only
-    // ~3x: further out and lineWidth has to grow to survive the shrink, which
-    // costs more than the extra sampling buys.
+    // Texture resolution at content scale 1. Deliberately larger than the
+    // on-screen dial (~44dp) so the panel's downsample supersamples the strokes
+    // -- but only ~3x: further out and lineWidth has to grow to survive the
+    // shrink, which costs more than the extra sampling buys. Scaling the
+    // texture and the strokes together preserves that ratio on a dense display
+    // rather than letting it decay (see MinimapRenderer::TextureSizeFor for why
+    // this is fixed at construction).
     static constexpr int TEXTURE_SIZE = 128;
+
+    [[nodiscard]] static Vector2i TextureSizeFor(float contentScale)
+    {
+        const int size = std::clamp(static_cast<int>(TEXTURE_SIZE * contentScale), TEXTURE_SIZE, 512);
+        return {size, size};
+    }
 
     struct Params {
         bool enabled = true;
@@ -75,6 +86,12 @@ private:
     // ships need no special case here.
     ModelRenderer2& m_modelRenderer;
 
+    // Before the framebuffer: its constructor is initialized from this.
+    Vector2i m_textureSize;
+    // Texels per design unit, so the stroke widths below survive the change of
+    // resolution at the thickness they were tuned at.
+    float m_contentScale;
+
     Line2Shader m_shader;
     Magnum::GL::Texture2D m_texture;
     Magnum::GL::Framebuffer m_framebuffer;
@@ -96,13 +113,13 @@ private:
     [[nodiscard]] float FitScale(const Model& model, id_t modelId);
 
 public:
-    CompassRenderer(IFilesystem& filesystem, ModelRenderer2& modelRenderer);
+    CompassRenderer(IFilesystem& filesystem, ModelRenderer2& modelRenderer, float contentScale = 1.f);
 
     Params& GetParams() { return m_params; }
 
     // Raw GL id + size, for registering with the RmlUi live-texture bridge.
     [[nodiscard]] unsigned TextureId() { return m_texture.id(); }
-    [[nodiscard]] static Vector2i TextureSize() { return {TEXTURE_SIZE, TEXTURE_SIZE}; }
+    [[nodiscard]] Vector2i TextureSize() const { return m_textureSize; }
 
     // Binds its own framebuffer; the caller binds whatever it draws to next
     // (the app runs this before the glow pass claims the scene target).

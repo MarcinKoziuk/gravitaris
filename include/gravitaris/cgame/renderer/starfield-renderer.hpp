@@ -65,7 +65,7 @@ public:
     void SetViewportSize(const Vector2& size) { m_viewportSize = size; }
     void SetCameraPosition(const Vector2& pos) { m_cameraPos = pos; }
     void SetZoom(float zoom) { m_zoom = zoom; }
-    void SetPixelScale(float scale) { m_pixelScale = scale; }
+    void SetContentScale(float scale) { m_contentScale = scale; }
 
     void Render();
 
@@ -103,7 +103,7 @@ private:
     Vector2 m_cameraPos{0.f, 0.f};
     float m_pixelsPerUnit = 1.f;
     float m_zoom = 1.f;
-    float m_pixelScale = 1.f;
+    float m_contentScale = 1.f;
 
     bool m_enabled = true;
     float m_cellSize = Defaults::cellSize;
@@ -116,6 +116,7 @@ private:
     // /zoom-delta checks.
     Vector2 m_lastRebuildCameraPos{0.f, 0.f};
     float m_lastRebuildZoom = 0.f;
+    float m_lastRebuildContentScale = 0.f;
 
     // How far past the actual viewport Rebuild() generates cells in every
     // direction -- the camera can drift this far (see NeedsRebuild's 0.5x

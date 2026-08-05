@@ -121,7 +121,7 @@ private:
     float m_lineWidthPixels = 2.f;
     float m_zoomWidthFactor = 0.f; // 0 = width constant across zoom, 1 = width scales linearly with zoom
     float m_referenceZoom = 1.f;   // zoom at which lineWidthPixels is the literal pixel width
-    float m_pixelScale = 1.f; // framebuffer-pixels per logical-pixel (HiDPI)
+    float m_contentScale = 1.f; // framebuffer-pixels per design unit (HiDPI + UI-size preference)
     float m_timeSeconds = 0.f; // continuous client clock, for animated colors (see SetTime)
     bool m_debugForceFacetedCircles = false;
 
@@ -148,7 +148,7 @@ public:
     [[nodiscard]] float GetZoomWidthFactor() const { return m_zoomWidthFactor; }
     // Zoom at which the width matches lineWidthPixels exactly (usually the default camera zoom).
     void SetReferenceZoom(float zoom) { m_referenceZoom = zoom; }
-    void SetPixelScale(float scale) { m_pixelScale = scale; }
+    void SetContentScale(float scale) { m_contentScale = scale; }
     // Wall-clock seconds since the client started, for colors that animate on
     // their own (a Lab's ready flash). Render()'s `delta` can't stand in for
     // it: callers pass a fixed-step interpolation fraction there, or 0.

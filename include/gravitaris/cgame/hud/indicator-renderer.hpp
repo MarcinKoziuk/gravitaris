@@ -63,10 +63,11 @@ public:
     // Submits an arrow overlay per nearby-but-off-screen enemy, into
     // `view.overlays`. `player` may be a dead/invalid entity (between death
     // and respawn) -- the update is then a no-op. `cameraPos`/`zoom` are the
-    // camera director's final values for this frame; `pixelScale` is
-    // framebuffer-pixels-per-logical-pixel (HiDPI).
+    // camera director's final values for this frame; `viewportSize` is the
+    // scene viewport in design units, so the Params' pixel sizes below are
+    // directly comparable to it on any display (CGame::GetDesignViewportSize).
     void Update(const SceneView& view, std::optional<flecs::entity> player, const Magnum::Vector2& cameraPos,
-               float zoom, const Magnum::Vector2& viewportSize, float pixelScale);
+               float zoom, const Magnum::Vector2& viewportSize);
 };
 
 } // namespace Gravitaris

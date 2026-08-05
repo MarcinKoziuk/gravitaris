@@ -159,6 +159,30 @@ private:
         return Magnum::Math::max(fbRatio, dpiScaling());
     }
 
+    // Framebuffer pixels per design unit -- what everything sized to be *seen*
+    // is laid out in: RmlUi's dp, ImGui's canvas, line widths, world framing.
+    //
+    // Deliberately not the same thing as PixelScale(): that one converts SDL's
+    // logical points and belongs to the window system, so the player's UI-size
+    // preference must never reach it or the pointer would stop landing where
+    // it looks (the input path below).
+    //
+    // The display term is the OS scaling factor rather than the panel's
+    // physical density -- SDL_GetDisplayDPI reports MDT_EFFECTIVE_DPI on
+    // Windows, which is that same factor, and warns it's unreliable elsewhere.
+    // So a 4K panel run at 100% scaling reads as 1.0 here: the OS has been
+    // told 1x elements are wanted, and the UI-scale preference is how the
+    // player disagrees.
+    float ContentScale() const { return PixelScale().x() * m_game->GetUiScale(); }
+
+    // ImGui's canvas, in design units. ImGuiIntegration supersamples the font
+    // atlas by framebufferSize/uiSize, so this is both the layout size and
+    // what keeps the dev overlay crisp.
+    Magnum::Vector2 DebugUiSize(const Magnum::Vector2i& fbSize) const
+    {
+        return Magnum::Vector2{fbSize} / ContentScale();
+    }
+
     // Pointer position in the UI context's coordinate space (physical pixels,
     // matching SetDimensions(framebufferSize())).
     //
@@ -218,7 +242,10 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
 
     // Game before UI: the HUD document (ui/hud.rml) references the minimap's
     // live texture, which must be registered before RmlUi first resolves it.
-    m_game = std::make_unique<CGame>(m_filesystem);
+    // PixelScale() rather than ContentScale(): the latter reads the UI-scale
+    // preference off the game that doesn't exist yet, and the preference has
+    // nowhere to have been loaded from this early anyway.
+    m_game = std::make_unique<CGame>(m_filesystem, PixelScale().x());
 
     // docs/networking-plan.md 3.5.3: --connect ws://host:port (native) or
     // ?connect=ws://host:port (wasm, read from the page URL) switches into
@@ -232,10 +259,12 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
         m_game->BuildWorld(m_sectorParams);
     }
 
+    const Magnum::Vector2i minimapSize = m_game->GetMinimapRenderer().TextureSize();
+    const Magnum::Vector2i compassSize = m_game->GetCompassRenderer().TextureSize();
     m_ui.RegisterLiveTexture("minimap", m_game->GetMinimapRenderer().TextureId(),
-                             MinimapRenderer::TextureSize().x(), MinimapRenderer::TextureSize().y());
+                             minimapSize.x(), minimapSize.y());
     m_ui.RegisterLiveTexture("compass", m_game->GetCompassRenderer().TextureId(),
-                             CompassRenderer::TextureSize().x(), CompassRenderer::TextureSize().y());
+                             compassSize.x(), compassSize.y());
 
     m_ui.SetIntroConfirmCallback(
             [this](TeamId team, const std::string& name) { StartSession(team, name); });
@@ -267,7 +296,7 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     // Application constructor made them), so these are the real values rather
     // than the placeholders drawEvent would otherwise correct a frame later.
     m_ui.SetDimensions(framebufferSize().x(), framebufferSize().y());
-    m_ui.SetDensityIndependentPixelRatio(PixelScale().x());
+    m_ui.SetDensityIndependentPixelRatio(ContentScale());
 
     m_ui.Init();
 
@@ -287,10 +316,11 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
 
     m_glow = std::make_unique<GlowPostProcess>(m_filesystem);
 
-    // Dev overlay (hidden until F1). UI size in logical points; framebuffer
-    // size keeps fonts crisp on HiDPI.
+    // Dev overlay (hidden until F1). Laid out in design units; the framebuffer
+    // size keeps fonts crisp on HiDPI. windowSize() stays as it is -- that one
+    // scales incoming pointer events, which arrive in logical points.
     m_debugUi = std::make_unique<DebugUi>(*m_game, *m_glow,
-                                          Magnum::Vector2{windowSize()}, windowSize(), framebufferSize());
+                                          DebugUiSize(framebufferSize()), windowSize(), framebufferSize());
 }
 
     // Claude: there is stuff here that would belong to cgame. client/ is only for wiring everything up and maybe later platform- specific startup  logic
@@ -594,8 +624,13 @@ void GravitarisApplication::drawEvent()
     const Magnum::Vector2i fbSize = framebufferSize();
     const Magnum::Vector2i logicalSize = windowSize();
 
+    const float contentScale = ContentScale();
+
     m_ui.SetDimensions(fbSize.x(), fbSize.y());
-    m_ui.SetDensityIndependentPixelRatio(PixelScale().x());
+    m_ui.SetDensityIndependentPixelRatio(contentScale);
+    // Per frame rather than on resize alone: the UI-scale preference can move
+    // under the slider at any time. Both calls no-op when nothing changed.
+    m_debugUi->Relayout(DebugUiSize(fbSize), logicalSize, fbSize);
 
     // The HUD sidebar owns a fixed strip of the left edge; the world renders
     // only to the right of it. The UI context is sized in framebuffer pixels,
@@ -604,11 +639,14 @@ void GravitarisApplication::drawEvent()
     const int sidebarPx = std::clamp(m_ui.GetSidebarWidthPx(), 0, fbSize.x() / 2);
     const Magnum::Vector2i sceneOrigin{sidebarPx, 0};
     const Magnum::Vector2i sceneSize = fbSize - sceneOrigin;
-    const Magnum::Vector2i sceneLogicalSize{
-            std::max(1, logicalSize.x() - static_cast<int>(sidebarPx / PixelScale().x())), logicalSize.y()};
+    // Design units: the glow's blur runs off this, so the halo is a fixed size
+    // on screen rather than one that shrinks as the display gets denser.
+    const Magnum::Vector2i sceneDesignSize{
+            std::max(1, static_cast<int>((fbSize.x() - sidebarPx) / contentScale)),
+            std::max(1, static_cast<int>(fbSize.y() / contentScale))};
 
     m_game->SetViewport(Magnum::Vector2{sceneOrigin}, Magnum::Vector2{sceneSize});
-    m_game->SetPixelScale(PixelScale().x());
+    m_game->SetContentScale(contentScale);
 
     PerfMonitor& perf = m_game->GetPerfMonitor();
 
@@ -624,7 +662,7 @@ void GravitarisApplication::drawEvent()
     // so it can be blurred/composited.
     {
         ScopedPerfTimer timer(perf, "Post-process Begin");
-        m_glow->BeginScene(sceneSize, sceneLogicalSize);
+        m_glow->BeginScene(sceneSize, sceneDesignSize);
     }
     const double delta = m_frameTimeAccumulator / Game::PHYSICS_DELTA;
     m_game->Render(delta);
@@ -668,7 +706,7 @@ void GravitarisApplication::drawEvent()
 void GravitarisApplication::viewportEvent(ViewportEvent& event)
 {
     Magnum::GL::defaultFramebuffer.setViewport({{}, event.framebufferSize()});
-    m_debugUi->Relayout(Magnum::Vector2{event.windowSize()}, event.windowSize(), event.framebufferSize());
+    m_debugUi->Relayout(DebugUiSize(event.framebufferSize()), event.windowSize(), event.framebufferSize());
 }
 
 void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::KeyEvent& event)

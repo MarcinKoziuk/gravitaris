@@ -9,10 +9,10 @@
 namespace Gravitaris {
 
 // World -> ImGui overlay coordinates: camera-centered on the scene viewport,
-// ppu = zoom in framebuffer pixels, world +Y up vs. ImGui +Y down, then
-// framebuffer -> logical UI scale. The scene viewport is inset horizontally by
-// the HUD sidebar, so the overlay's centre is the viewport's centre rather than
-// the window's; vertically the two still coincide.
+// ppu = framebuffer pixels per world unit, world +Y up vs. ImGui +Y down, then
+// framebuffer -> UI scale. The scene viewport is inset horizontally by the HUD
+// sidebar, so the overlay's centre is the viewport's centre rather than the
+// window's; vertically the two still coincide.
 struct WorldToUi {
     Magnum::Vector2 camPos;
     float ppu;
@@ -21,8 +21,8 @@ struct WorldToUi {
 
     WorldToUi(CGame& game, const Magnum::Vector2& uiSize)
             : camPos(game.GetCamera().GetPosition())
-            , ppu(game.GetCamera().GetZoom())
-            , fbToUi(Magnum::Vector2{1.f / game.GetPixelScale()})
+            , ppu(game.GetCamera().GetZoom() * game.GetContentScale())
+            , fbToUi(Magnum::Vector2{1.f / game.GetContentScale()})
             , uiCenter((game.GetViewportOrigin().x() + game.GetViewportSize().x() * 0.5f) * fbToUi.x(),
                        uiSize.y() * 0.5f)
     {}

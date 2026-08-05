@@ -68,7 +68,7 @@ Matrix3 SimpleModelRenderer::ViewProjection() const
 {
     // World -> NDC. Extent shrinks as zoom grows, so more pixels per world
     // unit -- same convention ModelRenderer2 uses (1 px/unit at zoom 1.0).
-    const float ppu = m_pixelsPerUnit * m_zoom;
+    const float ppu = m_pixelsPerUnit * m_zoom * m_contentScale;
     const Vector2 extent = m_viewportSize / ppu;
     return Matrix3::projection(extent) * Matrix3::translation(-m_cameraPos);
 }

@@ -68,10 +68,12 @@ float BoundingRadius(const Model& model)
 
 } // namespace
 
-CompassRenderer::CompassRenderer(IFilesystem& filesystem, ModelRenderer2& modelRenderer)
+CompassRenderer::CompassRenderer(IFilesystem& filesystem, ModelRenderer2& modelRenderer, float contentScale)
         : m_modelRenderer(modelRenderer)
+        , m_textureSize(TextureSizeFor(contentScale))
+        , m_contentScale(static_cast<float>(m_textureSize.x()) / TEXTURE_SIZE)
         , m_shader(filesystem)
-        , m_framebuffer({{}, TextureSize()})
+        , m_framebuffer({{}, m_textureSize})
 {
     m_texture.setStorage(1, GL::TextureFormat::RGBA8, TextureSize())
              .setMinificationFilter(GL::SamplerFilter::Linear)
@@ -150,7 +152,7 @@ void CompassRenderer::Render(const Subject& subject)
 
     m_shader.setViewportSize(Vector2{TextureSize()})
             .setViewProjection(viewProjection)
-            .setWidth(m_params.lineWidth);
+            .setWidth(m_params.lineWidth * m_contentScale);
 
     m_shader.draw(m_mesh);
 
@@ -159,7 +161,7 @@ void CompassRenderer::Render(const Subject& subject)
     const float scale = FitScale(*subject.model, subject.modelId);
     const Matrix3 transform = Matrix3::rotation(subject.rot) * Matrix3::scaling({scale, scale});
     m_modelRenderer.RenderStandalone(subject.modelId, transform, viewProjection, Vector2{TextureSize()},
-                                     m_params.lineWidth, subject.teamColor);
+                                     m_params.lineWidth * m_contentScale, subject.teamColor);
 }
 
 } // namespace Gravitaris

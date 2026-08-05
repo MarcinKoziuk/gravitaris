@@ -35,6 +35,8 @@ private:
 
     // ImGui's logical display size, kept for world->UI overlay drawing.
     Magnum::Vector2 m_uiSize;
+    Magnum::Vector2i m_windowSize;
+    Magnum::Vector2i m_framebufferSize;
 
     void BuildFrame();
 
@@ -54,7 +56,9 @@ public:
     void ToggleAiLabels() { m_aiLabels = !m_aiLabels; }
     [[nodiscard]] bool ShowsAiLabels() const { return m_aiLabels; }
 
-    // Re-layout on window/framebuffer resize.
+    // Re-layout on a window/framebuffer resize or a UI-scale change. Cheap to
+    // call every frame: a relayout that changes nothing is skipped, and one
+    // that doesn't rebuilds the font atlas and its GL texture.
     void Relayout(const Magnum::Vector2& uiSize,
                   const Magnum::Vector2i& windowSize,
                   const Magnum::Vector2i& framebufferSize);

@@ -47,12 +47,18 @@ DebugUi::DebugUi(CGame& game, GlowPostProcess& glow,
     , m_game(game)
     , m_glow(glow)
     , m_uiSize(uiSize)
+    , m_windowSize(windowSize)
+    , m_framebufferSize(framebufferSize)
 {}
 
 void DebugUi::Relayout(const Vector2& uiSize, const Vector2i& windowSize, const Vector2i& framebufferSize)
 {
+    if (uiSize == m_uiSize && windowSize == m_windowSize && framebufferSize == m_framebufferSize) return;
+
     m_imgui.relayout(uiSize, windowSize, framebufferSize);
     m_uiSize = uiSize;
+    m_windowSize = windowSize;
+    m_framebufferSize = framebufferSize;
 }
 
 bool DebugUi::WantsMouse() const

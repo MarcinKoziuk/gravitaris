@@ -306,7 +306,9 @@ void ModelRenderer2::HandleModelRemoved(const Model& model, const id_t id)
 Matrix3 ModelRenderer2::ViewProjection() const
 {
     // world -> NDC. Extent shrinks as zoom grows, so more pixels per world unit.
-    const float ppu = m_pixelsPerUnit * m_zoom;
+    // The content scale is in there so a denser display resolves the same
+    // framing more finely instead of revealing more world.
+    const float ppu = m_pixelsPerUnit * m_zoom * m_contentScale;
     const Vector2 extent = m_viewportSize / ppu;
     return Matrix3::projection(extent)
             * Matrix3::translation(-m_cameraPos);
@@ -441,7 +443,7 @@ void ModelRenderer2::Render(double)
     const float zoomScale = std::pow(m_zoom / refZoom, m_zoomWidthFactor);
     m_shader.setViewportSize(m_viewportSize)
             .setViewProjection(ViewProjection())
-            .setWidth(m_lineWidthPixels * m_pixelScale * zoomScale);
+            .setWidth(m_lineWidthPixels * m_contentScale * zoomScale);
 
     RenderTag(OVERLAY_TAG, {});
 

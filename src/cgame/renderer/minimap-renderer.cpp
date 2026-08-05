@@ -88,9 +88,11 @@ void EmitRect(std::vector<LineVertex>& out, const Vector2& center, const Vector2
 
 } // namespace
 
-MinimapRenderer::MinimapRenderer(IFilesystem& filesystem)
-        : m_shader(filesystem)
-        , m_framebuffer({{}, TextureSize()})
+MinimapRenderer::MinimapRenderer(IFilesystem& filesystem, float contentScale)
+        : m_textureSize(TextureSizeFor(contentScale))
+        , m_contentScale(static_cast<float>(m_textureSize.x()) / TEXTURE_SIZE)
+        , m_shader(filesystem)
+        , m_framebuffer({{}, m_textureSize})
 {
     m_texture.setStorage(1, GL::TextureFormat::RGBA8, TextureSize())
              .setMinificationFilter(GL::SamplerFilter::Linear)
@@ -171,7 +173,9 @@ void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, st
         worldRadius = std::max(worldRadius, (*subjectPos - mapCenter).length() * SUBJECT_MARGIN);
     }
     m_frameRadius = worldRadius;
-    // Minimap px per world unit; fixed-px icon sizes convert through this.
+    // Design px per world unit; fixed-px icon sizes convert through this. Not
+    // the texture's own resolution: an icon is a fraction of the map, so a
+    // higher-resolution texture must resolve it more finely, not shrink it.
     const float ppu = (TEXTURE_SIZE * 0.5f) / worldRadius;
 
     std::vector<LineVertex> vertices;
@@ -250,7 +254,7 @@ void MinimapRenderer::Render(const SceneView& view, const Vector2& mapCenter, st
 
     m_shader.setViewportSize(Vector2{TextureSize()})
             .setViewProjection(viewProjection)
-            .setWidth(MAP_LINE_WIDTH);
+            .setWidth(MAP_LINE_WIDTH * m_contentScale);
 
     m_shader.draw(m_mesh);
 }

@@ -45,6 +45,7 @@ private:
     Vector2 m_cameraPos{0.f, 0.f};
     float m_pixelsPerUnit = 1.f;
     float m_zoom = 1.f;
+    float m_contentScale = 1.f;
 
     void HandleModelAdded(const Model& model, id_t id);
 
@@ -62,6 +63,7 @@ public:
     void SetViewportSize(const Vector2& size) { m_viewportSize = size; }
     void SetCameraPosition(const Vector2& pos) { m_cameraPos = pos; }
     void SetZoom(float zoom) { m_zoom = zoom; }
+    void SetContentScale(float scale) { m_contentScale = scale; }
 
     void Render(double delta);
 };

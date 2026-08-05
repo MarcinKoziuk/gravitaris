@@ -48,19 +48,19 @@ GlowPostProcess::GlowPostProcess(IFilesystem& filesystem)
     m_fullscreenTri.setPrimitive(MeshPrimitive::Triangles).setCount(3);
 }
 
-void GlowPostProcess::Resize(const Vector2i& framebufferSize, const Vector2i& logicalSize)
+void GlowPostProcess::Resize(const Vector2i& framebufferSize, const Vector2i& designSize)
 {
-    if ((framebufferSize == m_fullSize && logicalSize == m_logicalSize)
+    if ((framebufferSize == m_fullSize && designSize == m_designSize)
             || framebufferSize.x() <= 0 || framebufferSize.y() <= 0) {
         return;
     }
 
     m_fullSize = framebufferSize;
-    m_logicalSize = logicalSize;
+    m_designSize = designSize;
     m_halfSize = Math::max(framebufferSize / 2, Vector2i{1, 1});
     m_quarterSize = Math::max(framebufferSize / 4, Vector2i{1, 1});
-    // Blur resolution follows the logical size, so the halo is DPI-independent.
-    m_blurSize = Math::max(logicalSize / 4, Vector2i{1, 1});
+    // Blur resolution follows the design size, so the halo is display-independent.
+    m_blurSize = Math::max(designSize / 4, Vector2i{1, 1});
 
     m_sceneColor = MakeColorTexture(m_fullSize);
     m_sceneFbo = MakeColorFramebuffer(m_fullSize, m_sceneColor);
@@ -80,9 +80,9 @@ void GlowPostProcess::Resize(const Vector2i& framebufferSize, const Vector2i& lo
     m_outputFbo = MakeColorFramebuffer(m_fullSize, m_outputColor);
 }
 
-void GlowPostProcess::BeginScene(const Vector2i& framebufferSize, const Vector2i& logicalSize)
+void GlowPostProcess::BeginScene(const Vector2i& framebufferSize, const Vector2i& designSize)
 {
-    Resize(framebufferSize, logicalSize);
+    Resize(framebufferSize, designSize);
 
     m_sceneFbo.bind();
     m_sceneFbo.setViewport(Range2Di{{}, m_fullSize});
@@ -96,15 +96,19 @@ void GlowPostProcess::Present(GL::Texture2D& sourceTex, GL::Framebuffer& sourceF
         GL::Renderer::disable(GL::Renderer::Feature::Blending);
         target.bind();
         target.setViewport(targetRect);
+        // The shader measures in target (framebuffer) pixels while the tunables
+        // are authored in design units, so the scanlines stay the same width on
+        // screen instead of thinning out as the display gets denser.
+        const float contentScale = ContentScale();
         m_crtShader.setViewportSize(Vector2{targetRect.size()})
                 .setScanlineStrength(m_scanlineStrength)
-                .setLineWidthPx(m_scanlineWidthPx)
-                .setPeriodPx(m_scanlinePeriodPx)
+                .setLineWidthPx(m_scanlineWidthPx * contentScale)
+                .setPeriodPx(m_scanlinePeriodPx * contentScale)
                 .setFlickerRate(m_flickerRate)
                 .setFlickerAmplitude(m_flickerAmplitude)
                 .setScanJitterRate(m_scanJitterRate)
                 .setScanJitterAmplitude(m_scanJitterAmplitude)
-                .setPhaseJitterPx(m_phaseJitterPx)
+                .setPhaseJitterPx(m_phaseJitterPx * contentScale)
                 .setTime(time)
                 .bindImage(sourceTex)
                 .draw(m_fullscreenTri);
