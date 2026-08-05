@@ -36,7 +36,7 @@
 				width: 880dp;
 				height: auto;
 				margin: auto;
-				padding: 20dp 22dp 22dp 22dp;
+				padding: 44dp 22dp 22dp 22dp;
 
 				background-color: #060d12f7;
 				border-width: 1dp;
@@ -65,12 +65,34 @@
 				border-bottom-color: #123742;
 			}
 
-			/* The board is a window you place, so its title doubles as the
-			   grip that moves it. */
+			/* A title bar in the theme's own language (see vector.rcss's
+			   #title_bar), and the whole strip is the grip. */
+			div#tech_titlebar
+			{
+				position: absolute;
+				top: 0;
+				left: 0;
+				right: 0;
+				height: 30dp;
+				box-sizing: border-box;
+
+				background-color: #0cf2;
+				border-bottom-width: 1dp;
+				border-bottom-color: #1b5a6b;
+			}
+
 			handle#tech_grip
 			{
-				display: inline-block;
+				display: block;
+				width: 100%;
+				height: 100%;
+				padding: 8dp 14dp;
+				box-sizing: border-box;
 				cursor: move;
+
+				font-size: 11dp;
+				letter-spacing: 3dp;
+				color: #7fe4f5;
 			}
 
 			span#tech_title
@@ -262,6 +284,8 @@
 			{
 				position: absolute;
 				display: none;
+				top: 0;
+				left: 0;
 				width: 226dp;
 				padding: 9dp 11dp;
 				z-index: 10;
@@ -306,8 +330,12 @@
 	<body>
 		<div class="corner tl"></div><div class="corner br"></div>
 
+		<div id="tech_titlebar">
+			<handle id="tech_grip" move_target="#document">GRAVITARIS &mdash; TECHNOLOGY</handle>
+		</div>
+
 		<div id="tech_header">
-			<handle id="tech_grip" move_target="#document"><span id="tech_title">TECHNOLOGY</span></handle>
+			<span id="tech_title">TECHNOLOGY</span>
 			<span id="tech_fitted"></span>
 			<div class="currency"><span class="label">TECH</span><span id="tech_value" class="value">0</span></div>
 			<div class="currency"><span class="label">SUPPLY</span><span id="supply_value" class="value">0</span></div>

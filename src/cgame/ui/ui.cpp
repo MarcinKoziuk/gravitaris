@@ -612,6 +612,11 @@ static constexpr const char* BRANCH_NAMES[] = {"WEAPONS", "MOBILITY", "DEFENSE"}
 static constexpr const char* BRANCH_CLASSES[] = {"weapons", "mobility", "defense"};
 static constexpr int BRANCH_COUNT = 3;
 
+// Tooltip geometry, matching the RCSS it is positioned against.
+static constexpr float TILE_SIZE = 54.f;
+static constexpr float TIP_WIDTH = 226.f;
+static constexpr float TIP_GAP = 14.f;
+
 void UI::SetTechTree(const std::vector<TechNodeView>& nodes)
 {
     if (nodes == m_shownNodes) return;
@@ -735,8 +740,8 @@ void UI::AttachTechListeners()
             const std::uint32_t id = node.id;
 
             // Hover anywhere on the row raises the tooltip for it.
-            m_techListeners.push_back(std::make_unique<FunctionListener>([this, id](Rml::Event&) {
-                ShowTechTip(id);
+            m_techListeners.push_back(std::make_unique<FunctionListener>([this, id](Rml::Event& event) {
+                ShowTechTip(id, event.GetCurrentElement());
             }));
             row->AddEventListener("mouseover", m_techListeners.back().get());
             m_techListeners.push_back(std::make_unique<FunctionListener>([this](Rml::Event&) {
@@ -782,9 +787,9 @@ void UI::AttachTechListeners()
 
 // All the prose lives here rather than on the board: the tiles carry an icon,
 // a rank count and a row of pips, and nothing else competes for the glance.
-void UI::ShowTechTip(std::uint32_t id)
+void UI::ShowTechTip(std::uint32_t id, Rml::Element* anchor)
 {
-    if (!m_techTip) return;
+    if (!m_techTip || !anchor || !m_techTree) return;
 
     const TechNodeView* node = nullptr;
     for (const TechNodeView& candidate : m_shownNodes) {
@@ -823,6 +828,25 @@ void UI::ShowTechTip(std::uint32_t id)
 
     m_techTip->SetInnerRML(tip);
     m_techTip->SetProperty("display", "block");
+
+    // Beside the tile it belongs to rather than under the cursor: a tooltip
+    // that follows the mouse jitters across a board this dense, and the thing
+    // being described has a position of its own already.
+    //
+    // Absolute coordinates are context-space, so the panel's own origin comes
+    // off them -- the tip is positioned within the document, not the screen.
+    const float originX = m_techTree->GetAbsoluteLeft();
+    const float originY = m_techTree->GetAbsoluteTop();
+    const float tileX = anchor->GetAbsoluteLeft() - originX;
+    const float tileY = anchor->GetAbsoluteTop() - originY;
+
+    float left = tileX + TILE_SIZE + TIP_GAP;
+    // Flipped to the near side when it would hang off the panel, which is what
+    // the rightmost branch does at any sensible UI scale.
+    if (left + TIP_WIDTH > m_techTree->GetOffsetWidth()) left = tileX - TIP_WIDTH - TIP_GAP;
+
+    m_techTip->SetProperty("left", std::to_string(static_cast<int>(std::lround(left))) + "px");
+    m_techTip->SetProperty("top", std::to_string(static_cast<int>(std::lround(tileY))) + "px");
 }
 
 void UI::HideTechTip()

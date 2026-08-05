@@ -253,7 +253,7 @@ private:
     void AttachTechListeners();
 
     // Raises / drops the hover tooltip for a node.
-    void ShowTechTip(std::uint32_t id);
+    void ShowTechTip(std::uint32_t id, Rml::Element* anchor);
     void HideTechTip();
 
     // Rewrites the footer for the current selection: what it is, what it
