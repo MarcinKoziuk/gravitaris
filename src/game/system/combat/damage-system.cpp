@@ -190,9 +190,19 @@ void DamageSystem::Update(std::uint64_t step)
                                                                    : DamageCause::Gunfire;
             targetDmg.lastDamageTeam = bullet.team;
             targetDmg.lastDamagePilotId = 0;
-            if (const flecs::entity shooter = m_registry.entity(bullet.shooter); shooter.is_alive()) {
-                if (const PilotRef* ref = shooter.try_get<PilotRef>()) {
-                    targetDmg.lastDamagePilotId = ref->pilotId;
+            // Zero means nothing fired it and nobody is credited: death
+            // shrapnel (DeathSystem) and a structure's turrets both leave it
+            // that way. Checked before the lookup, not after -- asking flecs
+            // whether entity 0 is alive breaks a precondition it only verifies
+            // in a debug build, which is what crashed a release build on the
+            // tick after a ship came apart. The hit sweep above guards the same
+            // field for the same reason.
+            if (bullet.shooter != 0) {
+                const flecs::entity shooter = m_registry.entity(bullet.shooter);
+                if (shooter.is_alive()) {
+                    if (const PilotRef* ref = shooter.try_get<PilotRef>()) {
+                        targetDmg.lastDamagePilotId = ref->pilotId;
+                    }
                 }
             }
 
