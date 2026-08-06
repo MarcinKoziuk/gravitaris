@@ -231,6 +231,7 @@ static void ApplyLoadout(flecs::entity entity, const EntityState& state)
             loadout->mounts[i] = arm <= static_cast<std::uint8_t>(MountArm::Heavy)
                                ? static_cast<MountArm>(arm) : MountArm::None;
         }
+        loadout->missileBays = state.missileBays;
         loadout->levels.fireRate = state.fireRateLevel;
         loadout->levels.gunTier = state.gunTierLevel;
         loadout->levels.cannonTier = state.cannonTierLevel;

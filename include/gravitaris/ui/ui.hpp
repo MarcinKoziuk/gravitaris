@@ -73,10 +73,28 @@ struct TechNodeView {
     }
 };
 
-// A slot that is not one of the hull's weapon mounts -- a shield, the engine.
-// Matches TechPick::NO_MOUNT; spelled again here so ui/ stays free of the
-// sim's headers.
+// Which primary lines the trigger works, for the cannon row's label. Spelled
+// again here, matching ActiveWeapon's order, so ui/ stays free of the sim's
+// headers.
+enum class PrimaryMode {
+    Both,
+    Cannon,
+    Guns,
+};
+
+// A slot that sits on no numbered hull hole -- a shield, the engine. Matches
+// TechPick::NO_MOUNT; spelled again here so ui/ stays free of the sim's
+// headers.
 inline constexpr std::uint8_t NO_SLOT_MOUNT = 0xFF;
+
+// Which family of holes a slot addresses. Matches the sim's SlotFamily, and
+// spelled again for the same reason: a hull numbers its weapon mounts and its
+// missile bays separately, so an index means nothing without one of these.
+enum class SlotFamilyView : std::uint8_t {
+    None,
+    Weapon,
+    MissileBay,
+};
 
 // One fitting position on the ship tab's schematic. `x`/`y` are 0..1 across
 // the drawing with y down, so this layer places slots without knowing
@@ -86,17 +104,24 @@ struct ShipSlotView {
     std::vector<std::string> categories;  // what the slot accepts
     float x = 0.f;
     float y = 0.f;
-    // Which hull mount this is -- what a pick names so the part goes here and
-    // not into the next free hole. NO_SLOT_MOUNT for a slot that isn't one.
+    // Which family of holes this slot addresses, and which of them it is --
+    // together, what a pick names so the part goes here and not into the next
+    // free one. None/NO_SLOT_MOUNT for a slot that sits on no hole.
+    SlotFamilyView family = SlotFamilyView::None;
     std::uint8_t mount = NO_SLOT_MOUNT;
-    // The node armed in this mount right now, 0 for an empty one.
+    // The node fitted in this hole right now, 0 for an empty one.
     std::uint32_t fittedId = 0;
+    // Per-rank cost and state for each mounted line *in this hole*, keyed by
+    // node id. The ship-wide states on TechNodeView answer a different
+    // question: whether the hull owns a rank, not whether it can go here.
+    std::vector<std::pair<std::uint32_t, std::vector<TechRankView>>> rankStates;
 
     bool operator==(const ShipSlotView& other) const
     {
         return name == other.name && categories == other.categories
                && x == other.x && y == other.y
-               && mount == other.mount && fittedId == other.fittedId;
+               && family == other.family && mount == other.mount && fittedId == other.fittedId
+               && rankStates == other.rankStates;
     }
 };
 
@@ -216,7 +241,7 @@ private:
     Rml::Element* m_cannonMode = nullptr;
     int m_cannonAmmo = -2;
     int m_cannonCapacity = -1;
-    bool m_cannonSelected = true;
+    PrimaryMode m_cannonPrimary = PrimaryMode::Both;
 
     Rml::Element* m_speedReadout = nullptr;
     Rml::Element* m_gwellReadout = nullptr;
@@ -281,6 +306,27 @@ private:
         std::size_t rankIndex = 0;
     };
     [[nodiscard]] std::vector<SlotOffer> OfferedForSelection() const;
+    // The rank as the selected hole sees it: its own cost and state, which is
+    // what decides whether a row can be picked. Falls back to the node's
+    // ship-wide rank for anything that sits in no hole.
+    [[nodiscard]] TechRankView RankInSelection(const TechNodeView& node, std::size_t rankIndex) const;
+
+    // Which hull hole a slot or a staged pick names. Neither half identifies
+    // one on its own: a hull numbers its weapon mounts and its missile bays
+    // separately, so weapon 1 and bay 1 are both index 1 and are not the same
+    // place.
+    struct SlotRef {
+        SlotFamilyView family = SlotFamilyView::None;
+        std::uint8_t mount = NO_SLOT_MOUNT;
+
+        [[nodiscard]] bool IsHole() const
+        { return family != SlotFamilyView::None && mount != NO_SLOT_MOUNT; }
+
+        bool operator==(const SlotRef& other) const
+        { return family == other.family && mount == other.mount; }
+    };
+    [[nodiscard]] static SlotRef RefOf(const ShipSlotView& slot)
+    { return SlotRef{slot.family, slot.mount}; }
 
     // A pick chosen but not yet committed. Nothing on this board applies on
     // the click that asks for it -- a refit is a plan you approve, not a
@@ -290,10 +336,14 @@ private:
         std::uint32_t id = 0;
         int tab = 0;
         int rank = 0;
-        // Which mount it is going into, or NO_SLOT_MOUNT for a fitting that
-        // isn't mounted. Two mounts can be staged with the same line, so this
-        // is part of what makes a staged pick unique.
-        std::uint8_t mount = NO_SLOT_MOUNT;
+        // Which hole it is going into, or none for a fitting that sits in no
+        // hole. Two holes can be staged with the same line, so this is part of
+        // what makes a staged pick unique.
+        SlotRef hole;
+        // A plan to pull what is there rather than to fit something. Carries
+        // the node so the board knows what is being given up, and rank 0
+        // because there is no rank to buy.
+        bool strip = false;
     };
     std::vector<StagedPick> m_staged;
     Rml::Element* m_confirmButton = nullptr;
@@ -301,14 +351,27 @@ private:
     Rml::Element* m_stagedCost = nullptr;
 
     void StagePick(std::uint32_t id, int tab, int rank);
-    // rank 0 un-stages. `mount` names the hull mount for a weapon going into a
-    // slot; a pick for that mount replaces whatever was staged there, which is
-    // what makes picking a different line in the same slot a swap.
+    // rank 0 un-stages. `hole` names where a mounted line is going; a pick for
+    // that hole replaces whatever was planned there, which is what makes
+    // picking a different line in the same slot a swap.
+    // The default is spelled out rather than `{}`: a nested class's member
+    // initializers aren't in scope yet in an enclosing-class default argument
+    // (clang enforces this, MSVC doesn't).
     void SetStagedRank(std::uint32_t id, int tab, int rank,
-                       std::uint8_t mount = NO_SLOT_MOUNT);
-    // What is staged for a mount: the node, or 0 for a mount with no plan.
-    [[nodiscard]] std::uint32_t StagedInMount(std::uint8_t mount) const;
-    [[nodiscard]] int StagedRankInMount(std::uint8_t mount) const;
+                       SlotRef hole = SlotRef{SlotFamilyView::None, NO_SLOT_MOUNT});
+    // Plans to pull what the selected slot carries. Replaces any fitting
+    // staged there, for the same reason a fitting replaces a strip.
+    void StageStrip(std::uint32_t id, SlotRef hole);
+    // The one plan standing against a slot: which node, at what rank, and
+    // whether it pulls rather than fits. Node 0 means the slot is being left
+    // alone, which is not the same as being planned empty.
+    struct SlotPlan {
+        std::uint32_t id = 0;
+        int rank = 0;
+        bool strip = false;
+    };
+    [[nodiscard]] SlotPlan PlanFor(const ShipSlotView& slot) const;
+    [[nodiscard]] bool SlotTakes(const ShipSlotView& slot, std::uint32_t nodeId) const;
     void CycleStagePick(std::uint32_t id, int tab);
     void ConfirmStaged();
     void ResetStaged();
@@ -321,20 +384,24 @@ private:
     // trees answer differently.
     [[nodiscard]] bool Stageable(const TechNodeView& node, int rank, int tab) const;
 
-    // What a mount is carrying, and what is staged to go into it -- both
-    // derived from the node list rather than stored, because a slot does not
-    // own its contents yet: ShipLoadout keeps one level per line, not one per
-    // mount, so two mounts of a kind report the same fitting.
+    // What a slot is carrying, and what is planned for it. A slot that sits on
+    // a hull hole reads that hole; the rest are matched by category, since a
+    // shield or an overburn belongs to exactly one slot on the drawing.
     [[nodiscard]] const TechNodeView* FittedIn(const ShipSlotView& slot) const;
     [[nodiscard]] const TechNodeView* StagedIn(const ShipSlotView& slot) const;
+    // Whether this node goes into a hull hole at all, judged by the slots the
+    // drawing authors: a line that does is listed once per hole that carries
+    // it, and one that doesn't is listed once for the ship.
+    [[nodiscard]] bool NodeIsMounted(const TechNodeView& node) const;
 
     // Written straight from the hover handlers -- the panel has a place of its
     // own, so there is no flicker to defer around and nothing to anchor.
     void ClearTechInfo();
-    // Drops whatever the selected mount had staged. Fitted parts stay: nothing
-    // in the sim strips one off a hull yet.
+    // Takes whatever was planned for the selected slot back off the plan --
+    // which is not the same as planning to empty it (see StageStrip).
     void ClearStagedForSelection();
-    [[nodiscard]] std::uint8_t MountOfSelection() const;
+    [[nodiscard]] SlotRef SelectionHole() const;
+    [[nodiscard]] const ShipSlotView* SelectedSlot() const;
 
     // A structural rebuild frees the element a click came from, so it can never
     // run from inside a handler: data changes ask for one here and Update()
@@ -384,13 +451,11 @@ private:
     Rml::Element* m_techValue = nullptr;
     Rml::Element* m_supplyValue = nullptr;
     Rml::Element* m_techNoticeElement = nullptr;
-    Rml::Element* m_refitHint = nullptr;
-    bool m_refitHintShown = false;
     std::vector<TechNodeView> m_shownNodes;
     int m_techTab = 0;
     int m_shownTech = -1;
     int m_shownSupplies = -1;
-    std::function<void(std::uint32_t, int, int, std::uint8_t)> m_onTechPick;
+    std::function<void(std::uint32_t, int, int, std::uint8_t, bool)> m_onTechPick;
     std::string m_techNotice;
     // Held separately from m_listeners: the nodes they belong to are destroyed
     // and rebuilt on every tree change, so these are dropped with them rather
@@ -491,7 +556,7 @@ public:
     // The cannon's magazine, and which primary the trigger is on. `ammo`
     // negative means the hull carries no cannon at all, which blanks the row
     // rather than drawing an empty one.
-    void SetCannonAmmo(int ammo, int capacity, bool selected);
+    void SetCannonAmmo(int ammo, int capacity, PrimaryMode mode);
 
     // Sidebar telemetry row: speed in world units/s and gravity field strength
     // in multiples of a planet's surface pull. Heading has no cell of its own
@@ -542,9 +607,12 @@ public:
     // ignored, so calling it every frame is fine.
     void SetCurrencies(int tech, int supplies);
 
-    // Fired when a rank pip is clicked, with the node's id, its tab and the
-    // rank being bought. Set before Init().
-    void SetTechPickCallback(std::function<void(std::uint32_t, int, int, std::uint8_t)> callback);
+    // Fired for each pick a confirmed plan commits: the node's id, its tab,
+    // the rank being bought, which hull hole it goes into, and whether the
+    // pick pulls what is there rather than fitting something (rank 0 then).
+    // Set before Init().
+    void SetTechPickCallback(
+            std::function<void(std::uint32_t, int, int, std::uint8_t, bool)> callback);
 
     // The tree is a window the player opens, not a panel that appears at them
     // -- so it is browsable in flight, and it is theirs to close.
@@ -562,10 +630,6 @@ public:
     // The ship tab draws a live schematic, which the client only renders
     // while that panel is actually the one on screen.
     [[nodiscard]] int GetTechTab() const { return m_techTab; }
-
-    // Blinks a prompt in the sidebar while a refit is possible. The window
-    // itself is never opened for the player: it asks, it doesn't interrupt.
-    void SetRefitHintVisible(bool visible);
 
     // A line the footer shows over its usual contents -- what the port said
     // when it turned a purchase away. Empty restores the normal footer. The

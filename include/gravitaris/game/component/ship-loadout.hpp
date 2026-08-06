@@ -24,6 +24,18 @@ struct ShipLoadout {
     // than the mount's.
     std::array<MountArm, MAX_WEAPON_MOUNTS> mounts{};
 
+    // Which of the hull's 'missile_N' bays carry a launcher, one bit per bay.
+    // The same split as `mounts`: UpgradeLevels::missileTier is the round the
+    // ship has paid for, and this is where the tubes to fire it are. A
+    // bitmask rather than an array because a bay is fitted or it isn't, and
+    // one byte covers MAX_WEAPON_MOUNTS of them -- which is also what the
+    // wire sends.
+    //
+    // The rack itself stays the ship's, exactly as the cannon's magazine is
+    // shared across its heavy mounts: a second bay buys another tube to empty
+    // it through, not a second rack.
+    std::uint8_t missileBays = 0;
+
     std::uint8_t missileAmmo = 0;
     // Rounds left in the cannon's magazine. Deeper than the rack by an order
     // of magnitude -- see the HUD, which draws one tick per ten.
@@ -66,6 +78,33 @@ inline int MountsArmedWith(const ShipLoadout& loadout, MountArm arm)
     int count = 0;
     for (const MountArm mount : loadout.mounts) {
         if (mount == arm) ++count;
+    }
+    return count;
+}
+
+// Whether that bay carries a launcher. Out-of-range bays never do, which is
+// what keeps a hull that authors more 'missile_N' markers than the mask is
+// wide simply quiet on the surplus rather than reading past it.
+inline bool MissileBayFitted(const ShipLoadout& loadout, unsigned bay)
+{
+    return bay < MAX_WEAPON_MOUNTS && (loadout.missileBays & (1u << bay)) != 0;
+}
+
+inline void SetMissileBay(ShipLoadout& loadout, unsigned bay, bool fitted)
+{
+    if (bay >= MAX_WEAPON_MOUNTS) return;
+    const auto bit = static_cast<std::uint8_t>(1u << bay);
+    loadout.missileBays = static_cast<std::uint8_t>(fitted ? (loadout.missileBays | bit)
+                                                           : (loadout.missileBays & ~bit));
+}
+
+// How many bays carry one. Zero means the rack has nowhere to fire from, the
+// same way an unmounted gun line has nothing to shoot out of.
+inline int MissileBaysFitted(const ShipLoadout& loadout)
+{
+    int count = 0;
+    for (unsigned bay = 0; bay < MAX_WEAPON_MOUNTS; ++bay) {
+        if (MissileBayFitted(loadout, bay)) ++count;
     }
     return count;
 }

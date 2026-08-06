@@ -40,22 +40,50 @@ struct TechPick {
     id_t node = 0; // zero means no purchase this tick
     TechTab tab = TechTab::Ship;
     std::uint8_t rank = 0;
-    // Which weapon mount a ship-tab pick is arming, or NO_MOUNT for the
-    // fittings that aren't mounted anywhere (a shield, the overburn).
+    // Which hull hole a ship-tab pick is arming, or NO_MOUNT for the fittings
+    // that aren't mounted anywhere (a shield, the overburn). Which family that
+    // indexes is the node's own business -- a weapon line goes in a weapon
+    // mount, a launcher in a missile bay -- so it is not spelled again here.
     static constexpr std::uint8_t NO_MOUNT = 0xFF;
     std::uint8_t mount = NO_MOUNT;
+    // A pick that empties rather than fills: the hole or the system named
+    // comes back off the hull. `rank` stays 0, which is what tells the two
+    // apart -- there is no rank 0 to fit.
+    bool strip = false;
 
-    [[nodiscard]] bool IsSet() const { return node != 0 && rank != 0; }
+    [[nodiscard]] bool IsSet() const { return node != 0 && (rank != 0 || strip); }
 };
 
 // Which primary the trigger fires. A hull can carry both a cannon and its
 // wing guns, and the choice between them is the pilot's in flight rather than
 // a property of the loadout -- so it lives here, next to the trigger, not in
 // ShipLoadout.
+//
+// Both is the default: a hull that has paid for two lines should shoot with
+// two lines unless its pilot says otherwise, and holding one back is the
+// deliberate act (saving the magazine, or staying quiet on the heavy mounts).
 enum class ActiveWeapon : std::uint8_t {
-    Cannon, // the default while there is a cannon with rounds in it
+    Both,
+    Cannon,
     Gun,
 };
+
+// What the toggle key steps to. Round and round rather than there and back:
+// three states need a cycle, and Both leads so one press off the default is
+// the cannon alone.
+inline ActiveWeapon NextWeapon(ActiveWeapon current)
+{
+    switch (current) {
+    case ActiveWeapon::Both:   return ActiveWeapon::Cannon;
+    case ActiveWeapon::Cannon: return ActiveWeapon::Gun;
+    case ActiveWeapon::Gun:    return ActiveWeapon::Both;
+    }
+    return ActiveWeapon::Both;
+}
+
+// How many primary lines one trigger can work at once: the light guns and the
+// heavy cannon (see ActiveWeapon::Both).
+inline constexpr std::size_t MAX_PRIMARY_LINES = 2;
 
 // Written each tick by InputSystem from the entity's InputQueue, consumed by
 // ShipControlsSystem.
@@ -65,24 +93,29 @@ struct Controls {
     // What the pilot asked for. What actually fires can differ: a dry cannon
     // falls through to the guns without changing this, so the moment a
     // magazine is refilled the heavy mount is live again with no second key
-    // press (see ShipControlsSystem::PrimaryWeapon).
-    ActiveWeapon activeWeapon = ActiveWeapon::Cannon;
+    // press (see ShipControlsSystem::PrimaryWeapons).
+    ActiveWeapon activeWeapon = ActiveWeapon::Both;
 
     // Ticks until each mount can fire again; sim-side state, not input, and
     // never serialized (only the flags travel -- see GatherSnapshot).
     //
+    // Indexed by hull mount, not by firing slot: with both lines live the
+    // mounts one of them is armed on are not a contiguous run, and packing
+    // them would have a gun and a cannon pacing each other off one entry.
+    //
     // One per mount, not one per ship: every barrel runs its own cadence, so a
     // hull carrying two guns fires twice as often as one carrying one. What
     // stops them landing on the same tick is the phase they are seeded with
-    // when the trigger goes down (ShipControlsSystem::SeedMountPhases) -- held
+    // when the trigger goes down (ShipControlsSystem::SeedPhasesAt) -- held
     // fire would otherwise lock them together for good.
     std::array<std::uint32_t, MAX_WEAPON_MOUNTS> gunCooldown{};
     std::array<std::uint32_t, MAX_WEAPON_MOUNTS> missileCooldown{};
 
-    // Which weapon the mount cooldowns above were last phased for. A swap
-    // between primaries has to re-deal them, and comparing the def pointer is
-    // enough: the catalog owns them for the process's life.
-    const void* firingWeaponId = nullptr;
+    // Which weapons the mount cooldowns above were last phased for, one entry
+    // per line the trigger works. A swap between primaries has to re-deal
+    // them, and comparing the def pointers is enough: the catalog owns them
+    // for the process's life.
+    std::array<const void*, MAX_PRIMARY_LINES> firingWeaponIds{};
 
     // Last tick's trigger states, so the rising edge can be spotted. That edge
     // is the only moment the phases above are dealt out; from then on each

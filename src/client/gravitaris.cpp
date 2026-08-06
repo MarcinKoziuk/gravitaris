@@ -325,9 +325,10 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     // shortcut for a purchase, since naming a node and a rank needs a pointer.
     // Queued, not assigned: CONFIRM hands over everything staged at once, and
     // a command carries one pick per tick.
-    m_ui.SetTechPickCallback([this](std::uint32_t id, int tab, int rank, std::uint8_t mount) {
+    m_ui.SetTechPickCallback([this](std::uint32_t id, int tab, int rank, std::uint8_t mount,
+                                    bool strip) {
         m_techPicks.push_back(TechPick{id, static_cast<TechTab>(tab),
-                                       static_cast<std::uint8_t>(rank), mount});
+                                       static_cast<std::uint8_t>(rank), mount, strip});
     });
 
     // Before Init(), which is where the documents load and are first laid out.
@@ -485,7 +486,7 @@ void GravitarisApplication::UpdateUi()
 
     const std::optional<CGame::CannonReadout> cannon = m_game->GetCannonReadout();
     m_ui.SetCannonAmmo(cannon ? cannon->ammo : -1, cannon ? cannon->capacity : 0,
-                       cannon ? cannon->selected : true);
+                       cannon ? static_cast<PrimaryMode>(cannon->mode) : PrimaryMode::Both);
 
     const CGame::ShieldReadout shield = m_game->GetShieldReadout();
     m_ui.SetShieldFraction(shield.capacity > 0.f ? shield.charge / shield.capacity : -1.f,
@@ -619,10 +620,6 @@ void GravitarisApplication::RefreshTechTree()
     const CGame::TechReadout readout = m_game->GetTechReadout();
     m_ui.SetCurrencies(static_cast<int>(readout.tech), static_cast<int>(readout.supplies));
 
-    // Whether a refit is on the table right now: landed somewhere that will
-    // fit parts, with something affordable to fit.
-    bool canRefit = false;
-
     std::vector<TechNodeView> nodes;
     for (const CGame::TechNode& node : m_game->GetTechTree()) {
         TechNodeView view;
@@ -641,8 +638,6 @@ void GravitarisApplication::RefreshTechTree()
         view.requiresId = node.requiresId;
         for (const CGame::TechRank& rank : node.ranks) {
             view.ranks.push_back(TechRankView{rank.cost, static_cast<TechRankState>(rank.state)});
-            canRefit = canRefit
-                    || (node.tab == TechTab::Ship && rank.state == TechNodeState::Available);
         }
         nodes.push_back(std::move(view));
     }
@@ -650,15 +645,18 @@ void GravitarisApplication::RefreshTechTree()
 
     std::vector<ShipSlotView> slots;
     for (const CGame::ShipSlot& slot : m_game->GetShipSlots()) {
-        slots.push_back(ShipSlotView{slot.name, slot.categories, slot.uv.x(), slot.uv.y(),
-                                     slot.mount, slot.fittedId});
+        ShipSlotView view{slot.name, slot.categories, slot.uv.x(), slot.uv.y(),
+                          static_cast<SlotFamilyView>(slot.family), slot.mount, slot.fittedId};
+        for (const auto& [id, ranks] : slot.rankStates) {
+            std::vector<TechRankView> states;
+            for (const CGame::TechRank& rank : ranks) {
+                states.push_back(TechRankView{rank.cost, static_cast<TechRankState>(rank.state)});
+            }
+            view.rankStates.emplace_back(id, std::move(states));
+        }
+        slots.push_back(std::move(view));
     }
     m_ui.SetShipSlots(slots);
-
-    // Asked, never forced: the sidebar blinks while a refit is possible and
-    // the player opens the board themselves. An earlier version opened it for
-    // them, which was the panel-that-appears-at-you this replaced.
-    m_ui.SetRefitHintVisible(canRefit);
 }
 
 // One command for the tick Update() is about to run: keyboard, autopilot and
@@ -1292,6 +1290,12 @@ static Application::Configuration CreateConfiguration(const Application::Argumen
 }
 
 #ifdef CORRADE_TARGET_EMSCRIPTEN
+// No argv on a page, so the dev shortcut has no way in.
+static bool WantsAutostart(const Application::Arguments&)
+{
+    return false;
+}
+
 static std::string GetConnectUrl(const Application::Arguments&)
 {
     // argv is never populated from the page URL under Emscripten, so this is

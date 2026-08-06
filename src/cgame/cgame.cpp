@@ -39,8 +39,8 @@
 namespace Gravitaris {
 
 static std::vector<std::string> SlotCategories(const std::string& label);
-static std::uint8_t SlotMountIndex(const std::vector<std::string>& categories,
-                                   const std::string& label);
+static SlotFamily SlotFamilyOf(const std::vector<std::string>& categories);
+static std::uint8_t SlotIndexOf(const std::string& label);
 
 namespace {
 
@@ -139,8 +139,9 @@ std::optional<int> CGame::GetMissileAmmo()
 
     const ShipLoadout* loadout = subject->try_get<ShipLoadout>();
     // A structure/planet being spectated has no rack, and neither has a hull
-    // that hasn't fitted a missile bay.
-    if (!loadout || loadout->levels.missileTier == 0) return std::nullopt;
+    // with no launcher in any bay -- the tier alone is what it has paid for,
+    // not what it is carrying.
+    if (!loadout || MissileBaysFitted(*loadout) == 0) return std::nullopt;
 
     return static_cast<int>(loadout->missileAmmo);
 }
@@ -154,7 +155,9 @@ std::optional<CGame::CannonReadout> CGame::GetCannonReadout()
     if (!subject) return std::nullopt;
 
     const ShipLoadout* loadout = subject->try_get<ShipLoadout>();
-    if (!loadout || loadout->levels.cannonTier == 0) return std::nullopt;
+    // Mounted, not merely owned: a hull whose heavy mounts have all been
+    // stripped has no magazine to show, whatever tier it once paid for.
+    if (!loadout || MountsArmedWith(*loadout, MountArm::Heavy) == 0) return std::nullopt;
 
     CannonReadout readout;
     readout.ammo = static_cast<int>(loadout->cannonAmmo);
@@ -162,7 +165,7 @@ std::optional<CGame::CannonReadout> CGame::GetCannonReadout()
     // What the pilot asked for, not what fired: a dry cannon still reads as
     // selected, which is what makes the empty bar the explanation.
     if (const Controls* controls = subject->try_get<Controls>()) {
-        readout.selected = controls->activeWeapon == ActiveWeapon::Cannon;
+        readout.mode = static_cast<int>(controls->activeWeapon);
     }
     return readout;
 }
@@ -717,14 +720,45 @@ std::vector<CGame::ShipSlot> CGame::GetShipSlots()
         ShipSlot slot;
         slot.name = marker.name;
         slot.categories = SlotCategories(marker.name);
-        slot.mount = SlotMountIndex(slot.categories, marker.name);
+        slot.family = SlotFamilyOf(slot.categories);
+        slot.mount = slot.family == SlotFamily::None ? TechPick::NO_MOUNT
+                                                     : SlotIndexOf(marker.name);
+        if (slot.mount == TechPick::NO_MOUNT) slot.family = SlotFamily::None;
 
-        if (loadout && slot.mount < loadout->mounts.size()) {
+        // What each mounted line would cost in *this* hole, and whether it can
+        // go there at all. Asked per hole because holding a line is: light guns
+        // in the nose leave them for sale for a wing, and a launcher in the
+        // port bay leaves the starboard one empty.
+        if (loadout && slot.family != SlotFamily::None) {
+            const TechReadout readout = GetTechReadout();
+            const TechUnlocks unlocked = OwnUnlocks();
+
+            for (const UpgradeDef& def : m_upgradeCatalog.Defs()) {
+                if (UpgradeCatalog::FamilyOf(def) != slot.family) continue;
+
+                std::vector<TechRank> ranks;
+                const UpgradeCatalog::ShipContext context{loadout, &unlocked, readout.supplies,
+                                                          readout.atLab, slot.mount};
+                for (std::uint8_t rank = 1; rank <= def.maxLevel; ++rank) {
+                    ranks.push_back(TechRank{UpgradeCatalog::SupplyCostOf(def, rank),
+                                             m_upgradeCatalog.ShipState(def, rank, context)});
+                }
+                slot.rankStates.emplace_back(def.id, std::move(ranks));
+            }
+        }
+
+        if (loadout && slot.family == SlotFamily::Weapon && slot.mount < loadout->mounts.size()) {
             const MountArm arm = loadout->mounts[slot.mount];
             const UpgradeKind kind = arm == MountArm::Heavy ? UpgradeKind::CannonTier
                                                             : UpgradeKind::WeaponTier;
             if (arm != MountArm::None) {
                 if (const UpgradeDef* def = m_upgradeCatalog.FindKind(kind)) slot.fittedId = def->id;
+            }
+        }
+        if (loadout && slot.family == SlotFamily::MissileBay
+                && MissileBayFitted(*loadout, slot.mount)) {
+            if (const UpgradeDef* def = m_upgradeCatalog.FindKind(UpgradeKind::MissileTier)) {
+                slot.fittedId = def->id;
             }
         }
         slot.uv = m_shipViewRenderer.PanelUV(*m_shipSchematicModel, m_shipSchematicModel.Id(),
@@ -1132,21 +1166,24 @@ std::unique_ptr<EntitySpawner> CGame::CreateEntitySpawner()
     return std::make_unique<CEntitySpawner>(m_registry, m_resourceLoader);
 }
 
-// The hull mount a slot sits on: `gun+cannon_1` is the hull's weapon_1.
-//
-// Only the slots that take a weapon line address ShipLoadout::mounts. Every
-// slot is named `<categories>_<index>`, so a shield or an ammo slot carries an
-// index of its own -- reading the mount array with one of those had every
-// `_0` slot on the hull reporting whatever was in the nose.
-static std::uint8_t SlotMountIndex(const std::vector<std::string>& categories,
-                                   const std::string& label)
+// Which family of hull holes a slot addresses, from what it accepts. Only the
+// slots that take a mounted line address one at all: a shield or an ammo slot
+// carries an index of its own, and reading the mount array with one of those
+// had every `_0` slot on the hull reporting whatever was in the nose.
+static SlotFamily SlotFamilyOf(const std::vector<std::string>& categories)
 {
-    bool weaponMount = false;
     for (const std::string& category : categories) {
-        weaponMount = weaponMount || category == "gun" || category == "cannon";
+        if (category == "gun" || category == "cannon") return SlotFamily::Weapon;
+        if (category == "missile") return SlotFamily::MissileBay;
     }
-    if (!weaponMount) return TechPick::NO_MOUNT;
+    return SlotFamily::None;
+}
 
+// The hole a slot sits on, from the index its label ends in: `gun+cannon_1` is
+// the hull's weapon_1, `missile_1` its second bay. Which array that indexes is
+// the family's business, not this one's.
+static std::uint8_t SlotIndexOf(const std::string& label)
+{
     const std::size_t underscore = label.find_last_of('_');
     if (underscore == std::string::npos) return TechPick::NO_MOUNT;
 

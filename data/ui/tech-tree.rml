@@ -28,10 +28,53 @@
 				src: tech-frame-dim.tga;
 				tech-frame-dim: 0px 0px 54px 54px;
 			}
+			@spritesheet tech_selected
+			{
+				src: tech-frame-selected.tga;
+				tech-frame-selected: 0px 0px 54px 54px;
+			}
 			@spritesheet tech_hatch
 			{
 				src: tech-hatch.tga;
 				tech-hatch: 0px 0px 54px 54px;
+			}
+
+			/* The hover halos. Baked sprites rather than box-shadow or
+			   filter: drop-shadow, neither of which this game's render
+			   interface can draw -- RenderInterfaceGL3 implements no filters
+			   and no render layers, so both would silently render nothing.
+			   74px because the halo element hangs 10dp outside the 54dp tile
+			   on every side, which lands the sprite pixel for pixel. */
+			@spritesheet tech_glow_cyan
+			{
+				src: tech-glow-cyan.tga;
+				tech-glow-cyan: 0px 0px 74px 74px;
+			}
+			@spritesheet tech_glow_amber
+			{
+				src: tech-glow-amber.tga;
+				tech-glow-amber: 0px 0px 74px 74px;
+			}
+			@spritesheet tech_glow_white
+			{
+				src: tech-glow-white.tga;
+				tech-glow-white: 0px 0px 74px 74px;
+			}
+			@spritesheet tech_glow_dim
+			{
+				src: tech-glow-dim.tga;
+				tech-glow-dim: 0px 0px 74px 74px;
+			}
+
+			/* Sits outside its tile and paints nothing until the cursor is on
+			   it; which colour it lights is what says whether the thing under
+			   the cursor is already held, on offer, planned, or out of reach.
+			   Placed last in the tile so the rules below can stay one line
+			   each -- it draws over the frame, which is the point of a glow. */
+			div.halo
+			{
+				position: absolute;
+				top: -10dp; left: -10dp; right: -10dp; bottom: -10dp;
 			}
 
 			/* Centred over live gameplay, which keeps running behind it. Not a
@@ -173,6 +216,11 @@
 				height: 360dp;
 				overflow: hidden;
 
+				/* Opaque black rather than the board's own translucent fill:
+				   the drawing is 640dp inside a wider stage, and live
+				   gameplay showing through the bars either side reads as the
+				   schematic itself moving. */
+				background-color: #000;
 				border-width: 1dp;
 				border-color: #123742;
 			}
@@ -222,10 +270,6 @@
 				opacity: 0.75;
 			}
 			div.slot:hover { decorator: image(tech-frame-normal); opacity: 1; }
-			/* The selected slot is what AVAILABLE SYSTEMS is a list for, so it
-			   wears the fitted frame -- the loudest of the three -- and holds
-			   it whether or not the cursor is still on it. */
-			div.slot.selected { decorator: image(tech-frame-fitted); opacity: 1; }
 
 			/* No hatch, unlike the branch tiles: the slot's dark backing is the
 			   readable surface here, and a texture over the drawing is noise. */
@@ -241,7 +285,6 @@
 				color: #4a7a86;
 			}
 			div.slot:hover div.glyph { color: #7fe4f5; }
-			div.slot.selected div.glyph { color: #ffb340; }
 
 			/* A mount that carries something reads as carrying it: the fitted
 			   frame and the system's own code, in the amber the branch tiles
@@ -256,6 +299,23 @@
 			   CONFIRM applies it. */
 			div.slot.staged { decorator: image(tech-frame-staged); opacity: 1; }
 			div.slot.staged div.glyph { color: #fff; }
+			/* Planned empty. The frame still says a plan stands against this
+			   mount; the code is gone because that is what will be there. */
+			div.slot.stripping div.glyph { color: #8a5252; }
+
+			/* The selected slot is what AVAILABLE SYSTEMS is a list for. Cyan,
+			   the board's "you may act on this" colour, and last so it wins
+			   over the state frames above: amber here would say the mount
+			   carries something, which is a separate question its glyph is
+			   still answering. Held whether or not the cursor is on it. */
+			div.slot.selected { decorator: image(tech-frame-selected); opacity: 1; }
+
+			/* Hover, in whatever the mount's own state colour is: amber for one
+			   that already carries something, white for one with a plan against
+			   it, cyan for an empty one on offer. */
+			div.slot:hover div.halo          { decorator: image(tech-glow-cyan); }
+			div.slot.fitted:hover div.halo   { decorator: image(tech-glow-amber); }
+			div.slot.staged:hover div.halo   { decorator: image(tech-glow-white); }
 
 			/* The two ledgers under the hull: what it carries, and what the
 			   selected mount would take. Side by side and equal, because the
@@ -367,7 +427,7 @@
 			}
 
 			/* Three equal branches. No `gap` in RCSS -- the spacing is a margin
-			   on each column, cleared on the last. The PERMANENT tab only: the
+			   on each column, cleared on the last. The TECH tab only: the
 			   ship's own fitting is done on the hull and in the two lists under
 			   it, so the columns would be a second way to buy the same things.
 			   Hidden by default because the SHIP tab is the one that opens. */
@@ -470,7 +530,18 @@
 			div.tile.staged div.counter { color: #fff; }
 			div.tile.dim    div.counter { color: #4a7a86; }
 
-			div.tile:hover { }
+			/* Hover, in whatever the node's own state colour is -- which is
+			   what tells apart a rank the faction already holds (amber) from
+			   one it has yet to research (cyan) and one it cannot reach at all
+			   (a barely-there steel). Hung on the row rather than the tile so
+			   running the cursor down the names lights them too: the whole row
+			   is already what the info panel reads from. */
+			div.tile_row:hover div.halo        { decorator: image(tech-glow-cyan); }
+			div.tile_row.fitted:hover div.halo { decorator: image(tech-glow-amber); }
+			div.tile_row.dim:hover div.halo    { decorator: image(tech-glow-dim); }
+			/* A staged rank outranks all three: the plan is the loudest thing
+			   on the board, hovered or not. */
+			div.tile_row:hover div.tile.staged div.halo { decorator: image(tech-glow-white); }
 
 			div.tile_text { flex: 1 1 auto; }
 
@@ -573,6 +644,10 @@
 				font-size: 11dp;
 				color: #7fe4f5;
 			}
+			/* The plan outruns the purse. CONFIRM stays live: the port serves
+			   what it can and refuses the rest, which is a deal a pilot is
+			   allowed to take -- but not one to take by surprise. */
+			span#tech_staged_cost.short { color: #ff6b6b; }
 
 			button#tech_confirm
 			{
@@ -626,7 +701,7 @@
 		<div class="corner tl"></div><div class="corner br"></div>
 
 		<div id="tech_titlebar">
-			<handle id="tech_grip" move_target="#document">GRAVITARIS &mdash; TECHNOLOGY</handle>
+			<handle id="tech_grip" move_target="#document">GRAVITARIS &#8212; TECHNOLOGY</handle>
 		</div>
 
 		<div id="tech_header">
@@ -636,7 +711,7 @@
 			<div class="currency"><span class="label">SUPPLY</span><span id="supply_value" class="value">0</span></div>
 			<div id="tech_tabs">
 				<button id="tab_ship" class="active">SHIP</button>
-				<button id="tab_permanent">PERMANENT</button>
+				<button id="tab_permanent">TECH</button>
 			</div>
 		</div>
 

@@ -146,7 +146,6 @@ bool UI::Init()
         m_boostValue = hud->GetElementById("boost_value");
         m_researchFill = hud->GetElementById("research_fill");
         m_researchValue = hud->GetElementById("research_value");
-        m_refitHint = hud->GetElementById("refit_hint");
         m_hudTechValue = hud->GetElementById("tech_value");
         m_hudSuppliesValue = hud->GetElementById("supplies_value");
         if (Rml::Element* button = hud->GetElementById("open_tech_tree")) {
@@ -419,17 +418,20 @@ void UI::SetMissileAmmo(int ammo, int capacity)
 // that fits a dozen.
 static constexpr int CANNON_ROUNDS_PER_TICK = 10;
 
-void UI::SetCannonAmmo(int ammo, int capacity, bool selected)
+void UI::SetCannonAmmo(int ammo, int capacity, PrimaryMode mode)
 {
     if (!m_cannonTicks || !m_cannonValue) return;
 
-    if (selected != m_cannonSelected && m_cannonMode) {
-        m_cannonSelected = selected;
+    if (mode != m_cannonPrimary && m_cannonMode) {
+        m_cannonPrimary = mode;
         // Named on the row itself: which primary is up is the pilot's own
         // choice, and a HUD that made them infer it from which bar last moved
         // would be asking them to check in a fight.
-        m_cannonMode->SetInnerRML(ammo < 0 ? "" : (selected ? "ARMED" : "GUNS"));
-        m_cannonMode->SetClass("gun", !selected);
+        const char* label = mode == PrimaryMode::Cannon ? "ARMED"
+                          : mode == PrimaryMode::Guns   ? "GUNS" : "BOTH";
+        m_cannonMode->SetInnerRML(ammo < 0 ? "" : label);
+        m_cannonMode->SetClass("gun", mode == PrimaryMode::Guns);
+        m_cannonMode->SetClass("both", mode == PrimaryMode::Both);
     }
     if (ammo == m_cannonAmmo && capacity == m_cannonCapacity) return;
 
@@ -760,78 +762,116 @@ void UI::RefreshStagedVisuals()
         const ShipSlotView& slot = m_shownSlots[i];
         const TechNodeView* fitted = FittedIn(slot);
         const TechNodeView* staged = StagedIn(slot);
+        const bool stripping = PlanFor(slot).strip;
 
         Rml::Element* element = m_slotElements[i];
-        element->SetClass("staged", staged != nullptr);
-        element->SetClass("fitted", staged == nullptr && fitted != nullptr);
+        element->SetClass("staged", staged != nullptr || stripping);
+        element->SetClass("fitted", staged == nullptr && !stripping && fitted != nullptr);
         element->SetClass("selected", slot.name == m_selectedSlot);
+        // Planned empty reads as empty: the frame says a plan stands against
+        // it, and the code says what will be there when it lands, which is
+        // nothing.
+        element->SetClass("stripping", stripping);
 
         if (Rml::Element* glyph = element->GetChild(0)) {
-            glyph->SetInnerRML(SlotGlyph(slot, staged ? staged : fitted));
+            glyph->SetInnerRML(SlotGlyph(slot, stripping ? nullptr : staged ? staged : fitted));
         }
     }
 
-    // A row is staged when it is the exact level staged for its system; NOTHING
-    // is staged when this mount has no plan against it at all.
+    // A row is staged when it is the exact fitting planned for the selected
+    // slot; CLEAR is staged when the plan is to empty it.
+    const ShipSlotView* selected = SelectedSlot();
+    const SlotPlan plan = selected ? PlanFor(*selected) : SlotPlan{};
     const std::vector<SlotOffer> offers = OfferedForSelection();
-    bool anyStaged = false;
     for (std::size_t i = 0; i < m_availableRows.size() && i < offers.size(); ++i) {
         const SlotOffer& offer = offers[i];
-        const bool staged = StagedInMount(MountOfSelection()) == offer.node->id
-                         && StagedRankInMount(MountOfSelection())
-                                    == static_cast<int>(offer.rankIndex) + 1;
-        anyStaged = anyStaged || staged;
-        m_availableRows[i]->SetClass("staged", staged);
+        m_availableRows[i]->SetClass("staged", !plan.strip && plan.id == offer.node->id
+                                            && plan.rank == static_cast<int>(offer.rankIndex) + 1);
     }
-    if (m_noneRow) m_noneRow->SetClass("staged", !anyStaged);
+    if (m_noneRow) m_noneRow->SetClass("staged", plan.strip);
 
     RefreshConfirmButton();
 }
 
-void UI::SetStagedRank(std::uint32_t id, int tab, int rank, std::uint8_t mount)
+void UI::SetStagedRank(std::uint32_t id, int tab, int rank, SlotRef hole)
 {
-    // A mount holds one thing, so a pick for it replaces whatever was planned
+    // A hole holds one thing, so a pick for it replaces whatever was planned
     // there -- picking a cannon where a gun was staged is a swap, not a second
-    // entry. Everything else is keyed by node and tab: the same def id names a
-    // node in each tree, and learning a rank is not the same plan as fitting
-    // one.
-    const bool mounted = mount != NO_SLOT_MOUNT;
+    // entry, and so is fitting something where a strip was planned. Everything
+    // else is keyed by node and tab: the same def id names a node in each
+    // tree, and learning a rank is not the same plan as fitting one.
     for (std::size_t i = m_staged.size(); i > 0; --i) {
         const StagedPick& staged = m_staged[i - 1];
-        const bool same = mounted ? (staged.tab == tab && staged.mount == mount)
-                                  : (staged.tab == tab && staged.id == id
-                                     && staged.mount == NO_SLOT_MOUNT);
+        const bool same = hole.IsHole()
+                                ? (staged.tab == tab && staged.hole == hole)
+                                : (staged.tab == tab && staged.id == id && !staged.hole.IsHole());
         if (!same) continue;
 
-        const bool sameNode = staged.id == id;
+        // Clicking the same plan again takes it back off; anything else
+        // replaces it.
+        const bool repeat = staged.id == id && staged.rank == rank && !staged.strip;
         m_staged.erase(m_staged.begin() + static_cast<std::ptrdiff_t>(i - 1));
-        // Re-picking the same node at a new rank keeps the plan; rank 0 or a
-        // different node falls through to the push below.
-        if (rank != 0 && sameNode) {
-            m_staged.push_back(StagedPick{id, tab, rank, mount});
+        if (repeat) rank = 0;
+        break;
+    }
+    if (rank != 0) m_staged.push_back(StagedPick{id, tab, rank, hole});
+    RefreshStagedVisuals();
+}
+
+void UI::StageStrip(std::uint32_t id, SlotRef hole)
+{
+    for (std::size_t i = m_staged.size(); i > 0; --i) {
+        const StagedPick& staged = m_staged[i - 1];
+        const bool same = hole.IsHole() ? (staged.tab == 0 && staged.hole == hole)
+                                        : (staged.tab == 0 && staged.id == id
+                                           && !staged.hole.IsHole());
+        if (!same) continue;
+
+        const bool repeat = staged.strip;
+        m_staged.erase(m_staged.begin() + static_cast<std::ptrdiff_t>(i - 1));
+        if (repeat) { // clicking CLEAR again puts the plan back to leaving it alone
             RefreshStagedVisuals();
             return;
         }
         break;
     }
-    if (rank != 0) m_staged.push_back(StagedPick{id, tab, rank, mount});
+    m_staged.push_back(StagedPick{id, 0, 0, hole, /*strip=*/true});
     RefreshStagedVisuals();
 }
 
-std::uint32_t UI::StagedInMount(std::uint8_t mount) const
+// The one plan standing against a slot. A slot on a hull hole is looked up by
+// that hole; one that sits on no hole is looked up by what it accepts, since
+// a shield or an overburn belongs to exactly one slot on the drawing and its
+// pick carries no hole to key by.
+UI::SlotPlan UI::PlanFor(const ShipSlotView& slot) const
 {
+    const SlotRef hole = RefOf(slot);
     for (const StagedPick& staged : m_staged) {
-        if (staged.tab == 0 && staged.mount == mount) return staged.id;
+        if (staged.tab != 0) continue;
+
+        if (hole.IsHole()) {
+            if (staged.hole == hole) return SlotPlan{staged.id, staged.rank, staged.strip};
+            continue;
+        }
+        if (staged.hole.IsHole()) continue;
+        if (SlotTakes(slot, staged.id)) return SlotPlan{staged.id, staged.rank, staged.strip};
     }
-    return 0;
+    return SlotPlan{};
 }
 
-int UI::StagedRankInMount(std::uint8_t mount) const
+// Whether this slot accepts that node at all, by the category names the
+// drawing and the pool both spell.
+bool UI::SlotTakes(const ShipSlotView& slot, std::uint32_t nodeId) const
 {
-    for (const StagedPick& staged : m_staged) {
-        if (staged.tab == 0 && staged.mount == mount) return staged.rank;
+    for (const TechNodeView& node : m_shownNodes) {
+        if (node.tab != 0 || node.id != nodeId) continue;
+        for (const std::string& category : slot.categories) {
+            for (const std::string& fits : node.slots) {
+                if (fits == category) return true;
+            }
+        }
     }
-    return 0;
+    return false;
 }
 
 void UI::StagePick(std::uint32_t id, int tab, int rank)
@@ -868,11 +908,11 @@ void UI::ConfirmStaged()
     for (const StagedPick& staged : m_staged) {
         if (!m_onTechPick) break;
         if (staged.tab != 1) {
-            m_onTechPick(staged.id, staged.tab, staged.rank, staged.mount);
+            m_onTechPick(staged.id, staged.tab, staged.rank, staged.hole.mount, staged.strip);
             continue;
         }
         for (int rank = HeldRankOf(staged.id, staged.tab) + 1; rank <= staged.rank; ++rank) {
-            m_onTechPick(staged.id, staged.tab, rank, staged.mount);
+            m_onTechPick(staged.id, staged.tab, rank, staged.hole.mount, /*strip=*/false);
         }
     }
     m_staged.clear();
@@ -894,14 +934,27 @@ void UI::RefreshConfirmButton()
     if (!m_stagedCost) return;
     int supplies = 0;
     int tech = 0;
+    int strips = 0;
     for (const StagedPick& staged : m_staged) {
+        // Pulling a part costs nothing and buys nothing back, so it is counted
+        // rather than priced -- the row still has to say the plan does
+        // something, or CONFIRM would look inert.
+        if (staged.strip) {
+            ++strips;
+            continue;
+        }
         for (const TechNodeView& node : m_shownNodes) {
-            if (node.id != staged.id) continue;
+            // Both tabs are in this list and the same def id names a node in
+            // each, so a pick that did not check the tab would be priced twice
+            // -- once in supplies and once in Tech.
+            if (node.id != staged.id || node.tab != staged.tab) continue;
             if (staged.tab == 0) {
                 const auto rank = static_cast<std::size_t>(staged.rank - 1);
                 if (rank < node.ranks.size()) supplies += node.ranks[rank].cost;
                 continue;
             }
+            // A permanent rank is a ladder, so a plan that stands on rungs it
+            // is itself buying pays for every one of them.
             for (int rank = node.rank + 1; rank <= staged.rank; ++rank) {
                 const auto index = static_cast<std::size_t>(rank - 1);
                 if (index < node.ranks.size()) tech += node.ranks[index].cost;
@@ -912,7 +965,15 @@ void UI::RefreshConfirmButton()
     std::string cost;
     if (supplies > 0) cost = std::to_string(supplies) + " SUP";
     if (tech > 0) cost += (cost.empty() ? "" : " + ") + std::to_string(tech) + " TECH";
+    if (strips > 0) cost += (cost.empty() ? "" : " + ") + std::to_string(strips) + " PULLED";
     m_stagedCost->SetInnerRML(cost);
+
+    // The purse against the plan as a whole, which is the check a rank-by-rank
+    // one cannot make: each pick is affordable on its own and the pool is spent
+    // down as they land, so the last of them is what a plan overruns on. Said
+    // rather than enforced -- the port serves what it can and refuses the rest,
+    // and CONFIRM staying live is what lets a pilot take that deal knowingly.
+    m_stagedCost->SetClass("short", supplies > m_shownSupplies || tech > m_shownTech);
 }
 
 void UI::ClearTechInfo()
@@ -926,11 +987,11 @@ void UI::ClearTechInfo()
 
 const TechNodeView* UI::FittedIn(const ShipSlotView& slot) const
 {
-    // A weapon mount reports what is in *it*, as the loadout placed it: two
-    // mounts can hold different lines, so this cannot be inferred from what the
-    // hull owns. An empty mount holds nothing, which is not the same question
-    // as what the ship carries elsewhere.
-    if (slot.mount != NO_SLOT_MOUNT) {
+    // A slot on a hull hole reports what is in *that hole*, as the loadout
+    // placed it: two holes can carry different lines, so this cannot be
+    // inferred from what the hull owns. An empty hole holds nothing, which is
+    // not the same question as what the ship carries elsewhere.
+    if (RefOf(slot).IsHole()) {
         if (slot.fittedId == 0) return nullptr;
         for (const TechNodeView& node : m_shownNodes) {
             if (node.tab == 0 && node.id == slot.fittedId) return &node;
@@ -938,45 +999,33 @@ const TechNodeView* UI::FittedIn(const ShipSlotView& slot) const
         return nullptr;
     }
 
-    // Everything else is the hull's rather than a mount's -- a shield, the
+    // Everything else is the hull's rather than a hole's -- a shield, the
     // overburn -- and each of those categories belongs to exactly one slot.
     for (const TechNodeView& node : m_shownNodes) {
         if (node.tab != 0 || node.rank <= 0) continue;
-        for (const std::string& category : slot.categories) {
-            for (const std::string& fits : node.slots) {
-                if (fits == category) return &node;
-            }
-        }
+        if (SlotTakes(slot, node.id)) return &node;
     }
     return nullptr;
 }
 
 const TechNodeView* UI::StagedIn(const ShipSlotView& slot) const
 {
-    if (slot.mount != NO_SLOT_MOUNT) {
-        const std::uint32_t id = StagedInMount(slot.mount);
-        if (id == 0) return nullptr;
-        for (const TechNodeView& node : m_shownNodes) {
-            if (node.tab == 0 && node.id == id) return &node;
-        }
-        return nullptr;
-    }
+    // A strip is a plan for the slot, but it is not something going *into* it.
+    const SlotPlan plan = PlanFor(slot);
+    if (plan.id == 0 || plan.strip) return nullptr;
 
-    // Not a mount: matched by category, the same way its fitting is. Staged
-    // picks for these carry no mount, so keying by one would have every
-    // unmounted slot showing the same plan.
-    for (const StagedPick& staged : m_staged) {
-        if (staged.tab != 0 || staged.mount != NO_SLOT_MOUNT) continue;
-        for (const TechNodeView& node : m_shownNodes) {
-            if (node.id != staged.id || node.tab != 0) continue;
-            for (const std::string& category : slot.categories) {
-                for (const std::string& fits : node.slots) {
-                    if (fits == category) return &node;
-                }
-            }
-        }
+    for (const TechNodeView& node : m_shownNodes) {
+        if (node.tab == 0 && node.id == plan.id) return &node;
     }
     return nullptr;
+}
+
+bool UI::NodeIsMounted(const TechNodeView& node) const
+{
+    for (const ShipSlotView& slot : m_shownSlots) {
+        if (RefOf(slot).IsHole() && SlotTakes(slot, node.id)) return true;
+    }
+    return false;
 }
 
 void UI::SetShipSlots(const std::vector<ShipSlotView>& slots)
@@ -1019,6 +1068,9 @@ void UI::RebuildShipSlots()
                + "\" style=\"left: " + std::to_string(left) + "dp; top: "
                + std::to_string(top) + "dp;\">";
         rml += "<div class=\"glyph\">" + glyph + "</div>";
+        // Last, so the glyph stays child 0 for RefreshStagedVisuals -- and so
+        // the glow paints over the frame rather than under it.
+        rml += "<div class=\"halo\"></div>";
         rml += "</div>";
     }
 
@@ -1061,7 +1113,18 @@ void UI::SelectShipSlot(const std::string& name)
     RefreshStagedVisuals(); // the slots themselves only change class
 }
 
-// Every level of every system the selected mount will take, in the order both
+TechRankView UI::RankInSelection(const TechNodeView& node, std::size_t rankIndex) const
+{
+    if (const ShipSlotView* selected = SelectedSlot()) {
+        for (const auto& [id, ranks] : selected->rankStates) {
+            if (id != node.id) continue;
+            if (rankIndex < ranks.size()) return ranks[rankIndex];
+        }
+    }
+    return rankIndex < node.ranks.size() ? node.ranks[rankIndex] : TechRankView{};
+}
+
+// Every level of every system the selected slot will take, in the order both
 // the markup and its click handlers walk -- computed once so a row and its
 // listener cannot disagree about which fitting they mean.
 //
@@ -1072,28 +1135,18 @@ std::vector<UI::SlotOffer> UI::OfferedForSelection() const
 {
     std::vector<SlotOffer> offers;
 
-    const ShipSlotView* selected = nullptr;
-    for (const ShipSlotView& slot : m_shownSlots) {
-        if (slot.name == m_selectedSlot) selected = &slot;
-    }
+    const ShipSlotView* selected = SelectedSlot();
     if (!selected) return offers;
 
     for (const TechNodeView& node : m_shownNodes) {
         if (node.tab != 0 || node.ranks.empty()) continue;
-
-        bool fits = false;
-        for (const std::string& category : selected->categories) {
-            for (const std::string& slot : node.slots) {
-                if (slot == category) fits = true;
-            }
-        }
-        if (!fits) continue;
+        if (!SlotTakes(*selected, node.id)) continue;
 
         for (std::size_t i = 0; i < node.ranks.size(); ++i) {
             // A level the faction has not researched is not a fitting the port
             // can offer, and one gated behind another part is not one this hull
             // can take yet. Neither belongs on a list of choices.
-            const TechRankState state = node.ranks[i].state;
+            const TechRankState state = RankInSelection(node, i).state;
             if (state == TechRankState::NotUnlocked || state == TechRankState::Locked) continue;
             offers.push_back(SlotOffer{&node, i});
         }
@@ -1105,12 +1158,28 @@ void UI::RebuildShipLists()
 {
     if (!m_installedList || !m_availableList) return;
 
-    const bool hasSelection = !m_selectedSlot.empty();
-
+    // One line per hole rather than per system: a hull with a gun on each wing
+    // carries two guns, and a list that folded them into one entry would be
+    // describing a different ship. The slot's own name goes on the row, since
+    // two identical entries are otherwise indistinguishable.
     std::string installed;
     int installedCount = 0;
+    for (const ShipSlotView& slot : m_shownSlots) {
+        if (!RefOf(slot).IsHole() || slot.fittedId == 0) continue;
+        for (const TechNodeView& node : m_shownNodes) {
+            if (node.tab != 0 || node.id != slot.fittedId) continue;
+            ++installedCount;
+            installed += "<div class=\"entry installed\"><span class=\"entry_name\">" + node.name
+                       + "</span><span class=\"entry_note\">" + Upper(slot.name) + " &#183; "
+                       + RankNumeral(node.rank) + "</span></div>";
+        }
+    }
+    // Then what the hull carries that sits in no hole at all -- a shield, the
+    // overburn. A line that *does* go in one is listed above or not at all: a
+    // rank the hull has paid for but has in no hole is not fitted, whatever
+    // the levels still say (see UpgradeCatalog::StripRank).
     for (const TechNodeView& node : m_shownNodes) {
-        if (node.tab != 0 || node.rank <= 0) continue;
+        if (node.tab != 0 || node.rank <= 0 || NodeIsMounted(node)) continue;
         ++installedCount;
 
         installed += "<div class=\"entry installed\"><span class=\"entry_name\">" + node.name
@@ -1122,15 +1191,21 @@ void UI::RebuildShipLists()
     }
 
     std::string available;
+    const ShipSlotView* selected = SelectedSlot();
     const std::vector<SlotOffer> offers = OfferedForSelection();
-    if (hasSelection) {
-        // Leaving the mount alone is a choice like any other, so it sits on the
-        // list rather than being the absence of one.
-        available += "<div class=\"entry none\"><span class=\"entry_name\">NOTHING</span>"
-                     "<span class=\"entry_note\">CLEAR</span></div>";
+    if (selected) {
+        // Emptying the slot is a choice like any other, so it sits on the list
+        // rather than being the absence of one. On a slot that already carries
+        // something it is the only way to get the part off the hull -- and it
+        // says so, because pulling one buys nothing back.
+        const bool carries = FittedIn(*selected) != nullptr;
+        available += std::string("<div class=\"entry none\"><span class=\"entry_name\">")
+                   + (carries ? "STRIP THIS MOUNT" : "NOTHING")
+                   + "</span><span class=\"entry_note\">"
+                   + (carries ? "NO REFUND" : "CLEAR") + "</span></div>";
     }
     for (const SlotOffer& offer : offers) {
-        const TechRankView& rank = offer.node->ranks[offer.rankIndex];
+        const TechRankView rank = RankInSelection(*offer.node, offer.rankIndex);
 
         const char* entryClass = "entry";
         std::string note = std::to_string(rank.cost) + " SUP";
@@ -1146,7 +1221,7 @@ void UI::RebuildShipLists()
                    + offer.node->name + " " + RankNumeral(static_cast<int>(offer.rankIndex) + 1)
                    + "</span><span class=\"entry_note\">" + note + "</span></div>";
     }
-    if (!hasSelection) {
+    if (!selected) {
         available = "<div class=\"list_empty\">Select a mount on the hull to see what it takes.</div>";
     }
     else if (offers.empty()) {
@@ -1157,15 +1232,15 @@ void UI::RebuildShipLists()
     m_availableList->SetInnerRML(available);
     if (m_installedCount) m_installedCount->SetInnerRML(std::to_string(installedCount));
     if (m_availableCount) {
-        m_availableCount->SetInnerRML(hasSelection ? std::to_string(offers.size()) : "--");
+        m_availableCount->SetInnerRML(selected ? std::to_string(offers.size()) : "--");
     }
 
     AttachShipListListeners();
 }
 
 // A row is one fitting: clicking it stages exactly that level, rather than
-// stepping through them the way a tile does. NOTHING clears whatever this mount
-// had staged.
+// stepping through them the way a tile does. CLEAR plans the slot empty, or
+// takes back the plan on one that is already empty.
 void UI::AttachShipListListeners()
 {
     m_listListeners.clear();
@@ -1187,38 +1262,56 @@ void UI::AttachShipListListeners()
         if (!row) break;
         m_availableRows.push_back(row);
 
-        if (offer.node->ranks[offer.rankIndex].state != TechRankState::Available) continue;
+        if (RankInSelection(*offer.node, offer.rankIndex).state != TechRankState::Available) continue;
 
         const std::uint32_t id = offer.node->id;
         const int rank = static_cast<int>(offer.rankIndex) + 1;
-        const std::uint8_t mount = MountOfSelection();
+        const SlotRef hole = SelectionHole();
         m_listListeners.push_back(
-                std::make_unique<FunctionListener>([this, id, rank, mount](Rml::Event&) {
-            SetStagedRank(id, 0, rank, mount);
+                std::make_unique<FunctionListener>([this, id, rank, hole](Rml::Event&) {
+            SetStagedRank(id, 0, rank, hole);
         }));
         row->AddEventListener("click", m_listListeners.back().get());
     }
 }
 
-// Takes off the plan whatever was going into the selected mount. The hull's own
-// fittings are untouched: nothing in the sim removes a fitted part yet, so this
-// clears an intention rather than stripping the ship.
-// Which mount the selected slot is, or NO_MOUNT with nothing selected.
-std::uint8_t UI::MountOfSelection() const
+const ShipSlotView* UI::SelectedSlot() const
 {
+    if (m_selectedSlot.empty()) return nullptr;
     for (const ShipSlotView& slot : m_shownSlots) {
-        if (slot.name == m_selectedSlot) return slot.mount;
+        if (slot.name == m_selectedSlot) return &slot;
     }
-    return NO_SLOT_MOUNT;
+    return nullptr;
 }
 
+UI::SlotRef UI::SelectionHole() const
+{
+    const ShipSlotView* selected = SelectedSlot();
+    return selected ? RefOf(*selected) : SlotRef{};
+}
+
+// What CLEAR does. A slot carrying something is planned empty -- that is the
+// only way to get a part off a hull. One that is already empty has nothing to
+// pull, so CLEAR simply takes back whatever was planned for it.
 void UI::ClearStagedForSelection()
 {
-    const std::uint8_t mount = MountOfSelection();
+    const ShipSlotView* selected = SelectedSlot();
+    if (!selected) return;
+
+    if (const TechNodeView* fitted = FittedIn(*selected)) {
+        StageStrip(fitted->id, RefOf(*selected));
+        return;
+    }
+
+    const SlotRef hole = RefOf(*selected);
     for (std::size_t i = m_staged.size(); i > 0; --i) {
-        if (m_staged[i - 1].tab != 0 || m_staged[i - 1].mount != mount) continue;
+        const StagedPick& staged = m_staged[i - 1];
+        if (staged.tab != 0) continue;
+        const bool same = hole.IsHole() ? staged.hole == hole
+                                        : (!staged.hole.IsHole() && SlotTakes(*selected, staged.id));
+        if (!same) continue;
+
         m_staged.erase(m_staged.begin() + static_cast<std::ptrdiff_t>(i - 1));
-        RebuildShipLists();
         RefreshStagedVisuals();
         return;
     }
@@ -1304,6 +1397,9 @@ void UI::RebuildTechTree()
             rml += "<div class=\"" + tileClass + "\">";
             rml += "<div class=\"glyph\">" + Upper(node.icon) + "</div>";
             rml += "<div class=\"counter\">" + counterText + "</div>";
+            // Last, so glyph and counter keep the child indices
+            // AttachTechListeners resolves them by.
+            rml += "<div class=\"halo\"></div>";
             rml += "</div>";
             rml += "<div class=\"tile_text\"><span class=\"name\">" + node.name + "</span><div class=\"pips\">";
             for (std::size_t i = 0; i < node.ranks.size(); ++i) {
@@ -1420,15 +1516,17 @@ void UI::ShowSlotTip(const ShipSlotView& slot, Rml::Element*)
 
     const TechNodeView* fitted = FittedIn(slot);
     const TechNodeView* staged = StagedIn(slot);
+    const bool stripping = PlanFor(slot).strip;
 
     std::string body;
-    if (staged) body = staged->name + ", pending confirmation. ";
+    if (stripping && fitted) body = fitted->name + ", to be pulled on confirmation. ";
+    else if (staged) body = staged->name + ", pending confirmation. ";
     else if (fitted) body = fitted->name + " " + RankNumeral(fitted->rank) + ". ";
     body += "Accepts " + accepts + ".";
 
     WriteTechInfo(Upper(slot.name), body,
-                  staged ? "STAGED" : fitted ? "FITTED" : "EMPTY",
-                  staged ? "ok" : fitted ? "paid" : "unres");
+                  stripping ? "STRIP" : staged ? "STAGED" : fitted ? "FITTED" : "EMPTY",
+                  stripping ? "short" : staged ? "ok" : fitted ? "paid" : "unres");
 }
 
 void UI::ShowTechTip(std::uint32_t id, Rml::Element*)
@@ -1462,7 +1560,7 @@ void UI::ShowTechTip(std::uint32_t id, Rml::Element*)
 
     std::string body = node->description;
     if (rank.state == TechRankState::Locked) body = "Locked -- fit what it bolts onto first.";
-    else if (rank.state == TechRankState::NotUnlocked) body = "Not researched. See the PERMANENT tab.";
+    else if (rank.state == TechRankState::NotUnlocked) body = "Not researched. See the TECH tab.";
     else if (rank.state == TechRankState::NeedsLanding) body = "Land at one of your labs to fit this.";
 
     WriteTechInfo(node->name + " " + RankNumeral(static_cast<int>(index) + 1), body,
@@ -1487,7 +1585,7 @@ void UI::RefreshTechFooter()
     if (!m_techNoticeElement) return;
     m_techNoticeElement->SetInnerRML(m_techNotice.empty()
                                              ? ""
-                                             : "PORT AUTHORITY &mdash; " + m_techNotice);
+                                             : "PORT AUTHORITY &#8212; " + m_techNotice);
 }
 
 void UI::SetTechNotice(const std::string& text)
@@ -1495,13 +1593,6 @@ void UI::SetTechNotice(const std::string& text)
     if (text == m_techNotice) return;
     m_techNotice = text;
     RefreshTechFooter();
-}
-
-void UI::SetRefitHintVisible(bool visible)
-{
-    if (!m_refitHint || visible == m_refitHintShown) return;
-    m_refitHintShown = visible;
-    m_refitHint->SetProperty("display", visible ? "block" : "none");
 }
 
 void UI::SetTechTab(int tab)
@@ -1533,7 +1624,8 @@ void UI::SetCurrencies(int tech, int supplies)
     if (m_hudSuppliesValue) m_hudSuppliesValue->SetInnerRML(supplyText);
 }
 
-void UI::SetTechPickCallback(std::function<void(std::uint32_t, int, int, std::uint8_t)> callback)
+void UI::SetTechPickCallback(
+        std::function<void(std::uint32_t, int, int, std::uint8_t, bool)> callback)
 {
     m_onTechPick = std::move(callback);
 }

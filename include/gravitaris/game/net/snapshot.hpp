@@ -94,6 +94,10 @@ struct EntityState {
     // so a client has to know which mounts are armed with what to fire the
     // same rounds out of the same muzzles the server does.
     std::array<std::uint8_t, MAX_WEAPON_MOUNTS> mounts{};
+    // One bit per missile bay, as ShipLoadout::missileBays packs them: the
+    // refit board draws a bay as fitted or empty, and the tier alone cannot
+    // tell one bay from the other.
+    std::uint8_t missileBays = 0;
     std::uint8_t fireRateLevel = 0;
     std::uint8_t gunTierLevel = 0;
     std::uint8_t cannonTierLevel = 0;

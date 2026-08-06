@@ -312,6 +312,18 @@ void ResearchSystem::ApplyPurchases()
         // REFIT_GRACE_TICKS. A pilot who was on the pad when they clicked gets
         // served, whatever the round trip did to them in between.
         const bool served = access.atLab || access.ticksSinceLab <= REFIT_GRACE_TICKS;
+
+        // Pulling a part is free and needs nothing but the yard, so it does
+        // not go past the purse or the tree at all.
+        if (pick.strip) {
+            if (!m_catalog.StripRank(*def, loadout, served, pick.mount)) {
+                if (!ship.has<AIPilot>()) deny(TechNodeState::NeedsLanding);
+                continue;
+            }
+            LOG(info) << "research: team " << static_cast<int>(team.id) << " stripped " << def->key;
+            continue;
+        }
+
         if (!m_catalog.FitRank(*def, pick.rank, loadout, fs->unlocked, account->supplies, served,
                                pick.mount)) {
             if (!ship.has<AIPilot>()) {

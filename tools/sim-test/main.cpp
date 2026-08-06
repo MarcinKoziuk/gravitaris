@@ -1536,6 +1536,87 @@ void TestUpgradeCatalog()
         }
     }
 
+    // Holding a rank is a property of a mount, not of the ship. Light guns in
+    // the nose leave every other mount buyable, and the hull's own fitting
+    // counts as researched enough to repeat -- arming a second mount with the
+    // weapon already aboard asks nothing new of the faction.
+    {
+        ShipLoadout stockHull;
+        stockHull.levels.gunTier = 1;
+        stockHull.mounts[0] = MountArm::Light;
+        TechUnlocks nothingLearned;
+        std::uint32_t purse = RICH;
+
+        const UpgradeCatalog::ShipContext inNose{&stockHull, &nothingLearned, purse, true, 0};
+        Require(catalog.ShipState(*gun, 1, inNose) == TechNodeState::Held,
+                "catalog: the mount holding a line reports it held");
+
+        const UpgradeCatalog::ShipContext inWing{&stockHull, &nothingLearned, purse, true, 1};
+        Require(catalog.ShipState(*gun, 1, inWing) == TechNodeState::Available,
+                "catalog: ...and an empty mount is still sold the same line");
+
+        Require(catalog.FitRank(*gun, 1, stockHull, nothingLearned, purse, true, /*mount=*/1),
+                "catalog: a second mount takes the line the hull already carries");
+        Require(stockHull.mounts[1] == MountArm::Light && stockHull.mounts[2] == MountArm::None,
+                "catalog: ...into the mount the pick named, and no other");
+
+        // A rank above what the hull carries still needs researching.
+        Require(catalog.ShipState(*gun, 2, inWing) == TechNodeState::NotUnlocked,
+                "catalog: carrying rank I does not unlock rank II");
+
+        // Pulling a part empties the mount named and nothing else. What the
+        // hull paid for stays paid for, so the same rank goes back in without
+        // the faction ever having researched it.
+        Require(catalog.StripRank(*gun, stockHull, /*atLab=*/true, /*mount=*/1),
+                "catalog: a mount can be stripped back to empty");
+        Require(stockHull.mounts[1] == MountArm::None && stockHull.mounts[0] == MountArm::Light,
+                "catalog: ...the one the pick named, leaving the other armed");
+        Require(!catalog.StripRank(*gun, stockHull, /*atLab=*/true, /*mount=*/1),
+                "catalog: an empty mount has nothing to strip");
+        Require(!catalog.StripRank(*gun, stockHull, /*atLab=*/false, /*mount=*/0),
+                "catalog: and a yard is needed to pull one at all");
+        Require(catalog.ShipState(*gun, 1, inWing) == TechNodeState::Available
+                        && stockHull.levels.gunTier == 1,
+                "catalog: a stripped mount is sold the line back at the rank it held");
+    }
+
+    // A missile bay is a hole like a weapon mount, not a ship-wide level: the
+    // port bay carrying a launcher leaves the starboard one empty and for sale.
+    {
+        const UpgradeDef* bay = catalog.FindKind(UpgradeKind::MissileTier);
+        Require(bay, "catalog: the pool has a missile bay");
+
+        ShipLoadout hull;
+        TechUnlocks learned;
+        learned.rank[catalog.IndexOf(bay->id)] = 1;
+        std::uint32_t purse = RICH;
+
+        Require(catalog.FitRank(*bay, 1, hull, learned, purse, true, /*mount=*/0),
+                "catalog: a launcher goes into the bay the pick named");
+        Require(MissileBayFitted(hull, 0) && !MissileBayFitted(hull, 1),
+                "catalog: ...and into that bay alone");
+
+        const UpgradeCatalog::ShipContext port{&hull, &learned, purse, true, 0};
+        const UpgradeCatalog::ShipContext starboard{&hull, &learned, purse, true, 1};
+        Require(catalog.ShipState(*bay, 1, port) == TechNodeState::Held,
+                "catalog: the bay holding a launcher reports it held");
+        Require(catalog.ShipState(*bay, 1, starboard) == TechNodeState::Available,
+                "catalog: ...and the empty one is still sold the same launcher");
+
+        Require(catalog.FitRank(*bay, 1, hull, learned, purse, true, /*mount=*/1)
+                        && MissileBaysFitted(hull) == 2,
+                "catalog: the second bay takes one of its own");
+
+        // The rack is the ship's, as the cannon's magazine is: the last tube
+        // gone is what empties it, not the first.
+        hull.missileAmmo = 4;
+        Require(catalog.StripRank(*bay, hull, true, /*mount=*/0)
+                        && MissileBaysFitted(hull) == 1 && hull.missileAmmo == 4,
+                "catalog: pulling one launcher leaves the rack loaded for the other");
+        Require(catalog.StripRank(*bay, hull, true, /*mount=*/1) && hull.missileAmmo == 0,
+                "catalog: pulling the last one leaves nothing to fire the rounds through");
+    }
+
     // The cannon is a second weapon rather than a better gun: a hull carries
     // both, and the guns stay exactly what they were when one is fitted.
     const UpgradeDef* cannonLine = catalog.FindKind(UpgradeKind::CannonTier);
@@ -1609,23 +1690,44 @@ void TestUpgradeCatalog()
 
         const ShipStats armedStats = catalog.ResolveStats(armed.levels);
         Controls controls;
-        Require(ShipControlsSystem::PrimaryWeapon(controls, armedStats, &armed).weapon
-                        == armedStats.cannon,
-                "controls: a loaded cannon is what the trigger fires by default");
+        const ShipControlsSystem::PrimarySet both =
+                ShipControlsSystem::PrimaryWeapons(controls, armedStats, &armed);
+        Require(both.count == 2 && both.lines[0].weapon == armedStats.cannon
+                        && both.lines[1].weapon == armedStats.gun,
+                "controls: the trigger works both lines by default");
 
         armed.cannonAmmo = 0;
-        const ShipControlsSystem::Primary dry =
-                ShipControlsSystem::PrimaryWeapon(controls, armedStats, &armed);
-        Require(dry.weapon == armedStats.gun && !dry.spendsAmmo,
-                "controls: a dry cannon falls through to the guns");
-        Require(controls.activeWeapon == ActiveWeapon::Cannon,
+        const ShipControlsSystem::PrimarySet dry =
+                ShipControlsSystem::PrimaryWeapons(controls, armedStats, &armed);
+        Require(dry.count == 1 && dry.lines[0].weapon == armedStats.gun && !dry.lines[0].spendsAmmo,
+                "controls: a dry cannon drops out and leaves the guns firing");
+        Require(controls.activeWeapon == ActiveWeapon::Both,
                 "controls: ...without changing what the pilot asked for, so a reload re-arms it");
+
+        armed.cannonAmmo = 10;
+        controls.activeWeapon = ActiveWeapon::Cannon;
+        const ShipControlsSystem::PrimarySet heavyOnly =
+                ShipControlsSystem::PrimaryWeapons(controls, armedStats, &armed);
+        Require(heavyOnly.count == 1 && heavyOnly.lines[0].weapon == armedStats.cannon,
+                "controls: asking for the cannon alone holds the guns back");
+
+        armed.cannonAmmo = 0;
+        Require(ShipControlsSystem::PrimaryWeapons(controls, armedStats, &armed).lines[0].weapon
+                        == armedStats.gun,
+                "controls: a dry cannon still falls through to the guns");
 
         controls.activeWeapon = ActiveWeapon::Gun;
         armed.cannonAmmo = 10;
-        Require(ShipControlsSystem::PrimaryWeapon(controls, armedStats, &armed).weapon
-                        == armedStats.gun,
+        const ShipControlsSystem::PrimarySet lightOnly =
+                ShipControlsSystem::PrimaryWeapons(controls, armedStats, &armed);
+        Require(lightOnly.count == 1 && lightOnly.lines[0].weapon == armedStats.gun,
                 "controls: asking for the guns is honoured with a loaded cannon aboard");
+
+        // Round and round: three states need a cycle, and the default leads.
+        Require(NextWeapon(ActiveWeapon::Both) == ActiveWeapon::Cannon
+                        && NextWeapon(ActiveWeapon::Cannon) == ActiveWeapon::Gun
+                        && NextWeapon(ActiveWeapon::Gun) == ActiveWeapon::Both,
+                "controls: the toggle cycles both -> cannon -> guns -> both");
     }
 
     // Both shields resolve to a real reservoir, and swapping type resets the
@@ -2122,6 +2224,7 @@ void TestResearch()
     UpgradeLevels missileLevels;
     missileLevels.missileTier = 1;
     ship.get_mut<ShipLoadout>().levels.missileTier = 1;
+    SetMissileBay(ship.get_mut<ShipLoadout>(), 0, true); // the tube the rack fires through
     ship.get_mut<ShipLoadout>().missileAmmo =
             static_cast<std::uint8_t>(game.GetUpgradeCatalog().ResolveStats(missileLevels).missileCapacity);
 
@@ -3125,7 +3228,8 @@ void TestAIUsesItsUpgrades()
 
         flecs::entity shooter = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{-500., 0.},
                                                     game.GetAIPresets().Default());
-        shooter.get_mut<ShipLoadout>().levels.missileTier = 1; // no bay, no launcher
+        shooter.get_mut<ShipLoadout>().levels.missileTier = 1;
+        SetMissileBay(shooter.get_mut<ShipLoadout>(), 0, true); // no bay, no launcher
         shooter.get_mut<ShipLoadout>().missileAmmo = 4;
         spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{500., 0.}, TeamId::Blue);
 

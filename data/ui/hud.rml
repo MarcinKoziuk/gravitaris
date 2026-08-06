@@ -280,6 +280,9 @@
 				color: #ffb340;
 			}
 			span#cannon_mode.gun { color: #0cf; }
+			/* Both lines live: neither line's own colour, since it is not
+			   either of them. */
+			span#cannon_mode.both { color: #9effc4; }
 
 			/* Secondary telemetry: three short columns under a rule, quiet
 			   enough that hull and missiles stay the loudest things here. */
@@ -479,31 +482,30 @@
 				pointer-events: auto;
 			}
 
+			/* The two purses, spread across one line. Smaller than the
+			   gauges above them on purpose: a balance is something you read
+			   before deciding to spend, not something you fly by. */
+			div#purses { margin-top: 2dp; }
+
+			/* Inline rather than a flex row: the pair reads as "TECH 12" and
+			   the label belongs to the number beside it, not to a column. */
+			div#purses span.purse { margin-right: 20dp; }
+			div#purses span.purse_label
+			{
+				font-size: 10dp;
+				letter-spacing: 2.4dp;
+				color: #7cc;
+			}
+			div#purses span.purse_value
+			{
+				margin-left: 7dp;
+				font-size: 12dp;
+				letter-spacing: 0dp;
+				color: #eff;
+			}
+
 			/* Sidebar button that opens the tech tree. Outlined rather
 			   than filled: it opens a window, it doesn't commit anything. */
-			/* Blinks while a refit is possible -- landed somewhere that fits
-			   parts, with something affordable to fit. Replaces the panel that
-			   used to open itself at you: it asks rather than interrupts. */
-			div#refit_hint
-			{
-				display: none;
-				margin-top: 10dp;
-				padding: 6dp 0;
-				text-align: center;
-
-				font-size: 11dp;
-				letter-spacing: 2dp;
-				color: #012;
-				background-color: #fc0;
-				animation: 1.1s cubic-in-out infinite alternate refit-blink;
-			}
-
-			@keyframes refit-blink
-			{
-				from { background-color: #fc0; }
-				to   { background-color: #fc06; }
-			}
-
 			button#open_tech_tree
 			{
 				display: block;
@@ -600,20 +602,14 @@
 							<div id="research_fill"></div>
 						</div>
 					</div>
-					<div class="stat">
-						<div class="stat_head">
-							<span>Tech</span>
-							<span id="tech_value" class="stat_value readout">0</span>
-						</div>
+					<!-- The two purses on one line: neither is a thing you watch
+					     the way hull and shield are, so they read as a ledger
+					     rather than as two more gauges. -->
+					<div id="purses">
+						<span class="purse"><span class="purse_label">TECH</span><span id="tech_value" class="purse_value readout">0</span></span>
+						<span class="purse"><span class="purse_label">SUPPLIES</span><span id="supplies_value" class="purse_value readout">0</span></span>
 					</div>
-					<div class="stat">
-						<div class="stat_head">
-							<span>Supplies</span>
-							<span id="supplies_value" class="stat_value readout">0</span>
-						</div>
-					</div>
-					<div id="refit_hint">REFIT AVAILABLE &mdash; T</div>
-					<button id="open_tech_tree">Tech tree &mdash; T</button>
+					<button id="open_tech_tree">Tech tree &#8212; T</button>
 				</div>
 
 				<div id="panel_footer">

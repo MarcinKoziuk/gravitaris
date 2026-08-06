@@ -406,13 +406,25 @@ TechNodeState UpgradeCatalog::ShipState(const UpgradeDef& def, std::uint8_t rank
     // light guns fitted at a rank no side has researched yet. Reporting the
     // weapon in its mounts as unresearched would be a plain lie.
     //
+    // For a line that goes into a mount or a bay, held is asked of *that* hole:
+    // owning a rank is not the same as having it in the one being armed, and
+    // reading it ship-wide would let a hull arm exactly one position with each
+    // line and then refuse every other.
+    //
     // Swapping to the other shield emitter is always on offer, at every
     // unlocked rank: it replaces rather than stacks, and swapping down is the
     // player's call to make.
     const bool swapping = def.kind == UpgradeKind::Shield && levels.shieldType != def.shield.type;
-    if (!swapping && LevelOf(def, levels) >= rank) return TechNodeState::Held;
+    if (!swapping && HeldInMount(def, loadout, context.mount) && LevelOf(def, levels) >= rank) {
+        return TechNodeState::Held;
+    }
 
-    if (rank > UnlockedRank(def, *context.unlocked)) return TechNodeState::NotUnlocked;
+    // A rank the hull already carries is one it can carry again -- arming a
+    // second mount with the guns already in the nose asks nothing new of the
+    // faction. Only a rank above both gates is genuinely unresearched.
+    if (rank > UnlockedRank(def, *context.unlocked) && rank > LevelOf(def, levels)) {
+        return TechNodeState::NotUnlocked;
+    }
 
     if (context.supplies < SupplyCostOf(def, rank)) return TechNodeState::Unaffordable;
     if (!context.atLab) return TechNodeState::NeedsLanding;
@@ -454,11 +466,28 @@ MountArm UpgradeCatalog::ArmOf(const UpgradeDef& def)
     }
 }
 
+SlotFamily UpgradeCatalog::FamilyOf(const UpgradeDef& def)
+{
+    if (ArmOf(def) != MountArm::None) return SlotFamily::Weapon;
+    return def.kind == UpgradeKind::MissileTier ? SlotFamily::MissileBay : SlotFamily::None;
+}
+
+bool UpgradeCatalog::HeldInMount(const UpgradeDef& def, const ShipLoadout& loadout,
+                                 std::uint8_t mount)
+{
+    // Nothing that goes into a hole, or nobody asking about a particular one:
+    // the ship-wide answer, which is what the branch view and the AI want.
+    if (!IsMounted(def) || mount >= MAX_WEAPON_MOUNTS) return true;
+
+    if (def.kind == UpgradeKind::MissileTier) return MissileBayFitted(loadout, mount);
+    return loadout.mounts[mount] == ArmOf(def);
+}
+
 bool UpgradeCatalog::FitRank(const UpgradeDef& def, std::uint8_t rank, ShipLoadout& loadout,
                              const TechUnlocks& unlocked, std::uint32_t& supplies, bool atLab,
                              std::uint8_t mount) const
 {
-    const ShipContext context{&loadout, &unlocked, supplies, atLab};
+    const ShipContext context{&loadout, &unlocked, supplies, atLab, mount};
     if (ShipState(def, rank, context) != TechNodeState::Available) return false;
 
     UpgradeLevels& levels = loadout.levels;
@@ -471,20 +500,28 @@ bool UpgradeCatalog::FitRank(const UpgradeDef& def, std::uint8_t rank, ShipLoado
                 std::min(loadout.missileAmmo + rounds, ResolveStats(levels).missileCapacity));
     };
 
-    // Where it goes, for the lines that go somewhere. A pick with no mount
-    // named takes the first free one, and failing that the first mount already
+    // Where it goes, for the lines that go somewhere. A pick with no hole
+    // named takes the first free one, and failing that the first already
     // holding this line -- re-ranking what is there rather than refusing.
-    if (const MountArm arm = ArmOf(def); arm != MountArm::None) {
-        if (mount >= loadout.mounts.size()) {
+    if (IsMounted(def)) {
+        const MountArm arm = ArmOf(def);
+        const auto occupied = [&](std::uint8_t i) {
+            return arm != MountArm::None ? loadout.mounts[i] != MountArm::None
+                                         : MissileBayFitted(loadout, i);
+        };
+        if (mount >= MAX_WEAPON_MOUNTS) {
             mount = TechPick::NO_MOUNT;
-            for (std::uint8_t i = 0; i < loadout.mounts.size(); ++i) {
-                if (loadout.mounts[i] == MountArm::None) { mount = i; break; }
+            for (std::uint8_t i = 0; i < MAX_WEAPON_MOUNTS; ++i) {
+                if (!occupied(i)) { mount = i; break; }
             }
-            for (std::uint8_t i = 0; mount == TechPick::NO_MOUNT && i < loadout.mounts.size(); ++i) {
-                if (loadout.mounts[i] == arm) mount = i;
+            for (std::uint8_t i = 0; mount == TechPick::NO_MOUNT && i < MAX_WEAPON_MOUNTS; ++i) {
+                if (HeldInMount(def, loadout, i)) mount = i;
             }
         }
-        if (mount < loadout.mounts.size()) loadout.mounts[mount] = arm;
+        if (mount < MAX_WEAPON_MOUNTS) {
+            if (arm != MountArm::None) loadout.mounts[mount] = arm;
+            else SetMissileBay(loadout, mount, true);
+        }
     }
 
     // Set, never increment: a supply price buys the rank named, and a hull
@@ -525,6 +562,67 @@ bool UpgradeCatalog::FitRank(const UpgradeDef& def, std::uint8_t rank, ShipLoado
     }
 
     supplies -= SupplyCostOf(def, rank);
+    return true;
+}
+
+bool UpgradeCatalog::StripRank(const UpgradeDef& def, ShipLoadout& loadout, bool atLab,
+                               std::uint8_t mount) const
+{
+    if (!atLab) return false;
+
+    // A mounted line comes out hole by hole: a hull may carry it in three
+    // places and be giving up one of them. The rank stays on the levels --
+    // what it paid for, it has paid for -- so the mount can be re-armed at
+    // that rank later without the faction having to know it.
+    const SlotFamily family = FamilyOf(def);
+    if (family != SlotFamily::None) {
+        // Nobody named a hole: the last one holding this line, so repeating
+        // the call empties them one at a time from the outside in.
+        for (std::uint8_t i = MAX_WEAPON_MOUNTS; i > 0 && mount >= MAX_WEAPON_MOUNTS; --i) {
+            if (HeldInMount(def, loadout, static_cast<std::uint8_t>(i - 1))) {
+                mount = static_cast<std::uint8_t>(i - 1);
+            }
+        }
+        if (mount >= MAX_WEAPON_MOUNTS || !HeldInMount(def, loadout, mount)) return false;
+
+        if (family == SlotFamily::Weapon) {
+            loadout.mounts[mount] = MountArm::None;
+            // The last heavy mount gone leaves nothing to fire the magazine
+            // through, so its rounds go back to the yard with the gun.
+            if (ArmOf(def) == MountArm::Heavy && MountsArmedWith(loadout, MountArm::Heavy) == 0) {
+                loadout.cannonAmmo = 0;
+            }
+        }
+        else {
+            SetMissileBay(loadout, mount, false);
+            if (MissileBaysFitted(loadout) == 0) loadout.missileAmmo = 0;
+        }
+        return true;
+    }
+
+    UpgradeLevels& levels = loadout.levels;
+    if (LevelOf(def, levels) == 0) return false;
+
+    switch (def.kind) {
+    case UpgradeKind::FireRate:
+        levels.fireRate = 0;
+        break;
+    case UpgradeKind::Boost:
+        levels.boost = 0;
+        break;
+    case UpgradeKind::Shield:
+        levels.shield = 0;
+        levels.shieldType = ShieldType::None;
+        loadout.shieldHp = 0.f;
+        loadout.plates = {};
+        loadout.plateRegenDelay = {};
+        break;
+    // Mounted lines never reach here -- they came out above.
+    case UpgradeKind::WeaponTier:
+    case UpgradeKind::CannonTier:
+    case UpgradeKind::MissileTier:
+        return false;
+    }
     return true;
 }
 

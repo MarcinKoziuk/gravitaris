@@ -39,6 +39,13 @@ public:
         const TechUnlocks* unlocked = nullptr;
         std::uint32_t supplies = 0;
         bool atLab = false;
+        // Which mount the question is about, for the lines that go into one.
+        // "Already held" is a property of a mount, not of the ship: a hull with
+        // light guns in the nose can still buy a second set for a wing, and
+        // asking ship-wide would report every mount as already carrying them.
+        // NO_MOUNT asks the ship-wide question, which is what the branch view
+        // and the AI want.
+        std::uint8_t mount = TechPick::NO_MOUNT;
     };
 
     // What an unupgraded hull is fitted with, and what a structure's turret
@@ -132,8 +139,36 @@ public:
                  const TechUnlocks& unlocked, std::uint32_t& supplies, bool atLab,
                  std::uint8_t mount = TechPick::NO_MOUNT) const;
 
+    // Takes a fitting back off the hull. No refund: a yard will pull a part
+    // for you, it will not buy it back.
+    //
+    // What the hull has *paid* for stays on its UpgradeLevels, so the same
+    // rank can be fitted again at its own price rather than needing the
+    // faction to have researched it -- which matters most for the stock light
+    // guns, fitted at a rank no side starts out knowing.
+    //
+    // `mount` names the hole for a mounted line, and NO_MOUNT empties the last
+    // one holding it, so repeating the call strips them one at a time. False
+    // when the hull is not at a yard, or when there is nothing there to pull,
+    // which leaves a stale click costing nothing exactly as FitRank does.
+    bool StripRank(const UpgradeDef& def, ShipLoadout& loadout, bool atLab,
+                   std::uint8_t mount = TechPick::NO_MOUNT) const;
+
     // Which line a def arms a mount with, or None for one that isn't mounted.
     [[nodiscard]] static MountArm ArmOf(const UpgradeDef& def);
+
+    // Which family of holes a def goes into, or None for one that belongs to
+    // the ship as a whole (a shield, the overburn).
+    [[nodiscard]] static SlotFamily FamilyOf(const UpgradeDef& def);
+
+    // Whether a def goes into a numbered hole on the hull at all.
+    [[nodiscard]] static bool IsMounted(const UpgradeDef& def)
+    { return FamilyOf(def) != SlotFamily::None; }
+
+    // Whether that hole already carries this line. True for anything that
+    // isn't mounted, and for NO_MOUNT, which asks the ship-wide question.
+    [[nodiscard]] static bool HeldInMount(const UpgradeDef& def, const ShipLoadout& loadout,
+                                          std::uint8_t mount);
 
     // What an AI fits next, given what it can afford and reach: the def and
     // rank it should buy, or a null def when nothing is worth taking. A human

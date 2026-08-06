@@ -337,19 +337,33 @@ public:
     // drawing, y down, so the UI layer needs to know nothing about model
     // space. `categories` is what the slot accepts -- one entry for a plain
     // `engine_0`, several for a `gun+cannon_0`.
+    // One buyable rank: what it costs, and why it is or isn't for sale.
+    struct TechRank {
+        int cost = 0;
+        TechNodeState state = TechNodeState::Locked;
+    };
+
     struct ShipSlot {
         std::string name;
         std::vector<std::string> categories;
         Magnum::Vector2 uv;
-        // Which of the hull's weapon mounts this is, from the label's index --
-        // what a refit pick names so the part goes into *this* mount. Slots
-        // that aren't weapon mounts carry it too; the catalog ignores it for
-        // anything that isn't mounted.
+        // Which family of holes this slot addresses. A hull numbers its weapon
+        // mounts and its missile bays separately, so `mount` alone does not say
+        // which array it indexes -- `missile_1` is not `weapon_1`.
+        SlotFamily family = SlotFamily::None;
+        // Which hole of that family this is, from the label's index -- what a
+        // refit pick names so the part goes into *this* one. Slots that
+        // address no family carry it too; the catalog ignores it for anything
+        // that isn't mounted.
         std::uint8_t mount = 0;
-        // The def currently armed in this mount, or 0 for an empty one. Read
-        // from the loadout rather than inferred from what the ship owns: two
-        // mounts can hold different lines now.
+        // The def currently fitted here, or 0 for an empty hole. Read from the
+        // loadout rather than inferred from what the ship owns: two holes can
+        // hold different lines now.
         std::uint32_t fittedId = 0;
+        // What each ship-tab node's ranks cost and whether they can go in
+        // *this* hole, keyed by def id. Asked per hole because "already
+        // held" is: a line in the nose is still for sale for a wing.
+        std::vector<std::pair<std::uint32_t, std::vector<TechRank>>> rankStates;
     };
 
     // Empty until the schematic has loaded. Cheap enough to call per frame:
@@ -427,12 +441,12 @@ public:
     // (nothing to show, as opposed to an empty one).
     [[nodiscard]] std::optional<int> GetMissileAmmo();
 
-    // The cannon row: rounds left, what the magazine holds, and whether the
-    // trigger is on the cannon rather than the guns.
+    // The cannon row: rounds left, what the magazine holds, and which lines
+    // the trigger works. Matches ActiveWeapon's order.
     struct CannonReadout {
         int ammo = 0;
         int capacity = 0;
-        bool selected = true;
+        int mode = 0;
     };
     [[nodiscard]] std::optional<CannonReadout> GetCannonReadout();
 
@@ -499,10 +513,6 @@ public:
     // One node of one tree, already resolved to what the panel draws -- so
     // ui/ stays independent of the upgrade catalog, exactly as the draft
     // panel's view did.
-    struct TechRank {
-        int cost = 0;
-        TechNodeState state = TechNodeState::Locked;
-    };
     struct TechNode {
         id_t id = 0;
         TechTab tab = TechTab::Ship;

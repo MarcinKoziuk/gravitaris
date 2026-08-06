@@ -68,6 +68,16 @@ enum class MountArm : std::uint8_t {
     Heavy, // the heavy-cannon line, which feeds from the magazine
 };
 
+// Which family of numbered holes on a hull a fitting goes into. A hull counts
+// its weapon mounts and its missile bays separately -- `weapon_1` and
+// `missile_1` are both index 1 and are not the same place -- so an index is
+// only meaningful alongside the family it belongs to.
+enum class SlotFamily : std::uint8_t {
+    None, // belongs to the ship rather than to a hole: a shield, the overburn
+    Weapon,
+    MissileBay,
+};
+
 // Which shield a ship is carrying. Unlike the levels, this is a real choice:
 // the two absorb differently (see UpgradeDef::shield), so collecting the
 // other type replaces rather than stacks.

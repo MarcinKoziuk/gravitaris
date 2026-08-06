@@ -28,6 +28,7 @@ static constexpr float BOX_HP = 30.f; // a couple of primary hits or one ram
 static constexpr double HALF_PI = 1.5707963267948966;
 
 static cpVect ThrustWithinSpeedLimit(cpBody* body, double thrust, double maxSpeed);
+static unsigned PhaseSlotOf(MountArm arm);
 
 ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner,
                                        PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
@@ -98,11 +99,12 @@ ShipControlsSystem::BoostEffect ShipControlsSystem::BoostEffectOf(bool boosting,
                        static_cast<double>(stats.boostMaxSpeedScale)};
 }
 
-ShipControlsSystem::Primary ShipControlsSystem::PrimaryWeapon(const Controls& controls,
-                                                             const ShipStats& stats,
-                                                             const ShipLoadout* loadout)
+ShipControlsSystem::PrimarySet ShipControlsSystem::PrimaryWeapons(const Controls& controls,
+                                                                 const ShipStats& stats,
+                                                                 const ShipLoadout* loadout)
 {
-    if (!loadout) return Primary{};
+    PrimarySet set;
+    if (!loadout) return set;
 
     const bool heavy = stats.cannon && loadout->cannonAmmo > 0
                     && MountsArmedWith(*loadout, MountArm::Heavy) > 0;
@@ -111,12 +113,24 @@ ShipControlsSystem::Primary ShipControlsSystem::PrimaryWeapon(const Controls& co
     const Primary heavyPrimary{stats.cannon, stats.cannonCooldownTicks, true, MountArm::Heavy};
     const Primary lightPrimary{stats.gun, stats.fireCooldownTicks, false, MountArm::Light};
 
-    if (controls.activeWeapon == ActiveWeapon::Cannon && heavy) return heavyPrimary;
+    // Both lines at once, each on its own mounts at its own cadence. A hull
+    // carrying only one of them needs no special case here -- the other
+    // contributes nothing, exactly as it does under a pilot's own choice.
+    if (controls.activeWeapon == ActiveWeapon::Both) {
+        if (heavy) set.lines[set.count++] = heavyPrimary;
+        if (light) set.lines[set.count++] = lightPrimary;
+        return set;
+    }
+
+    if (controls.activeWeapon == ActiveWeapon::Cannon && heavy) {
+        set.lines[set.count++] = heavyPrimary;
+        return set;
+    }
     // Asked for the guns, or asked for heavy mounts that are dry, empty or
     // unfitted.
-    if (light) return lightPrimary;
-    if (heavy) return heavyPrimary;
-    return Primary{};
+    if (light) set.lines[set.count++] = lightPrimary;
+    else if (heavy) set.lines[set.count++] = heavyPrimary;
+    return set;
 }
 
 void ShipControlsSystem::AdvancePrimary(Controls& controls, const ShipStats& stats,
@@ -126,47 +140,75 @@ void ShipControlsSystem::AdvancePrimary(Controls& controls, const ShipStats& sta
 {
     // One-shot: the swap happens on the press, not for every tick the key is
     // held down.
-    if (flags.toggleWeapon) {
-        controls.activeWeapon = controls.activeWeapon == ActiveWeapon::Cannon
-                              ? ActiveWeapon::Gun : ActiveWeapon::Cannon;
-    }
+    if (flags.toggleWeapon) controls.activeWeapon = NextWeapon(controls.activeWeapon);
 
-    const Primary primary = PrimaryWeapon(controls, stats, loadout);
+    const PrimarySet primaries = PrimaryWeapons(controls, stats, loadout);
     const unsigned mounts = MountsFor(body, WEAPON_HARDPOINT);
 
-    // Only the mounts armed with the line that is firing, and phased among
-    // themselves rather than by hull position: two heavy mounts either side of
-    // an empty one should still interleave.
-    std::array<unsigned, MAX_WEAPON_MOUNTS> firing{};
-    unsigned count = 0;
-    if (primary.weapon && loadout) {
+    // Only the mounts armed with each line, and phased among themselves rather
+    // than by hull position: two heavy mounts either side of an empty one
+    // should still interleave. Gathered up front because the three passes
+    // below have to happen in order across *all* the lines -- seed, then count
+    // down, then fire -- and not line by line.
+    std::array<std::array<unsigned, MAX_WEAPON_MOUNTS>, MAX_PRIMARY_LINES> firing{};
+    std::array<unsigned, MAX_PRIMARY_LINES> armed{};
+    std::array<const void*, MAX_PRIMARY_LINES> weapons{};
+    for (unsigned line = 0; line < primaries.count && loadout; ++line) {
+        const Primary& primary = primaries.lines[line];
+        const unsigned phase = PhaseSlotOf(primary.arm);
+        weapons[phase] = primary.weapon;
         for (unsigned i = 0; i < mounts; ++i) {
-            if (loadout->mounts[i] == primary.arm) firing[count++] = i;
+            if (loadout->mounts[i] == primary.arm) firing[phase][armed[phase]++] = i;
         }
     }
 
-    // Re-phased on a swap as well as on a fresh pull: the two lines have their
-    // own cadences and their own mounts, so cooldowns left over from the other
-    // one mean nothing here.
-    const bool swapped = primary.weapon != controls.firingWeaponId;
-    if (flags.firePrimary && (!controls.firePrimaryWasHeld || swapped)) {
-        SeedMountPhases(controls.gunCooldown, count, primary.cooldownTicks, FIRE_STAGGER);
+    // Re-phased on a swap as well as on a fresh pull: the lines have their own
+    // cadences and their own mounts, so cooldowns left over from another one
+    // mean nothing here.
+    for (unsigned line = 0; line < primaries.count; ++line) {
+        const Primary& primary = primaries.lines[line];
+        const unsigned phase = PhaseSlotOf(primary.arm);
+        const bool swapped = primary.weapon != controls.firingWeaponIds[phase];
+        if (flags.firePrimary && (!controls.firePrimaryWasHeld || swapped)) {
+            SeedPhasesAt(controls.gunCooldown, firing[phase], armed[phase],
+                         primary.cooldownTicks, FIRE_STAGGER);
+        }
     }
+    controls.firingWeaponIds = weapons;
     controls.firePrimaryWasHeld = flags.firePrimary;
-    controls.firingWeaponId = primary.weapon;
 
-    for (unsigned slot = 0; slot < count; ++slot) {
-        if (controls.gunCooldown[slot] > 0) --controls.gunCooldown[slot];
-        if (!flags.firePrimary || controls.gunCooldown[slot] != 0) continue;
-        // A magazine emptied by an earlier mount this same tick stops the rest
-        // of them: the fall back to the light guns waits for the next tick,
-        // which is one frame nobody can see.
-        if (primary.spendsAmmo && (!loadout || loadout->cannonAmmo == 0)) break;
-
-        controls.gunCooldown[slot] = primary.cooldownTicks;
-        if (primary.spendsAmmo && loadout) --loadout->cannonAmmo;
-        onShot(*primary.weapon, firing[slot]);
+    // Every mount counts down once a tick, armed or not -- one walk over the
+    // array rather than one per line, so a mount both lines somehow named
+    // could not be stepped twice.
+    for (std::uint32_t& cooldown : controls.gunCooldown) {
+        if (cooldown > 0) --cooldown;
     }
+
+    for (unsigned line = 0; line < primaries.count; ++line) {
+        const Primary& primary = primaries.lines[line];
+        const unsigned phase = PhaseSlotOf(primary.arm);
+        for (unsigned slot = 0; slot < armed[phase]; ++slot) {
+            const unsigned mount = firing[phase][slot];
+            if (!flags.firePrimary || controls.gunCooldown[mount] != 0) continue;
+            // A magazine emptied by an earlier mount this same tick stops the
+            // rest of them: the fall back to the light guns waits for the next
+            // tick, which is one frame nobody can see.
+            if (primary.spendsAmmo && (!loadout || loadout->cannonAmmo == 0)) break;
+
+            controls.gunCooldown[mount] = primary.cooldownTicks;
+            if (primary.spendsAmmo && loadout) --loadout->cannonAmmo;
+            onShot(*primary.weapon, mount);
+        }
+    }
+}
+
+// Which phase slot a line keeps its cadence in. Keyed by the line rather than
+// by this tick's firing order, so a magazine running dry -- which drops the
+// cannon out of the set -- does not shunt the guns into its slot and re-phase
+// barrels that never changed.
+static unsigned PhaseSlotOf(MountArm arm)
+{
+    return arm == MountArm::Heavy ? 0u : 1u;
 }
 
 unsigned ShipControlsSystem::MountsFor(const Body& body, const char* hardpoint)
@@ -184,16 +226,29 @@ unsigned ShipControlsSystem::MountsFor(const Body& body, const char* hardpoint)
 void ShipControlsSystem::SeedMountPhases(std::array<std::uint32_t, MAX_WEAPON_MOUNTS>& cooldowns,
                                          unsigned mounts, std::uint32_t periodTicks, float stagger)
 {
+    std::array<unsigned, MAX_WEAPON_MOUNTS> run{};
     const unsigned live = std::min<unsigned>(mounts, MAX_WEAPON_MOUNTS);
+    for (unsigned i = 0; i < live; ++i) run[i] = i;
+
+    SeedPhasesAt(cooldowns, run, live, periodTicks, stagger);
+}
+
+void ShipControlsSystem::SeedPhasesAt(std::array<std::uint32_t, MAX_WEAPON_MOUNTS>& cooldowns,
+                                      const std::array<unsigned, MAX_WEAPON_MOUNTS>& mounts,
+                                      unsigned count, std::uint32_t periodTicks, float stagger)
+{
+    const unsigned live = std::min<unsigned>(count, MAX_WEAPON_MOUNTS);
     for (unsigned i = 0; i < live; ++i) {
+        if (mounts[i] >= MAX_WEAPON_MOUNTS) continue;
+
         const float share = static_cast<float>(i) / static_cast<float>(live);
         const auto delay = static_cast<std::uint32_t>(std::lround(share * stagger * periodTicks));
 
         // The tick that seeds these also runs the countdown, so a mount meant
-        // to wait `delay` ticks is seeded one above it. Mount 0 is the
+        // to wait `delay` ticks is seeded one above it. The first is the
         // exception: it fires on the seeding tick itself, which is what makes
         // the trigger feel instant however many barrels follow it.
-        cooldowns[i] = delay > 0 ? delay + 1 : 0;
+        cooldowns[mounts[i]] = delay > 0 ? delay + 1 : 0;
     }
 }
 
@@ -300,15 +355,26 @@ void ShipControlsSystem::Update(std::uint64_t step)
         // Tubes run on the same rule as barrels: each on its own cadence,
         // phased apart, so a rack with two of them empties twice as fast as
         // one with a single tube.
+        //
+        // Only the bays the hull has actually fitted a launcher in: the rack
+        // is the ship's, but a tube is a purchase per bay, and the empty ones
+        // are holes in the airframe rather than launchers.
         const unsigned missileMounts = stats.missile && phys.body
                                      ? MountsFor(*phys.body, stats.missile->hardpoint.c_str()) : 0;
+        std::array<unsigned, MAX_WEAPON_MOUNTS> tubes{};
+        unsigned tubeCount = 0;
+        for (unsigned bay = 0; bay < missileMounts && loadout; ++bay) {
+            if (MissileBayFitted(*loadout, bay)) tubes[tubeCount++] = bay;
+        }
+
         if (scontrols.actionFlags.fireMissile && !scontrols.fireMissileWasHeld) {
-            SeedMountPhases(scontrols.missileCooldown, missileMounts, stats.missileCooldownTicks,
-                            FIRE_STAGGER);
+            SeedPhasesAt(scontrols.missileCooldown, tubes, tubeCount, stats.missileCooldownTicks,
+                         FIRE_STAGGER);
         }
         scontrols.fireMissileWasHeld = scontrols.actionFlags.fireMissile;
 
-        for (unsigned mount = 0; mount < missileMounts; ++mount) {
+        for (unsigned tube = 0; tube < tubeCount; ++tube) {
+            const unsigned mount = tubes[tube];
             if (scontrols.missileCooldown[mount] > 0) {
                 --scontrols.missileCooldown[mount];
             }

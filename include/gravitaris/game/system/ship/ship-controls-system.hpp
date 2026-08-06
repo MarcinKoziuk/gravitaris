@@ -100,6 +100,14 @@ public:
         MountArm arm = MountArm::None;   // which mounts this fires from
     };
 
+    // Every line the trigger works this tick, in firing order. Two when the
+    // pilot has asked for both and the hull can serve both, otherwise the one
+    // that answers.
+    struct PrimarySet {
+        std::array<Primary, MAX_PRIMARY_LINES> lines;
+        unsigned count = 0;
+    };
+
     // The pilot's choice, honoured where it can be: the heavy mounts when
     // there are any with rounds for them, and the light ones otherwise. A line
     // nothing is armed with is not a choice, however well the rank is owned --
@@ -107,8 +115,11 @@ public:
     //
     // Falling back is deliberately not a state change: reloading should put
     // the heavy mounts back in the pilot's hands without a second key press.
-    [[nodiscard]] static Primary PrimaryWeapon(const Controls& controls, const ShipStats& stats,
-                                               const ShipLoadout* loadout);
+    // That is why Both is not simply "no choice at all": a hull set to Both
+    // whose magazine runs dry keeps shooting with the guns and picks the
+    // cannon back up on its own.
+    [[nodiscard]] static PrimarySet PrimaryWeapons(const Controls& controls, const ShipStats& stats,
+                                                   const ShipLoadout* loadout);
 
     // How many mounts a weapon actually fires from, following the same
     // fallback ComputeBulletSpawn does: a hull carrying none of the weapon's
@@ -140,6 +151,13 @@ public:
     // MAX_WEAPON_MOUNTS leaves the surplus silent.
     static void SeedMountPhases(std::array<std::uint32_t, MAX_WEAPON_MOUNTS>& cooldowns,
                                 unsigned mounts, std::uint32_t periodTicks, float stagger);
+
+    // The same deal, but to the hull mounts named rather than to a contiguous
+    // run: the mounts one line is armed on are not neighbours, and with both
+    // lines live they share this array. `mounts` holds `count` hull indices.
+    static void SeedPhasesAt(std::array<std::uint32_t, MAX_WEAPON_MOUNTS>& cooldowns,
+                             const std::array<unsigned, MAX_WEAPON_MOUNTS>& mounts, unsigned count,
+                             std::uint32_t periodTicks, float stagger);
 
     // Muzzle position/velocity for a projectile leaving `mount`-th mount of the
     // `hardpoint` family at `muzzleSpeed` right now, falling back to the gun
