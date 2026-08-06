@@ -50,6 +50,22 @@ bool SystemInterface::LogMessage(Rml::Log::Type type, const Rml::String& message
     }
 }
 
+#if defined(__EMSCRIPTEN__)
+// Emscripten's SDL shim declares the clipboard API but implements none of it,
+// and the browser has no synchronous clipboard read to build one from. Copy
+// and paste stay inside the page.
+static Rml::String s_clipboard;
+
+void SystemInterface::SetClipboardText(const Rml::String& text)
+{
+    s_clipboard = text;
+}
+
+void SystemInterface::GetClipboardText(Rml::String& text)
+{
+    text = s_clipboard;
+}
+#else
 void SystemInterface::SetClipboardText(const Rml::String& text)
 {
     SDL_SetClipboardText(text.c_str());
@@ -63,5 +79,6 @@ void SystemInterface::GetClipboardText(Rml::String& text)
     text = owned;
     SDL_free(owned);
 }
+#endif
 
 } // namespace Gravitaris

@@ -197,7 +197,7 @@
 		</style>
 	</head>
 	<body template="vector-window">
-		<p>This is a game in development by Marcin / Lalatina. Thanks for testing!</p>
+		<p>This is a game in development. Thanks for testing!</p>
 
 		<p class="section">CONTROLS</p>
 		<div id="controls">

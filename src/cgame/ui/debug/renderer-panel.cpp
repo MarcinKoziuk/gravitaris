@@ -40,12 +40,21 @@ void DrawRendererPanel(CGame& game)
         game.SetUiScale(CGame::Defaults::uiScale);
     }
 
-    float typedUiScale = game.GetUiScale();
+    // InputScalar asserts on ImGuiInputTextFlags_EnterReturnsTrue, so Enter is
+    // caught via deactivation instead -- and the value has to be held for the
+    // same reason as the slider, since without that flag every keystroke
+    // reports a change.
+    static float heldTypedUiScale = -1.f;
+
+    float typedUiScale = heldTypedUiScale >= 0.f ? heldTypedUiScale : game.GetUiScale();
     ImGui::SetNextItemWidth(160.f);
     // No step buttons: they'd apply on click and then move themselves away.
-    if (ImGui::InputFloat("##uiscale_typed", &typedUiScale, 0.f, 0.f, "%.2f",
-                           ImGuiInputTextFlags_EnterReturnsTrue)) {
-        game.SetUiScale(typedUiScale);
+    if (ImGui::InputFloat("##uiscale_typed", &typedUiScale, 0.f, 0.f, "%.2f")) {
+        heldTypedUiScale = typedUiScale;
+    }
+    if (ImGui::IsItemDeactivated()) {
+        if (heldTypedUiScale >= 0.f) game.SetUiScale(heldTypedUiScale);
+        heldTypedUiScale = -1.f;
     }
     ImGui::SetItemTooltip("Type an exact value and press Enter.");
 
