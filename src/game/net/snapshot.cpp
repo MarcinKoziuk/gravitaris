@@ -138,16 +138,29 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
 
     // A pilot's Supplies live on their own account entity, which has no NetId
     // of its own -- so they are copied onto whichever hull that pilot is
-    // flying, which is the thing the client already tracks.
+    // flying, which is the thing the client already tracks. Gathered flat and
+    // matched afterwards: a query run inside another query's callback yields
+    // nothing, which left every client reading zero Supplies.
+    struct Purse {
+        std::uint32_t pilotId;
+        std::uint32_t supplies;
+    };
+    std::vector<Purse> purses;
     world.each([&](const PilotAccount& account) {
-        world.each([&](const NetId& netId, const PilotRef& ref) {
-            if (ref.pilotId != account.pilotId) return;
-            const auto it = std::lower_bound(out.entities.begin(), out.entities.end(), netId.value,
-                                             [](const EntityState& e, std::uint32_t id) {
-                                                 return e.netId < id;
-                                             });
-            if (it != out.entities.end() && it->netId == netId.value) it->supplies = account.supplies;
+        purses.push_back(Purse{account.pilotId, account.supplies});
+    });
+
+    world.each([&](const NetId& netId, const PilotRef& ref) {
+        const auto purse = std::find_if(purses.begin(), purses.end(), [&](const Purse& p) {
+            return p.pilotId == ref.pilotId;
         });
+        if (purse == purses.end()) return;
+
+        const auto it = std::lower_bound(out.entities.begin(), out.entities.end(), netId.value,
+                                         [](const EntityState& e, std::uint32_t id) {
+                                             return e.netId < id;
+                                         });
+        if (it != out.entities.end() && it->netId == netId.value) it->supplies = purse->supplies;
     });
 
     world.each([&](const FactionState& fs) {

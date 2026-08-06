@@ -1793,6 +1793,39 @@ void TestHardpointMounts()
     fs.Shutdown();
 }
 
+// ADR 0002's slot store must hand out references that survive further spawns.
+// A ship with two armed mounts reads its own slot, fires, and reads it again
+// within one tick (ShipControlsSystem::Update), so a store that relocated its
+// slots as it grew would leave the second read on freed memory -- and it grows
+// exactly when a faster or better-mounted gun puts more rounds in the air.
+void TestPhysicsSlotStability()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+
+    flecs::entity ship = game.GetEntitySpawner().SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.});
+    const PhysicsRef ref = ship.get<PhysicsRef>();
+    const PhysicsBody* slot = &game.GetPhysicsSystem().GetBody(ref);
+    const Body* resource = slot->body.Get();
+    const cpBody* cp = slot->cp.body.get();
+
+    for (int i = 0; i < 256; ++i) {
+        game.GetEntitySpawner().SpawnBullet("models/bullets/bullet-0"_id,
+                                            Vector2d{double(i) * 4., 400.}, Vector2d{0., 1.});
+    }
+
+    Require(&game.GetPhysicsSystem().GetBody(ref) == slot,
+            "physics: a body slot keeps its address while further bodies are spawned");
+    Require(slot->body.Get() == resource && slot->cp.body.get() == cp,
+            "physics: and a reference taken before those spawns still reads the same body");
+
+    fs.Shutdown();
+}
+
 void TestShields()
 {
     FilesystemPhysFS fs;
@@ -2186,8 +2219,12 @@ void TestResearchQueue()
     // tree commits its own points, so the pool alone can sit flat while the
     // labs are working perfectly well.
     const auto earned = [&] {
-        int total = static_cast<int>(research().techPoints);
-        for (const std::uint8_t rank : research().unlocked.rank) total += rank;
+        // Named, not walked straight off the call: research() returns by
+        // value, and iterating an array member of that temporary reads it
+        // after it has gone (caught by ASan).
+        const FactionState state = research();
+        int total = static_cast<int>(state.techPoints);
+        for (const std::uint8_t rank : state.unlocked.rank) total += rank;
         return total;
     };
 
@@ -3983,6 +4020,7 @@ int main()
     TestPlanetsideStructureHits();
     TestUpgradeCatalog();
     TestHardpointMounts();
+    TestPhysicsSlotStability();
     TestShields();
     TestResearch();
     TestResearchQueue();

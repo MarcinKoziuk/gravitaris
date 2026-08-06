@@ -5,7 +5,7 @@ Status: accepted (implemented on the entt-to-flecs branch)
 ## Decision
 
 Chipmunk bodies/shapes/space references live in `PhysicsSystem`'s own slot
-storage (`std::vector<PhysicsBody>` + free-list), NOT in ECS components.
+storage (`std::deque<PhysicsBody>` + free-list), NOT in ECS components.
 Entities carry two small components instead:
 
 - `RigidBodyDesc` — spawn intent (spaceId + Body resource). Set by spawners;
@@ -43,6 +43,21 @@ stale ref (e.g. an entity whose slot was bulk-freed by `UnloadSpace`, see
 below) is detected instead of freeing someone else's slot. `GetBody` asserts
 liveness+generation in debug; `HandleBodyRemoved` treats stale refs as a
 no-op by design.
+
+## Slot addresses are stable
+
+The store was a `std::vector` until it wasn't: `GetBody` hands out a
+`PhysicsBody&`, and callers hold one across spawning further bodies --
+`ShipControlsSystem::Update` reads a ship's slot, fires a round from each
+armed mount, and reads the slot again for the next muzzle. Growing the vector
+freed the buffer under every such reference, so the second mount read a
+dangling slot. It only bit when the live-body count passed its previous high
+water mark, which is exactly what a faster or better-mounted gun causes --
+hence "crashes after researching a weapon, when you shoot".
+
+A `deque` never moves an element that is already in it, and slots are only
+ever recycled through the free list, never erased. `TestPhysicsSlotStability`
+in the sim-test pins this.
 
 ## Arena-style level teardown
 

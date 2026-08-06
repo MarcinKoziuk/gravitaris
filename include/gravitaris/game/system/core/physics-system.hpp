@@ -1,5 +1,6 @@
 #pragma once
 
+#include <deque>
 #include <optional>
 #include <vector>
 #include <unordered_map>
@@ -145,7 +146,13 @@ private:
     // Slot storage + free-list; PhysicsRef indexes into m_bodies. Declared
     // after m_spaces so slots (whose deleters may touch their space) are
     // destroyed first.
-    std::vector<PhysicsBody> m_bodies;
+    //
+    // A deque, not a vector: GetBody hands out references that callers hold
+    // across spawning further bodies (a ship firing spawns a bullet between
+    // two reads of its own slot), and a vector's growth would leave every one
+    // of those dangling. Slots are never erased, only recycled through the
+    // free list, so a deque's stability under push_back is the whole contract.
+    std::deque<PhysicsBody> m_bodies;
     std::vector<std::uint32_t> m_freeList;
 
     // Hard contacts accumulated during Simulate's cpSpaceStep (see

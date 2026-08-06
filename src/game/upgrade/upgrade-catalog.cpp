@@ -218,10 +218,11 @@ void UpgradeCatalog::BuildLayout()
 
     for (std::size_t i = 0; i < m_defs.size(); ++i) {
         std::uint8_t depth = 0;
-        // Bounded by the pool size, so a `requires` cycle in a hand-edited
-        // file stops rather than hanging the load.
+        // Bounded one short of the pool size, so a `requires` cycle in a
+        // hand-edited file stops rather than hanging the load -- and cannot
+        // walk `depth` off the end of nextRow, which a full pool would.
         id_t prereq = m_defs[i].requiresId;
-        for (std::size_t step = 0; prereq != 0 && step < m_defs.size(); ++step) {
+        for (std::size_t step = 0; prereq != 0 && step + 1 < m_defs.size(); ++step) {
             const UpgradeDef* def = Find(prereq);
             if (!def) break;
             ++depth;
