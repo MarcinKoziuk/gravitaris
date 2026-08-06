@@ -276,10 +276,15 @@ void ModelRenderer2::HandleModelAdded(const Model& model, const id_t id)
                                          Line2Shader::Param{},
                                          Line2Shader::VertexColor{},
                                          Line2Shader::TeamWeight{})
+                        // Same attribute list as baked.mesh above, because both
+                        // read the same instanceBuffer: a shorter list here is
+                        // a shorter stride over InstanceData, so every instance
+                        // past the first reads a transform straddling two of them.
                         .addVertexBufferInstanced(baked.instanceBuffer, 1, 0,
                                                   Line2Shader::InstanceTransform{},
                                                   Line2Shader::InstanceTeamColor{},
-                                                  Line2Shader::InstanceFlash{});
+                                                  Line2Shader::InstanceFlash{},
+                                                  Line2Shader::InstanceShieldFx{});
             }
         }
 
