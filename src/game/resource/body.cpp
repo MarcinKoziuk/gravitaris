@@ -149,12 +149,18 @@ const Body::Hardpoint* Body::FindHardpoint(const char* name) const
     return nullptr;
 }
 
-const Body::Hardpoint* Body::FindMount(const char* prefix, unsigned nth) const
+unsigned Body::CountMounts(const char* prefix) const
 {
     unsigned count = 0;
     for (const Hardpoint& hardpoint : m_hardpoints) {
         if (MountIndex(hardpoint.name, prefix)) ++count;
     }
+    return count;
+}
+
+const Body::Hardpoint* Body::FindMount(const char* prefix, unsigned nth) const
+{
+    const unsigned count = CountMounts(prefix);
     if (count == 0) return nullptr;
 
     // The `want`-th smallest index, found by a scan per rank rather than by

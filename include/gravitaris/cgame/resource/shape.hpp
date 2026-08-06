@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include <optional>
+#include <string>
 
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Color.h>
@@ -59,8 +60,18 @@ public:
             {}
     };
 
+    // A named point authored in the '@slots' layer, in the same transformed
+    // space as the paths. `name` is the element's inkscape:label verbatim --
+    // what it means (category, index) is the reader's business, not the
+    // resource's.
+    struct Marker {
+        std::string name;
+        Vector2d pos;
+    };
+
 private:
     std::vector<Path> m_paths;
+    std::vector<Marker> m_markers;
     int m_renderOrder = 0;
 
     static ResourcePtr<const Shape> placeholder;
@@ -71,11 +82,16 @@ private:
     void AddPaths(const NSVGshape* shape, const Matrix4d& transform, id_t group, bool fxLayer = false,
                   std::size_t* plateIndex = nullptr);
 
+    void AddMarker(const NSVGshape* shape, const Matrix4d& transform);
+
 public:
     ~Shape() override = default;
 
     [[nodiscard]] const std::vector<Path>& GetPaths() const
     { return m_paths; }
+
+    [[nodiscard]] const std::vector<Marker>& GetMarkers() const
+    { return m_markers; }
 
     // Paint order across models, low first (`render_order` in the model's
     // toml, 0 if absent). Only matters between models that overlap and fill:

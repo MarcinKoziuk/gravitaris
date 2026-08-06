@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <utility>
 
 #include <flecs.h>
@@ -83,6 +84,62 @@ public:
     // of its own (WeaponDef::hardpoint), and the last resort before the hull's
     // own center.
     static constexpr const char* GUN_HARDPOINT = "gun";
+
+    // How far apart a family's mounts are held, as a share of an even spread:
+    // 1 puts them at 1/count of the cycle from each other, 0 fires them as one
+    // volley. A ship setting eventually -- the pilot may well want the volley
+    // -- which is why everything below takes it rather than reading it.
+    static constexpr float FIRE_STAGGER = 1.f;
+
+    // Which primary a ship fires this tick, and what it costs to fire it.
+    // `weapon` is null on a hull with nothing armed that can shoot.
+    struct Primary {
+        const WeaponDef* weapon = nullptr;
+        std::uint32_t cooldownTicks = 1;
+        bool spendsAmmo = false;         // the cannon's magazine
+        MountArm arm = MountArm::None;   // which mounts this fires from
+    };
+
+    // The pilot's choice, honoured where it can be: the heavy mounts when
+    // there are any with rounds for them, and the light ones otherwise. A line
+    // nothing is armed with is not a choice, however well the rank is owned --
+    // fitting and mounting are separate now.
+    //
+    // Falling back is deliberately not a state change: reloading should put
+    // the heavy mounts back in the pilot's hands without a second key press.
+    [[nodiscard]] static Primary PrimaryWeapon(const Controls& controls, const ShipStats& stats,
+                                               const ShipLoadout* loadout);
+
+    // How many mounts a weapon actually fires from, following the same
+    // fallback ComputeBulletSpawn does: a hull carrying none of the weapon's
+    // own family shoots it out of the gun mounts, and a hull with neither
+    // fires one round from its centre. The two must agree, or a weapon would
+    // be counted across mounts it never leaves from. Never more than
+    // MAX_WEAPON_MOUNTS: this is a loop bound over a fixed-width array.
+    [[nodiscard]] static unsigned MountsFor(const Body& body, const char* hardpoint);
+
+    // The family every weapon mount belongs to: one hull position per index,
+    // armed by the loadout rather than claimed by a weapon.
+    static constexpr const char* WEAPON_HARDPOINT = "weapon";
+
+    // Runs one tick of a ship's primary fire and reports what it fired, so the
+    // sim and client-side prediction cannot pace differently. `onShot` is
+    // handed the mount index each time a round leaves; everything the two
+    // sides do differently with that round (a real bullet, a cosmetic one)
+    // stays in the callback.
+    static void AdvancePrimary(Controls& controls, const ShipStats& stats, ShipLoadout* loadout,
+                               const Body& body, const ControlFlags& flags,
+                               const std::function<void(const WeaponDef&, unsigned)>& onShot);
+
+    // Deals each mount its opening wait, in ticks, so the first trigger pull
+    // spreads them across one cycle instead of firing them together. Struck
+    // from the fraction (i/count) at the moment it is needed rather than kept
+    // as a tick count, so a cycle that changes length -- an autoloader fitted
+    // between bursts -- re-phases correctly instead of drifting toward a
+    // volley. `mounts` is clamped to the array; a hull with more mounts than
+    // MAX_WEAPON_MOUNTS leaves the surplus silent.
+    static void SeedMountPhases(std::array<std::uint32_t, MAX_WEAPON_MOUNTS>& cooldowns,
+                                unsigned mounts, std::uint32_t periodTicks, float stagger);
 
     // Muzzle position/velocity for a projectile leaving `mount`-th mount of the
     // `hardpoint` family at `muzzleSpeed` right now, falling back to the gun

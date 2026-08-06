@@ -18,7 +18,16 @@ namespace Gravitaris {
 // Replication class: replicated (server -> clients) -- the sidebar's readouts
 // and the shield ring both read the camera subject, not just the own ship.
 struct ShipLoadout {
+    // What each of the hull's weapon mounts is armed with, indexed exactly as
+    // its 'weapon_N' hardpoints are (Body::FindMount). This is the placement;
+    // UpgradeLevels holds the rank of each line, which is the ship's rather
+    // than the mount's.
+    std::array<MountArm, MAX_WEAPON_MOUNTS> mounts{};
+
     std::uint8_t missileAmmo = 0;
+    // Rounds left in the cannon's magazine. Deeper than the rack by an order
+    // of magnitude -- see the HUD, which draws one tick per ten.
+    std::uint8_t cannonAmmo = 0;
     UpgradeLevels levels;
     // Shield charge, 0..ShipStats::shieldCapacity. ShieldSystem refills it;
     // DamageSystem spends it ahead of the hull. For plating this is the sum of
@@ -49,6 +58,18 @@ struct ShipLoadout {
 // plating emitter on a hull whose model authors no '+plating' layer falls back
 // to the pooled shieldHp, so the upgrade is never a dead pickup on a hull that
 // hasn't been drawn plates yet.
+// How many mounts carry a line. Zero means the trigger has nothing to work
+// even if the rank is owned -- fitting a line and mounting it are now two
+// different things.
+inline int MountsArmedWith(const ShipLoadout& loadout, MountArm arm)
+{
+    int count = 0;
+    for (const MountArm mount : loadout.mounts) {
+        if (mount == arm) ++count;
+    }
+    return count;
+}
+
 inline bool IsPlated(const ShipLoadout& loadout)
 {
     return loadout.levels.shieldType == ShieldType::Plating && loadout.plateCount > 0;

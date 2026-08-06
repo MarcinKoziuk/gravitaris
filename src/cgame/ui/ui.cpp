@@ -118,6 +118,9 @@ bool UI::Init()
         m_healthValue = hud->GetElementById("health_value");
         m_missileTicks = hud->GetElementById("missile_ticks");
         m_missileValue = hud->GetElementById("missile_value");
+        m_cannonTicks = hud->GetElementById("cannon_ticks");
+        m_cannonValue = hud->GetElementById("cannon_value");
+        m_cannonMode = hud->GetElementById("cannon_mode");
         m_speedReadout = hud->GetElementById("speed_readout");
         m_gwellReadout = hud->GetElementById("gwell_readout");
         m_shieldFill = hud->GetElementById("shield_fill");
@@ -176,14 +179,29 @@ bool UI::Init()
             title->SetInnerRML(m_techTree->GetTitle());
         }
         m_techGrid = m_techTree->GetElementById("tech_branches");
+        m_shipViewPanel = m_techTree->GetElementById("ship_view_panel");
+        m_shipSlotLayer = m_techTree->GetElementById("ship_slots");
+        m_installedList = m_techTree->GetElementById("installed_list");
+        m_availableList = m_techTree->GetElementById("available_list");
+        m_installedCount = m_techTree->GetElementById("installed_count");
+        m_availableCount = m_techTree->GetElementById("available_count");
         m_techFitted = m_techTree->GetElementById("tech_fitted");
         m_techValue = m_techTree->GetElementById("tech_value");
         m_supplyValue = m_techTree->GetElementById("supply_value");
         // Loud rather than silent: without the container the board simply
         // never draws, which looks like a game bug rather than a typo.
         if (!m_techGrid) LOG(error) << "ui: tech-tree.rml has no #tech_branches; the board cannot draw";
-        m_techTip = m_techTree->GetElementById("tech_tip");
+        m_techInfo = m_techTree->GetElementById("tech_info");
         m_techNoticeElement = m_techTree->GetElementById("tech_notice");
+        m_stagedCost = m_techTree->GetElementById("tech_staged_cost");
+        m_confirmButton = m_techTree->GetElementById("tech_confirm");
+        if (m_confirmButton) {
+            Listen(*m_confirmButton, "click", [this](Rml::Event&) { ConfirmStaged(); });
+        }
+        m_resetButton = m_techTree->GetElementById("tech_reset");
+        if (m_resetButton) {
+            Listen(*m_resetButton, "click", [this](Rml::Event&) { ResetStaged(); });
+        }
 
         if (Rml::Element* grip = m_techTree->GetElementById("tech_grip")) {
             // ElementHandle drags by writing top/left, and the board is centred
@@ -288,6 +306,8 @@ void UI::SetDensityIndependentPixelRatio(float ratio)
 bool UI::ProcessMouseMove(int x, int y)
 {
     if (!m_context) return false;
+    m_mouseX = x;
+    m_mouseY = y;
     return !m_context->ProcessMouseMove(x, y, 0);
 }
 
@@ -392,6 +412,51 @@ void UI::SetMissileAmmo(int ammo, int capacity)
                           : "<span class=\"missile_tick empty\"></span>";
     }
     m_missileTicks->SetInnerRML(ticks);
+}
+
+// Rounds one tick on the cannon row stands for. A magazine runs to three
+// figures, so a tick per round would be a hundred of them across a sidebar
+// that fits a dozen.
+static constexpr int CANNON_ROUNDS_PER_TICK = 10;
+
+void UI::SetCannonAmmo(int ammo, int capacity, bool selected)
+{
+    if (!m_cannonTicks || !m_cannonValue) return;
+
+    if (selected != m_cannonSelected && m_cannonMode) {
+        m_cannonSelected = selected;
+        // Named on the row itself: which primary is up is the pilot's own
+        // choice, and a HUD that made them infer it from which bar last moved
+        // would be asking them to check in a fight.
+        m_cannonMode->SetInnerRML(ammo < 0 ? "" : (selected ? "ARMED" : "GUNS"));
+        m_cannonMode->SetClass("gun", !selected);
+    }
+    if (ammo == m_cannonAmmo && capacity == m_cannonCapacity) return;
+
+    m_cannonAmmo = ammo;
+    m_cannonCapacity = capacity;
+
+    if (ammo < 0) {
+        m_cannonValue->SetInnerRML("--");
+        m_cannonTicks->SetInnerRML("");
+        if (m_cannonMode) m_cannonMode->SetInnerRML("");
+        return;
+    }
+
+    m_cannonValue->SetInnerRML(std::to_string(ammo));
+
+    // Ticks round up, so the last few rounds still light one: a bar that
+    // emptied while the cannon could still fire would be a lie at exactly the
+    // moment it matters.
+    const int total = (capacity + CANNON_ROUNDS_PER_TICK - 1) / CANNON_ROUNDS_PER_TICK;
+    const int lit = (ammo + CANNON_ROUNDS_PER_TICK - 1) / CANNON_ROUNDS_PER_TICK;
+
+    std::string ticks;
+    for (int i = 0; i < total; ++i) {
+        ticks += i < lit ? "<span class=\"cannon_tick\"></span>"
+                         : "<span class=\"cannon_tick empty\"></span>";
+    }
+    m_cannonTicks->SetInnerRML(ticks);
 }
 
 void UI::SetHudTelemetry(std::optional<float> speed, std::optional<float> gravityAccel)
@@ -612,10 +677,552 @@ static constexpr const char* BRANCH_NAMES[] = {"WEAPONS", "MOBILITY", "DEFENSE"}
 static constexpr const char* BRANCH_CLASSES[] = {"weapons", "mobility", "defense"};
 static constexpr int BRANCH_COUNT = 3;
 
-// Tooltip geometry, matching the RCSS it is positioned against.
 static constexpr float TILE_SIZE = 54.f;
-static constexpr float TIP_WIDTH = 226.f;
-static constexpr float TIP_GAP = 14.f;
+
+// Matches div#ship_view_frame's size in tech-tree.rml: slot positions arrive
+// as a fraction of the drawing, and this is what turns them into offsets
+// within it. A slot is a TILE_SIZE tile, the same one the branches use.
+static constexpr float SHIP_VIEW_WIDTH = 640.f;
+static constexpr float SHIP_VIEW_HEIGHT = 360.f;
+
+// Clicking the same tile again asks for the rank above the one already
+// staged, and falls off the top back to nothing staged. A pip still stages the
+// rank it *is* -- that is what pips are for -- but a tile has no rank of its
+// own to mean, so it means "one more".
+void UI::CycleStagePick(std::uint32_t id, int tab)
+{
+    const TechNodeView* node = nullptr;
+    for (const TechNodeView& candidate : m_shownNodes) {
+        if (candidate.tab == tab && candidate.id == id) node = &candidate;
+    }
+    if (!node || node->ranks.empty()) return;
+
+    const int staged = StagedRankFor(id, tab);
+    const int from = staged > 0 ? staged : node->rank;
+
+    for (int rank = from + 1; rank <= node->maxRank; ++rank) {
+        if (rank > static_cast<int>(node->ranks.size())) break;
+        if (Stageable(*node, rank, tab)) {
+            SetStagedRank(id, tab, rank);
+            return;
+        }
+    }
+    SetStagedRank(id, tab, 0); // past the top: nothing staged
+}
+
+// Whether a plan may include this rank. The two trees answer differently, and
+// the difference is the whole reason this isn't just a state check:
+//
+//   PERMANENT is a ladder. It only ever offers the rank one past what the
+//   faction holds, so every rank above that reads Locked -- not because it is
+//   out of reach, but because the rungs below it haven't been climbed yet. A
+//   plan is allowed to stand on rungs it is itself planning to buy, so what
+//   matters is that the *first* step is genuinely on offer.
+//
+//   SHIP sells a rank outright: III costs III's price whether or not the hull
+//   ever carried I. So only a rank actually on offer can be staged, and
+//   staging it is one purchase rather than a climb.
+bool UI::Stageable(const TechNodeView& node, int rank, int tab) const
+{
+    const auto index = static_cast<std::size_t>(rank - 1);
+    if (index >= node.ranks.size()) return false;
+
+    if (tab != 1) return node.ranks[index].state == TechRankState::Available;
+
+    const auto firstOffer = static_cast<std::size_t>(node.rank);
+    if (firstOffer >= node.ranks.size()) return false; // the line is finished
+    const TechRankState first = node.ranks[firstOffer].state;
+
+    // Unaffordable is deliberately allowed through: the purse is checked
+    // against the plan as a whole (see RefreshConfirmButton), not rank by rank.
+    return first == TechRankState::Available || first == TechRankState::Unaffordable;
+}
+
+// Everything a staged pick shows in, repainted where it stands. No markup is
+// written, so nothing is destroyed, nothing relayouts, and the element the
+// click came from is still under the cursor when the next one arrives.
+void UI::RefreshStagedVisuals()
+{
+    for (const TileRefs& refs : m_tileRefs) {
+        const int staged = StagedRankFor(refs.id, m_techTab);
+
+        if (refs.tile) refs.tile->SetClass("staged", staged > 0);
+        if (refs.counter) {
+            refs.counter->SetInnerRML(std::to_string(staged > 0 ? staged : refs.heldRank) + "/"
+                                      + std::to_string(refs.maxRank));
+        }
+        for (std::size_t i = 0; i < refs.pips.size(); ++i) {
+            refs.pips[i]->SetClass("staged", static_cast<int>(i) < staged);
+        }
+    }
+
+    for (std::size_t i = 0; i < m_slotElements.size() && i < m_shownSlots.size(); ++i) {
+        const ShipSlotView& slot = m_shownSlots[i];
+        const TechNodeView* fitted = FittedIn(slot);
+        const TechNodeView* staged = StagedIn(slot);
+
+        Rml::Element* element = m_slotElements[i];
+        element->SetClass("staged", staged != nullptr);
+        element->SetClass("fitted", staged == nullptr && fitted != nullptr);
+        element->SetClass("selected", slot.name == m_selectedSlot);
+
+        if (Rml::Element* glyph = element->GetChild(0)) {
+            glyph->SetInnerRML(SlotGlyph(slot, staged ? staged : fitted));
+        }
+    }
+
+    // A row is staged when it is the exact level staged for its system; NOTHING
+    // is staged when this mount has no plan against it at all.
+    const std::vector<SlotOffer> offers = OfferedForSelection();
+    bool anyStaged = false;
+    for (std::size_t i = 0; i < m_availableRows.size() && i < offers.size(); ++i) {
+        const SlotOffer& offer = offers[i];
+        const bool staged = StagedInMount(MountOfSelection()) == offer.node->id
+                         && StagedRankInMount(MountOfSelection())
+                                    == static_cast<int>(offer.rankIndex) + 1;
+        anyStaged = anyStaged || staged;
+        m_availableRows[i]->SetClass("staged", staged);
+    }
+    if (m_noneRow) m_noneRow->SetClass("staged", !anyStaged);
+
+    RefreshConfirmButton();
+}
+
+void UI::SetStagedRank(std::uint32_t id, int tab, int rank, std::uint8_t mount)
+{
+    // A mount holds one thing, so a pick for it replaces whatever was planned
+    // there -- picking a cannon where a gun was staged is a swap, not a second
+    // entry. Everything else is keyed by node and tab: the same def id names a
+    // node in each tree, and learning a rank is not the same plan as fitting
+    // one.
+    const bool mounted = mount != NO_SLOT_MOUNT;
+    for (std::size_t i = m_staged.size(); i > 0; --i) {
+        const StagedPick& staged = m_staged[i - 1];
+        const bool same = mounted ? (staged.tab == tab && staged.mount == mount)
+                                  : (staged.tab == tab && staged.id == id
+                                     && staged.mount == NO_SLOT_MOUNT);
+        if (!same) continue;
+
+        const bool sameNode = staged.id == id;
+        m_staged.erase(m_staged.begin() + static_cast<std::ptrdiff_t>(i - 1));
+        // Re-picking the same node at a new rank keeps the plan; rank 0 or a
+        // different node falls through to the push below.
+        if (rank != 0 && sameNode) {
+            m_staged.push_back(StagedPick{id, tab, rank, mount});
+            RefreshStagedVisuals();
+            return;
+        }
+        break;
+    }
+    if (rank != 0) m_staged.push_back(StagedPick{id, tab, rank, mount});
+    RefreshStagedVisuals();
+}
+
+std::uint32_t UI::StagedInMount(std::uint8_t mount) const
+{
+    for (const StagedPick& staged : m_staged) {
+        if (staged.tab == 0 && staged.mount == mount) return staged.id;
+    }
+    return 0;
+}
+
+int UI::StagedRankInMount(std::uint8_t mount) const
+{
+    for (const StagedPick& staged : m_staged) {
+        if (staged.tab == 0 && staged.mount == mount) return staged.rank;
+    }
+    return 0;
+}
+
+void UI::StagePick(std::uint32_t id, int tab, int rank)
+{
+    // Clicking the staged rank again takes it back off the plan.
+    SetStagedRank(id, tab, StagedRankFor(id, tab) == rank ? 0 : rank);
+}
+
+int UI::HeldRankOf(std::uint32_t id, int tab) const
+{
+    for (const TechNodeView& node : m_shownNodes) {
+        if (node.id == id && node.tab == tab) return node.rank;
+    }
+    return 0;
+}
+
+int UI::StagedRankFor(std::uint32_t id, int tab) const
+{
+    for (const StagedPick& staged : m_staged) {
+        if (staged.id == id && staged.tab == tab) return staged.rank;
+    }
+    return 0;
+}
+
+void UI::ConfirmStaged()
+{
+    if (m_staged.empty()) return;
+
+    // Handed over in the order they were staged: a prerequisite picked before
+    // the thing that needs it has to reach the sim in that order too. A
+    // permanent rank is a rung on a ladder, so staging III there means buying
+    // I, II and III -- ascending, since each is only on offer once the one
+    // below it has landed. A ship rank is bought outright, so it is one pick.
+    for (const StagedPick& staged : m_staged) {
+        if (!m_onTechPick) break;
+        if (staged.tab != 1) {
+            m_onTechPick(staged.id, staged.tab, staged.rank, staged.mount);
+            continue;
+        }
+        for (int rank = HeldRankOf(staged.id, staged.tab) + 1; rank <= staged.rank; ++rank) {
+            m_onTechPick(staged.id, staged.tab, rank, staged.mount);
+        }
+    }
+    m_staged.clear();
+    RefreshStagedVisuals();
+}
+
+void UI::ResetStaged()
+{
+    if (m_staged.empty()) return;
+    m_staged.clear();
+    RefreshStagedVisuals();
+}
+
+void UI::RefreshConfirmButton()
+{
+    if (m_confirmButton) m_confirmButton->SetClass("idle", m_staged.empty());
+    if (m_resetButton) m_resetButton->SetClass("idle", m_staged.empty());
+
+    if (!m_stagedCost) return;
+    int supplies = 0;
+    int tech = 0;
+    for (const StagedPick& staged : m_staged) {
+        for (const TechNodeView& node : m_shownNodes) {
+            if (node.id != staged.id) continue;
+            if (staged.tab == 0) {
+                const auto rank = static_cast<std::size_t>(staged.rank - 1);
+                if (rank < node.ranks.size()) supplies += node.ranks[rank].cost;
+                continue;
+            }
+            for (int rank = node.rank + 1; rank <= staged.rank; ++rank) {
+                const auto index = static_cast<std::size_t>(rank - 1);
+                if (index < node.ranks.size()) tech += node.ranks[index].cost;
+            }
+        }
+    }
+
+    std::string cost;
+    if (supplies > 0) cost = std::to_string(supplies) + " SUP";
+    if (tech > 0) cost += (cost.empty() ? "" : " + ") + std::to_string(tech) + " TECH";
+    m_stagedCost->SetInnerRML(cost);
+}
+
+void UI::ClearTechInfo()
+{
+    if (!m_techInfo) return;
+    m_techInfo->SetClass("idle", true);
+    m_techInfo->SetInnerRML("<div class=\"info_text\"><span class=\"info_title\">SELECT A SYSTEM"
+                            "</span><span class=\"info_body\">Hover a mount or a system for "
+                            "details.</span></div><span class=\"info_cost\"></span>");
+}
+
+const TechNodeView* UI::FittedIn(const ShipSlotView& slot) const
+{
+    // A weapon mount reports what is in *it*, as the loadout placed it: two
+    // mounts can hold different lines, so this cannot be inferred from what the
+    // hull owns. An empty mount holds nothing, which is not the same question
+    // as what the ship carries elsewhere.
+    if (slot.mount != NO_SLOT_MOUNT) {
+        if (slot.fittedId == 0) return nullptr;
+        for (const TechNodeView& node : m_shownNodes) {
+            if (node.tab == 0 && node.id == slot.fittedId) return &node;
+        }
+        return nullptr;
+    }
+
+    // Everything else is the hull's rather than a mount's -- a shield, the
+    // overburn -- and each of those categories belongs to exactly one slot.
+    for (const TechNodeView& node : m_shownNodes) {
+        if (node.tab != 0 || node.rank <= 0) continue;
+        for (const std::string& category : slot.categories) {
+            for (const std::string& fits : node.slots) {
+                if (fits == category) return &node;
+            }
+        }
+    }
+    return nullptr;
+}
+
+const TechNodeView* UI::StagedIn(const ShipSlotView& slot) const
+{
+    if (slot.mount != NO_SLOT_MOUNT) {
+        const std::uint32_t id = StagedInMount(slot.mount);
+        if (id == 0) return nullptr;
+        for (const TechNodeView& node : m_shownNodes) {
+            if (node.tab == 0 && node.id == id) return &node;
+        }
+        return nullptr;
+    }
+
+    // Not a mount: matched by category, the same way its fitting is. Staged
+    // picks for these carry no mount, so keying by one would have every
+    // unmounted slot showing the same plan.
+    for (const StagedPick& staged : m_staged) {
+        if (staged.tab != 0 || staged.mount != NO_SLOT_MOUNT) continue;
+        for (const TechNodeView& node : m_shownNodes) {
+            if (node.id != staged.id || node.tab != 0) continue;
+            for (const std::string& category : slot.categories) {
+                for (const std::string& fits : node.slots) {
+                    if (fits == category) return &node;
+                }
+            }
+        }
+    }
+    return nullptr;
+}
+
+void UI::SetShipSlots(const std::vector<ShipSlotView>& slots)
+{
+    if (slots == m_shownSlots) return;
+    m_shownSlots = slots;
+    RebuildShipSlots();
+}
+
+// What a slot draws: the code of whatever is in it, or -- when it is empty --
+// what it would take. A slot that accepts only one thing says so; one that
+// takes either line has no single code to show, and saying "GUN" on an empty
+// mount would read exactly like a gun fitted in it.
+std::string UI::SlotGlyph(const ShipSlotView& slot, const TechNodeView* shown)
+{
+    if (shown) return Upper(shown->icon);
+    if (slot.categories.size() != 1) return "---";
+    return Upper(slot.categories.front().substr(0, 3));
+}
+
+void UI::RebuildShipSlots()
+{
+    if (!m_shipSlotLayer) return;
+
+    std::string rml;
+    for (const ShipSlotView& slot : m_shownSlots) {
+        const int left = static_cast<int>(std::lround(slot.x * SHIP_VIEW_WIDTH - TILE_SIZE * 0.5f));
+        const int top = static_cast<int>(std::lround(slot.y * SHIP_VIEW_HEIGHT - TILE_SIZE * 0.5f));
+
+        const TechNodeView* fitted = FittedIn(slot);
+        const TechNodeView* staged = StagedIn(slot);
+        const std::string glyph = SlotGlyph(slot, staged ? staged : fitted);
+
+        std::string slotClass = "slot";
+        if (staged) slotClass += " staged";
+        else if (fitted) slotClass += " fitted";
+        if (slot.name == m_selectedSlot) slotClass += " selected";
+
+        rml += "<div class=\"" + slotClass
+               + "\" style=\"left: " + std::to_string(left) + "dp; top: "
+               + std::to_string(top) + "dp;\">";
+        rml += "<div class=\"glyph\">" + glyph + "</div>";
+        rml += "</div>";
+    }
+
+    m_shipSlotLayer->SetInnerRML(rml);
+
+    // SetInnerRML destroyed the previous elements, so the handlers go on the
+    // fresh ones, as AttachTechListeners does for the tiles.
+    m_slotListeners.clear();
+    m_slotElements.clear();
+    for (int i = 0; i < m_shipSlotLayer->GetNumChildren() && i < static_cast<int>(m_shownSlots.size()); ++i) {
+        Rml::Element* element = m_shipSlotLayer->GetChild(i);
+        m_slotElements.push_back(element);
+        const ShipSlotView& slot = m_shownSlots[i];
+
+        m_slotListeners.push_back(std::make_unique<FunctionListener>([this, slot](Rml::Event& event) {
+            ShowSlotTip(slot, nullptr);
+        }));
+        element->AddEventListener("mouseover", m_slotListeners.back().get());
+        m_slotListeners.push_back(std::make_unique<FunctionListener>([this](Rml::Event&) {
+            ClearTechInfo();
+        }));
+        element->AddEventListener("mouseout", m_slotListeners.back().get());
+
+        const std::string name = slot.name;
+        m_slotListeners.push_back(std::make_unique<FunctionListener>([this, name](Rml::Event&) {
+            SelectShipSlot(name);
+        }));
+        element->AddEventListener("click", m_slotListeners.back().get());
+    }
+
+    RebuildShipLists();
+}
+
+// Clicking the selected mount again clears it, which is the only way back to
+// "nothing picked" -- there is nowhere else on the drawing to click.
+void UI::SelectShipSlot(const std::string& name)
+{
+    m_selectedSlot = name == m_selectedSlot ? std::string() : name;
+    RebuildShipLists();     // a different mount offers different systems
+    RefreshStagedVisuals(); // the slots themselves only change class
+}
+
+// Every level of every system the selected mount will take, in the order both
+// the markup and its click handlers walk -- computed once so a row and its
+// listener cannot disagree about which fitting they mean.
+//
+// One row per level rather than per system: a refit is a choice between
+// concrete fittings, and a hull that cannot afford III should be able to pick I
+// off the same list rather than discovering it by clicking twice.
+std::vector<UI::SlotOffer> UI::OfferedForSelection() const
+{
+    std::vector<SlotOffer> offers;
+
+    const ShipSlotView* selected = nullptr;
+    for (const ShipSlotView& slot : m_shownSlots) {
+        if (slot.name == m_selectedSlot) selected = &slot;
+    }
+    if (!selected) return offers;
+
+    for (const TechNodeView& node : m_shownNodes) {
+        if (node.tab != 0 || node.ranks.empty()) continue;
+
+        bool fits = false;
+        for (const std::string& category : selected->categories) {
+            for (const std::string& slot : node.slots) {
+                if (slot == category) fits = true;
+            }
+        }
+        if (!fits) continue;
+
+        for (std::size_t i = 0; i < node.ranks.size(); ++i) {
+            // A level the faction has not researched is not a fitting the port
+            // can offer, and one gated behind another part is not one this hull
+            // can take yet. Neither belongs on a list of choices.
+            const TechRankState state = node.ranks[i].state;
+            if (state == TechRankState::NotUnlocked || state == TechRankState::Locked) continue;
+            offers.push_back(SlotOffer{&node, i});
+        }
+    }
+    return offers;
+}
+
+void UI::RebuildShipLists()
+{
+    if (!m_installedList || !m_availableList) return;
+
+    const bool hasSelection = !m_selectedSlot.empty();
+
+    std::string installed;
+    int installedCount = 0;
+    for (const TechNodeView& node : m_shownNodes) {
+        if (node.tab != 0 || node.rank <= 0) continue;
+        ++installedCount;
+
+        installed += "<div class=\"entry installed\"><span class=\"entry_name\">" + node.name
+                   + "</span><span class=\"entry_note\">" + RankNumeral(node.rank) + "</span></div>";
+    }
+
+    if (installed.empty()) {
+        installed = "<div class=\"list_empty\">Nothing fitted. The hull is stock.</div>";
+    }
+
+    std::string available;
+    const std::vector<SlotOffer> offers = OfferedForSelection();
+    if (hasSelection) {
+        // Leaving the mount alone is a choice like any other, so it sits on the
+        // list rather than being the absence of one.
+        available += "<div class=\"entry none\"><span class=\"entry_name\">NOTHING</span>"
+                     "<span class=\"entry_note\">CLEAR</span></div>";
+    }
+    for (const SlotOffer& offer : offers) {
+        const TechRankView& rank = offer.node->ranks[offer.rankIndex];
+
+        const char* entryClass = "entry";
+        std::string note = std::to_string(rank.cost) + " SUP";
+        switch (rank.state) {
+        case TechRankState::Available:    entryClass = "entry buy"; break;
+        case TechRankState::Unaffordable: entryClass = "entry poor"; break;
+        case TechRankState::NeedsLanding: entryClass = "entry poor"; note = "LAND"; break;
+        case TechRankState::Held:         entryClass = "entry installed"; note = "FITTED"; break;
+        default:                          note = "LOCKED"; break;
+        }
+
+        available += "<div class=\"" + std::string(entryClass) + "\"><span class=\"entry_name\">"
+                   + offer.node->name + " " + RankNumeral(static_cast<int>(offer.rankIndex) + 1)
+                   + "</span><span class=\"entry_note\">" + note + "</span></div>";
+    }
+    if (!hasSelection) {
+        available = "<div class=\"list_empty\">Select a mount on the hull to see what it takes.</div>";
+    }
+    else if (offers.empty()) {
+        available += "<div class=\"list_empty\">Nothing the faction has researched fits this mount.</div>";
+    }
+
+    m_installedList->SetInnerRML(installed);
+    m_availableList->SetInnerRML(available);
+    if (m_installedCount) m_installedCount->SetInnerRML(std::to_string(installedCount));
+    if (m_availableCount) {
+        m_availableCount->SetInnerRML(hasSelection ? std::to_string(offers.size()) : "--");
+    }
+
+    AttachShipListListeners();
+}
+
+// A row is one fitting: clicking it stages exactly that level, rather than
+// stepping through them the way a tile does. NOTHING clears whatever this mount
+// had staged.
+void UI::AttachShipListListeners()
+{
+    m_listListeners.clear();
+    m_availableRows.clear();
+    m_noneRow = nullptr;
+    if (!m_availableList || m_selectedSlot.empty()) return;
+
+    int child = 0;
+    if (Rml::Element* none = m_availableList->GetChild(child++)) {
+        m_noneRow = none;
+        m_listListeners.push_back(std::make_unique<FunctionListener>([this](Rml::Event&) {
+            ClearStagedForSelection();
+        }));
+        none->AddEventListener("click", m_listListeners.back().get());
+    }
+
+    for (const SlotOffer& offer : OfferedForSelection()) {
+        Rml::Element* row = m_availableList->GetChild(child++);
+        if (!row) break;
+        m_availableRows.push_back(row);
+
+        if (offer.node->ranks[offer.rankIndex].state != TechRankState::Available) continue;
+
+        const std::uint32_t id = offer.node->id;
+        const int rank = static_cast<int>(offer.rankIndex) + 1;
+        const std::uint8_t mount = MountOfSelection();
+        m_listListeners.push_back(
+                std::make_unique<FunctionListener>([this, id, rank, mount](Rml::Event&) {
+            SetStagedRank(id, 0, rank, mount);
+        }));
+        row->AddEventListener("click", m_listListeners.back().get());
+    }
+}
+
+// Takes off the plan whatever was going into the selected mount. The hull's own
+// fittings are untouched: nothing in the sim removes a fitted part yet, so this
+// clears an intention rather than stripping the ship.
+// Which mount the selected slot is, or NO_MOUNT with nothing selected.
+std::uint8_t UI::MountOfSelection() const
+{
+    for (const ShipSlotView& slot : m_shownSlots) {
+        if (slot.name == m_selectedSlot) return slot.mount;
+    }
+    return NO_SLOT_MOUNT;
+}
+
+void UI::ClearStagedForSelection()
+{
+    const std::uint8_t mount = MountOfSelection();
+    for (std::size_t i = m_staged.size(); i > 0; --i) {
+        if (m_staged[i - 1].tab != 0 || m_staged[i - 1].mount != mount) continue;
+        m_staged.erase(m_staged.begin() + static_cast<std::ptrdiff_t>(i - 1));
+        RebuildShipLists();
+        RefreshStagedVisuals();
+        return;
+    }
+}
 
 void UI::SetTechTree(const std::vector<TechNodeView>& nodes)
 {
@@ -685,11 +1292,13 @@ void UI::RebuildTechTree()
             if (fitted) tileClass += " fitted";
             else if (dim) tileClass += " dim";
 
-            // A restock has no rank to report, only that it can be bought
-            // again. No loaded font is guaranteed to carry U+21BB, so this
-            // says RE rather than risking a box.
-            const std::string counterText = std::to_string(node.rank) + "/"
-                                            + std::to_string(node.maxRank);
+            // A staged rank is what the tile reports, so the counter answers
+            // the click that just happened rather than the state on the hull --
+            // which does not move until CONFIRM.
+            const int stagedRank = StagedRankFor(node.id, m_techTab);
+            const std::string counterText = std::to_string(stagedRank > 0 ? stagedRank : node.rank)
+                                            + "/" + std::to_string(node.maxRank);
+            if (stagedRank > 0) tileClass += " staged";
 
             rml += "<div class=\"" + rowClass + "\">";
             rml += "<div class=\"" + tileClass + "\">";
@@ -697,8 +1306,14 @@ void UI::RebuildTechTree()
             rml += "<div class=\"counter\">" + counterText + "</div>";
             rml += "</div>";
             rml += "<div class=\"tile_text\"><span class=\"name\">" + node.name + "</span><div class=\"pips\">";
-            for (const TechRankView& rank : node.ranks) {
-                rml += "<div class=\"pip " + std::string(PipClass(rank.state)) + "\"></div>";
+            for (std::size_t i = 0; i < node.ranks.size(); ++i) {
+                const TechRankView& rank = node.ranks[i];
+                // Filled up to the staged rank, the way held ranks are: the bar
+                // is a level meter, and "2/3" with only the second bar lit
+                // reads as neither the rank nor the count.
+                const bool staged = static_cast<int>(i) < stagedRank;
+                rml += "<div class=\"pip " + std::string(staged ? "staged" : PipClass(rank.state))
+                       + "\"></div>";
             }
             rml += "</div></div></div>";
         }
@@ -707,16 +1322,19 @@ void UI::RebuildTechTree()
 
     m_techGrid->SetInnerRML(rml);
     AttachTechListeners();
+    RebuildShipSlots(); // which rebuilds the lists under it
     RefreshTechFooter();
+    RefreshConfirmButton();
 }
 
 // SetInnerRML destroyed the previous elements, so the handlers go on the fresh
-// ones -- and the old handler objects are dropped -- on every rebuild. A tile
-// buys the next rank up; a pip buys the rank it is, which is the whole point
-// of a price that is absolute rather than a step.
+// ones -- and the old handler objects are dropped -- on every rebuild. This is
+// also where the elements a staged pick repaints are resolved, so staging
+// itself never has to touch the markup again (see RefreshStagedVisuals).
 void UI::AttachTechListeners()
 {
     m_techListeners.clear();
+    m_tileRefs.clear();
     if (!m_techGrid) return;
 
     for (int b = 0; b < m_techGrid->GetNumChildren(); ++b) {
@@ -739,71 +1357,98 @@ void UI::AttachTechListeners()
 
             const std::uint32_t id = node.id;
 
-            // Hover anywhere on the row raises the tooltip for it.
-            m_techListeners.push_back(std::make_unique<FunctionListener>([this, id](Rml::Event& event) {
-                ShowTechTip(id, event.GetCurrentElement());
+            TileRefs refs;
+            refs.id = id;
+            refs.maxRank = node.maxRank;
+            refs.heldRank = node.rank;
+
+            // Hover anywhere on the row reads it out in the info panel.
+            m_techListeners.push_back(std::make_unique<FunctionListener>([this, id](Rml::Event&) {
+                ShowTechTip(id, nullptr);
             }));
             row->AddEventListener("mouseover", m_techListeners.back().get());
             m_techListeners.push_back(std::make_unique<FunctionListener>([this](Rml::Event&) {
-                HideTechTip();
+                ClearTechInfo();
             }));
             row->AddEventListener("mouseout", m_techListeners.back().get());
 
-            // The tile: the next rank this track hasn't got.
+            // The tile has no rank of its own to mean, so it means "one more".
             if (Rml::Element* tile = row->GetChild(0)) {
-                int next = 0;
-                for (std::size_t i = 0; i < node.ranks.size(); ++i) {
-                    if (node.ranks[i].state == TechRankState::Available) {
-                        next = static_cast<int>(i) + 1;
-                        break;
-                    }
-                }
-                if (next != 0) {
-                    m_techListeners.push_back(
-                            std::make_unique<FunctionListener>([this, id, next](Rml::Event&) {
-                                if (m_onTechPick) m_onTechPick(id, m_techTab, next);
-                            }));
-                    tile->AddEventListener("click", m_techListeners.back().get());
-                }
+                refs.tile = tile;
+                refs.counter = tile->GetChild(1);
+
+                m_techListeners.push_back(
+                        std::make_unique<FunctionListener>([this, id](Rml::Event&) {
+                            CycleStagePick(id, m_techTab);
+                        }));
+                tile->AddEventListener("click", m_techListeners.back().get());
             }
 
             Rml::Element* text = row->GetChild(1);
             Rml::Element* pips = text ? text->GetChild(1) : nullptr;
-            if (!pips) continue;
+            if (!pips) {
+                m_tileRefs.push_back(std::move(refs));
+                continue;
+            }
             for (int i = 0; i < pips->GetNumChildren(); ++i) {
                 if (static_cast<std::size_t>(i) >= node.ranks.size()) break;
-                if (node.ranks[static_cast<std::size_t>(i)].state != TechRankState::Available) continue;
+                refs.pips.push_back(pips->GetChild(i));
 
+                // A pip stages the rank it is -- the one place an exact rank
+                // can be named rather than stepped to.
                 const int rank = i + 1;
+                if (!Stageable(node, rank, m_techTab)) continue;
                 m_techListeners.push_back(
                         std::make_unique<FunctionListener>([this, id, rank](Rml::Event&) {
-                            if (m_onTechPick) m_onTechPick(id, m_techTab, rank);
+                            StagePick(id, m_techTab, rank);
                         }));
                 pips->GetChild(i)->AddEventListener("click", m_techListeners.back().get());
             }
+            m_tileRefs.push_back(std::move(refs));
         }
     }
 }
 
-// All the prose lives here rather than on the board: the tiles carry an icon,
-// a rank count and a row of pips, and nothing else competes for the glance.
-void UI::ShowTechTip(std::uint32_t id, Rml::Element* anchor)
+void UI::ShowSlotTip(const ShipSlotView& slot, Rml::Element*)
 {
-    if (!m_techTip || !anchor || !m_techTree) return;
+    std::string accepts;
+    for (const std::string& category : slot.categories) {
+        if (!accepts.empty()) accepts += " / ";
+        accepts += Upper(category);
+    }
+    if (accepts.empty()) accepts = "NOTHING";
+
+    const TechNodeView* fitted = FittedIn(slot);
+    const TechNodeView* staged = StagedIn(slot);
+
+    std::string body;
+    if (staged) body = staged->name + ", pending confirmation. ";
+    else if (fitted) body = fitted->name + " " + RankNumeral(fitted->rank) + ". ";
+    body += "Accepts " + accepts + ".";
+
+    WriteTechInfo(Upper(slot.name), body,
+                  staged ? "STAGED" : fitted ? "FITTED" : "EMPTY",
+                  staged ? "ok" : fitted ? "paid" : "unres");
+}
+
+void UI::ShowTechTip(std::uint32_t id, Rml::Element*)
+{
+    if (!m_techInfo) return;
 
     const TechNodeView* node = nullptr;
     for (const TechNodeView& candidate : m_shownNodes) {
         if (candidate.tab == m_techTab && candidate.id == id) node = &candidate;
     }
-    if (!node) return;
+    if (!node || node->ranks.empty()) return;
 
-    // The rank the tooltip is about: the next one on offer, or the last one
-    // held if the line is finished.
+    // The rank being described: the one staged if there is one, else the next
+    // on offer, else the last held -- the same rank the tile is reporting.
     std::size_t index = 0;
     for (std::size_t i = 0; i < node->ranks.size(); ++i) {
         index = i;
         if (node->ranks[i].state != TechRankState::Held) break;
     }
+    if (const int staged = StagedRankFor(node->id, m_techTab)) index = static_cast<std::size_t>(staged - 1);
     const TechRankView& rank = node->ranks[index];
 
     const char* costClass = "unres";
@@ -820,42 +1465,23 @@ void UI::ShowTechTip(std::uint32_t id, Rml::Element* anchor)
     else if (rank.state == TechRankState::NotUnlocked) body = "Not researched. See the PERMANENT tab.";
     else if (rank.state == TechRankState::NeedsLanding) body = "Land at one of your labs to fit this.";
 
-    std::string tip = "<div class=\"tip_head\"><span class=\"tip_title\">" + node->name + " "
-                      + RankNumeral(static_cast<int>(index) + 1) + "</span>";
-    tip += "<span class=\"tip_cost " + std::string(costClass) + "\">" + std::to_string(rank.cost)
-           + (m_techTab == 0 ? " SUP" : " TECH") + "</span></div>";
-    tip += "<div class=\"tip_body\">" + body + "</div>";
-
-    m_techTip->SetInnerRML(tip);
-    m_techTip->SetProperty("display", "block");
-
-    // Beside the tile it belongs to rather than under the cursor: a tooltip
-    // that follows the mouse jitters across a board this dense, and the thing
-    // being described has a position of its own already.
-    //
-    // Absolute coordinates are context-space, so the panel's own origin comes
-    // off them -- the tip is positioned within the document, not the screen.
-    const float originX = m_techTree->GetAbsoluteLeft();
-    const float originY = m_techTree->GetAbsoluteTop();
-    const float tileX = anchor->GetAbsoluteLeft() - originX;
-    const float tileY = anchor->GetAbsoluteTop() - originY;
-
-    float left = tileX + TILE_SIZE + TIP_GAP;
-    // Flipped to the near side when it would hang off the panel, which is what
-    // the rightmost branch does at any sensible UI scale.
-    if (left + TIP_WIDTH > m_techTree->GetOffsetWidth()) left = tileX - TIP_WIDTH - TIP_GAP;
-
-    m_techTip->SetProperty("left", std::to_string(static_cast<int>(std::lround(left))) + "px");
-    m_techTip->SetProperty("top", std::to_string(static_cast<int>(std::lround(tileY))) + "px");
+    WriteTechInfo(node->name + " " + RankNumeral(static_cast<int>(index) + 1), body,
+                  std::to_string(rank.cost) + (m_techTab == 0 ? " SUP" : " TECH"), costClass);
 }
 
-void UI::HideTechTip()
+void UI::WriteTechInfo(const std::string& title, const std::string& body, const std::string& cost,
+                       const char* costClass)
 {
-    if (m_techTip) m_techTip->SetProperty("display", "none");
+    if (!m_techInfo) return;
+    m_techInfo->SetClass("idle", false);
+    m_techInfo->SetInnerRML("<div class=\"info_text\"><span class=\"info_title\">" + title
+                            + "</span><span class=\"info_body\">" + body
+                            + "</span></div><span class=\"info_cost " + costClass + "\">" + cost
+                            + "</span>");
 }
 
-// The design puts every word in the tooltip, so what is left down here is the
-// port's answer when it turns a purchase away -- and nothing else.
+// The info panel carries every word about a system, so what is left down here
+// is the port's answer when it turns a purchase away -- and nothing else.
 void UI::RefreshTechFooter()
 {
     if (!m_techNoticeElement) return;
@@ -886,8 +1512,10 @@ void UI::SetTechTab(int tab)
     if (Rml::Element* permanent = m_techTree->GetElementById("tab_permanent")) {
         permanent->SetClass("active", tab == 1);
     }
-    HideTechTip();
-    RebuildTechTree();
+    if (m_shipViewPanel) m_shipViewPanel->SetClass("active", tab == 0);
+    if (m_techGrid) m_techGrid->SetClass("active", tab == 1);
+    ClearTechInfo();
+    RequestTechRebuild();
 }
 
 void UI::SetCurrencies(int tech, int supplies)
@@ -905,7 +1533,7 @@ void UI::SetCurrencies(int tech, int supplies)
     if (m_hudSuppliesValue) m_hudSuppliesValue->SetInnerRML(supplyText);
 }
 
-void UI::SetTechPickCallback(std::function<void(std::uint32_t, int, int)> callback)
+void UI::SetTechPickCallback(std::function<void(std::uint32_t, int, int, std::uint8_t)> callback)
 {
     m_onTechPick = std::move(callback);
 }
@@ -1161,6 +1789,16 @@ void UI::Update()
 
     // After the update, not inside SetChatLog: the fresh markup has no scroll
     // extents to pin to until the context has laid it out.
+    if (m_techRebuildPending) {
+        m_techRebuildPending = false;
+        RebuildTechTree();
+        // The markup the cursor was over is gone; hand RmlUi the same position
+        // again so the replacement under it is hovered, and clickable, without
+        // the player having to jiggle the mouse. Staging no longer rebuilds at
+        // all (see RefreshStagedVisuals), so this is only for data changes.
+        m_context->ProcessMouseMove(m_mouseX, m_mouseY, 0);
+    }
+
     if (m_chatScrollToEnd && m_chatLog) {
         m_chatScrollToEnd = false;
         m_chatLog->SetScrollTop(m_chatLog->GetScrollHeight());

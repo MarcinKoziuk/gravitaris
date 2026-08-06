@@ -162,6 +162,22 @@ void ResearchSystem::Update(std::uint64_t step)
         }
     });
 
+    // A hull sitting at a yard tops its tubes and its magazine up. Reloading
+    // is part of refitting rather than something to buy: the fitted parts
+    // decide how much they hold, and what can be filled is filled. Its own
+    // walk, not a lookup inside the one above -- a query run inside another
+    // query's callback yields nothing.
+    m_registry.each([&](flecs::entity, const ResearchAccess& access, ShipLoadout& loadout) {
+        if (!access.atLab) return;
+        const ShipStats stats = m_catalog.ResolveStats(loadout.levels);
+
+        const auto tubes = static_cast<std::uint8_t>(std::min(stats.missileCapacity, 255));
+        if (loadout.missileAmmo < tubes) loadout.missileAmmo = tubes;
+
+        const auto rounds = static_cast<std::uint8_t>(std::min(stats.cannonCapacity, 255));
+        if (loadout.cannonAmmo < rounds) loadout.cannonAmmo = rounds;
+    });
+
     // Which sides have somebody reading the tree for themselves. Gathered
     // before the walk below rather than asked inside it: a query run inside
     // another query's callback yields nothing.
@@ -296,7 +312,8 @@ void ResearchSystem::ApplyPurchases()
         // REFIT_GRACE_TICKS. A pilot who was on the pad when they clicked gets
         // served, whatever the round trip did to them in between.
         const bool served = access.atLab || access.ticksSinceLab <= REFIT_GRACE_TICKS;
-        if (!m_catalog.FitRank(*def, pick.rank, loadout, fs->unlocked, account->supplies, served)) {
+        if (!m_catalog.FitRank(*def, pick.rank, loadout, fs->unlocked, account->supplies, served,
+                               pick.mount)) {
             if (!ship.has<AIPilot>()) {
                 const UpgradeCatalog::ShipContext why{&loadout, &fs->unlocked, account->supplies, served};
                 deny(m_catalog.ShipState(*def, pick.rank, why));

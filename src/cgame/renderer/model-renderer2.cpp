@@ -321,11 +321,11 @@ void ModelRenderer2::SubmitOverlay(id_t modelId, const Matrix3& transform, const
 
 void ModelRenderer2::RenderStandalone(id_t modelId, const Matrix3& transform, const Matrix3& viewProjection,
                                       const Vector2& viewportSizePx, float lineWidthPx,
-                                      const Vector3& teamColor)
+                                      const Vector3& teamColor, id_t tag)
 {
     const auto bakedGroupsIt = m_baked.find(modelId);
     if (bakedGroupsIt == m_baked.end()) return;
-    const auto bakedIt = bakedGroupsIt->second.find(OVERLAY_TAG);
+    const auto bakedIt = bakedGroupsIt->second.find(tag);
     if (bakedIt == bakedGroupsIt->second.end()) return;
     BakedGroup& baked = bakedIt->second;
 

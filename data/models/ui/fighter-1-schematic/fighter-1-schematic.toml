@@ -1,0 +1,9 @@
+# The refit screen's cutaway of models/ships/fighter-1: the hull's own
+# `model_detail` layer, lifted into its own asset so the schematic can gain
+# slot markings without touching what the game flies.
+#
+# Only the drawing is here -- no @body, no @hardpoints, no @origin. Nothing
+# collides with it and nothing spawns from it, and ShipViewRenderer fits it by
+# its own bounds, so `scale` only has to keep the strokes in the range the
+# line shader was tuned for.
+scale = 0.05

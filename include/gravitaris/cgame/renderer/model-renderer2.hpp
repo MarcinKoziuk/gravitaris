@@ -172,14 +172,17 @@ public:
     // overlay should be visible, before Render().
     void SubmitOverlay(id_t modelId, const Matrix3& transform, const Vector3& color, float flash = 0.f);
 
-    // Draws one baked model's "model" group into the currently bound
-    // framebuffer under an explicit view-projection, bypassing both the world
-    // camera and the entity sweep -- for the offscreen HUD panels (the compass
-    // dial) that need a real ship drawn but have no scene to draw it in. Both
-    // the transform and the projection are the caller's own space, whatever
-    // that is. A no-op for a model that isn't baked here yet.
+    // Draws one baked group of one model into the currently bound framebuffer
+    // under an explicit view-projection, bypassing both the world camera and
+    // the entity sweep -- for the offscreen panels (the compass dial, the
+    // refit schematic) that need a real model drawn but have no scene to draw
+    // it in. Both the transform and the projection are the caller's own space,
+    // whatever that is. `tag` picks the group, for panels drawing a layer the
+    // world never shows. A no-op for a model that isn't baked here yet, or a
+    // tag it doesn't carry.
     void RenderStandalone(id_t modelId, const Matrix3& transform, const Matrix3& viewProjection,
-                          const Vector2& viewportSizePx, float lineWidthPx, const Vector3& teamColor);
+                          const Vector2& viewportSizePx, float lineWidthPx, const Vector3& teamColor,
+                          id_t tag = "model"_id);
 
     void Render(double delta);
 };

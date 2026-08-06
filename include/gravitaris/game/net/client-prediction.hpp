@@ -205,7 +205,6 @@ private:
 
     flecs::entity m_ownShip;
     std::deque<PredictedTick> m_history;
-    std::uint32_t m_fireCooldown = 0;
 
     // NetId (a planet or a remote ship) -> this client's local
     // collision-proxy entity for it.

@@ -43,7 +43,6 @@ void ClientPrediction::DestroyOwnShip()
 {
     if (m_ownShip.is_alive()) m_ownShip.destruct();
     m_history.clear();
-    m_fireCooldown = 0;
 }
 
 void ClientPrediction::SpawnOwnShip(id_t modelId, Magnum::Vector2d initialPos, TeamId team)
@@ -241,45 +240,45 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
     m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
     m_physicsSystem.Update();
 
-    if (m_fireCooldown > 0) --m_fireCooldown;
-    if (flags.firePrimary && m_fireCooldown == 0 && stats.gun) {
-        const WeaponDef& gun = *stats.gun;
-        m_fireCooldown = stats.fireCooldownTicks;
+    // The very same pacing the server runs, off the same Controls, stats and
+    // loadout -- including the swap, the armed-mount filter and the fall
+    // through a dry magazine. Only what a round *is* differs down here.
+    const PhysicsBody& ownPhys = m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>());
+    if (ownPhys.body) {
+        ShipLoadout* mutableLoadout = m_ownShip.try_get_mut<ShipLoadout>();
+        ShipControlsSystem::AdvancePrimary(ownControls, stats, mutableLoadout, *ownPhys.body, flags,
+                                           [&](const WeaponDef& gun, unsigned mount) {
+            // The bullet this client actually sees. The server's authoritative
+            // copy of this same shot never arrives (GatherSnapshot omits a
+            // peer's own bullets), so there is exactly one on screen -- which
+            // is what makes predicting it safe: an earlier attempt drew both,
+            // and since the own ship renders at ~serverTick + INPUT_LEAD_TICKS
+            // while replicated entities render at serverTick - the
+            // interpolation delay, the pair showed up ~14 ticks apart as two
+            // separate tracers.
+            //
+            // Cosmetic only -- zero damage, and DamageSystem never runs on
+            // this client -- so it flies through whatever the server says it
+            // hit and expires on its own; hits and damage stay entirely
+            // server-authoritative. The cadence can still drift (a dropped
+            // input makes the server skip a shot this client took), and the
+            // server's copy of this shot is never drawn here.
+            const auto [pos, vel] =
+                    ShipControlsSystem::ComputeBulletSpawn(m_ownShip.get<Transform>(),
+                                                           ownPhys, gun.speed,
+                                                           ShipControlsSystem::WEAPON_HARDPOINT,
+                                                           mount);
+            const flecs::entity bullet =
+                    m_entitySpawner.SpawnBullet(gun.modelId, pos, vel, /*sensor=*/true,
+                                                static_cast<double>(m_ownShip.get<Transform>().rot));
+            bullet.emplace<Bullet>(gun.lifetimeSeconds, m_ownShip.get<Team>().id, 0.f,
+                                   m_ownShip.get<NetId>().value, m_ownShip.id());
 
-        // The bullet this client actually sees. The server's authoritative
-        // copy of this same shot never arrives (GatherSnapshot omits a
-        // peer's own bullets), so there is exactly one on screen -- which is
-        // what makes predicting it safe: an earlier attempt drew both, and
-        // since the own ship renders at ~serverTick + INPUT_LEAD_TICKS while
-        // replicated entities render at serverTick - the interpolation
-        // delay, the pair showed up ~14 ticks apart as two separate tracers.
-        // Same muzzle math the server uses, from the same predicted state
-        // the server will reach for this tick, so the trajectory matches;
-        // bullets take no gravity (see PhysicsSystem::ApplyGravity) and are
-        // sensors, so both copies fly identical straight lines.
-        //
-        // Cosmetic only -- zero damage, and DamageSystem never runs on this
-        // client -- so it flies through whatever the server says it hit and
-        // expires on its own; hits/damage stay entirely server-authoritative.
-        // The mount counter is the own ship's own Controls, the same field the
-        // server counts up -- the two can still drift apart (this cooldown is
-        // predicted independently, and a dropped input makes the server skip a
-        // shot this client took), but only ever by which wingtip a tracer
-        // leaves from, and the server's copy of this shot is never drawn here.
-        const auto [pos, vel] =
-                ShipControlsSystem::ComputeBulletSpawn(m_ownShip.get<Transform>(),
-                                                       m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>()),
-                                                       gun.speed, gun.hardpoint.c_str(),
-                                                       ownControls.gunMount++);
-        const flecs::entity bullet =
-                m_entitySpawner.SpawnBullet(gun.modelId, pos, vel, /*sensor=*/true,
-                                            static_cast<double>(m_ownShip.get<Transform>().rot));
-        bullet.emplace<Bullet>(gun.lifetimeSeconds, m_ownShip.get<Team>().id, 0.f,
-                               m_ownShip.get<NetId>().value, m_ownShip.id());
-
-        m_eventQueue.Emit(GameEventType::BulletFired, m_ownShip,
-                          Magnum::Vector2{static_cast<float>(pos.x()), static_cast<float>(pos.y())},
-                          gun.id);
+            m_eventQueue.Emit(GameEventType::BulletFired, m_ownShip,
+                              Magnum::Vector2{static_cast<float>(pos.x()),
+                                              static_cast<float>(pos.y())},
+                              gun.id);
+        });
     }
 
     m_history.push_back(CaptureTick(tick, flags, ownControls.boosting));

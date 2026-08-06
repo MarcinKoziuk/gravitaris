@@ -608,16 +608,44 @@ void TestClientPrediction()
     });
     Require(ownedAndHarmless, "prediction: the predicted bullet is zero-damage and tagged with the shooter's NetId");
 
-    // Cooldown gates the cadence: holding the trigger for the resolved
-    // cooldown - 1 more ticks must not emit another event yet.
-    for (std::uint64_t tick = 11; tick < 10 + fireCooldownTicks; ++tick) {
-        prediction.Step(tick, firing, planets, tick, /*ownShipNetId=*/0);
-    }
-    Require(eventQueue.LatestSeq() == 1, "prediction: fire cooldown gates cadence, no event mid-cooldown");
+    // Each mount paces itself. fighter-1 carries its light guns in one forward
+    // mount -- the heavy pair either side are cannon mounts -- so held fire is
+    // one shot per cooldown, and never two on a tick.
+    const ResourcePtr<const Body> hull =
+            game.GetResourceLoader().Load<Body>("models/ships/fighter-1"_id);
+    Require(ShipControlsSystem::MountsFor(*hull, ShipControlsSystem::WEAPON_HARDPOINT) == 3,
+            "hull: fighter-1 carries three weapon mounts, each armed by the loadout");
 
-    prediction.Step(10 + fireCooldownTicks, firing, planets,
-                    10 + fireCooldownTicks, /*ownShipNetId=*/0);
-    Require(eventQueue.LatestSeq() == 2, "prediction: cooldown expiring lets the next held shot fire");
+    const std::uint64_t holdUntil = 10 + fireCooldownTicks * 4;
+    std::uint32_t previousSeq = eventQueue.LatestSeq();
+    std::size_t shots = 1; // the one already fired on the trigger's first tick
+    bool everDoubled = false;
+    for (std::uint64_t tick = 11; tick < holdUntil; ++tick) {
+        prediction.Step(tick, firing, planets, tick, /*ownShipNetId=*/0);
+        const std::uint32_t seq = eventQueue.LatestSeq();
+        everDoubled = everDoubled || seq - previousSeq > 1;
+        shots += seq - previousSeq;
+        previousSeq = seq;
+    }
+    Require(!everDoubled, "prediction: a mount never fires twice on one tick");
+    Require(shots >= 3, "prediction: held fire keeps the mount at its own cadence");
+
+    // The phase rule itself, where it can be read off exactly: mount 0 fires on
+    // the pull, and the rest are spread across one cycle behind it. Checked
+    // directly because no hull carries two mounts of one family today, so
+    // nothing above would notice if the spread broke.
+    {
+        std::array<std::uint32_t, MAX_WEAPON_MOUNTS> phases{};
+        ShipControlsSystem::SeedMountPhases(phases, 2, 8, 1.f);
+        // Seeded one above the delay: the tick that deals these also runs the
+        // countdown (see SeedMountPhases).
+        Require(phases[0] == 0 && phases[1] == 5,
+                "controls: two mounts are dealt half a cycle apart");
+
+        ShipControlsSystem::SeedMountPhases(phases, 2, 8, 0.f);
+        Require(phases[0] == 0 && phases[1] == 0,
+                "controls: zero stagger fires a family as one volley");
+    }
 
     // Phase 7: planet collision proxies have real collision geometry, not
     // just gravitational pull -- place a real planet body (not the earlier
@@ -1385,43 +1413,27 @@ void TestUpgradeCatalog()
                 "catalog: a rank already fitted is not for sale again");
     }
 
-    // The missile line: nothing to fire, nowhere to put rounds and no restock
-    // on the table until a bay is fitted, and each tier widens all three.
+    // The missile line: nothing to fire and nowhere to put rounds until a bay
+    // is fitted, and each tier widens both. Reloading is not on this table at
+    // all -- a yard fills the tubes (ResearchSystem), so there is no restock
+    // to buy.
     const UpgradeDef* bay = catalog.FindKind(UpgradeKind::MissileTier);
-    const UpgradeDef* rack = catalog.FindKind(UpgradeKind::MissileRack);
-    Require(bay != nullptr && rack != nullptr, "catalog: the pool has a missile bay and a restock");
+    Require(bay != nullptr, "catalog: the pool has a missile bay");
     Require(base.missile == nullptr && base.missileCapacity == 0,
             "catalog: an unupgraded hull carries no launcher at all");
 
     ShipLoadout racked;
     std::uint32_t purse = RICH;
-    {
-        const UpgradeCatalog::ShipContext ctx{&racked, &all, purse, true};
-        Require(catalog.ShipState(*rack, 1, ctx) == TechNodeState::Locked,
-                "catalog: rounds are not sold to a hull with nothing to fire them from");
-    }
     Require(catalog.FitRank(*bay, 1, racked, all, purse, true), "catalog: the bay can be fitted");
     Require(purse < RICH, "catalog: fitting a rank spends Supplies");
-    // The fitting comes with rounds in it, so the restock has nothing to sell
-    // until some have been spent.
     Require(racked.missileAmmo == catalog.ResolveStats(racked.levels).missileCapacity,
             "catalog: fitting the bay fills the rack it decides the width of");
-    {
-        const UpgradeCatalog::ShipContext ctx{&racked, &all, purse, true};
-        Require(catalog.ShipState(*rack, 1, ctx) == TechNodeState::Held,
-                "catalog: a full rack is not sold another reload");
-    }
 
-    racked.missileAmmo = 0;
-    {
-        const UpgradeCatalog::ShipContext ctx{&racked, &all, purse, true};
-        Require(catalog.ShipState(*rack, 1, ctx) == TechNodeState::Available,
-                "catalog: an empty rack is for sale a reload once the bay is fitted");
+    // Every def in the pool is something a hull keeps, now that the one
+    // repeatable entry is gone -- a restock would need its own rules again.
+    for (const UpgradeDef& def : catalog.Defs()) {
+        Require(def.maxLevel > 0, "catalog: every entry in the pool holds a rank");
     }
-    Require(catalog.FitRank(*rack, 1, racked, all, purse, true),
-            "catalog: a repeatable restock can always be bought again");
-    Require(racked.missileAmmo == catalog.ResolveStats(racked.levels).missileCapacity,
-            "catalog: a restock fills the rack the fitted bay decides, and no further");
 
     // The two gates, each reported as itself so the UI can explain which one
     // is in the way.
@@ -1493,38 +1505,127 @@ void TestUpgradeCatalog()
     const UpgradeDef* gun = catalog.FindKind(UpgradeKind::WeaponTier);
     Require(gun != nullptr && !gun->tiers.empty(), "catalog: the pool has a weapon-tier upgrade");
     levels.gunTier = 1;
-    const ShipStats heavier = catalog.ResolveStats(levels);
-    Require(heavier.gun != nullptr && heavier.gun->id == gun->tiers[0],
-            "catalog: a gun tier fits that tier's weapon rather than scaling the stock one");
-    Require(heavier.gun->damage > base.gun->damage && heavier.gun->speed > base.gun->speed,
-            "catalog: a tiered gun hits harder and throws flatter than the stock one");
+    const ShipStats stock = catalog.ResolveStats(levels);
+    Require(stock.gun != nullptr && stock.gun->id == gun->tiers[0],
+            "catalog: a gun rank fits that rank's weapon rather than scaling the one below");
+    // Rank 1 of the line is the weapon every hull already flies with, which is
+    // what lets a ship spawn with the line fitted rather than above it.
+    Require(stock.gun == base.gun, "catalog: the light guns start at the stock weapon");
 
-    // Each tier hits harder and throws flatter than the one below it, and the
+    levels.gunTier = 2;
+    const ShipStats heavier = catalog.ResolveStats(levels);
+    Require(heavier.gun->damage > base.gun->damage && heavier.gun->speed > base.gun->speed,
+            "catalog: a rank above the first hits harder and throws flatter than stock");
+
+    // The gun line is a wider bore on the same mounts -- each tier outdoes the
+    // one below it, and they deliberately share the stock round's model: it is
+    // the same ammunition, not a different weapon.
+    {
+        const WeaponDef* below = nullptr;
+        for (std::uint8_t tier = 1; tier <= gun->maxLevel; ++tier) {
+            UpgradeLevels tierLevels;
+            tierLevels.gunTier = tier;
+            const WeaponDef* round = catalog.ResolveStats(tierLevels).gun;
+
+            Require(round != nullptr, "catalog: every gun rank resolves to a weapon");
+            if (below) {
+                Require(round->damage > below->damage && round->speed > below->speed,
+                        "catalog: each gun rank out-damages and outruns the one below it");
+            }
+            below = round;
+        }
+    }
+
+    // The cannon is a second weapon rather than a better gun: a hull carries
+    // both, and the guns stay exactly what they were when one is fitted.
+    const UpgradeDef* cannonLine = catalog.FindKind(UpgradeKind::CannonTier);
+    Require(cannonLine != nullptr && !cannonLine->tiers.empty(),
+            "catalog: the pool has a cannon-tier upgrade");
+    Require(base.cannon == nullptr && base.cannonCapacity == 0,
+            "catalog: a stock hull carries no cannon at all");
+    {
+        UpgradeLevels both;
+        both.gunTier = 1;
+        both.cannonTier = 1;
+        const ShipStats armed = catalog.ResolveStats(both);
+        Require(armed.cannon != nullptr && armed.cannon->id == cannonLine->tiers[0],
+                "catalog: a cannon rank fits that rank's weapon");
+        Require(armed.gun != nullptr && armed.gun->id == gun->tiers[0],
+                "catalog: fitting a cannon leaves the guns alone -- the hull carries both");
+        Require(armed.cannonCapacity > armed.missileCapacity,
+                "catalog: the magazine is deeper than the missile rack");
+    }
+
+    // Each rank hits harder and throws flatter than the one below it, and the
     // whole line is drawn as a streak rather than the stock round's point --
-    // the top tier in its own colour. Asserted here because a mistyped model
+    // the top rank in its own colour. Asserted here because a mistyped model
     // path is otherwise a silent placeholder at runtime.
     ResourceLoader tierLoader(fs);
-    const WeaponDef* below = base.gun;
-    id_t firstTierModel = 0;
-    for (std::uint8_t tier = 1; tier <= gun->maxLevel; ++tier) {
-        UpgradeLevels tierLevels;
-        tierLevels.gunTier = tier;
-        const WeaponDef* round = catalog.ResolveStats(tierLevels).gun;
+    {
+        const WeaponDef* below = base.gun;
+        id_t firstTierModel = 0;
+        for (std::uint8_t tier = 1; tier <= cannonLine->maxLevel; ++tier) {
+            UpgradeLevels tierLevels;
+            tierLevels.cannonTier = tier;
+            const ShipStats tierStats = catalog.ResolveStats(tierLevels);
+            const WeaponDef* round = tierStats.cannon;
 
-        Require(round != nullptr, "catalog: every gun tier resolves to a weapon");
-        Require(round->modelId != 0 && round->modelId != base.gun->modelId,
-                "catalog: a heavy tier fires its own round, not the stock one");
-        Require(tierLoader.Load<Body>(round->modelId)->GetCircleShapes().size() == 1,
-                "catalog: a heavy round's model loads (one hitbox, not a placeholder)");
-        Require(round->damage > below->damage && round->speed > below->speed,
-                "catalog: each gun tier out-damages and outruns the one below it");
+            Require(round != nullptr, "catalog: every cannon rank resolves to a weapon");
+            Require(round->modelId != 0 && round->modelId != base.gun->modelId,
+                    "catalog: a heavy rank fires its own round, not the stock one");
+            Require(tierLoader.Load<Body>(round->modelId)->GetCircleShapes().size() == 1,
+                    "catalog: a heavy round's model loads (one hitbox, not a placeholder)");
+            Require(round->damage > below->damage && round->speed > below->speed,
+                    "catalog: each cannon rank out-damages and outruns the one below it");
+            Require(tierStats.cannonCapacity > 0,
+                    "catalog: a fitted cannon has a magazine to fire from");
 
-        if (tier == 1) firstTierModel = round->modelId;
-        if (tier == gun->maxLevel) {
-            Require(round->modelId != firstTierModel,
-                    "catalog: the top gun tier is drawn differently from the first");
+            if (tier == 1) firstTierModel = round->modelId;
+            if (tier == cannonLine->maxLevel) {
+                Require(round->modelId != firstTierModel,
+                        "catalog: the top cannon rank is drawn differently from the first");
+            }
+            below = round;
         }
-        below = round;
+    }
+
+    // Fitting the cannon loads it, the way fitting the bay fills the rack --
+    // and a dry magazine is what puts the trigger back on the guns.
+    {
+        ShipLoadout armed;
+        std::uint32_t purse = RICH;
+        Require(catalog.FitRank(*cannonLine, 1, armed, all, purse, true),
+                "catalog: the cannon can be fitted");
+        Require(armed.mounts[0] == MountArm::Heavy,
+                "catalog: a weapon with no mount named takes the first free one");
+        // And the light guns into the next mount along, which is what the
+        // fallback below needs something to fall back *to*.
+        Require(catalog.FitRank(*gun, 1, armed, all, purse, true),
+                "catalog: the light guns can be fitted alongside");
+        Require(armed.mounts[1] == MountArm::Light,
+                "catalog: ...into a mount of their own rather than over the cannon");
+        Require(armed.cannonAmmo == catalog.ResolveStats(armed.levels).cannonCapacity,
+                "catalog: fitting the cannon fills the magazine it decides the depth of");
+
+        const ShipStats armedStats = catalog.ResolveStats(armed.levels);
+        Controls controls;
+        Require(ShipControlsSystem::PrimaryWeapon(controls, armedStats, &armed).weapon
+                        == armedStats.cannon,
+                "controls: a loaded cannon is what the trigger fires by default");
+
+        armed.cannonAmmo = 0;
+        const ShipControlsSystem::Primary dry =
+                ShipControlsSystem::PrimaryWeapon(controls, armedStats, &armed);
+        Require(dry.weapon == armedStats.gun && !dry.spendsAmmo,
+                "controls: a dry cannon falls through to the guns");
+        Require(controls.activeWeapon == ActiveWeapon::Cannon,
+                "controls: ...without changing what the pilot asked for, so a reload re-arms it");
+
+        controls.activeWeapon = ActiveWeapon::Gun;
+        armed.cannonAmmo = 10;
+        Require(ShipControlsSystem::PrimaryWeapon(controls, armedStats, &armed).weapon
+                        == armedStats.gun,
+                "controls: asking for the guns is honoured with a loaded cannon aboard");
     }
 
     // Both shields resolve to a real reservoir, and swapping type resets the
@@ -1560,15 +1661,20 @@ void TestUpgradeCatalog()
 
     // Layout: a def sits one column right of what it requires, which is what
     // lets the tree draw a connector between them.
+    // Nothing in the pool has a prerequisite since the restock left, so this
+    // holds the rule against whatever gains one next rather than naming a def.
     {
-        const std::size_t rackIndex = catalog.IndexOf(rack->id);
         const std::size_t bayIndex = catalog.IndexOf(bay->id);
-        Require(rackIndex < catalog.Defs().size() && bayIndex < catalog.Defs().size(),
-                "catalog: every def has an index of its own");
+        Require(bayIndex < catalog.Defs().size(), "catalog: every def has an index of its own");
         Require(catalog.SlotOf(bayIndex).col == 0, "catalog: a def with no prerequisite is a root");
-        Require(catalog.SlotOf(rackIndex).col == catalog.SlotOf(bayIndex).col + 1,
-                "catalog: a def sits one column right of what it requires");
-        Require(catalog.TreeColumns() >= 2 && catalog.TreeRows() >= 1,
+
+        for (const UpgradeDef& def : catalog.Defs()) {
+            if (def.requiresId == 0) continue;
+            Require(catalog.SlotOf(catalog.IndexOf(def.id)).col
+                            == catalog.SlotOf(catalog.IndexOf(def.requiresId)).col + 1,
+                    "catalog: a def sits one column right of what it requires");
+        }
+        Require(catalog.TreeColumns() >= 1 && catalog.TreeRows() >= 1,
                 "catalog: the tree has a size to lay out");
     }
 
@@ -1591,10 +1697,10 @@ void TestHardpointMounts()
     ResourceLoader loader(fs);
     const ResourcePtr<const Body> body = loader.Load<Body>("models/ships/fighter-1"_id);
 
-    const Body::Hardpoint* gun = body->FindMount("gun", 0);
-    const Body::Hardpoint* cannon = body->FindMount("cannon", 0);
-    Require(gun && cannon, "hardpoints: fighter-1 carries both a gun and a cannon mount");
-    Require(gun->pos != cannon->pos, "hardpoints: the two are distinct points on the hull");
+    const Body::Hardpoint* forward = body->FindMount("weapon", 0);
+    const Body::Hardpoint* wing = body->FindMount("weapon", 1);
+    Require(forward && wing, "hardpoints: fighter-1 carries several weapon mounts");
+    Require(forward->pos != wing->pos, "hardpoints: the two are distinct points on the hull");
     Require(body->FindMount("plasma", 0) == nullptr,
             "hardpoints: a family the hull doesn't carry resolves to nothing, so a weapon can fall back");
 
@@ -1610,10 +1716,11 @@ void TestHardpointMounts()
     const auto farApart = [](const Body::Hardpoint* a, const Body::Hardpoint* b) {
         return (a->pos - b->pos).length() > 1.0;
     };
-    Require(farApart(gun, cannon), "hardpoints: the gun and cannon muzzles are visibly apart");
+    Require(farApart(forward, wing), "hardpoints: two weapon muzzles are visibly apart");
     Require(farApart(rackA, rackB), "hardpoints: the two racks are visibly apart");
-    Require(farApart(body->FindMount("gun", 0), body->FindMount("gun", 1)),
-            "hardpoints: the paired gun mounts are visibly apart");
+    Require(farApart(body->FindMount("weapon", 1), body->FindMount("weapon", 2)),
+            "hardpoints: the paired wing mounts are visibly apart");
+    Require(body->FindMount("weapon", 3) == forward, "hardpoints: the mount index wraps");
 
     // A weapon that names a family the hull hasn't got falls back to its gun
     // mounts rather than to the origin; one that names nothing at all still
@@ -1623,14 +1730,49 @@ void TestHardpointMounts()
     const PhysicsBody& phys = game.GetPhysicsSystem().GetBody(ship.get<PhysicsRef>());
     const Transform& transf = ship.get<Transform>();
 
-    const Vector2d fromGun = ShipControlsSystem::ComputeBulletSpawn(transf, phys, 100., "gun", 0).first;
-    const Vector2d fromCannon = ShipControlsSystem::ComputeBulletSpawn(transf, phys, 100., "cannon", 0).first;
-    const Vector2d fromPlasma = ShipControlsSystem::ComputeBulletSpawn(transf, phys, 100., "plasma", 0).first;
-    Require(fromGun != fromCannon, "hardpoints: a cannon round leaves from the cannon mount, not the gun's");
-    Require(fromPlasma == fromGun, "hardpoints: an unmounted family falls back to the gun mount");
-    Require(ShipControlsSystem::ComputeBulletSpawn(transf, phys, 100., "gun", 1).first != fromGun,
-            "hardpoints: consecutive rounds alternate across a hull's paired mounts");
-    Require((fromGun - transf.pos).length() > 1. && (fromGun - transf.pos).length() < 100.,
+    const Vector2d fromNose = ShipControlsSystem::ComputeBulletSpawn(transf, phys, 100., "weapon", 0).first;
+    const Vector2d fromWing = ShipControlsSystem::ComputeBulletSpawn(transf, phys, 100., "weapon", 1).first;
+    Require(fromNose != fromWing, "hardpoints: each mount fires from its own muzzle");
+    Require(ShipControlsSystem::ComputeBulletSpawn(transf, phys, 100., "plasma", 0).first
+                    == ShipControlsSystem::ComputeBulletSpawn(transf, phys, 100., "gun", 0).first,
+            "hardpoints: an unmounted family falls back to the gun mount");
+
+    // Per-mount arming: which mounts fire is the loadout's placement, not the
+    // weapon's own family. A hull with a heavy mount on one wing and nothing in
+    // the other two fires exactly one round per cycle, out of that wing.
+    {
+        ShipLoadout& armed = ship.get_mut<ShipLoadout>();
+        armed.mounts = {};
+        armed.mounts[1] = MountArm::Heavy;
+        armed.levels.cannonTier = 1;
+        armed.cannonAmmo = 20;
+
+        const ShipStats armedStats = game.GetUpgradeCatalog().ResolveStats(armed.levels);
+        Controls controls;
+        ControlFlags firing{};
+        firing.firePrimary = true;
+
+        std::vector<unsigned> shotMounts;
+        ShipControlsSystem::AdvancePrimary(controls, armedStats, &armed, *phys.body, firing,
+                                           [&](const WeaponDef&, unsigned mount) {
+            shotMounts.push_back(mount);
+        });
+        Require(shotMounts.size() == 1 && shotMounts[0] == 1,
+                "controls: only the armed mount fires, and it fires from its own position");
+        Require(armed.cannonAmmo == 19, "controls: a heavy round comes off the magazine");
+
+        // The light guns are owned but mounted nowhere, so asking for them
+        // leaves the ship silent -- fitting a line and mounting it are two
+        // different things now.
+        armed.mounts = {};
+        armed.levels.gunTier = 1;
+        Controls unarmed;
+        std::size_t shots = 0;
+        ShipControlsSystem::AdvancePrimary(unarmed, armedStats, &armed, *phys.body, firing,
+                                           [&](const WeaponDef&, unsigned) { ++shots; });
+        Require(shots == 0, "controls: a line owned but mounted nowhere fires nothing");
+    }
+    Require((fromNose - transf.pos).length() > 1. && (fromNose - transf.pos).length() < 100.,
             "hardpoints: the muzzle is offset from the hull's center but still on it");
 
     // The client-side geometry query and the sim's own segment query have to

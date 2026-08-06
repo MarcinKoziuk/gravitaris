@@ -280,6 +280,12 @@ static ShipLoadout MakeShipLoadout(const Body& body)
 {
     ShipLoadout loadout;
     loadout.plateCount = static_cast<std::uint8_t>(body.GetPlates().size());
+    // Every hull flies with its light guns already in the forward mount: rank 1
+    // of that line *is* the stock weapon, so this is the loadout reading what
+    // the ship has always had rather than an upgrade being handed out. Mount 0
+    // is the nose (the hull's 'weapon_0'); the rest start empty.
+    loadout.levels.gunTier = 1;
+    loadout.mounts[0] = MountArm::Light;
     return loadout;
 }
 

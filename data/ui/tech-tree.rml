@@ -18,6 +18,11 @@
 				src: tech-frame-fitted.tga;
 				tech-frame-fitted: 0px 0px 54px 54px;
 			}
+			@spritesheet tech_staged
+			{
+				src: tech-frame-staged.tga;
+				tech-frame-staged: 0px 0px 54px 54px;
+			}
 			@spritesheet tech_dim
 			{
 				src: tech-frame-dim.tga;
@@ -152,13 +157,226 @@
 				border-color: #56d9f2;
 			}
 
-			/* Three equal branches. No `gap` in RCSS -- the spacing is a margin
-			   on each column, cleared on the last. */
-			div#tech_branches
+			/* The ship tab's cutaway: a live texture, drawn by
+			   ShipViewRenderer and registered as "ship_view". Square at the
+			   source; the hull is centred in it, so the crop below trims
+			   empty margin rather than the drawing. Slots land on top of
+			   this, which is why it is a positioned container of its own. */
+			div#ship_view_panel { display: none; margin-top: 16dp; }
+			div#ship_view_panel.active { display: block; }
+
+			/* Clips the drawing and the slots hanging off its edges; the lists
+			   below are outside it so they can scroll on their own. */
+			div#ship_view_stage
+			{
+				position: relative;
+				height: 360dp;
+				overflow: hidden;
+
+				border-width: 1dp;
+				border-color: #123742;
+			}
+
+			/* Fixed, because slot positions are a fraction of the drawing: the
+			   slot layer has to be exactly the image, not the panel it is
+			   centred in. This size is SHIP_VIEW_WIDTH/HEIGHT in ui.cpp, which
+			   is what turns those fractions into offsets, and its proportions
+			   are ShipViewRenderer::ASPECT -- all three have to agree or the
+			   hull and its slots part company. */
+			div#ship_view_frame
+			{
+				position: relative;
+				width: 640dp;
+				height: 360dp;
+				margin: auto;
+			}
+
+			div#ship_view_frame img
+			{
+				display: block;
+				width: 100%;
+				height: 100%;
+			}
+
+			div#ship_slots
+			{
+				position: absolute;
+				top: 0; left: 0; right: 0; bottom: 0;
+			}
+
+			/* Same 54dp tile the branches use, so a slot and an upgrade read as
+			   the same kind of object -- which is the point, once one goes
+			   into the other. Positioned by its centre (ui.cpp offsets by
+			   half), so the authored point is where the slot actually sits. */
+			div.slot
+			{
+				position: absolute;
+				width: 54dp;
+				height: 54dp;
+
+				/* Under the frame decorator (RmlUi paints background before
+				   decorators), so the hull's own lines don't run through the
+				   code inside a slot. */
+				background-color: #030c11e0;
+				decorator: image(tech-frame-dim);
+				opacity: 0.75;
+			}
+			div.slot:hover { decorator: image(tech-frame-normal); opacity: 1; }
+			/* The selected slot is what AVAILABLE SYSTEMS is a list for, so it
+			   wears the fitted frame -- the loudest of the three -- and holds
+			   it whether or not the cursor is still on it. */
+			div.slot.selected { decorator: image(tech-frame-fitted); opacity: 1; }
+
+			/* No hatch, unlike the branch tiles: the slot's dark backing is the
+			   readable surface here, and a texture over the drawing is noise. */
+			div.slot div.glyph
+			{
+				position: absolute;
+				top: 1dp; left: 1dp; right: 1dp; bottom: 1dp;
+
+				text-align: center;
+				line-height: 52dp;
+				font-size: 12dp;
+				letter-spacing: 1dp;
+				color: #4a7a86;
+			}
+			div.slot:hover div.glyph { color: #7fe4f5; }
+			div.slot.selected div.glyph { color: #ffb340; }
+
+			/* A mount that carries something reads as carrying it: the fitted
+			   frame and the system's own code, in the amber the branch tiles
+			   use for the same state. Real icon art replaces the code and
+			   leaves the frame alone. */
+			div.slot.fitted { decorator: image(tech-frame-fitted); opacity: 1; }
+			div.slot.fitted div.glyph { color: #ffb340; }
+
+			/* Staged, not yet bought: white, so it is neither the amber of a
+			   fitting nor the cyan of an offer, and the brightest frame on the
+			   board -- a plan should be what the eye goes to. Cleared when
+			   CONFIRM applies it. */
+			div.slot.staged { decorator: image(tech-frame-staged); opacity: 1; }
+			div.slot.staged div.glyph { color: #fff; }
+
+			/* The two ledgers under the hull: what it carries, and what the
+			   selected mount would take. Side by side and equal, because the
+			   question is a comparison. */
+			div#ship_lists
 			{
 				display: flex;
+				margin-top: 14dp;
+			}
+			div.ship_list { flex: 1 1 0; margin-right: 18dp; }
+			div.ship_list:last-child { margin-right: 0; }
+
+			div.ship_list div.list_head
+			{
+				display: flex;
+				align-items: center;
+				padding-bottom: 7dp;
+				border-bottom-width: 1dp;
+				border-bottom-color: #1b5a6b;
+			}
+			div.ship_list div.list_head span.role
+			{
+				flex: 1 1 auto;
+				font-size: 12dp;
+				letter-spacing: 2.6dp;
+				color: #56d9f2;
+			}
+			div.ship_list div.list_head span.count
+			{
+				font-size: 10dp;
+				letter-spacing: 1.4dp;
+				color: #2f6270;
+			}
+
+			/* Fixed height and its own scrollbar: the board's own height is
+			   already the hull's, and a list that grows the window would move
+			   the drawing every time something was fitted. */
+			div.list_body
+			{
+				height: 132dp;
+				overflow: hidden auto;
+			}
+
+			/* Nothing else in the game styles a scrollbar, so these lists
+			   bring their own: unstyled, RmlUi lays one out at zero width and
+			   the list scrolls on the wheel with nothing to say that it can. */
+			div.list_body scrollbarvertical { width: 6dp; }
+			div.list_body scrollbarvertical slidertrack { background-color: #0b2129; }
+			div.list_body scrollbarvertical sliderbar
+			{
+				width: 6dp;
+				min-height: 24dp;
+				background-color: #1b5a6b;
+			}
+			div.list_body scrollbarvertical sliderbar:hover { background-color: #2f8ea6; }
+			div.list_body scrollbarvertical sliderbar:active { background-color: #56d9f2; }
+			div.list_body scrollbarvertical sliderarrowdec,
+			div.list_body scrollbarvertical sliderarrowinc { height: 0dp; }
+
+			div.entry
+			{
+				display: flex;
+				align-items: center;
+				padding: 5dp 6dp;
+				margin-bottom: 2dp;
+				border-left-width: 2dp;
+				border-left-color: #123742;
+			}
+			div.entry span.entry_name
+			{
+				flex: 1 1 auto;
+				font-size: 11dp;
+				letter-spacing: 1.2dp;
+				color: #cfeef7;
+			}
+			div.entry span.entry_note
+			{
+				font-family: Share Tech Mono;
+				font-size: 10dp;
+				color: #3f7f90;
+			}
+
+			div.entry.installed { border-left-color: #ffb340; }
+			div.entry.installed span.entry_name { color: #ffb340; }
+
+			div.entry.buy { cursor: pointer; border-left-color: #2f8ea6; }
+			div.entry.buy:hover { background-color: #0e2a33; border-left-color: #7fe4f5; }
+			div.entry.buy span.entry_note { color: #7fe4f5; }
+
+			div.entry.none { cursor: pointer; border-left-color: #1b5a6b; }
+			div.entry.none:hover { background-color: #0e2a33; border-left-color: #7fe4f5; }
+			div.entry.none span.entry_name { color: #6d8f99; }
+
+			div.entry.staged { border-left-color: #fff; background-color: #12303a; }
+			div.entry.staged span.entry_name { color: #fff; }
+			div.entry.staged span.entry_note { color: #fff; }
+
+			div.entry.poor span.entry_name { color: #6d8f99; }
+			div.entry.poor span.entry_note { color: #8a5252; }
+
+			/* Not an entry: the state before a mount has been picked, and the
+			   state of a mount with nothing to offer. */
+			div.list_empty
+			{
+				padding: 10dp 6dp;
+				font-size: 10dp;
+				line-height: 15dp;
+				color: #2f6270;
+			}
+
+			/* Three equal branches. No `gap` in RCSS -- the spacing is a margin
+			   on each column, cleared on the last. The PERMANENT tab only: the
+			   ship's own fitting is done on the hull and in the two lists under
+			   it, so the columns would be a second way to buy the same things.
+			   Hidden by default because the SHIP tab is the one that opens. */
+			div#tech_branches
+			{
+				display: none;
 				margin-top: 16dp;
 			}
+			div#tech_branches.active { display: flex; }
 			div.branch { flex: 1 1 0; margin-right: 18dp; }
 			div.branch:last-child { margin-right: 0; }
 
@@ -218,6 +436,7 @@
 				decorator: image(tech-frame-normal);
 			}
 			div.tile.fitted { decorator: image(tech-frame-fitted); }
+			div.tile.staged { decorator: image(tech-frame-staged); }
 			div.tile.dim    { decorator: image(tech-frame-dim); opacity: 0.75; }
 
 			/* The placeholder texture. Real art replaces this element's
@@ -235,6 +454,7 @@
 				color: #7fe4f5;
 			}
 			div.tile.fitted div.glyph { color: #ffb340; }
+			div.tile.staged div.glyph { color: #fff; }
 			div.tile.dim    div.glyph { color: #4a7a86; }
 
 			div.tile div.counter
@@ -247,6 +467,7 @@
 				color: #7fe4f5;
 			}
 			div.tile.fitted div.counter { color: #ffb340; }
+			div.tile.staged div.counter { color: #fff; }
 			div.tile.dim    div.counter { color: #4a7a86; }
 
 			div.tile:hover { }
@@ -275,55 +496,129 @@
 				background-color: #10333c;
 			}
 			div.pip.fitted { background-color: #ffb340; }
-			div.pip.buy    { background-color: #2f8ea6; cursor: pointer; }
+			div.pip.buy    { background-color: #17414c; cursor: pointer; }
 			div.pip.poor   { background-color: #4a2c2c; }
 			div.pip.buy:hover { background-color: #7fe4f5; }
+			div.pip.staged { background-color: #fff; }
 
-			/* Anchored beside the hovered tile, written from code. */
-			div#tech_tip
-			{
-				position: absolute;
-				display: none;
-				top: 0;
-				left: 0;
-				width: 226dp;
-				padding: 9dp 11dp;
-				z-index: 10;
-
-				background-color: #030c11;
-				border-width: 1dp;
-				border-color: #56d9f2;
-			}
-			div#tech_tip div.tip_head
+			/* A fixed reading place rather than a tooltip that follows the
+			   cursor: on a board this dense a floating panel covers the thing
+			   it describes, and it can never be where the eye already is. It
+			   holds the last thing hovered rather than blanking, so glancing
+			   down is always worth it. */
+			div#tech_info
 			{
 				display: flex;
-				margin-bottom: 4dp;
+				align-items: center;
+				height: 46dp;
+				padding: 0 12dp;
+				margin-top: 14dp;
+				box-sizing: border-box;
+
+				background-color: #08161c;
+				border-width: 1dp;
+				border-color: #123742;
 			}
-			div#tech_tip span.tip_title
+
+			div#tech_info div.info_text { flex: 1 1 auto; }
+
+			div#tech_info span.info_title
 			{
-				flex: 1 1 auto;
-				font-size: 11dp;
-				letter-spacing: 1.5dp;
+				display: block;
+				font-size: 12dp;
+				letter-spacing: 1.8dp;
 				color: #8ee9fb;
 			}
-			div#tech_tip span.tip_cost { font-size: 10dp; }
-			div#tech_tip span.tip_cost.paid  { color: #ffb340; }
-			div#tech_tip span.tip_cost.ok    { color: #7fe4f5; }
-			div#tech_tip span.tip_cost.short { color: #8a5252; }
-			div#tech_tip span.tip_cost.unres { color: #2f6270; }
-			div#tech_tip div.tip_body
+			div#tech_info span.info_body
 			{
+				display: block;
 				font-size: 10dp;
-				line-height: 15dp;
 				color: #9dc4cf;
+			}
+			/* Nothing hovered yet: the panel says what it is for. */
+			div#tech_info.idle span.info_title { color: #2f6270; }
+
+			div#tech_info span.info_cost
+			{
+				margin-left: 14dp;
+				font-family: Share Tech Mono;
+				font-size: 14dp;
+			}
+			div#tech_info span.info_cost.paid  { color: #ffb340; }
+			div#tech_info span.info_cost.ok    { color: #7fe4f5; }
+			div#tech_info span.info_cost.short { color: #8a5252; }
+			div#tech_info span.info_cost.unres { color: #2f6270; }
+
+			/* Nothing on this board applies on the click that asks for it:
+			   picks are staged and this row is what commits them. */
+			div#tech_footer
+			{
+				display: flex;
+				align-items: center;
+				margin-top: 14dp;
 			}
 
 			div#tech_notice
 			{
-				margin-top: 14dp;
+				flex: 1 1 auto;
 				font-size: 11dp;
 				letter-spacing: 1dp;
 				color: #fc0;
+			}
+
+			span#tech_staged_cost
+			{
+				margin-right: 14dp;
+				font-family: Share Tech Mono;
+				font-size: 11dp;
+				color: #7fe4f5;
+			}
+
+			button#tech_confirm
+			{
+				display: block;
+				margin: 0;
+				padding: 7dp 18dp;
+				font-size: 11dp;
+				letter-spacing: 2.4dp;
+
+				color: #06121a;
+				background-color: #56d9f2;
+				border-width: 1dp;
+				border-color: #56d9f2;
+				font-effect: none;
+				cursor: pointer;
+			}
+			button#tech_confirm:hover { background-color: #bff; border-color: #bff; }
+
+			/* Quieter than CONFIRM: undoing a plan should never be the loudest
+			   thing on the row. */
+			button#tech_reset
+			{
+				display: block;
+				margin: 0 8dp 0 0;
+				padding: 7dp 14dp;
+				font-size: 11dp;
+				letter-spacing: 2.4dp;
+
+				color: #3f8fa2;
+				background-color: transparent;
+				border-width: 1dp;
+				border-color: #1b5a6b;
+				font-effect: none;
+				cursor: pointer;
+			}
+			button#tech_reset:hover { color: #cff6ff; border-color: #56d9f2; }
+			button#tech_reset.idle { color: #23505c; border-color: #123742; cursor: arrow; }
+
+			/* Nothing staged: still there, so the button never moves, but
+			   plainly not a thing to press. */
+			button#tech_confirm.idle
+			{
+				color: #2f6270;
+				background-color: transparent;
+				border-color: #1b5a6b;
+				cursor: arrow;
 			}
 		</style>
 	</head>
@@ -345,12 +640,46 @@
 			</div>
 		</div>
 
+		<div id="ship_view_panel" class="active">
+			<div id="ship_view_stage">
+				<div id="ship_view_frame">
+					<img id="ship_view" src="live://ship_view"/>
+					<!-- Slots are written from code (UI::SetShipSlots); they
+					     are authored in the schematic's own '@slots' layer, so
+					     moving one is an Inkscape edit, not a code edit. -->
+					<div id="ship_slots"></div>
+				</div>
+			</div>
+
+			<!-- Both lists are written from code (UI::RebuildShipLists): what
+			     is offered depends on the slot selected above. -->
+			<div id="ship_lists">
+				<div class="ship_list">
+					<div class="list_head"><span class="role">NOW INSTALLED</span><span id="installed_count" class="count"></span></div>
+					<div id="installed_list" class="list_body"></div>
+				</div>
+				<div class="ship_list">
+					<div class="list_head"><span class="role">AVAILABLE SYSTEMS</span><span id="available_count" class="count"></span></div>
+					<div id="available_list" class="list_body"></div>
+				</div>
+			</div>
+		</div>
+
 		<!-- Branches and their tiles are written from code (UI::SetTechTree):
 		     everything is keyed by the toml `key`, so adding an [[upgrade]]
 		     adds a tile with no markup to touch. -->
 		<div id="tech_branches"></div>
 
-		<div id="tech_notice"></div>
-		<div id="tech_tip"></div>
+		<div id="tech_info" class="idle">
+			<div class="info_text"><span class="info_title">SELECT A SYSTEM</span><span class="info_body">Hover a mount or a system for details.</span></div>
+			<span class="info_cost"></span>
+		</div>
+
+		<div id="tech_footer">
+			<div id="tech_notice"></div>
+			<span id="tech_staged_cost"></span>
+			<button id="tech_reset" class="idle">RESET</button>
+			<button id="tech_confirm" class="idle">CONFIRM</button>
+		</div>
 	</body>
 </rml>

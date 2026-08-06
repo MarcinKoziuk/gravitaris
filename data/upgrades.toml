@@ -12,6 +12,7 @@
 
 [[weapon]]
 key = "autocannon"
+hardpoint = "weapon"
 name = "Autocannon"
 cooldown_ticks = 7
 damage = 10.0
@@ -30,7 +31,7 @@ sound_gain = 0.5
 # is shooting is readable from the rounds alone.
 [[weapon]]
 key = "gatling_1"
-hardpoint = "cannon"
+hardpoint = "weapon"
 name = "Gatling"
 cooldown_ticks = 6
 damage = 15.0
@@ -42,7 +43,7 @@ sound_gain = 0.7
 
 [[weapon]]
 key = "gatling_2"
-hardpoint = "cannon"
+hardpoint = "weapon"
 name = "Gatling II"
 cooldown_ticks = 5
 damage = 21.0
@@ -56,7 +57,7 @@ sound_gain = 0.7
 # reward as much as the damage is.
 [[weapon]]
 key = "gatling_3"
-hardpoint = "cannon"
+hardpoint = "weapon"
 name = "Gatling III"
 cooldown_ticks = 5
 damage = 30.0
@@ -73,6 +74,33 @@ sound_gain = 0.7
 # governing number of the whole line is lifetime_seconds: a round that loiters
 # is one a pilot cannot break from, however hard they turn, so even the top
 # tier burns out in four seconds. Everything else here is tuned around that.
+# The light-gun line. Rank 1 is the weapon every hull spawns with, so the line
+# starts at what a pilot already has rather than above it; the ranks above are a
+# wider bore on the same mount. No feed, no magazine -- see `light_guns`.
+[[weapon]]
+key = "autocannon_2"
+hardpoint = "weapon"
+name = "Autocannon II"
+cooldown_ticks = 6
+damage = 14.0
+speed = 240.0
+lifetime_seconds = 3.0
+model = "models/bullets/bullet-0"
+sound = "sounds/laser-1.wav"
+sound_gain = 0.5
+
+[[weapon]]
+key = "autocannon_3"
+hardpoint = "weapon"
+name = "Autocannon III"
+cooldown_ticks = 5
+damage = 19.0
+speed = 280.0
+lifetime_seconds = 3.2
+model = "models/bullets/bullet-0"
+sound = "sounds/laser-1.wav"
+sound_gain = 0.55
+
 [[weapon]]
 key = "missile_mk1"
 hardpoint = "missile"
@@ -147,6 +175,7 @@ fire_cooldown_ticks = 90
 # standoff weapon.
 [[upgrade]]
 key = "missile_bay"
+slots = ["missile"]
 icon = "bay"
 name = "MISSILE BAY"
 description = "Fits the launcher, then a harder round. Four more tubes each time."
@@ -159,24 +188,9 @@ capacity = 4   # per level
 tech_cost = [3, 5, 8]
 supply_cost = [12, 26, 44]
 
-# The one repeatable entry: the faction learns to keep the tubes filled once,
-# and a pilot buys a reload every time they come home. Priced as the small
-# change of a landing, since that is what it is.
-[[upgrade]]
-key = "missile_rack"
-icon = "rld"
-name = "MISSILE RACK"
-description = "Reload. Fills the tubes you have."
-kind = "missile_rack"
-max_level = 0 # a restock: buyable again every landing
-requires = "missile_bay"
-weight = 1.4
-per_pickup = 6 # capped at the bay's own capacity
-tech_cost = 2
-supply_cost = 5
-
 [[upgrade]]
 key = "autoloader"
+slots = ["support"]
 icon = "ald"
 name = "AUTOLOADER"
 description = "Cannon cycles a third faster. Same round, more of them."
@@ -187,16 +201,42 @@ cooldown_scale = 0.72
 tech_cost = [2, 4, 7]
 supply_cost = [8, 18, 32]
 
+# The two things a weapon mount can hold. Every mount takes either, so what a
+# hull is armed with is a choice about weight of fire against endurance rather
+# than about which hole a part fits.
+
+# Light guns: what a hull flies with, and what it falls back to. They never run
+# out, which is the whole of their case against the cannons below.
 [[upgrade]]
-key = "heavy_rounds"
-icon = "hvy"
-name = "HEAVY ROUNDS"
-description = "Depleted-slug ammunition. Hits far harder and flies flatter."
+key = "light_guns"
+slots = ["gun", "cannon"]
+icon = "gun"
+name = "LIGHT GUNS"
+description = "Wing-calibre autocannon. Lighter than a heavy mount, and it never runs dry."
 kind = "weapon_tier"
+max_level = 3
+weight = 1.0
+tiers = ["autocannon", "autocannon_2", "autocannon_3"]
+tech_cost = [0, 2, 5]
+supply_cost = [0, 10, 24]
+
+# Heavy cannons: the weight of fire, and the only primary that runs out.
+[[upgrade]]
+key = "heavy_cannons"
+slots = ["gun", "cannon"]
+icon = "hvy"
+name = "HEAVY CANNONS"
+description = "Depleted-slug autocannon. Hits far harder than the light guns, and runs out."
+kind = "cannon_tier"
 max_level = 3
 weight = 1.0
 # One weapon per rank, in order: fitting the rank fits its weapon.
 tiers = ["gatling_1", "gatling_2", "gatling_3"]
+# Rounds the magazine holds per rank, and what a fitting arrives loaded with.
+# Deep next to the missile rack's handful: this is the weapon a pilot leans on
+# until it is dry, not one they save for a shot worth taking.
+capacity = 40
+per_pickup = 40
 tech_cost = [3, 6, 10]
 supply_cost = [14, 30, 52]
 
@@ -211,6 +251,7 @@ supply_cost = [14, 30, 52]
 # burn and shorten the wait instead.
 [[upgrade]]
 key = "overburn"
+slots = ["engine"]
 icon = "ovb"
 name = "OVERBURN"
 description = "Injector overrun: hard thrust, briefly past the redline. Then it has to cool."
@@ -227,6 +268,7 @@ supply_cost = [10, 22, 38]
 
 [[upgrade]]
 key = "bubble_shield"
+slots = ["shield"]
 icon = "bub"
 name = "BUBBLE FIELD"
 description = "Wide reservoir, absorbs a hit whole -- but slow to come back."
@@ -243,6 +285,7 @@ supply_cost = [15, 32, 55]
 
 [[upgrade]]
 key = "plating_shield"
+slots = ["shield"]
 icon = "plt"
 name = "FIELD PLATING"
 description = "Hull-hugging. Some rounds get through it -- fewer with every layer."

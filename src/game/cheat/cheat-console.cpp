@@ -124,7 +124,7 @@ CheatResult RunCheatCommand(Game& game, flecs::entity subject, TeamId team, cons
     const std::string& verb = args[0];
     if (verb == "help" || verb == "cheats") CheatHelp(cheat);
     else if (verb == "tech") CheatTech(cheat);
-    else if (verb == "supplies") CheatSupplies(cheat);
+    else if (verb == "supply") CheatSupplies(cheat);
     else if (verb == "upgrade") CheatUpgrade(cheat);
     else if (verb == "heal") CheatHeal(cheat);
     else if (verb == "god") CheatGod(cheat);
@@ -146,7 +146,7 @@ static void CheatHelp(Cheat& c)
 {
     c.Say("cheats (everyone, always):");
     c.Say("/tech [n] - n technology points into your faction's pool");
-    c.Say("/supplies [n] - n supplies into your own account");
+    c.Say("/supply [n] - n supplies into your own account");
     c.Say("/upgrade <key|all|list> [n] - fit one straight onto your ship");
     c.Say("/heal - hull and shields back to full");
     c.Say("/god - stop dying (lost on respawn)");

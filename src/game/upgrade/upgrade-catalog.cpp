@@ -96,6 +96,12 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
             def.name = (*entry)["name"].value_or(*key);
             def.description = (*entry)["description"].value_or("");
             def.icon = (*entry)["icon"].value_or(key->substr(0, std::min<std::size_t>(3, key->size())));
+
+            if (const toml::array* slots = (*entry)["slots"].as_array()) {
+                for (const toml::node& slot : *slots) {
+                    if (const auto name = slot.value<std::string>()) def.slots.push_back(*name);
+                }
+            }
             def.maxLevel = static_cast<std::uint8_t>(
                     std::min<std::size_t>((*entry)["max_level"].value_or<std::uint8_t>(1),
                                           MAX_UPGRADE_RANKS));
@@ -108,12 +114,10 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
             ParseCostCurve(*entry, "supply_cost", def.supplyCost);
 
             switch (def.kind) {
-            case UpgradeKind::MissileRack:
-                def.rack.perPickup = (*entry)["per_pickup"].value_or(0);
-                break;
             case UpgradeKind::FireRate:
                 def.fireRate.cooldownScale = (*entry)["cooldown_scale"].value_or(1.f);
                 break;
+            case UpgradeKind::CannonTier:
             case UpgradeKind::MissileTier:
                 def.rack.perPickup = (*entry)["per_pickup"].value_or(0);
                 def.rack.capacity = (*entry)["capacity"].value_or(0);
@@ -282,6 +286,15 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
         if (const WeaponDef* tier = FindWeapon(def->tiers[index])) stats.gun = tier;
     }
 
+    // No stock cannon either: the heavy mount is empty until one is fitted,
+    // and the tier decides both the weapon and how deep its magazine is.
+    if (const UpgradeDef* def = FindKind(UpgradeKind::CannonTier); def && levels.cannonTier > 0) {
+        const std::size_t index = std::min<std::size_t>(levels.cannonTier, def->tiers.size()) - 1;
+        stats.cannon = FindWeapon(def->tiers[index]);
+        stats.cannonCapacity = def->rack.capacity * static_cast<int>(levels.cannonTier);
+    }
+    if (stats.cannon) stats.cannonCooldownTicks = stats.cannon->cooldownTicks;
+
     // No stock launcher: a hull that hasn't fitted a bay has no missile at all,
     // and both the round and the rack it goes in come from that bay's tier.
     if (const UpgradeDef* def = FindKind(UpgradeKind::MissileTier); def && levels.missileTier > 0) {
@@ -387,20 +400,18 @@ TechNodeState UpgradeCatalog::ShipState(const UpgradeDef& def, std::uint8_t rank
         if (!prereq || LevelOf(*prereq, levels) == 0) return TechNodeState::Locked;
     }
 
-    if (rank > UnlockedRank(def, *context.unlocked)) return TechNodeState::NotUnlocked;
+    // What the hull already carries is held, whatever the faction has since
+    // learned -- and before the unlock gate, because a ship spawns with its
+    // light guns fitted at a rank no side has researched yet. Reporting the
+    // weapon in its mounts as unresearched would be a plain lie.
+    //
+    // Swapping to the other shield emitter is always on offer, at every
+    // unlocked rank: it replaces rather than stacks, and swapping down is the
+    // player's call to make.
+    const bool swapping = def.kind == UpgradeKind::Shield && levels.shieldType != def.shield.type;
+    if (!swapping && LevelOf(def, levels) >= rank) return TechNodeState::Held;
 
-    if (def.maxLevel == 0) {
-        // A restock is never held -- that is what repeatable means -- but a
-        // full rack would take the payment and give nothing back.
-        if (loadout.missileAmmo >= ResolveStats(levels).missileCapacity) return TechNodeState::Held;
-    }
-    else {
-        // Swapping to the other emitter is always on offer, at every unlocked
-        // rank: it replaces rather than stacks, and swapping down is the
-        // player's call to make.
-        const bool swapping = def.kind == UpgradeKind::Shield && levels.shieldType != def.shield.type;
-        if (!swapping && LevelOf(def, levels) >= rank) return TechNodeState::Held;
-    }
+    if (rank > UnlockedRank(def, *context.unlocked)) return TechNodeState::NotUnlocked;
 
     if (context.supplies < SupplyCostOf(def, rank)) return TechNodeState::Unaffordable;
     if (!context.atLab) return TechNodeState::NeedsLanding;
@@ -410,9 +421,9 @@ TechNodeState UpgradeCatalog::ShipState(const UpgradeDef& def, std::uint8_t rank
 std::uint8_t UpgradeCatalog::LevelOf(const UpgradeDef& def, const UpgradeLevels& levels)
 {
     switch (def.kind) {
-    case UpgradeKind::MissileRack:  return 0; // a restock holds no rank
     case UpgradeKind::FireRate:     return levels.fireRate;
     case UpgradeKind::WeaponTier:   return levels.gunTier;
+    case UpgradeKind::CannonTier:   return levels.cannonTier;
     case UpgradeKind::MissileTier:  return levels.missileTier;
     case UpgradeKind::Shield:       return levels.shieldType == def.shield.type ? levels.shield : 0;
     case UpgradeKind::Boost:        return levels.boost;
@@ -433,8 +444,18 @@ bool UpgradeCatalog::UnlockRank(const UpgradeDef& def, std::uint8_t rank, TechUn
     return true;
 }
 
+MountArm UpgradeCatalog::ArmOf(const UpgradeDef& def)
+{
+    switch (def.kind) {
+    case UpgradeKind::WeaponTier: return MountArm::Light;
+    case UpgradeKind::CannonTier: return MountArm::Heavy;
+    default:                      return MountArm::None;
+    }
+}
+
 bool UpgradeCatalog::FitRank(const UpgradeDef& def, std::uint8_t rank, ShipLoadout& loadout,
-                             const TechUnlocks& unlocked, std::uint32_t& supplies, bool atLab) const
+                             const TechUnlocks& unlocked, std::uint32_t& supplies, bool atLab,
+                             std::uint8_t mount) const
 {
     const ShipContext context{&loadout, &unlocked, supplies, atLab};
     if (ShipState(def, rank, context) != TechNodeState::Available) return false;
@@ -449,18 +470,39 @@ bool UpgradeCatalog::FitRank(const UpgradeDef& def, std::uint8_t rank, ShipLoado
                 std::min(loadout.missileAmmo + rounds, ResolveStats(levels).missileCapacity));
     };
 
+    // Where it goes, for the lines that go somewhere. A pick with no mount
+    // named takes the first free one, and failing that the first mount already
+    // holding this line -- re-ranking what is there rather than refusing.
+    if (const MountArm arm = ArmOf(def); arm != MountArm::None) {
+        if (mount >= loadout.mounts.size()) {
+            mount = TechPick::NO_MOUNT;
+            for (std::uint8_t i = 0; i < loadout.mounts.size(); ++i) {
+                if (loadout.mounts[i] == MountArm::None) { mount = i; break; }
+            }
+            for (std::uint8_t i = 0; mount == TechPick::NO_MOUNT && i < loadout.mounts.size(); ++i) {
+                if (loadout.mounts[i] == arm) mount = i;
+            }
+        }
+        if (mount < loadout.mounts.size()) loadout.mounts[mount] = arm;
+    }
+
     // Set, never increment: a supply price buys the rank named, and a hull
     // that skipped the ranks below it never paid for them.
     switch (def.kind) {
-    case UpgradeKind::MissileRack:
-        load(def.rack.perPickup);
-        break;
     case UpgradeKind::FireRate:
         levels.fireRate = rank;
         break;
     case UpgradeKind::WeaponTier:
         levels.gunTier = rank;
         break;
+    case UpgradeKind::CannonTier: {
+        levels.cannonTier = rank;
+        // Arrives loaded: a cannon with an empty magazine is a purchase that
+        // does nothing until the hull happens to sit at a yard.
+        const int capacity = ResolveStats(levels).cannonCapacity;
+        loadout.cannonAmmo = static_cast<std::uint8_t>(std::min(capacity, 255));
+        break;
+    }
     case UpgradeKind::MissileTier:
         levels.missileTier = rank;
         load(def.rack.perPickup); // the fitting comes with rounds in it
@@ -506,17 +548,16 @@ static int FitScore(const UpgradeDef& def, const ShipLoadout& loadout, int missi
         // The launcher is a weapon the hull does not otherwise have; the ranks
         // above it are only a better round.
         return level == 0 ? 75 : 45 - 5 * static_cast<int>(level);
-    case UpgradeKind::MissileRack:
-        // An empty rack is a weapon the ship cannot use. A nearly full one is
-        // worth almost nothing, however cheap the restock is.
-        if (loadout.missileAmmo == 0) return 80;
-        return loadout.missileAmmo < missileCapacity / 2 ? 40 : 5;
     case UpgradeKind::Boost:
         // The first one is mobility it simply lacked; past that it is only a
         // longer burn.
         return level == 0 ? 70 : 30 - 5 * static_cast<int>(level);
     case UpgradeKind::WeaponTier:
         return 65 - 5 * static_cast<int>(level);
+    case UpgradeKind::CannonTier:
+        // The heavy mount is a weapon the hull does not otherwise have; the
+        // ranks above it are a better round and a deeper magazine.
+        return level == 0 ? 70 : 40 - 5 * static_cast<int>(level);
     case UpgradeKind::FireRate:
         return 50 - 5 * static_cast<int>(level);
     }
@@ -593,14 +634,14 @@ static WeaponDef ParseWeapon(const toml::table& entry, const std::string& key)
 
 static UpgradeKind ParseKind(std::string_view name, bool& ok)
 {
-    if (name == "missile_rack")   return UpgradeKind::MissileRack;
     if (name == "fire_rate")      return UpgradeKind::FireRate;
     if (name == "weapon_tier")    return UpgradeKind::WeaponTier;
+    if (name == "cannon_tier")    return UpgradeKind::CannonTier;
     if (name == "missile_tier")   return UpgradeKind::MissileTier;
     if (name == "shield")         return UpgradeKind::Shield;
     if (name == "boost")          return UpgradeKind::Boost;
     ok = false;
-    return UpgradeKind::MissileRack;
+    return UpgradeKind::FireRate; // unused: the caller drops the entry on !ok
 }
 
 // A scalar charges the same for every rank; a list charges per rank, with its

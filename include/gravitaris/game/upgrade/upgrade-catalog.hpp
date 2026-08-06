@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <gravitaris/game/fwd.hpp>
+#include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/upgrade/upgrade-def.hpp>
 
 namespace Gravitaris {
@@ -121,8 +122,18 @@ public:
     // Fits one rank onto `loadout`, spending from `supplies`. Sets the rank
     // outright rather than incrementing it: a supply price buys the rank
     // named, not the next step up.
+    //
+    // `mount` is which weapon mount a gun or cannon is going into; the rank is
+    // the ship's either way, but where it sits is not. Ignored by everything
+    // that isn't mounted (a shield, the overburn), and TechPick::NO_MOUNT on a
+    // weapon line arms the first free mount -- what the cheat console and the
+    // AI want, neither of which has a schematic in front of it.
     bool FitRank(const UpgradeDef& def, std::uint8_t rank, ShipLoadout& loadout,
-                 const TechUnlocks& unlocked, std::uint32_t& supplies, bool atLab) const;
+                 const TechUnlocks& unlocked, std::uint32_t& supplies, bool atLab,
+                 std::uint8_t mount = TechPick::NO_MOUNT) const;
+
+    // Which line a def arms a mount with, or None for one that isn't mounted.
+    [[nodiscard]] static MountArm ArmOf(const UpgradeDef& def);
 
     // What an AI fits next, given what it can afford and reach: the def and
     // rank it should buy, or a null def when nothing is worth taking. A human

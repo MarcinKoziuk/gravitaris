@@ -50,12 +50,22 @@ struct WeaponDef {
 // the code that reads it; adding another tier, cost or magnitude of an
 // existing behavior is a data edit alone.
 enum class UpgradeKind : std::uint8_t {
-    MissileRack,  // rounds onto the rack -- the only repeatable kind
     FireRate,     // shorter cooldown, whichever weapon is fitted
-    WeaponTier,   // fits the next weapon up its line
+    WeaponTier,   // fits the next gun up its line
+    CannonTier,   // fits the next cannon up, and the magazine it feeds from
     MissileTier,  // fits the launcher, then the next round up, and widens the rack
     Shield,       // a damage buffer in front of the hull
     Boost,        // an overburn: more thrust, and briefly past the speed cap
+};
+
+// What one weapon mount is armed with. Not which weapon: the rank of a line
+// is the ship's (UpgradeLevels), and this is where each of them sits. A hull
+// with a heavy mount either side and its light guns in the nose is three
+// entries here, and that is the whole of what "flexible mounts" means.
+enum class MountArm : std::uint8_t {
+    None,  // empty: this mount fires nothing
+    Light, // the light-gun line, which never runs out
+    Heavy, // the heavy-cannon line, which feeds from the magazine
 };
 
 // Which shield a ship is carrying. Unlike the levels, this is a real choice:
@@ -72,6 +82,12 @@ enum class ShieldType : std::uint8_t {
 // authoring more '+plating' paths than this is clamped at load (Body::AddPlates),
 // so the index a hit reports always addresses all three.
 inline constexpr std::size_t MAX_SHIELD_PLATES = 16;
+
+// Fixed width of everything indexed by weapon mount -- Controls' per-mount
+// cooldowns, for now. A hull authoring more mounts of one family than this
+// simply doesn't fire the surplus (see ShipControlsSystem), which is a
+// silently quiet gun rather than a crash; fighter-1 carries two.
+inline constexpr std::size_t MAX_WEAPON_MOUNTS = 8;
 
 // Plate index meaning "the bubble", which is one element rather than one of an
 // indexed array. Lives here, with the plate width it sits outside of, so both
@@ -104,7 +120,12 @@ struct UpgradeDef {
     // show; real icon art is keyed by the same string.
     std::string icon;
 
-    UpgradeKind kind = UpgradeKind::MissileRack;
+    // Which slots on a hull's schematic will take this, by the same category
+    // names the drawing's '@slots' layer authors (see ShipViewRenderer).
+    // Empty means it belongs to no slot and only the branch list offers it.
+    std::vector<std::string> slots;
+
+    UpgradeKind kind = UpgradeKind::FireRate;
 
     // How many times one ship can take it. 0 means unlimited -- a restock,
     // not a tier, so it can always be bought again.
@@ -132,7 +153,7 @@ struct UpgradeDef {
 
     struct Rack {
         int perPickup = 0;
-        int capacity = 0; // MissileTier: per level; MissileRack: unused (the fitted bay decides)
+        int capacity = 0; // MissileTier: per level
     } rack;
 
     struct FireRate {
@@ -180,6 +201,9 @@ struct UpgradeDef {
 struct UpgradeLevels {
     std::uint8_t fireRate = 0;
     std::uint8_t gunTier = 0;
+    // Zero means the hull carries no cannon: unlike the gun, the heavy mount
+    // is something a pilot fits rather than something a hull comes with.
+    std::uint8_t cannonTier = 0;
     // Zero means the hull carries no launcher at all, not a stock one: there
     // is nothing to fire and nowhere to put rounds until the bay is fitted.
     std::uint8_t missileTier = 0;
@@ -220,13 +244,21 @@ inline bool AnyRankUnlocked(const TechUnlocks& unlocked)
 // every ship. `missile` is null on a hull that has not fitted a bay, which is
 // most of them -- there is no stock launcher.
 struct ShipStats {
+    // The wing mounts, always present, and the two a pilot fits: null when the
+    // hull carries neither. Which one the trigger fires is the pilot's choice
+    // in flight, not a property of the loadout -- see Controls::activeWeapon.
     const WeaponDef* gun = nullptr;
+    const WeaponDef* cannon = nullptr;
     const WeaponDef* missile = nullptr;
 
     // The gun's own cooldown with the fire-rate tier applied; the missile's is
     // the fitted round's own, since its tier already carries the cadence.
     std::uint32_t fireCooldownTicks = 1;
     std::uint32_t missileCooldownTicks = 1;
+    // The cannon's own cadence, from the fitted tier, and the magazine that
+    // feeds it. Both zero on a hull with no cannon.
+    std::uint32_t cannonCooldownTicks = 1;
+    int cannonCapacity = 0;
     // Rack width, which the bay's tier decides -- zero on a hull without one.
     int missileCapacity = 0;
 

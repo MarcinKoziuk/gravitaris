@@ -82,6 +82,7 @@ void WriteClientInput(const ClientInputPacket& packet, ByteWriter& out)
         out.WriteU32(cmd.techPick.node);
         out.WriteU8(static_cast<std::uint8_t>(cmd.techPick.tab));
         out.WriteU8(cmd.techPick.rank);
+        out.WriteU8(cmd.techPick.mount);
     }
 }
 
@@ -105,6 +106,7 @@ bool ReadClientInputBody(ByteReader& in, ClientInputPacket& out)
         cmd.techPick.tab = tab == static_cast<std::uint8_t>(TechTab::Permanent) ? TechTab::Permanent
                                                                                : TechTab::Ship;
         cmd.techPick.rank = in.ReadU8();
+        cmd.techPick.mount = in.ReadU8();
         out.commands.push_back(cmd);
     }
     return in.Ok();

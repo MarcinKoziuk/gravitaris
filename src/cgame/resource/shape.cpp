@@ -15,6 +15,7 @@
 namespace Gravitaris {
 
 using Magnum::Vector3d;
+using Magnum::Vector4d;
 
 static std::vector<Shape::Path> ShapeToPaths(const NSVGshape* shape, Shape::Style style, const Matrix4d& transform, id_t group);
 
@@ -57,6 +58,7 @@ ResourcePtr<const Shape> Shape::Create(id_t id, LoadingContext& context)
         const char* group = svgShape->groupLabel;
 
         if (std::strlen(group) > 0 && group[0] == GROUP_LABEL_PREFIX) {
+            if (std::strcmp(group, SLOTS_GROUP_LABEL) == 0) shape->AddMarker(svgShape, transform);
             continue;
         }
 
@@ -114,6 +116,22 @@ void Shape::AddPaths(const NSVGshape* shape, const Matrix4d& transform, id_t gro
     }
 
     m_paths.insert(m_paths.end(), paths.begin(), paths.end());
+}
+
+void Shape::AddMarker(const NSVGshape* shape, const Matrix4d& transform)
+{
+    if (std::strlen(shape->label) == 0) {
+        LOG(warning) << "Model authors an unlabelled " << SLOTS_GROUP_LABEL
+                     << " element (" << shape->id << "); it has no name to be found by";
+        return;
+    }
+
+    const Vector2d center = GetShapeCenter(shape);
+    // Swizzles of a temporary alias its storage -- take the result by value
+    // (see CLAUDE.md's Magnum gotcha).
+    const Vector4d transformed = transform * Vector4d(center.x(), center.y(), 1., 1.);
+
+    m_markers.push_back(Marker{shape->label, transformed.xy()});
 }
 
 static std::vector<Shape::Path> ShapeToPaths(const NSVGshape* shape, Shape::Style style, const Matrix4d& transform, id_t group)

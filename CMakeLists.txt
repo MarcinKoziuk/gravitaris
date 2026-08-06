@@ -807,6 +807,7 @@ if(GRAVITARIS_BUILD_CLIENT)
         src/cgame/renderer/minimap-renderer.cpp
         include/gravitaris/cgame/renderer/compass-renderer.hpp
         src/cgame/renderer/compass-renderer.cpp
+        src/cgame/renderer/ship-view-renderer.cpp
         include/gravitaris/cgame/camera.hpp
         include/gravitaris/cgame/camera-director.hpp
         src/cgame/camera-director.cpp

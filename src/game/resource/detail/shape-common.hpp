@@ -21,6 +21,9 @@ static const char GROUP_LABEL_PREFIX = '@';
 static const char ORIGIN_GROUP_LABEL[] = "@origin";
 static const char BODY_GROUP_LABEL[] = "@body";
 static const char HARDPOINTS_GROUP_LABEL[] = "@hardpoints";
+// Refit slots, read by the client only: where the board's slot markers sit on
+// a schematic. Each element's inkscape:label names it (see Shape::GetMarkers).
+static const char SLOTS_GROUP_LABEL[] = "@slots";
 
 // '+' layers are consumed by BOTH sides -- the sim builds collision from them
 // and the renderer bakes them -- but they are drawn only while game state asks

@@ -222,8 +222,18 @@ static void ApplyLoadout(flecs::entity entity, const EntityState& state)
 {
     if (ShipLoadout* loadout = entity.try_get_mut<ShipLoadout>()) {
         loadout->missileAmmo = state.missileAmmo;
+        loadout->cannonAmmo = state.cannonAmmo;
+        for (std::size_t i = 0; i < MAX_WEAPON_MOUNTS; ++i) {
+            // Range-checked rather than cast straight through: this byte comes
+            // off the wire, and an out-of-range enum is UB the moment anything
+            // switches on it.
+            const std::uint8_t arm = state.mounts[i];
+            loadout->mounts[i] = arm <= static_cast<std::uint8_t>(MountArm::Heavy)
+                               ? static_cast<MountArm>(arm) : MountArm::None;
+        }
         loadout->levels.fireRate = state.fireRateLevel;
         loadout->levels.gunTier = state.gunTierLevel;
+        loadout->levels.cannonTier = state.cannonTierLevel;
         loadout->levels.missileTier = state.missileTierLevel;
         loadout->levels.shield = state.shieldLevel;
         loadout->levels.shieldType = state.shieldType;

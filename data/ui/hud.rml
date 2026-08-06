@@ -246,6 +246,41 @@
 				background-color: #0cf6;
 			}
 
+			/* The cannon's magazine, drawn the same way but a tick per ten
+			   rounds -- see CANNON_ROUNDS_PER_TICK in ui.cpp. A tick per round
+			   would be a hundred of them across the sidebar. Amber rather than
+			   cyan: this is the mount that runs out. */
+			div#cannon_ticks
+			{
+				min-height: 14dp;
+				margin-top: 7dp;
+			}
+
+			span.cannon_tick
+			{
+				display: inline-block;
+				width: 5dp;
+				height: 14dp;
+				margin-right: 3dp;
+				background-color: #ffb340;
+			}
+
+			span.cannon_tick.empty
+			{
+				background-color: #ffb34033;
+			}
+
+			/* The one the trigger is on right now. The pilot's own choice, so
+			   it is stated rather than inferred from which bar moved last. */
+			span#cannon_mode
+			{
+				margin-left: 6dp;
+				font-size: 9dp;
+				letter-spacing: 1.4dp;
+				color: #ffb340;
+			}
+			span#cannon_mode.gun { color: #0cf; }
+
 			/* Secondary telemetry: three short columns under a rule, quiet
 			   enough that hull and missiles stay the loudest things here. */
 			div#telemetry
@@ -523,6 +558,14 @@
 					<div class="bar_track">
 						<div id="boost_fill"></div>
 					</div>
+				</div>
+
+				<div class="stat">
+					<div class="stat_head">
+						<span>Cannon<span id="cannon_mode"></span></span>
+						<span id="cannon_value" class="stat_value readout">--</span>
+					</div>
+					<div id="cannon_ticks"></div>
 				</div>
 
 				<div class="stat">

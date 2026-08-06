@@ -2,6 +2,7 @@
 //
 
 #include <algorithm>
+#include <deque>
 #include <memory>
 #include <chrono>
 #include <cmath>
@@ -94,9 +95,20 @@ private:
     // command per sim tick. The sim never reads the keyboard directly.
     ControlFlags m_currentInput{};
     bool m_autostart = false;
-    // One-shot, cleared once the tick that carries it has been submitted:
-    // the tech-tree rank the player just bought, if any.
-    TechPick m_techPick;
+    // Confirmed tech picks waiting for a tick to carry them: a command holds
+    // one, and CONFIRM can approve a whole refit at once, so they go out one
+    // per tick in the order they were staged.
+    std::deque<TechPick> m_techPicks;
+
+    // The next pick to put on a command, popped as it goes. Empty when there
+    // is nothing waiting, which is every tick that isn't part of a refit.
+    TechPick NextTechPick()
+    {
+        if (m_techPicks.empty()) return {};
+        const TechPick pick = m_techPicks.front();
+        m_techPicks.pop_front();
+        return pick;
+    }
     // Seconds left on the footer's refusal line before the panel goes back to
     // talking about the selection.
     float m_techNoticeRemaining = 0.f;
@@ -283,6 +295,9 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
                              minimapSize.x(), minimapSize.y());
     m_ui.RegisterLiveTexture("compass", m_game->GetCompassRenderer().TextureId(),
                              compassSize.x(), compassSize.y());
+    const Magnum::Vector2i shipViewSize = m_game->GetShipViewRenderer().TextureSize();
+    m_ui.RegisterLiveTexture("ship_view", m_game->GetShipViewRenderer().TextureId(),
+                             shipViewSize.x(), shipViewSize.y());
 
     m_ui.SetIntroConfirmCallback(
             [this](TeamId team, const std::string& name) { StartSession(team, name); });
@@ -305,8 +320,11 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     m_ui.SetRecenterCallback([this] { m_game->FocusCamera(); });
     // A rank pip is the only way to buy anything -- there is no keyboard
     // shortcut for a purchase, since naming a node and a rank needs a pointer.
-    m_ui.SetTechPickCallback([this](std::uint32_t id, int tab, int rank) {
-        m_techPick = TechPick{id, static_cast<TechTab>(tab), static_cast<std::uint8_t>(rank)};
+    // Queued, not assigned: CONFIRM hands over everything staged at once, and
+    // a command carries one pick per tick.
+    m_ui.SetTechPickCallback([this](std::uint32_t id, int tab, int rank, std::uint8_t mount) {
+        m_techPicks.push_back(TechPick{id, static_cast<TechTab>(tab),
+                                       static_cast<std::uint8_t>(rank), mount});
     });
 
     // Before Init(), which is where the documents load and are first laid out.
@@ -380,12 +398,12 @@ void GravitarisApplication::tickEvent()
                 m_frameTimeAccumulator = 0.0;
                 break;
             }
-            m_game->TickNetClient(m_currentInput, m_techPick);
-            m_techPick = {};
+            m_game->TickNetClient(m_currentInput, NextTechPick());
             m_frameTimeAccumulator -= Game::PHYSICS_DELTA;
             ++steps;
         }
         m_currentInput.fireSecondary = false; // one-shot, same as FeedInput()
+    m_currentInput.toggleWeapon = false;
         redraw();
         UpdateUi();
         return;
@@ -461,6 +479,10 @@ void GravitarisApplication::UpdateUi()
     // quarter second behind the hit that caused it reads as broken.
     m_ui.SetHullFraction(m_game->GetHullFraction().value_or(-1.f));
     m_ui.SetMissileAmmo(m_game->GetMissileAmmo().value_or(-1), m_game->GetMissileCapacity());
+
+    const std::optional<CGame::CannonReadout> cannon = m_game->GetCannonReadout();
+    m_ui.SetCannonAmmo(cannon ? cannon->ammo : -1, cannon ? cannon->capacity : 0,
+                       cannon ? cannon->selected : true);
 
     const CGame::ShieldReadout shield = m_game->GetShieldReadout();
     m_ui.SetShieldFraction(shield.capacity > 0.f ? shield.charge / shield.capacity : -1.f,
@@ -604,6 +626,7 @@ void GravitarisApplication::RefreshTechTree()
         view.id = node.id;
         view.branch = node.branch;
         view.icon = node.icon;
+        view.slots = node.slots;
         view.tab = static_cast<int>(node.tab);
         view.col = node.col;
         view.row = node.row;
@@ -621,6 +644,13 @@ void GravitarisApplication::RefreshTechTree()
         nodes.push_back(std::move(view));
     }
     m_ui.SetTechTree(nodes);
+
+    std::vector<ShipSlotView> slots;
+    for (const CGame::ShipSlot& slot : m_game->GetShipSlots()) {
+        slots.push_back(ShipSlotView{slot.name, slot.categories, slot.uv.x(), slot.uv.y(),
+                                     slot.mount, slot.fittedId});
+    }
+    m_ui.SetShipSlots(slots);
 
     // Asked, never forced: the sidebar blinks while a refit is possible and
     // the player opens the board themselves. An earlier version opened it for
@@ -645,13 +675,14 @@ void GravitarisApplication::FeedInput()
     }
     else {
         cmd.flags = m_currentInput;
-        cmd.techPick = m_techPick;
+        cmd.techPick = NextTechPick();
         // Autopilot overrides movement but not fire.
         if (std::optional<ControlFlags> autopilot = m_game->ComputeAutopilotControls()) {
             cmd.flags = *autopilot;
             cmd.flags.firePrimary = m_currentInput.firePrimary;
             cmd.flags.fireSecondary = m_currentInput.fireSecondary;
             cmd.flags.fireMissile = m_currentInput.fireMissile;
+            cmd.flags.toggleWeapon = m_currentInput.toggleWeapon;
         }
     }
 
@@ -662,7 +693,7 @@ void GravitarisApplication::FeedInput()
     // One-shot actions apply only for the tick they were pressed on.
     // (firePrimary is held; released on key-up.)
     m_currentInput.fireSecondary = false;
-    m_techPick = {};
+    m_currentInput.toggleWeapon = false;
 }
 
 void GravitarisApplication::ToggleRecording()
@@ -730,6 +761,7 @@ void GravitarisApplication::drawEvent()
         ScopedPerfTimer timer(perf, "Minimap");
         m_game->RenderMinimap();
         m_game->RenderCompass();
+        if (m_ui.IsTechTreeVisible() && m_ui.GetTechTab() == 0) m_game->RenderShipView();
     }
 
     // Game renders into the glow pass's offscreen target, not the screen,
@@ -919,6 +951,11 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         case KeyEvent::Key::D:
             m_game->StopSpectating();
             m_currentInput.fireMissile = true;   // held; cadence paced by the sim
+            break;
+        // One-shot: swaps which primary the trigger works. Harmless on a hull
+        // with no cannon -- the sim keeps firing the guns either way.
+        case KeyEvent::Key::S:
+            if (!event.isRepeated()) m_currentInput.toggleWeapon = true;
             break;
         // Held, like thrust. Harmless without the OVERBURN upgrade -- the sim
         // simply never grants a burn (ShipControlsSystem::AdvanceBoost).

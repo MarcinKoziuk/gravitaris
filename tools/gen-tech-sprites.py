@@ -69,7 +69,11 @@ def hatch():
 
 for name, rgb in (('tech-frame-fitted', (0x8a, 0x5f, 0x1c)),
                   ('tech-frame-normal', (0x1d, 0x5f, 0x70)),
-                  ('tech-frame-dim', (0x12, 0x37, 0x42))):
+                  ('tech-frame-dim', (0x12, 0x37, 0x42)),
+                  # Staged: chosen but not yet paid for. White, and the
+                  # brightest frame on the board -- a plan should be the thing
+                  # the eye goes to.
+                  ('tech-frame-staged', (0xff, 0xff, 0xff))):
     write_tga(os.path.join(OUT, name + '.tga'), W, H, frame(rgb))
     print('wrote', name)
 

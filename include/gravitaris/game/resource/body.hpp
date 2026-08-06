@@ -178,6 +178,11 @@ public:
     // firing out of a mount the hull doesn't have.
     [[nodiscard]] const Hardpoint* FindMount(const char* prefix, unsigned nth) const;
 
+    // How many mounts of a family this hull carries. Each one fires on its own
+    // cadence (ShipControlsSystem), so this is both the loop bound and the
+    // divisor the phase offsets are struck from.
+    [[nodiscard]] unsigned CountMounts(const char* prefix) const;
+
     [[nodiscard]] const std::vector<Hardpoint>& GetHardpoints() const
     { return m_hardpoints; }
 

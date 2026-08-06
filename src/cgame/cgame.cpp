@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -31,10 +32,15 @@
 #include <gravitaris/cgame/team-color.hpp>
 #include <gravitaris/cgame/component/shield-flash.hpp>
 
+#include <gravitaris/cgame/resource/shape.hpp>
 #include <gravitaris/cgame/spawner/centity-spawner.hpp>
 #include <gravitaris/cgame/cgame.hpp>
 
 namespace Gravitaris {
+
+static std::vector<std::string> SlotCategories(const std::string& label);
+static std::uint8_t SlotMountIndex(const std::vector<std::string>& categories,
+                                   const std::string& label);
 
 namespace {
 
@@ -69,6 +75,7 @@ CGame::CGame(IFilesystem &filesystem, float contentScale)
     , m_starfieldRenderer(filesystem)
     , m_minimapRenderer(filesystem, contentScale)
     , m_compassRenderer(filesystem, m_modelRenderer2, contentScale)
+    , m_shipViewRenderer(m_modelRenderer2, contentScale)
     , m_audioSystem(m_registry, m_resourceLoader, m_eventQueue, m_upgradeCatalog)
     , m_hitFlashSystem(m_registry, m_eventQueue, *m_entitySpawner)
     , m_cameraDirector(Defaults::cameraZoom)
@@ -87,6 +94,8 @@ CGame::CGame(IFilesystem &filesystem, float contentScale)
     // their own constructors above) so both m_modelRenderer2 and
     // m_mirrorRenderer2 bake it for SubmitPlanetOwnershipMarkers.
     m_teamMarkerModel = m_resourceLoader.Load<Model>("models/ui/team-marker"_id);
+    m_shipSchematicModel = m_resourceLoader.Load<Model>("models/ui/fighter-1-schematic"_id);
+    m_shipSchematicShape = m_resourceLoader.Load<Shape>("models/ui/fighter-1-schematic"_id);
 
     m_modelRenderer2.SetExtraPasses(ShieldPasses());
     m_mirrorRenderer2.SetExtraPasses(ShieldPasses());
@@ -134,6 +143,28 @@ std::optional<int> CGame::GetMissileAmmo()
     if (!loadout || loadout->levels.missileTier == 0) return std::nullopt;
 
     return static_cast<int>(loadout->missileAmmo);
+}
+
+// The magazine of the camera subject's cannon, and which primary its pilot has
+// the trigger on. Empty when the hull carries no cannon at all -- the row goes
+// away rather than reading zero, which would say the opposite of the truth.
+std::optional<CGame::CannonReadout> CGame::GetCannonReadout()
+{
+    const std::optional<flecs::entity> subject = CameraSubject();
+    if (!subject) return std::nullopt;
+
+    const ShipLoadout* loadout = subject->try_get<ShipLoadout>();
+    if (!loadout || loadout->levels.cannonTier == 0) return std::nullopt;
+
+    CannonReadout readout;
+    readout.ammo = static_cast<int>(loadout->cannonAmmo);
+    readout.capacity = m_upgradeCatalog.ResolveStats(loadout->levels).cannonCapacity;
+    // What the pilot asked for, not what fired: a dry cannon still reads as
+    // selected, which is what makes the empty bar the explanation.
+    if (const Controls* controls = subject->try_get<Controls>()) {
+        readout.selected = controls->activeWeapon == ActiveWeapon::Cannon;
+    }
+    return readout;
 }
 
 std::optional<float> CGame::GetSpeed()
@@ -381,6 +412,7 @@ std::vector<CGame::TechNode> CGame::GetTechTree()
             node.row = slot.row;
             node.name = def.name;
             node.icon = def.icon;
+            node.slots = def.slots;
             node.branch = BranchOf(def.kind);
             node.description = def.description;
             node.maxRank = ranks;
@@ -658,6 +690,49 @@ void CGame::RenderCompass()
     }
 
     m_compassRenderer.Render(reading);
+}
+
+void CGame::RenderShipView()
+{
+    ShipViewRenderer::Subject subject;
+    if (m_shipSchematicModel) {
+        subject.model = m_shipSchematicModel.Get();
+        subject.modelId = m_shipSchematicModel.Id();
+    }
+
+    m_shipViewRenderer.Render(subject);
+}
+
+std::vector<CGame::ShipSlot> CGame::GetShipSlots()
+{
+    std::vector<ShipSlot> slots;
+    if (!m_shipSchematicShape || !m_shipSchematicModel) return slots;
+
+    // What the subject actually has in each mount. Empty for a spectated
+    // structure, which simply leaves every slot reading empty.
+    const std::optional<flecs::entity> subject = CameraSubject();
+    const ShipLoadout* loadout = subject ? subject->try_get<ShipLoadout>() : nullptr;
+
+    for (const Shape::Marker& marker : m_shipSchematicShape->GetMarkers()) {
+        ShipSlot slot;
+        slot.name = marker.name;
+        slot.categories = SlotCategories(marker.name);
+        slot.mount = SlotMountIndex(slot.categories, marker.name);
+
+        if (loadout && slot.mount < loadout->mounts.size()) {
+            const MountArm arm = loadout->mounts[slot.mount];
+            const UpgradeKind kind = arm == MountArm::Heavy ? UpgradeKind::CannonTier
+                                                            : UpgradeKind::WeaponTier;
+            if (arm != MountArm::None) {
+                if (const UpgradeDef* def = m_upgradeCatalog.FindKind(kind)) slot.fittedId = def->id;
+            }
+        }
+        slot.uv = m_shipViewRenderer.PanelUV(*m_shipSchematicModel, m_shipSchematicModel.Id(),
+                                             Magnum::Vector2{static_cast<float>(marker.pos.x()),
+                                                             static_cast<float>(marker.pos.y())});
+        slots.push_back(std::move(slot));
+    }
+    return slots;
 }
 
 void CGame::LookAtMapPoint(const Magnum::Vector2& normalized)
@@ -1055,6 +1130,58 @@ void CGame::Render(double delta)
 std::unique_ptr<EntitySpawner> CGame::CreateEntitySpawner()
 {
     return std::make_unique<CEntitySpawner>(m_registry, m_resourceLoader);
+}
+
+// The hull mount a slot sits on: `gun+cannon_1` is the hull's weapon_1.
+//
+// Only the slots that take a weapon line address ShipLoadout::mounts. Every
+// slot is named `<categories>_<index>`, so a shield or an ammo slot carries an
+// index of its own -- reading the mount array with one of those had every
+// `_0` slot on the hull reporting whatever was in the nose.
+static std::uint8_t SlotMountIndex(const std::vector<std::string>& categories,
+                                   const std::string& label)
+{
+    bool weaponMount = false;
+    for (const std::string& category : categories) {
+        weaponMount = weaponMount || category == "gun" || category == "cannon";
+    }
+    if (!weaponMount) return TechPick::NO_MOUNT;
+
+    const std::size_t underscore = label.find_last_of('_');
+    if (underscore == std::string::npos) return TechPick::NO_MOUNT;
+
+    const std::string digits = label.substr(underscore + 1);
+    if (digits.empty() || digits.find_first_not_of("0123456789") != std::string::npos) {
+        return TechPick::NO_MOUNT;
+    }
+    const int index = std::atoi(digits.c_str());
+    return index >= 0 && index < static_cast<int>(MAX_WEAPON_MOUNTS)
+                 ? static_cast<std::uint8_t>(index) : TechPick::NO_MOUNT;
+}
+
+// A slot's authored label is `<category>[+<category>...]_<index>`, the same
+// shape hardpoint names take (see Body::FindMount): the index makes the label
+// unique on a hull that carries two of something, and everything before it is
+// what the slot accepts.
+static std::vector<std::string> SlotCategories(const std::string& label)
+{
+    std::string categories = label;
+    const std::size_t underscore = categories.find_last_of('_');
+    if (underscore != std::string::npos
+            && categories.find_first_not_of("0123456789", underscore + 1) == std::string::npos) {
+        categories.resize(underscore);
+    }
+
+    std::vector<std::string> out;
+    std::size_t start = 0;
+    while (start <= categories.size()) {
+        const std::size_t plus = categories.find('+', start);
+        const std::size_t end = plus == std::string::npos ? categories.size() : plus;
+        if (end > start) out.push_back(categories.substr(start, end - start));
+        if (plus == std::string::npos) break;
+        start = plus + 1;
+    }
+    return out;
 }
 
 } // namespace Gravitaris

@@ -269,7 +269,7 @@ Removed: `#upgrade_draft` from `hud.rml`, the 1/2/3 cases in
 ## Also in the blast radius
 
 - `cheat-console.cpp`: `/research` stocks the queue; becomes `/tech [n]` and
-  `/supplies [n]`. `/upgrade` still fits directly, bypassing both currencies and
+  `/supply [n]`. `/upgrade` still fits directly, bypassing both currencies and
   the faction gate.
 - `tools/sim-test/main.cpp`: `TestUpgradeCatalog` asserts on rolled offers and a
   maxed tier falling off the table -- rewritten against the two tracks, the

@@ -89,8 +89,14 @@ struct EntityState {
     // know a hauler from a fighter to draw it as one (minimap, HUD arrows).
     bool isFreighter = false;
     std::uint8_t missileAmmo = 0;
+    std::uint8_t cannonAmmo = 0;
+    // One byte per weapon mount (MountArm). The own ship is predicted locally,
+    // so a client has to know which mounts are armed with what to fire the
+    // same rounds out of the same muzzles the server does.
+    std::array<std::uint8_t, MAX_WEAPON_MOUNTS> mounts{};
     std::uint8_t fireRateLevel = 0;
     std::uint8_t gunTierLevel = 0;
+    std::uint8_t cannonTierLevel = 0;
     std::uint8_t missileTierLevel = 0;
     std::uint8_t shieldLevel = 0;
     ShieldType shieldType = ShieldType::None;

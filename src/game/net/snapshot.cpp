@@ -78,6 +78,11 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
         }
         if (const ShipLoadout* loadout = entity.try_get<ShipLoadout>()) {
             state.missileAmmo = loadout->missileAmmo;
+            state.cannonAmmo = loadout->cannonAmmo;
+            for (std::size_t i = 0; i < MAX_WEAPON_MOUNTS; ++i) {
+                state.mounts[i] = static_cast<std::uint8_t>(loadout->mounts[i]);
+            }
+            state.cannonTierLevel = loadout->levels.cannonTier;
             state.fireRateLevel = loadout->levels.fireRate;
             state.gunTierLevel = loadout->levels.gunTier;
             state.missileTierLevel = loadout->levels.missileTier;
@@ -183,6 +188,9 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteU8(e.controlsFlags);
         out.WriteF32(e.hp);
         out.WriteU8(e.missileAmmo);
+        out.WriteU8(e.cannonAmmo);
+        for (const std::uint8_t mount : e.mounts) out.WriteU8(mount);
+        out.WriteU8(e.cannonTierLevel);
         out.WriteU8(e.fireRateLevel);
         out.WriteU8(e.gunTierLevel);
         out.WriteU8(e.missileTierLevel);
@@ -278,6 +286,9 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.controlsFlags = in.ReadU8();
         e.hp = in.ReadF32();
         e.missileAmmo = in.ReadU8();
+        e.cannonAmmo = in.ReadU8();
+        for (std::uint8_t& mount : e.mounts) mount = in.ReadU8();
+        e.cannonTierLevel = in.ReadU8();
         e.fireRateLevel = in.ReadU8();
         e.gunTierLevel = in.ReadU8();
         e.missileTierLevel = in.ReadU8();

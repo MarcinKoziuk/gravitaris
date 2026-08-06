@@ -36,6 +36,7 @@
 #include <gravitaris/cgame/renderer/starfield-renderer.hpp>
 #include <gravitaris/cgame/renderer/minimap-renderer.hpp>
 #include <gravitaris/cgame/renderer/compass-renderer.hpp>
+#include <gravitaris/cgame/renderer/ship-view-renderer.hpp>
 #include <gravitaris/cgame/audio/audio-system.hpp>
 #include <gravitaris/cgame/fx/hit-flash-system.hpp>
 #include <gravitaris/cgame/hud/indicator-renderer.hpp>
@@ -71,6 +72,7 @@ protected:
     StarfieldRenderer m_starfieldRenderer;
     MinimapRenderer m_minimapRenderer;
     CompassRenderer m_compassRenderer;
+    ShipViewRenderer m_shipViewRenderer;
     AudioSystem m_audioSystem;
     HitFlashSystem m_hitFlashSystem;
     CameraDirector m_cameraDirector;
@@ -130,6 +132,13 @@ protected:
     // world the mode simulates them in; the view knows which.
     ResourcePtr<const Model> m_teamMarkerModel;
     void SubmitPlanetOwnershipMarkers(const SceneView& view);
+
+    // The refit screen's cutaway. One hull for now: which schematic a ship
+    // shows will follow its model once there is more than one to show. The
+    // shape is held alongside the model for its '@slots' markers, which the
+    // bake drops.
+    ResourcePtr<const Model> m_shipSchematicModel;
+    ResourcePtr<const Shape> m_shipSchematicShape;
 
     // The shield passes both renderers draw after their standard ones: the
     // model's own '+shield' bubble, or one pass per '+plating' plate. Which is
@@ -321,6 +330,31 @@ public:
     StarfieldRenderer& GetStarfieldRenderer() { return m_starfieldRenderer; }
     MinimapRenderer& GetMinimapRenderer() { return m_minimapRenderer; }
     CompassRenderer& GetCompassRenderer() { return m_compassRenderer; }
+    ShipViewRenderer& GetShipViewRenderer() { return m_shipViewRenderer; }
+
+    // A fitting position on the refit schematic, authored in the drawing's
+    // '@slots' layer. `uv` is where it sits on the panel: 0..1 across the
+    // drawing, y down, so the UI layer needs to know nothing about model
+    // space. `categories` is what the slot accepts -- one entry for a plain
+    // `engine_0`, several for a `gun+cannon_0`.
+    struct ShipSlot {
+        std::string name;
+        std::vector<std::string> categories;
+        Magnum::Vector2 uv;
+        // Which of the hull's weapon mounts this is, from the label's index --
+        // what a refit pick names so the part goes into *this* mount. Slots
+        // that aren't weapon mounts carry it too; the catalog ignores it for
+        // anything that isn't mounted.
+        std::uint8_t mount = 0;
+        // The def currently armed in this mount, or 0 for an empty one. Read
+        // from the loadout rather than inferred from what the ship owns: two
+        // mounts can hold different lines now.
+        std::uint32_t fittedId = 0;
+    };
+
+    // Empty until the schematic has loaded. Cheap enough to call per frame:
+    // it walks a handful of authored markers.
+    [[nodiscard]] std::vector<ShipSlot> GetShipSlots();
 
     // Renders the minimap into its offscreen texture. Runs its own
     // framebuffer pass, so the app calls it before the glow pass claims the
@@ -330,6 +364,10 @@ public:
     // Same contract as RenderMinimap: its own framebuffer pass, run before the
     // glow pass claims the scene target.
     void RenderCompass();
+
+    // Same contract again. Unlike the other two this panel is only on screen
+    // while the refit board is open, so the app calls it only then.
+    void RenderShipView();
 
     // The solar system is laid out symmetrically around the origin (see
     // Game::BuildWorld), so that's the map's center -- static, not
@@ -388,6 +426,15 @@ public:
     // Missiles that unit has on the rack. Empty when it has no rack at all
     // (nothing to show, as opposed to an empty one).
     [[nodiscard]] std::optional<int> GetMissileAmmo();
+
+    // The cannon row: rounds left, what the magazine holds, and whether the
+    // trigger is on the cannon rather than the guns.
+    struct CannonReadout {
+        int ammo = 0;
+        int capacity = 0;
+        bool selected = true;
+    };
+    [[nodiscard]] std::optional<CannonReadout> GetCannonReadout();
 
     // Speed in world units/s.
     [[nodiscard]] std::optional<float> GetSpeed();
@@ -463,6 +510,8 @@ public:
         // than authored, since three branches over six kinds needs no data.
         int branch = 0;
         std::string icon;
+        // Which slots on the schematic will take it (data/upgrades.toml `slots`).
+        std::vector<std::string> slots;
         int col = 0;
         int row = 0;
         std::string name;
