@@ -28,6 +28,13 @@ public:
         double maxSpeedScale = 1.;
     };
 
+    // What ApplyMovement should push with this tick, hull and fittings and
+    // overburn already folded together.
+    struct Motion {
+        double thrust = 0.;
+        double maxSpeed = 0.;
+    };
+
     // Nothing about the airframe is a constant here any more either: thrust
     // is the hull's own (Body::GetThrust), so guidance derives its available
     // acceleration as that force over the ship's live mass.
@@ -79,6 +86,14 @@ public:
     // -decided tick (ClientPrediction's reconciliation) where the timers
     // must not run a second time.
     [[nodiscard]] static BoostEffect BoostEffectOf(bool boosting, const ShipStats& stats);
+
+    // What to hand ApplyMovement: the hull's own thrust and speed cap, the
+    // fitted drive's scales, and the burn. One function because the sim and
+    // client-side prediction must agree to the last bit -- and because the
+    // engine/overburn interaction is a rule rather than a product (see the
+    // implementation).
+    [[nodiscard]] static Motion MotionOf(const Body& hull, const ShipStats& stats,
+                                         const BoostEffect& boost);
 
     // The mount family every weapon falls back to when the hull carries none
     // of its own (WeaponDef::hardpoint), and the last resort before the hull's

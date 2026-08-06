@@ -286,6 +286,10 @@ static ShipLoadout MakeShipLoadout(const Body& body)
     // is the nose (the hull's 'weapon_0'); the rest start empty.
     loadout.levels.gunTier = 1;
     loadout.mounts[0] = MountArm::Light;
+    // And with its drive fitted, for the same reason: rank 1 of the engine is
+    // the motor the hull was drawn with, not an upgrade. Pulling it at a yard is
+    // allowed and leaves a hull that cannot accelerate (ResolveStats).
+    loadout.levels.engine = 1;
     return loadout;
 }
 

@@ -197,6 +197,20 @@ bool UI::Init()
         if (m_confirmButton) {
             Listen(*m_confirmButton, "click", [this](Rml::Event&) { ConfirmStaged(); });
         }
+        // Two ways out of the window, one path: whatever is staged is forgotten
+        // rather than committed, which is what closing a plan means.
+        for (const char* id : {"tech_close", "tech_titlebar_close"}) {
+            if (Rml::Element* close = m_techTree->GetElementById(id)) {
+                Listen(*close, "click", [this](Rml::Event&) {
+                    ResetStaged();
+                    SetTechTreeVisible(false);
+                });
+            }
+        }
+        m_resupplyButton = m_techTree->GetElementById("tech_resupply");
+        if (m_resupplyButton) {
+            Listen(*m_resupplyButton, "click", [this](Rml::Event&) { RequestResupply(); });
+        }
         m_resetButton = m_techTree->GetElementById("tech_reset");
         if (m_resetButton) {
             Listen(*m_resetButton, "click", [this](Rml::Event&) { ResetStaged(); });
@@ -375,9 +389,13 @@ void UI::SetHullFraction(float fraction)
 void UI::SetMissileAmmo(int ammo, int capacity)
 {
     if (!m_missileTicks || !m_missileValue) return;
-    if (ammo == m_missileAmmo) return;
+    // Capacity is part of the gate, not just the count: pulling the locker that
+    // widened the rack leaves the same rounds aboard in fewer tubes, and the row
+    // is one tick per tube.
+    if (ammo == m_missileAmmo && capacity == m_missileCapacity) return;
 
     m_missileAmmo = ammo;
+    m_missileCapacity = capacity;
 
     if (ammo < 0) {
         m_missileValue->SetInnerRML("--");
@@ -658,6 +676,18 @@ static std::string Upper(std::string text)
     return text;
 }
 
+// Rounds left on an installed row, and nothing at all for a fitting that has no
+// magazine to report. Empty is its own class rather than a colour picked here:
+// a dry weapon is the one thing on this list worth reading across the room.
+static std::string AmmoSpan(const TechNodeView& node)
+{
+    if (node.ammo < 0) return {};
+
+    const std::string span = std::to_string(node.ammo) + " / " + std::to_string(node.ammoCapacity);
+    return "<span class=\"entry_ammo" + std::string(node.ammo == 0 ? " dry" : "") + "\">" + span
+           + "</span>";
+}
+
 // The three role branches, in board order. Names and classes only -- what goes
 // in them is whatever the pool says belongs there (TechNodeView::branch).
 static constexpr const char* BRANCH_NAMES[] = {"WEAPONS", "MOBILITY", "DEFENSE"};
@@ -911,6 +941,28 @@ void UI::ResetStaged()
     RefreshStagedVisuals();
 }
 
+// Nothing staged and nothing to review: the click *is* the purchase. The server
+// prices it again on arrival, so a button drawn from a stale offer buys nothing
+// it shouldn't -- this check only keeps a pointless pick off the wire.
+void UI::RequestResupply()
+{
+    if (!m_resupplyAvailable || m_resupplyCost <= 0 || !m_onResupply) return;
+    m_onResupply();
+}
+
+void UI::RefreshResupplyButton()
+{
+    if (!m_resupplyButton) return;
+
+    const bool live = m_resupplyAvailable && m_resupplyCost > 0;
+    m_resupplyButton->SetClass("idle", !live);
+    // The price is on the button rather than beside it: it is the whole of what
+    // this one does, and it changes with every round fired.
+    m_resupplyButton->SetInnerRML(m_resupplyCost > 0
+                                          ? "RESUPPLY " + std::to_string(m_resupplyCost) + " SUP"
+                                          : "FULL");
+}
+
 void UI::RefreshConfirmButton()
 {
     if (m_confirmButton) m_confirmButton->SetClass("idle", m_staged.empty());
@@ -1149,14 +1201,20 @@ void UI::RebuildShipLists()
     // two identical entries are otherwise indistinguishable.
     std::string installed;
     int installedCount = 0;
+    // Which node each row's round count belongs to, in row order (0 for a row
+    // that shows none). Turned into element pointers once the markup is in, so
+    // the per-frame refresh never searches the document.
+    std::vector<std::uint32_t> rowAmmoNode;
     for (const ShipSlotView& slot : m_shownSlots) {
         if (!RefOf(slot).IsHole() || slot.fittedId == 0) continue;
         for (const TechNodeView& node : m_shownNodes) {
             if (node.tab != 0 || node.id != slot.fittedId) continue;
             ++installedCount;
+            const std::string ammo = AmmoSpan(node);
+            rowAmmoNode.push_back(ammo.empty() ? 0 : node.id);
             installed += "<div class=\"entry installed\"><span class=\"entry_name\">" + node.name
-                       + "</span><span class=\"entry_note\">" + Upper(slot.name) + " &#183; "
-                       + RankNumeral(node.rank) + "</span></div>";
+                       + "</span>" + ammo + "<span class=\"entry_note\">"
+                       + Upper(slot.name) + " &#183; " + RankNumeral(node.rank) + "</span></div>";
         }
     }
     // Then what the hull carries that sits in no hole at all -- a shield, the
@@ -1167,8 +1225,11 @@ void UI::RebuildShipLists()
         if (node.tab != 0 || node.rank <= 0 || NodeIsMounted(node)) continue;
         ++installedCount;
 
+        const std::string ammo = AmmoSpan(node);
+        rowAmmoNode.push_back(ammo.empty() ? 0 : node.id);
         installed += "<div class=\"entry installed\"><span class=\"entry_name\">" + node.name
-                   + "</span><span class=\"entry_note\">" + RankNumeral(node.rank) + "</span></div>";
+                   + "</span>" + ammo + "<span class=\"entry_note\">"
+                   + RankNumeral(node.rank) + "</span></div>";
     }
 
     if (installed.empty()) {
@@ -1215,6 +1276,18 @@ void UI::RebuildShipLists()
 
     m_installedList->SetInnerRML(installed);
     m_availableList->SetInnerRML(available);
+
+    // The round counts, resolved to elements now that the rows exist. Child 1 of
+    // a row is its count span, which is why AmmoSpan is written second -- the
+    // name is child 0 and the mount note is last.
+    m_ammoSpans.clear();
+    for (std::size_t row = 0; row < rowAmmoNode.size(); ++row) {
+        if (rowAmmoNode[row] == 0) continue;
+        Rml::Element* entry = m_installedList->GetChild(static_cast<int>(row));
+        Rml::Element* span = entry ? entry->GetChild(1) : nullptr;
+        if (span) m_ammoSpans.push_back(AmmoSpanRef{span, rowAmmoNode[row], -1, -1});
+    }
+
     if (m_installedCount) m_installedCount->SetInnerRML(std::to_string(installedCount));
     if (m_availableCount) {
         m_availableCount->SetInnerRML(selected ? std::to_string(offers.size()) : "--");
@@ -1304,9 +1377,40 @@ void UI::ClearStagedForSelection()
 
 void UI::SetTechTree(const std::vector<TechNodeView>& nodes)
 {
-    if (nodes == m_shownNodes) return;
+    if (nodes == m_shownNodes) {
+        // Same board, possibly different round counts (see TechNodeView's
+        // operator==, which ignores them on purpose). Copy them across and move
+        // the few spans that show them rather than rebuilding any markup.
+        for (std::size_t i = 0; i < m_shownNodes.size() && i < nodes.size(); ++i) {
+            m_shownNodes[i].ammo = nodes[i].ammo;
+            m_shownNodes[i].ammoCapacity = nodes[i].ammoCapacity;
+        }
+        RefreshAmmoSpans();
+        return;
+    }
     m_shownNodes = nodes;
     RebuildTechTree();
+}
+
+// The installed list's round counts, updated in place. Cheap enough to call
+// every frame: it writes only to spans whose number actually changed, and a hull
+// carrying nothing that runs out has no spans to walk at all.
+void UI::RefreshAmmoSpans()
+{
+    for (AmmoSpanRef& span : m_ammoSpans) {
+        const TechNodeView* node = nullptr;
+        for (const TechNodeView& candidate : m_shownNodes) {
+            if (candidate.tab == 0 && candidate.id == span.node) { node = &candidate; break; }
+        }
+        if (!node || node->ammo < 0) continue;
+        if (node->ammo == span.shownAmmo && node->ammoCapacity == span.shownCapacity) continue;
+
+        span.shownAmmo = node->ammo;
+        span.shownCapacity = node->ammoCapacity;
+        span.element->SetInnerRML(std::to_string(node->ammo) + " / "
+                                  + std::to_string(node->ammoCapacity));
+        span.element->SetClass("dry", node->ammo == 0);
+    }
 }
 
 void UI::RebuildTechTree()
@@ -1615,6 +1719,19 @@ void UI::SetTechPickCallback(
     m_onTechPick = std::move(callback);
 }
 
+void UI::SetResupplyOffer(int cost, bool available)
+{
+    if (cost == m_resupplyCost && available == m_resupplyAvailable) return;
+    m_resupplyCost = cost;
+    m_resupplyAvailable = available;
+    RefreshResupplyButton();
+}
+
+void UI::SetResupplyCallback(std::function<void()> callback)
+{
+    m_onResupply = std::move(callback);
+}
+
 void UI::SetTechTreeVisible(bool visible)
 {
     if (!m_techTree) return;
@@ -1870,8 +1987,6 @@ void UI::Update()
 {
     m_context->Update();
 
-    // After the update, not inside SetChatLog: the fresh markup has no scroll
-    // extents to pin to until the context has laid it out.
     if (m_techRebuildPending) {
         m_techRebuildPending = false;
         RebuildTechTree();

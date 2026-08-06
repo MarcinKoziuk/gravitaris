@@ -87,6 +87,9 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             state.fireRateLevel = loadout->levels.fireRate;
             state.gunTierLevel = loadout->levels.gunTier;
             state.missileTierLevel = loadout->levels.missileTier;
+            state.ammoStoreLevel = loadout->levels.ammoStore;
+            state.ammoPool = loadout->levels.ammoPool;
+            state.engineLevel = loadout->levels.engine;
             state.shieldLevel = loadout->levels.shield;
             state.shieldType = loadout->levels.shieldType;
             state.shieldHp = loadout->shieldHp;
@@ -201,14 +204,17 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteF32(e.angVel);
         out.WriteU8(e.controlsFlags);
         out.WriteF32(e.hp);
-        out.WriteU8(e.missileAmmo);
-        out.WriteU8(e.cannonAmmo);
+        out.WriteU16(e.missileAmmo);
+        out.WriteU16(e.cannonAmmo);
         for (const std::uint8_t mount : e.mounts) out.WriteU8(mount);
         out.WriteU8(e.missileBays);
         out.WriteU8(e.cannonTierLevel);
         out.WriteU8(e.fireRateLevel);
         out.WriteU8(e.gunTierLevel);
         out.WriteU8(e.missileTierLevel);
+        out.WriteU8(e.ammoStoreLevel);
+        out.WriteU8(static_cast<std::uint8_t>(e.ammoPool));
+        out.WriteU8(e.engineLevel);
         out.WriteU8(e.shieldLevel);
         out.WriteU8(static_cast<std::uint8_t>(e.shieldType));
         out.WriteF32(e.shieldHp);
@@ -300,14 +306,21 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.angVel = in.ReadF32();
         e.controlsFlags = in.ReadU8();
         e.hp = in.ReadF32();
-        e.missileAmmo = in.ReadU8();
-        e.cannonAmmo = in.ReadU8();
+        e.missileAmmo = in.ReadU16();
+        e.cannonAmmo = in.ReadU16();
         for (std::uint8_t& mount : e.mounts) mount = in.ReadU8();
         e.missileBays = in.ReadU8();
         e.cannonTierLevel = in.ReadU8();
         e.fireRateLevel = in.ReadU8();
         e.gunTierLevel = in.ReadU8();
         e.missileTierLevel = in.ReadU8();
+        e.ammoStoreLevel = in.ReadU8();
+        // Clamped like MountArm below: an out-of-range enum off the wire is UB
+        // the moment anything switches on it.
+        const std::uint8_t pool = in.ReadU8();
+        e.ammoPool = pool <= static_cast<std::uint8_t>(AmmoPool::Missile)
+                   ? static_cast<AmmoPool>(pool) : AmmoPool::None;
+        e.engineLevel = in.ReadU8();
         e.shieldLevel = in.ReadU8();
         e.shieldType = static_cast<ShieldType>(in.ReadU8());
         e.shieldHp = in.ReadF32();

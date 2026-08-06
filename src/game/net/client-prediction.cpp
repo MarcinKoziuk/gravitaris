@@ -233,9 +233,9 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
     Controls& ownControls = m_ownShip.get_mut<Controls>();
     const ShipControlsSystem::BoostEffect boost =
             ShipControlsSystem::AdvanceBoost(ownControls, stats);
-    ShipControlsSystem::ApplyMovement(phys.cp.body.get(), flags,
-                                      phys.body->GetThrust() * boost.thrustScale,
-                                      phys.body->GetMaxSpeed() * boost.maxSpeedScale);
+    const ShipControlsSystem::Motion motion =
+            ShipControlsSystem::MotionOf(*phys.body, stats, boost);
+    ShipControlsSystem::ApplyMovement(phys.cp.body.get(), flags, motion.thrust, motion.maxSpeed);
 
     m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
     m_physicsSystem.Update();
@@ -350,9 +350,10 @@ std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t author
         // this tick was first predicted.
         const ShipControlsSystem::BoostEffect replayBoost =
                 ShipControlsSystem::BoostEffectOf(pending.boosting, replayStats);
-        ShipControlsSystem::ApplyMovement(body, pending.flags,
-                                          phys.body->GetThrust() * replayBoost.thrustScale,
-                                          phys.body->GetMaxSpeed() * replayBoost.maxSpeedScale);
+        const ShipControlsSystem::Motion replayMotion =
+                ShipControlsSystem::MotionOf(*phys.body, replayStats, replayBoost);
+        ShipControlsSystem::ApplyMovement(body, pending.flags, replayMotion.thrust,
+                                          replayMotion.maxSpeed);
         m_physicsSystem.Simulate(Game::PHYSICS_DELTA);
         m_physicsSystem.Update();
         m_history.push_back(CaptureTick(pending.tick, pending.flags, pending.boosting));

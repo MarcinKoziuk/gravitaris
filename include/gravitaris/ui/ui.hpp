@@ -62,7 +62,16 @@ struct TechNodeView {
     // The node this one hangs off, for the connector; 0 for a root.
     std::uint32_t requiresId = 0;
     std::vector<TechRankView> ranks;
+    // Rounds left and rounds held, for a fitting that feeds from a magazine.
+    // -1 draws no count at all -- see CGame::TechNode, which resolves these.
+    int ammo = -1;
+    int ammoCapacity = 0;
 
+    // DELIBERATELY does not compare the round counts. This is what decides
+    // whether the whole board's markup is rebuilt, and `ammo` changes on every
+    // shot fired -- including it made holding the cannon trigger rebuild the
+    // entire tech tree several times a second. The counts are refreshed in place
+    // instead (UI::RefreshAmmoSpans), which touches only the spans that moved.
     bool operator==(const TechNodeView& other) const
     {
         return id == other.id && branch == other.branch && icon == other.icon && slots == other.slots
@@ -235,6 +244,7 @@ private:
     Rml::Element* m_missileTicks = nullptr;
     Rml::Element* m_missileValue = nullptr;
     int m_missileAmmo = -2; // no valid count, not even "no subject" (-1)
+    int m_missileCapacity = -1;
 
     Rml::Element* m_cannonTicks = nullptr;
     Rml::Element* m_cannonValue = nullptr;
@@ -348,7 +358,13 @@ private:
     std::vector<StagedPick> m_staged;
     Rml::Element* m_confirmButton = nullptr;
     Rml::Element* m_resetButton = nullptr;
+    Rml::Element* m_resupplyButton = nullptr;
     Rml::Element* m_stagedCost = nullptr;
+    // What filling the magazines would cost, and whether the yard will do it at
+    // all right now. Nothing to fill reads as cost 0, which is also what an
+    // unarmed hull reads as -- the button is idle either way.
+    int m_resupplyCost = 0;
+    bool m_resupplyAvailable = false;
 
     void StagePick(std::uint32_t id, int tab, int rank);
     // rank 0 un-stages. `hole` names where a mounted line is going; a pick for
@@ -376,6 +392,22 @@ private:
     void ConfirmStaged();
     void ResetStaged();
     void RefreshConfirmButton();
+    // One installed row's round count: the span, which node's count it shows,
+    // and what is currently written in it. Collected when the list is built so a
+    // per-frame refresh neither rebuilds markup nor searches the document.
+    struct AmmoSpanRef {
+        Rml::Element* element = nullptr;
+        std::uint32_t node = 0;
+        int shownAmmo = -1;
+        int shownCapacity = -1;
+    };
+    std::vector<AmmoSpanRef> m_ammoSpans;
+    void RefreshAmmoSpans();
+    // Buys rounds for what is already fitted. Deliberately outside the staging
+    // plan: nothing about it is a choice to review, so it commits on the click
+    // rather than waiting for CONFIRM.
+    void RequestResupply();
+    void RefreshResupplyButton();
     // The staged rank of a node, or 0 for one nothing is staged against.
     [[nodiscard]] int StagedRankFor(std::uint32_t id, int tab) const;
     // What the hull (or the faction) already holds of a line.
@@ -456,6 +488,7 @@ private:
     int m_shownTech = -1;
     int m_shownSupplies = -1;
     std::function<void(std::uint32_t, int, int, std::uint8_t, bool)> m_onTechPick;
+    std::function<void()> m_onResupply;
     std::string m_techNotice;
     // Held separately from m_listeners: the nodes they belong to are destroyed
     // and rebuilt on every tree change, so these are dropped with them rather
@@ -613,6 +646,16 @@ public:
     // Set before Init().
     void SetTechPickCallback(
             std::function<void(std::uint32_t, int, int, std::uint8_t, bool)> callback);
+
+    // What RESUPPLY would cost and whether the yard will do it: zero cost means
+    // nothing is missing, and `available` folds together standing at a lab and
+    // being able to pay. Unchanged values are ignored, so calling it every frame
+    // is fine.
+    void SetResupplyOffer(int cost, bool available);
+
+    // Fired when RESUPPLY is clicked and the offer above says it will be
+    // honoured. Set before Init().
+    void SetResupplyCallback(std::function<void()> callback);
 
     // The tree is a window the player opens, not a panel that appears at them
     // -- so it is browsable in flight, and it is theirs to close.

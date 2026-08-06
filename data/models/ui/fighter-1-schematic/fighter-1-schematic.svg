@@ -66,5 +66,6 @@
     <circle cx="300.0000" cy="267.1875" r="7" inkscape:label="missile_0" id="slot-missile-0" style="fill:none;stroke:#00ccff;stroke-width:1;stroke-dasharray:2,2" />
     <circle cx="447.7500" cy="267.1875" r="7" inkscape:label="missile_1" id="slot-missile-1" style="fill:none;stroke:#00ccff;stroke-width:1;stroke-dasharray:2,2" />
     <circle cx="373.8750" cy="300.0000" r="7" inkscape:label="engine_0" id="slot-engine-0" style="fill:none;stroke:#00ccff;stroke-width:1;stroke-dasharray:2,2" />
+    <circle cx="328.1250" cy="300.0000" r="7" inkscape:label="thruster_0" id="slot-thruster-0" style="fill:none;stroke:#00ccff;stroke-width:1;stroke-dasharray:2,2" />
   </g>
 </svg>

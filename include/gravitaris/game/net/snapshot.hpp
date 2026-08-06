@@ -88,8 +88,8 @@ struct EntityState {
     // fields are consumed purely server-side, and the client only needs to
     // know a hauler from a fighter to draw it as one (minimap, HUD arrows).
     bool isFreighter = false;
-    std::uint8_t missileAmmo = 0;
-    std::uint8_t cannonAmmo = 0;
+    std::uint16_t missileAmmo = 0;
+    std::uint16_t cannonAmmo = 0;
     // One byte per weapon mount (MountArm). The own ship is predicted locally,
     // so a client has to know which mounts are armed with what to fire the
     // same rounds out of the same muzzles the server does.
@@ -102,6 +102,12 @@ struct EntityState {
     std::uint8_t gunTierLevel = 0;
     std::uint8_t cannonTierLevel = 0;
     std::uint8_t missileTierLevel = 0;
+    // The ammo locker's rank and which magazine it feeds -- paired for the same
+    // reason the shield's two are: the rank alone cannot say which pool got the
+    // spares, and the refit board draws the locker either way.
+    std::uint8_t ammoStoreLevel = 0;
+    AmmoPool ammoPool = AmmoPool::None;
+    std::uint8_t engineLevel = 0;
     std::uint8_t shieldLevel = 0;
     ShieldType shieldType = ShieldType::None;
     float shieldHp = 0.f;

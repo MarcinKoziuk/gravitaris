@@ -236,6 +236,9 @@ static void ApplyLoadout(flecs::entity entity, const EntityState& state)
         loadout->levels.gunTier = state.gunTierLevel;
         loadout->levels.cannonTier = state.cannonTierLevel;
         loadout->levels.missileTier = state.missileTierLevel;
+        loadout->levels.ammoStore = state.ammoStoreLevel;
+        loadout->levels.ammoPool = state.ammoPool;
+        loadout->levels.engine = state.engineLevel;
         loadout->levels.shield = state.shieldLevel;
         loadout->levels.shieldType = state.shieldType;
         loadout->shieldHp = state.shieldHp;

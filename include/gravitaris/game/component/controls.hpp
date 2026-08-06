@@ -50,8 +50,13 @@ struct TechPick {
     // comes back off the hull. `rank` stays 0, which is what tells the two
     // apart -- there is no rank 0 to fit.
     bool strip = false;
+    // Fills every magazine the hull carries, for Supplies. Names no node --
+    // it buys rounds for whatever is already fitted -- so it is the one form
+    // of pick that sets nothing else, and IsSet() answers to it alone.
+    bool resupply = false;
 
-    [[nodiscard]] bool IsSet() const { return node != 0 && (rank != 0 || strip); }
+    [[nodiscard]] bool IsSet() const
+    { return resupply || (node != 0 && (rank != 0 || strip)); }
 };
 
 // Which primary the trigger fires. A hull can carry both a cannon and its

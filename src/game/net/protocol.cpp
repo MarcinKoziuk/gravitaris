@@ -84,6 +84,7 @@ void WriteClientInput(const ClientInputPacket& packet, ByteWriter& out)
         out.WriteU8(cmd.techPick.rank);
         out.WriteU8(cmd.techPick.mount);
         out.WriteU8(cmd.techPick.strip ? 1 : 0);
+        out.WriteU8(cmd.techPick.resupply ? 1 : 0);
     }
 }
 
@@ -109,6 +110,7 @@ bool ReadClientInputBody(ByteReader& in, ClientInputPacket& out)
         cmd.techPick.rank = in.ReadU8();
         cmd.techPick.mount = in.ReadU8();
         cmd.techPick.strip = in.ReadU8() != 0;
+        cmd.techPick.resupply = in.ReadU8() != 0;
         out.commands.push_back(cmd);
     }
     return in.Ok();

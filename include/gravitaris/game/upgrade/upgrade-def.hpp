@@ -54,8 +54,20 @@ enum class UpgradeKind : std::uint8_t {
     WeaponTier,   // fits the next gun up its line
     CannonTier,   // fits the next cannon up, and the magazine it feeds from
     MissileTier,  // fits the launcher, then the next round up, and widens the rack
+    AmmoStore,    // spare rounds for one magazine -- and only one (see AmmoPool)
+    EngineTier,   // a stronger drive: harder acceleration, higher cruise
     Shield,       // a damage buffer in front of the hull
     Boost,        // an overburn: more thrust, and briefly past the speed cap
+};
+
+// Which magazine a locker holds spares for. A hull has one ammo slot and the
+// lockers are one per pool, so carrying spares is a choice about which weapon
+// this pilot expects to run dry -- exactly as ShieldType is a choice about how
+// to absorb a hit. Fitting the other locker replaces rather than stacks.
+enum class AmmoPool : std::uint8_t {
+    None,
+    Cannon,  // deepens the heavy mounts' magazine
+    Missile, // widens the rack the launcher feeds from
 };
 
 // What one weapon mount is armed with. Not which weapon: the rank of a line
@@ -140,6 +152,11 @@ struct UpgradeDef {
     // How many times one ship can take it. 0 means unlimited -- a restock,
     // not a tier, so it can always be bought again.
     std::uint8_t maxLevel = 1;
+    // Whether a faction has to learn this before a hull may fit it. False makes
+    // it stock hardware a yard simply sells -- it never appears on the
+    // PERMANENT board and no unlocked rank gates it. The ammo boxes are this:
+    // shells are not a technology.
+    bool researched = true;
     // How badly an AI faction wants this line, relative to the others. Only
     // the research plan reads it (PreferredUnlock) -- a human sees the whole
     // tree and decides for themselves.
@@ -165,6 +182,21 @@ struct UpgradeDef {
         int perPickup = 0;
         int capacity = 0; // MissileTier: per level
     } rack;
+
+    // AmmoStore only. Rounds on top of what the weapon's own tier holds, so a
+    // locker is worth nothing to a hull that hasn't fitted the weapon it feeds.
+    struct Ammo {
+        AmmoPool pool = AmmoPool::None;
+        int capacity = 0;  // per level
+        int perPickup = 0; // rounds the fitting arrives with
+    } ammo;
+
+    // EngineTier only. Both compounded per level, as FireRate's scale is: rank
+    // III of a 1.15 drive is 1.52x the hull's own thrust.
+    struct Engine {
+        float thrustScale = 1.f;
+        float maxSpeedScale = 1.f;
+    } engine;
 
     struct FireRate {
         // Cooldown multiplier per level, compounded: 0.75 at level 2 is
@@ -217,6 +249,11 @@ struct UpgradeLevels {
     // Zero means the hull carries no launcher at all, not a stock one: there
     // is nothing to fire and nowhere to put rounds until the bay is fitted.
     std::uint8_t missileTier = 0;
+    // Which locker is fitted and how deep, paired the way the shield's rank and
+    // type are: one ammo slot, so one pool gets spares and the other doesn't.
+    std::uint8_t ammoStore = 0;
+    AmmoPool ammoPool = AmmoPool::None;
+    std::uint8_t engine = 0;
     std::uint8_t shield = 0;
     ShieldType shieldType = ShieldType::None;
     std::uint8_t boost = 0;
@@ -271,6 +308,14 @@ struct ShipStats {
     int cannonCapacity = 0;
     // Rack width, which the bay's tier decides -- zero on a hull without one.
     int missileCapacity = 0;
+
+    // The drive's own multipliers on the hull's [physics] thrust and max_speed,
+    // both 1 on a hull flying its stock engine. Distinct from the boost scales
+    // below: these apply always, and the overburn's stack on top of the thrust
+    // but NOT on top of the speed -- see ShipControlsSystem, where the ceiling
+    // stays a multiple of the hull's own number.
+    float thrustScale = 1.f;
+    float maxSpeedScale = 1.f;
 
     float shieldCapacity = 0.f;
     float shieldRegenPerSecond = 0.f;

@@ -1355,6 +1355,19 @@ void TestPlanetsideStructureHits()
     fs.Shutdown();
 }
 
+// A hull as EntitySpawner::MakeShipLoadout builds one: light guns in the nose
+// and its drive fitted, both rank 1. Tests that fit anything hanging off either
+// of those need to start from a real ship rather than a zeroed struct -- a bare
+// ShipLoadout is a hull with no guns and no engine, which nothing ever flies.
+static ShipLoadout StockLoadout()
+{
+    ShipLoadout loadout;
+    loadout.levels.gunTier = 1;
+    loadout.mounts[0] = MountArm::Light;
+    loadout.levels.engine = 1;
+    return loadout;
+}
+
 // Fits a rank straight onto a hull, bypassing both currencies and the faction
 // gate: a test setting a ship up is exercising what the part does, not the
 // shop that sells it.
@@ -1673,18 +1686,17 @@ void TestUpgradeCatalog()
     // Fitting the cannon loads it, the way fitting the bay fills the rack --
     // and a dry magazine is what puts the trigger back on the guns.
     {
-        ShipLoadout armed;
+        ShipLoadout armed = StockLoadout();
         std::uint32_t purse = RICH;
         Require(catalog.FitRank(*cannonLine, 1, armed, all, purse, true),
                 "catalog: the cannon can be fitted");
-        Require(armed.mounts[0] == MountArm::Heavy,
+        // Mount 0 is the nose, which a stock hull already flies its light guns
+        // in, so the first FREE mount is 1 -- and the guns it fell in beside are
+        // what the dry-magazine fallback below needs something to fall back *to*.
+        Require(armed.mounts[1] == MountArm::Heavy,
                 "catalog: a weapon with no mount named takes the first free one");
-        // And the light guns into the next mount along, which is what the
-        // fallback below needs something to fall back *to*.
-        Require(catalog.FitRank(*gun, 1, armed, all, purse, true),
-                "catalog: the light guns can be fitted alongside");
-        Require(armed.mounts[1] == MountArm::Light,
-                "catalog: ...into a mount of their own rather than over the cannon");
+        Require(armed.mounts[0] == MountArm::Light,
+                "catalog: ...rather than displacing the guns already aboard");
         Require(armed.cannonAmmo == catalog.ResolveStats(armed.levels).cannonCapacity,
                 "catalog: fitting the cannon fills the magazine it decides the depth of");
 
@@ -1750,6 +1762,31 @@ void TestUpgradeCatalog()
     Require(loadout.levels.shieldType == ShieldType::Plating && loadout.levels.shield == 1,
             "catalog: swapping shield type starts the new emitter at the rank bought");
 
+    // Plating hangs off the bubble, and the two replace each other -- so the
+    // gate has to be what the FACTION has learned. Checked against the hull it
+    // would lock plating out the moment the swap took the bubble off, which is
+    // the only state it is ever fitted from.
+    {
+        ShipLoadout swapped = StockLoadout();
+        std::uint32_t purse = RICH;
+        Require(catalog.FitRank(*bubble, 1, swapped, all, purse, true),
+                "catalog: the bubble goes on first");
+        Require(catalog.FitRank(*plating, 1, swapped, all, purse, true),
+                "catalog: plating can be swapped in behind it");
+        Require(UpgradeCatalog::LevelOf(*bubble, swapped.levels) == 0,
+                "catalog: ...which leaves the bubble reading as unfitted");
+        Require(catalog.FitRank(*plating, 2, swapped, all, purse, true),
+                "catalog: ...and a deeper plating rank is still on offer afterwards");
+
+        // With nothing learned, it is genuinely locked -- the gate still gates.
+        TechUnlocks none;
+        ShipLoadout fresh = StockLoadout();
+        Require(catalog.ShipState(*plating, 1,
+                                 UpgradeCatalog::ShipContext{&fresh, &none, RICH, true})
+                        == TechNodeState::Locked,
+                "catalog: plating is locked to a side that has not learned the bubble");
+    }
+
     // The whole point of an absolute price: a pilot who has III unlocked but
     // cannot afford it fits II instead of being locked out.
     {
@@ -1759,6 +1796,133 @@ void TestUpgradeCatalog()
         Require(catalog.ShipState(*bubble, 3, ctx) == TechNodeState::Unaffordable
                         && catalog.ShipState(*bubble, 2, ctx) == TechNodeState::Available,
                 "catalog: a hull short of the top rank is still sold the one below it");
+    }
+
+    // The two ammo lockers: spares on top of the weapon's own magazine, one
+    // pool at a time, and rounds that leave with the fitting that held them.
+    {
+        const UpgradeDef* shells = catalog.FindAmmoStore(AmmoPool::Cannon);
+        const UpgradeDef* warheads = catalog.FindAmmoStore(AmmoPool::Missile);
+        Require(shells && warheads, "catalog: the pool has a locker for each magazine");
+
+        ShipLoadout hull = StockLoadout();
+        std::uint32_t purse = RICH;
+        Require(catalog.FitRank(*cannonLine, 1, hull, all, purse, true),
+                "catalog: the cannon goes on before its box");
+        const int bare = catalog.ResolveStats(hull.levels).cannonCapacity;
+
+        Require(catalog.FitRank(*shells, 2, hull, all, purse, true),
+                "catalog: the shell locker can be fitted");
+        Require(catalog.ResolveStats(hull.levels).cannonCapacity > bare,
+                "catalog: a locker deepens the magazine it feeds");
+        Require(hull.cannonAmmo <= catalog.ResolveStats(hull.levels).cannonCapacity,
+                "catalog: ...and never leaves more rounds aboard than there is room for");
+
+        // Each locker hangs off the weapon it feeds, so a hull with no launcher
+        // is not offered warheads at all.
+        Require(catalog.ShipState(*warheads, 1,
+                                 UpgradeCatalog::ShipContext{&hull, &all, RICH, true})
+                        == TechNodeState::Locked,
+                "catalog: a locker is locked behind the weapon it loads");
+        Require(catalog.FitRank(*bay, 1, hull, all, purse, true),
+                "catalog: a launcher for the warheads to feed");
+
+        // One slot, so the other locker replaces this one -- and the spares it
+        // was holding go with it.
+        Require(catalog.FitRank(*warheads, 1, hull, all, purse, true),
+                "catalog: the other locker can be swapped in");
+        Require(hull.levels.ammoPool == AmmoPool::Missile && hull.levels.ammoStore == 1,
+                "catalog: swapping locker starts the new one at the rank bought");
+        Require(catalog.ResolveStats(hull.levels).cannonCapacity == bare,
+                "catalog: ...and the cannon is back to its own capacity");
+        Require(hull.cannonAmmo <= bare,
+                "catalog: ...with the rounds it can no longer stow gone");
+        Require(UpgradeCatalog::LevelOf(*shells, hull.levels) == 0,
+                "catalog: the locker for the other pool reads as unfitted at every rank");
+
+        Require(catalog.StripRank(*warheads, hull, true), "catalog: a locker can be pulled");
+        Require(hull.levels.ammoStore == 0 && hull.levels.ammoPool == AmmoPool::None,
+                "catalog: ...which leaves the hull carrying neither");
+    }
+
+    // The drive scales the hull's own numbers, and the overburn's ceiling stays
+    // a multiple of the hull's rather than of the drive's.
+    {
+        const UpgradeDef* engine = catalog.FindKind(UpgradeKind::EngineTier);
+        const UpgradeDef* burn = catalog.FindKind(UpgradeKind::Boost);
+        Require(engine && burn, "catalog: the pool has both the drive and the overburn");
+
+        // A hull with no drive at all does not move under its own power. Nothing
+        // ever flies in that state -- rank 1 is issued and fitted at spawn --
+        // but pulling the engine at a yard is allowed, and this is what it buys.
+        ShipLoadout drifting;
+        Require(catalog.ResolveStats(drifting.levels).thrustScale == 0.f,
+                "catalog: a hull with no engine cannot accelerate");
+
+        ShipLoadout hull = StockLoadout();
+        std::uint32_t purse = RICH;
+        const ShipStats stock = catalog.ResolveStats(hull.levels);
+        Require(stock.thrustScale == 1.f && stock.maxSpeedScale == 1.f,
+                "catalog: the drive a hull spawns with scales nothing -- it IS stock");
+
+        Require(catalog.FitRank(*engine, 2, hull, all, purse, true),
+                "catalog: the drive can be upgraded");
+        const ShipStats better = catalog.ResolveStats(hull.levels);
+        Require(better.thrustScale > 1.f && better.maxSpeedScale > 1.f,
+                "catalog: a better drive scales both thrust and cruise");
+
+        Require(catalog.FitRank(*engine, 3, hull, all, purse, true),
+                "catalog: ...and again");
+        const ShipStats best = catalog.ResolveStats(hull.levels);
+        Require(best.thrustScale > better.thrustScale,
+                "catalog: compounding per rank rather than applying once");
+    }
+
+    // Rearming is priced off what feeds the magazine, pro-rata for what is
+    // actually missing -- and it is the yard's call, not the client's.
+    {
+        ShipLoadout hull = StockLoadout();
+        std::uint32_t purse = RICH;
+        Require(catalog.ResupplyCost(hull) == 0,
+                "catalog: a hull with nothing that runs out costs nothing to rearm");
+
+        Require(catalog.FitRank(*cannonLine, 1, hull, all, purse, true),
+                "catalog: a cannon to run dry");
+        Require(catalog.ResupplyCost(hull) == 0,
+                "catalog: a full magazine costs nothing to rearm");
+        Require(!catalog.Resupply(hull, purse, true),
+                "catalog: ...and rearming a full one is refused rather than charged for");
+
+        const int capacity = catalog.ResolveStats(hull.levels).cannonCapacity;
+        hull.cannonAmmo = static_cast<std::uint16_t>(capacity / 2);
+        const std::uint32_t half = catalog.ResupplyCost(hull);
+        hull.cannonAmmo = 0;
+        const std::uint32_t whole = catalog.ResupplyCost(hull);
+        Require(half > 0 && whole > half,
+                "catalog: rearming is priced by how much is missing");
+        Require(whole < UpgradeCatalog::SupplyCostOf(*cannonLine, 1),
+                "catalog: ...and filling a magazine costs less than the gun that empties it");
+
+        Require(!catalog.Resupply(hull, purse, false),
+                "catalog: rearming away from a yard is refused");
+        Require(hull.cannonAmmo == 0, "catalog: ...leaving the magazine as it was");
+
+        std::uint32_t broke = whole - 1;
+        Require(!catalog.Resupply(hull, broke, true) && broke == whole - 1,
+                "catalog: rearming without the supplies for it costs nothing");
+
+        const std::uint32_t before = purse;
+        Require(catalog.Resupply(hull, purse, true), "catalog: rearming at a yard fills up");
+        Require(hull.cannonAmmo == capacity, "catalog: ...to the capacity the hull has fitted");
+        Require(before - purse == whole, "catalog: ...for exactly the price it quoted");
+
+        // The rank survives the mount coming off, so without a gate on what is
+        // actually mounted a yard would happily sell rounds for a gun that is
+        // no longer aboard.
+        Require(catalog.StripRank(*cannonLine, hull, true),
+                "catalog: the cannon can come back off");
+        Require(catalog.ResupplyCost(hull) == 0,
+                "catalog: a magazine with no mount left to fire it is not sold rounds");
     }
 
     // Layout: a def sits one column right of what it requires, which is what
@@ -2826,6 +2990,50 @@ void TestBoost()
         flyWith(/*boost=*/true, 1);
     }
     Require(ship.get<Controls>().boosting, "boost: another burn is available once the wait is over");
+
+    // The drive raises the cruise the hull's own thruster can reach -- and the
+    // burn's ceiling stays a multiple of the hull's number rather than of the
+    // drive's, so one authored value still bounds how fast anything can travel.
+    const UpgradeDef* engine = catalog.FindKind(UpgradeKind::EngineTier);
+    Require(engine != nullptr, "engine: the pool has a drive");
+    {
+        flecs::entity driven =
+                spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{50000., 0.}, TeamId::Red);
+        FitFree(catalog, *engine, 3, driven.get_mut<ShipLoadout>());
+
+        const ShipStats stats = catalog.ResolveStats(driven.get<ShipLoadout>().levels);
+        const ShipControlsSystem::Motion cruise = ShipControlsSystem::MotionOf(
+                *game.GetPhysicsSystem().GetBody(driven.get<PhysicsRef>()).body, stats,
+                ShipControlsSystem::BoostEffect{});
+        Require(cruise.maxSpeed > hullMaxSpeed,
+                "engine: a fitted drive raises the speed the thruster alone can reach");
+        Require(cruise.thrust > 0., "engine: ...and still pushes");
+
+        for (int tick = 0; tick < 900 && driven.is_alive(); ++tick) {
+            InputCommand cmd;
+            cmd.tick = game.GetStep();
+            cmd.flags.thrustForward = true;
+            driven.get_mut<InputQueue>().Push(cmd);
+            game.Update();
+        }
+        Require(driven.get<Transform>().vel.length() > hullMaxSpeed * 1.02,
+                "engine: a driven hull really does fly faster than a stock one's cap");
+
+        // The same hull with the burn as well: the ceiling is the higher of the
+        // two, and the drive is what decides it here.
+        FitFree(catalog, *def, 1, driven.get_mut<ShipLoadout>());
+        const ShipStats both = catalog.ResolveStats(driven.get<ShipLoadout>().levels);
+        const ShipControlsSystem::Motion burning = ShipControlsSystem::MotionOf(
+                *game.GetPhysicsSystem().GetBody(driven.get<PhysicsRef>()).body, both,
+                ShipControlsSystem::BoostEffectOf(/*boosting=*/true, both));
+        Require(burning.maxSpeed
+                        <= std::max(cruise.maxSpeed,
+                                    hullMaxSpeed * static_cast<double>(both.boostMaxSpeedScale))
+                                   + 1e-9,
+                "engine: a burn's ceiling is a multiple of the hull's own speed, not the drive's");
+        Require(burning.thrust > cruise.thrust,
+                "engine: ...while the burn's thrust still stacks on the drive's");
+    }
 
     fs.Shutdown();
 }

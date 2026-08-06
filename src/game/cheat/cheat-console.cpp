@@ -158,7 +158,7 @@ static void CheatHelp(Cheat& c)
     c.Say("/upgrade <key|all|list> [n] - fit one straight onto your ship");
     c.Say("/heal - hull and shields back to full");
     c.Say("/god - stop dying (lost on respawn)");
-    c.Say("/ammo [n] - fill the missile rack");
+    c.Say("/ammo [n] - fill the missile rack and the cannon magazine");
     c.Say("/kill - blow your own ship up");
     c.Say("/tp <x> <y> | /tp home | /tp <player> - go there");
     c.Say("/where - where you are now");
@@ -288,15 +288,22 @@ static void CheatAmmo(Cheat& c)
     ShipLoadout* loadout = c.Loadout();
     if (!loadout) return;
 
-    const int capacity = c.game.GetUpgradeCatalog().ResolveStats(loadout->levels).missileCapacity;
-    if (capacity <= 0) {
-        c.Say("ammo: no launcher fitted -- /upgrade missile_bay first");
+    // Both magazines, since nothing refills either one for free any more -- a
+    // yard charges for rounds now (UpgradeCatalog::Resupply), and a dev testing
+    // the cannon should not have to go shopping.
+    const ShipStats stats = c.game.GetUpgradeCatalog().ResolveStats(loadout->levels);
+    if (stats.missileCapacity <= 0 && stats.cannonCapacity <= 0) {
+        c.Say("ammo: nothing fitted that runs out -- /upgrade missile_bay or heavy_cannons first");
         return;
     }
 
-    const int wanted = std::clamp(c.IntArg(1, capacity), 0, capacity);
-    loadout->missileAmmo = static_cast<std::uint8_t>(wanted);
-    c.Say(Format("ammo: %d / %d on the rack", wanted, capacity));
+    const auto fill = [&](int capacity) {
+        return static_cast<std::uint16_t>(std::clamp(c.IntArg(1, capacity), 0, capacity));
+    };
+    loadout->missileAmmo = fill(stats.missileCapacity);
+    loadout->cannonAmmo = fill(stats.cannonCapacity);
+    c.Say(Format("ammo: %d / %d on the rack, %d / %d in the magazine", loadout->missileAmmo,
+                 stats.missileCapacity, loadout->cannonAmmo, stats.cannonCapacity));
 }
 
 static void CheatKill(Cheat& c)

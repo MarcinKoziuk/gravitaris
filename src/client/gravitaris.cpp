@@ -330,6 +330,13 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
         m_techPicks.push_back(TechPick{id, static_cast<TechTab>(tab),
                                        static_cast<std::uint8_t>(rank), mount, strip});
     });
+    // Rounds for what is already fitted: names no node, and queues alongside the
+    // picks so it reaches the sim through the one channel they all share.
+    m_ui.SetResupplyCallback([this] {
+        TechPick pick;
+        pick.resupply = true;
+        m_techPicks.push_back(pick);
+    });
 
     // Before Init(), which is where the documents load and are first laid out.
     // The window and its framebuffer already exist by now (the base
@@ -602,12 +609,18 @@ void GravitarisApplication::RefreshResearchReadout()
     m_ui.SetResearchReadout(research->progress, text);
 }
 
-// Both trees and both counters, every frame. The UI compares before it
-// rebuilds, so the cost of this is the copy rather than a relayout.
+// The counters every frame, the boards only while the window is up.
+//
+// Gathering a board is not free: GetTechTree resolves every rank of every def
+// against the hull, the purse and the faction, and GetShipSlots walks the
+// schematic. None of that is worth doing for a window nobody is looking at --
+// and it is why holding the trigger with a closed tech window used to cost
+// frames. The toggle refreshes on the frame it opens, so it is never stale.
 void GravitarisApplication::RefreshTechTree()
 {
-    // The port's answer to a refused purchase, if there was one. Shown for a
-    // few seconds and then the footer goes back to its own business.
+    // The port's answer to a refused purchase, if there was one. Taken every
+    // frame whatever is on screen: it writes the same line into the chat log on
+    // its way out, so leaving it queued would delay that too.
     if (const std::optional<std::string> denied = m_game->TakeRefitDenial()) {
         m_ui.SetTechNotice(*denied);
         m_techNoticeRemaining = TECH_NOTICE_SECONDS;
@@ -617,8 +630,15 @@ void GravitarisApplication::RefreshTechTree()
         if (m_techNoticeRemaining <= 0.f) m_ui.SetTechNotice("");
     }
 
+    // Both counters also sit on the HUD sidebar, which is up whether or not the
+    // window is, so these are not part of the gate below.
     const CGame::TechReadout readout = m_game->GetTechReadout();
     m_ui.SetCurrencies(static_cast<int>(readout.tech), static_cast<int>(readout.supplies));
+
+    if (!m_ui.IsTechTreeVisible()) return;
+
+    const CGame::ResupplyOffer resupply = m_game->GetResupplyOffer();
+    m_ui.SetResupplyOffer(resupply.cost, resupply.available);
 
     std::vector<TechNodeView> nodes;
     for (const CGame::TechNode& node : m_game->GetTechTree()) {
@@ -636,6 +656,8 @@ void GravitarisApplication::RefreshTechTree()
         view.maxRank = node.maxRank;
         view.cap = node.cap;
         view.requiresId = node.requiresId;
+        view.ammo = node.ammo;
+        view.ammoCapacity = node.ammoCapacity;
         for (const CGame::TechRank& rank : node.ranks) {
             view.ranks.push_back(TechRankView{rank.cost, static_cast<TechRankState>(rank.state)});
         }
@@ -971,6 +993,9 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
             break;
         case KeyEvent::Key::T:
             m_ui.SetTechTreeVisible(!m_ui.IsTechTreeVisible());
+            // Filled in on the frame it opens rather than the one after:
+            // RefreshTechTree skips a closed window entirely.
+            RefreshTechTree();
             break;
         default:
             (void)0;

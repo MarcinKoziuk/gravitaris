@@ -500,6 +500,16 @@ public:
     };
     [[nodiscard]] TechReadout GetTechReadout();
 
+    // What filling this hull's magazines would cost, and whether the yard will
+    // do it: `cost` 0 means nothing is missing, and `available` folds together
+    // standing at a lab and being able to pay for it. Priced by the catalog, the
+    // same function the server charges from.
+    struct ResupplyOffer {
+        int cost = 0;
+        bool available = false;
+    };
+    [[nodiscard]] ResupplyOffer GetResupplyOffer();
+
     // What the port said about a purchase it would not honour, or nullopt
     // when nothing has been refused since the last call. Own ship only -- a
     // teammate being turned away at their own port is not this player's
@@ -532,6 +542,16 @@ public:
         // What this node hangs off, for the connector; 0 for a root.
         id_t requiresId = 0;
         std::vector<TechRank> ranks;
+        // Rounds left and rounds it holds, for the fittings that feed from a
+        // magazine -- the cannon, the launcher, and the locker that deepens one
+        // of them. -1 means this fitting has no magazine to report and the panel
+        // draws no count: the light guns never run out, which is their case.
+        //
+        // A locker reports the pool it feeds, so the same numbers appear twice
+        // on a hull carrying both. Deliberate: the question the row answers is
+        // "how many rounds have I got", and it has one true answer.
+        int ammo = -1;
+        int ammoCapacity = 0;
     };
 
     // Both trees, every node, in catalog order. Empty only when the pool

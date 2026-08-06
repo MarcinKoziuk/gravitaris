@@ -351,6 +351,18 @@ CGame::TechReadout CGame::GetTechReadout()
     return readout;
 }
 
+CGame::ResupplyOffer CGame::GetResupplyOffer()
+{
+    const std::optional<flecs::entity> player = GetPlayer();
+    const ShipLoadout* loadout = player ? player->try_get<ShipLoadout>() : nullptr;
+    if (!loadout) return {};
+
+    const TechReadout readout = GetTechReadout();
+    const std::uint32_t cost = m_upgradeCatalog.ResupplyCost(*loadout);
+    return ResupplyOffer{static_cast<int>(cost),
+                         cost > 0 && readout.atLab && readout.supplies >= cost};
+}
+
 // The faction's unlock track, from whichever side of the wire this build is
 // on. Both trees are drawn against it: the permanent one shows what it holds,
 // the ship one what it permits.
@@ -376,15 +388,29 @@ TechUnlocks CGame::OwnUnlocks()
     return unlocked;
 }
 
-// Three role branches over the six kinds. A map rather than a toml field:
-// there is nothing to author yet, and the day a branch stops matching a kind
-// is the day it earns one.
+// Which magazine a fitting draws its round count from, or None for one that
+// reports none. The weapon that feeds from a pool and the locker that deepens
+// it both answer with that pool -- see TechNode::ammo.
+static AmmoPool PoolOf(const UpgradeDef& def)
+{
+    switch (def.kind) {
+    case UpgradeKind::CannonTier:  return AmmoPool::Cannon;
+    case UpgradeKind::MissileTier: return AmmoPool::Missile;
+    case UpgradeKind::AmmoStore:   return def.ammo.pool;
+    default:                       return AmmoPool::None;
+    }
+}
+
+// Three role branches over the kinds. A map rather than a toml field: there is
+// nothing to author yet, and the day a branch stops matching a kind is the day
+// it earns one.
 static int BranchOf(UpgradeKind kind)
 {
     switch (kind) {
-    case UpgradeKind::Boost:  return 1; // MOBILITY
-    case UpgradeKind::Shield: return 2; // DEFENSE
-    default:                  return 0; // WEAPONS
+    case UpgradeKind::Boost:
+    case UpgradeKind::EngineTier: return 1; // MOBILITY
+    case UpgradeKind::Shield:     return 2; // DEFENSE
+    default:                      return 0; // WEAPONS -- rounds included
     }
 }
 
@@ -399,6 +425,7 @@ std::vector<CGame::TechNode> CGame::GetTechTree()
     const TechReadout readout = GetTechReadout();
     const TechUnlocks unlocked = OwnUnlocks();
     const UpgradeCatalog::ShipContext context{loadout, &unlocked, readout.supplies, readout.atLab};
+    const ShipStats stats = m_upgradeCatalog.ResolveStats(loadout->levels);
 
     const std::vector<UpgradeDef>& defs = m_upgradeCatalog.Defs();
     nodes.reserve(defs.size() * 2);
@@ -408,6 +435,10 @@ std::vector<CGame::TechNode> CGame::GetTechTree()
         const std::uint8_t ranks = UpgradeCatalog::RankCount(def);
 
         for (const TechTab tab : {TechTab::Ship, TechTab::Permanent}) {
+            // Stock hardware has no rank for a faction to learn, so it appears
+            // on the hull's board and nowhere else.
+            if (tab == TechTab::Permanent && !def.researched) continue;
+
             TechNode node;
             node.id = def.id;
             node.tab = tab;
@@ -422,6 +453,17 @@ std::vector<CGame::TechNode> CGame::GetTechTree()
             node.cap = m_upgradeCatalog.UnlockedRank(def, unlocked);
             node.requiresId = def.requiresId;
             node.rank = tab == TechTab::Ship ? UpgradeCatalog::LevelOf(def, loadout->levels) : node.cap;
+            if (tab == TechTab::Ship) {
+                const AmmoPool pool = PoolOf(def);
+                if (pool == AmmoPool::Cannon) {
+                    node.ammo = static_cast<int>(loadout->cannonAmmo);
+                    node.ammoCapacity = stats.cannonCapacity;
+                }
+                else if (pool == AmmoPool::Missile) {
+                    node.ammo = static_cast<int>(loadout->missileAmmo);
+                    node.ammoCapacity = stats.missileCapacity;
+                }
+            }
 
             node.ranks.reserve(ranks);
             for (std::uint8_t rank = 1; rank <= ranks; ++rank) {
@@ -851,6 +893,9 @@ void CGame::TickNetClient(const ControlFlags& flags, const TechPick& techPick)
                     loadout->missileAmmo = state.missileAmmo;
                     loadout->levels.fireRate = state.fireRateLevel;
                     loadout->levels.gunTier = state.gunTierLevel;
+                    loadout->levels.ammoStore = state.ammoStoreLevel;
+                    loadout->levels.ammoPool = state.ammoPool;
+                    loadout->levels.engine = state.engineLevel;
                     loadout->levels.shield = state.shieldLevel;
                     loadout->levels.shieldType = state.shieldType;
                     loadout->shieldHp = state.shieldHp;

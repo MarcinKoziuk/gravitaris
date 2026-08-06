@@ -99,6 +99,21 @@ ShipControlsSystem::BoostEffect ShipControlsSystem::BoostEffectOf(bool boosting,
                        static_cast<double>(stats.boostMaxSpeedScale)};
 }
 
+ShipControlsSystem::Motion ShipControlsSystem::MotionOf(const Body& hull, const ShipStats& stats,
+                                                        const BoostEffect& boost)
+{
+    const double thrust = hull.GetThrust() * stats.thrustScale * boost.thrustScale;
+
+    // The drive raises cruise; the overburn's ceiling is a multiple of the
+    // hull's OWN number and never moves. So a hull whose engines already
+    // out-run a burn gets the thrust from one and no extra speed -- which is
+    // what keeps one authored number bounding how fast anything can travel.
+    const double cruise = hull.GetMaxSpeed() * stats.maxSpeedScale;
+    const double maxSpeed = std::max(cruise, hull.GetMaxSpeed() * boost.maxSpeedScale);
+
+    return Motion{thrust, maxSpeed};
+}
+
 ShipControlsSystem::PrimarySet ShipControlsSystem::PrimaryWeapons(const Controls& controls,
                                                                  const ShipStats& stats,
                                                                  const ShipLoadout* loadout)
@@ -305,12 +320,16 @@ void ShipControlsSystem::Update(std::uint64_t step)
         cpBody* body = phys.cp.body.get();
 
         ShipLoadout* loadout = entity.try_get_mut<ShipLoadout>();
-        const ShipStats stats =
-                m_catalog.ResolveStats(loadout ? loadout->levels : UpgradeLevels{});
+        // Something with a thruster and no loadout at all -- a freighter -- is
+        // not a fighter with its drive pulled: it flies on the hull's own
+        // numbers. Only a ship that carries a loadout is held to what it has
+        // fitted, which is what makes "no engine, no acceleration" a rule about
+        // fighters rather than about everything with an engine bell.
+        const ShipStats stats = loadout ? m_catalog.ResolveStats(loadout->levels) : ShipStats{};
 
         const BoostEffect boost = AdvanceBoost(scontrols, stats);
-        ApplyMovement(body, scontrols.actionFlags, phys.body->GetThrust() * boost.thrustScale,
-                      phys.body->GetMaxSpeed() * boost.maxSpeedScale);
+        const Motion motion = MotionOf(*phys.body, stats, boost);
+        ApplyMovement(body, scontrols.actionFlags, motion.thrust, motion.maxSpeed);
 
         // firePrimary is held, not one-shot; each armed mount's own cooldown
         // paces its own fire rate, so holding the button auto-fires every

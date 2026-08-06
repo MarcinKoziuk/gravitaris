@@ -188,6 +188,83 @@ capacity = 4   # per level
 tech_cost = [3, 5, 8]
 supply_cost = [12, 26, 44]
 
+# The two ammo boxes. A hull has ONE ammo slot and there is one box per
+# magazine, so fitting either takes the other one off -- carrying spares is a
+# choice about which weapon this pilot expects to run dry, the same shape of
+# decision the two shield emitters are.
+#
+# `research = false`: shells are not a technology. Neither box appears on the
+# PERMANENT board and no unlocked rank gates them -- a yard sells them off the
+# shelf, at every rank, to any hull carrying the weapon they feed. That
+# `requires` is the only gate either of them has.
+#
+# Spares sit on top of what the weapon's own tier holds, so a box is worth
+# nothing to a hull that hasn't fitted the weapon it feeds. Both are cheap next
+# to the weapon itself: this is the small purchase that keeps a working loadout
+# in the fight, not one that changes what it can do.
+
+[[upgrade]]
+key = "shell_box"
+slots = ["ammo"]
+icon = "shl"
+name = "CANNON SHELL BOX"
+description = "Belted rounds stowed aft. Half again the magazine, for the mounts that run out."
+kind = "ammo_store"
+ammo_pool = "cannon"
+research = false
+max_level = 3
+weight = 0.7
+capacity = 20  # per level, on top of the cannon tier's own 40 per rank
+per_pickup = 20
+requires = "heavy_cannons"
+supply_cost = [8, 16, 26]
+
+[[upgrade]]
+key = "missile_container"
+slots = ["ammo"]
+icon = "mis"
+name = "MISSILE CONTAINER"
+description = "Four more rounds for the rack, and the space to stow them."
+kind = "ammo_store"
+ammo_pool = "missile"
+research = false
+max_level = 3
+weight = 0.7
+capacity = 4 # per level, matching what a rank of the bay itself adds
+per_pickup = 4
+requires = "missile_bay"
+supply_cost = [10, 20, 34]
+
+# The drive. Straight-line performance: harder acceleration and a higher cruise.
+#
+# The scales below are PER RANK ABOVE STOCK, compounding. Rank I is the motor the
+# hull was drawn with and scales nothing at all, so a stock ship flies on its own
+# authored [physics] thrust and max_speed -- the numbers everything else in the
+# game is tuned against. Rank III of a 1.12/1.08 engine is therefore 1.25x the
+# thrust and 1.17x the speed of stock, not 1.4x and 1.26x.
+#
+# Deliberately NOT a multiplier on the overburn: OVERBURN's max_speed_scale
+# stays a multiple of the hull's own [physics] max_speed, so one number still
+# bounds how fast anything in the game can ever travel. A hull whose engines
+# already out-run that ceiling gets thrust out of a burn and no more speed.
+[[upgrade]]
+key = "engine"
+slots = ["engine"]
+icon = "eng"
+name = "ENGINE"
+description = "A bigger drive on the same hull. Gets there faster, and stops asking as much of the burn."
+kind = "engine_tier"
+max_level = 3
+weight = 1.0
+thrust_scale = 1.12
+max_speed_scale = 1.08
+# Rank I costs no Tech, which is what marks it as issued rather than researched:
+# every faction starts holding it (ResearchSystem::IssueFreeUnlocks) and every
+# hull spawns with it fitted, the same way it spawns with its light guns. A hull
+# that has had its drive pulled cannot accelerate at all.
+tech_cost = [0, 4, 7]
+supply_cost = [0, 22, 38]
+
 [[upgrade]]
 key = "autoloader"
 slots = ["support"]
@@ -228,6 +305,7 @@ icon = "hvy"
 name = "HEAVY CANNONS"
 description = "Depleted-slug autocannon. Hits far harder than the light guns, and runs out."
 kind = "cannon_tier"
+requires = "light_guns"
 max_level = 3
 weight = 1.0
 # One weapon per rank, in order: fitting the rank fits its weapon.
@@ -251,11 +329,15 @@ supply_cost = [14, 30, 52]
 # burn and shorten the wait instead.
 [[upgrade]]
 key = "overburn"
-slots = ["engine"]
+# Its own hole, not the engine's: the drive and the injector are two fittings a
+# hull carries at once, and one category per non-mounted fitting is what keeps
+# the board able to tell which of them sits where.
+slots = ["thruster"]
 icon = "ovb"
 name = "OVERBURN"
 description = "Injector overrun: hard thrust, briefly past the redline. Then it has to cool."
 kind = "boost"
+requires = "engine"
 max_level = 3
 weight = 1.0
 thrust_scale = 2.5
@@ -291,6 +373,11 @@ name = "FIELD PLATING"
 description = "Hull-hugging. Some rounds get through it -- fewer with every layer."
 kind = "shield"
 shield_type = "plating"
+# The bubble first: a side learns to hold a field at all before it learns to
+# wrap one round a hull. Checked against what the FACTION has learned rather
+# than what this hull carries -- the two emitters replace each other, so no
+# hull can ever have a bubble fitted at the moment it fits plating.
+requires = "bubble_shield"
 max_level = 3
 weight = 0.9
 capacity = 112.0

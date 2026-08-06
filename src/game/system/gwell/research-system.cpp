@@ -105,6 +105,7 @@ void ResearchSystem::Update(std::uint64_t step)
     // apart, and before the accounts are read, so a fresh pilot is not a tick
     // behind.
     EnsureAccounts();
+    IssueFreeUnlocks();
     const float suppliesPerTick =
             m_config.supplies.perSecond * static_cast<float>(Game::PHYSICS_DELTA);
     m_supplyRemainder += suppliesPerTick;
@@ -160,22 +161,6 @@ void ResearchSystem::Update(std::uint64_t step)
             access.ticksSinceLab = 0;
             return;
         }
-    });
-
-    // A hull sitting at a yard tops its tubes and its magazine up. Reloading
-    // is part of refitting rather than something to buy: the fitted parts
-    // decide how much they hold, and what can be filled is filled. Its own
-    // walk, not a lookup inside the one above -- a query run inside another
-    // query's callback yields nothing.
-    m_registry.each([&](flecs::entity, const ResearchAccess& access, ShipLoadout& loadout) {
-        if (!access.atLab) return;
-        const ShipStats stats = m_catalog.ResolveStats(loadout.levels);
-
-        const auto tubes = static_cast<std::uint8_t>(std::min(stats.missileCapacity, 255));
-        if (loadout.missileAmmo < tubes) loadout.missileAmmo = tubes;
-
-        const auto rounds = static_cast<std::uint8_t>(std::min(stats.cannonCapacity, 255));
-        if (loadout.cannonAmmo < rounds) loadout.cannonAmmo = rounds;
     });
 
     // Which sides have somebody reading the tree for themselves. Gathered
@@ -279,8 +264,6 @@ void ResearchSystem::ApplyPurchases()
         }
 
         if (!pick.IsSet()) continue;
-        const UpgradeDef* def = m_catalog.Find(pick.node);
-        if (!def) continue;
 
         const Transform& transf = ship.get<Transform>();
         const Magnum::Vector2 where{static_cast<float>(transf.pos.x()),
@@ -291,6 +274,32 @@ void ResearchSystem::ApplyPurchases()
             m_eventQueue.Emit(GameEventType::RefitDenied, ship, where,
                               static_cast<std::uint32_t>(reason));
         };
+
+        // The yard counts as open for a moment after it closes -- see
+        // REFIT_GRACE_TICKS. A pilot who was on the pad when they clicked gets
+        // served, whatever the round trip did to them in between.
+        const bool served = access.atLab || access.ticksSinceLab <= REFIT_GRACE_TICKS;
+
+        // Rounds for whatever the hull already carries. Names no node, so it is
+        // answered before the pool is consulted at all -- and priced by the
+        // catalog, never by the click, so a client cannot ask for a discount.
+        if (pick.resupply) {
+            if (!account) continue;
+            const std::uint32_t cost = m_catalog.ResupplyCost(loadout);
+            if (m_catalog.Resupply(loadout, account->supplies, served)) {
+                LOG(info) << "research: team " << static_cast<int>(team.id) << " resupplied for "
+                          << cost;
+            }
+            // Nothing missing is not a refusal: the button is already idle, and
+            // a stale click on it should say nothing at all.
+            else if (cost > 0 && !ship.has<AIPilot>()) {
+                deny(served ? TechNodeState::Unaffordable : TechNodeState::NeedsLanding);
+            }
+            continue;
+        }
+
+        const UpgradeDef* def = m_catalog.Find(pick.node);
+        if (!def) continue;
 
         if (pick.tab == TechTab::Permanent) {
             // Nothing about learning a part needs the hull to be anywhere in
@@ -307,11 +316,6 @@ void ResearchSystem::ApplyPurchases()
         }
 
         if (!account) continue;
-
-        // The yard counts as open for a moment after it closes -- see
-        // REFIT_GRACE_TICKS. A pilot who was on the pad when they clicked gets
-        // served, whatever the round trip did to them in between.
-        const bool served = access.atLab || access.ticksSinceLab <= REFIT_GRACE_TICKS;
 
         // Pulling a part is free and needs nothing but the yard, so it does
         // not go past the purse or the tree at all.
@@ -361,6 +365,22 @@ void ResearchSystem::AwardKill(std::uint32_t pilotId)
 // a flecs query run inside another query's callback yields nothing, so a
 // nested FindAccount reports every pilot as new and opens them a second
 // account every tick.
+// A rank that costs nothing to learn is one every side already knows: the light
+// guns a hull flies with, and the drive that moves it. Granted here rather than
+// at faction creation so a side that appears mid-match gets them too, and so
+// nothing depends on the order the factions were made in.
+void ResearchSystem::IssueFreeUnlocks()
+{
+    const std::vector<UpgradeDef>& defs = m_catalog.Defs();
+    m_registry.each([&](FactionState& faction) {
+        for (std::size_t i = 0; i < defs.size() && i < MAX_UPGRADE_DEFS; ++i) {
+            const UpgradeDef& def = defs[i];
+            if (!def.researched || UpgradeCatalog::TechCostOf(def, 1) != 0) continue;
+            if (faction.unlocked.rank[i] == 0) faction.unlocked.rank[i] = 1;
+        }
+    });
+}
+
 void ResearchSystem::EnsureAccounts()
 {
     m_accounts.clear();

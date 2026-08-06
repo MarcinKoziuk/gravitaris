@@ -158,6 +158,26 @@
 				color: #7fe4f5;
 			}
 
+			/* Absolute, over the grip's right end: the grip fills the bar to stay
+			   grabbable anywhere along it, so the X has to sit on top rather
+			   than beside. */
+			div#tech_titlebar_close
+			{
+				position: absolute;
+				top: 0;
+				right: 0;
+				width: 30dp;
+				height: 30dp;
+				box-sizing: border-box;
+				padding-top: 6dp;
+
+				text-align: center;
+				font-size: 15dp;
+				color: #3f8fa2;
+				cursor: pointer;
+			}
+			div#tech_titlebar_close:hover { color: #cff6ff; background-color: #1b5a6b; }
+
 			/* Sits in the corner the bottom-right bracket already draws, so the
 			   thing that says "this is a window" is the thing you grab. */
 			handle#tech_size
@@ -447,6 +467,19 @@
 			div.entry.installed { border-left-color: #ffb340; }
 			div.entry.installed span.entry_name { color: #ffb340; }
 
+			/* Rounds left, between the name and the mount. Monospaced so a
+			   column of them lines up, and red at zero -- a dry weapon is the
+			   one thing on this list worth reading from across the room. */
+			div.entry span.entry_ammo
+			{
+				font-family: Share Tech Mono;
+				font-size: 10dp;
+				letter-spacing: 0.6dp;
+				margin-right: 8dp;
+				color: #7fe4f5;
+			}
+			div.entry span.entry_ammo.dry { color: #ff6b6b; }
+
 			div.entry.buy { cursor: pointer; border-left-color: #2f8ea6; }
 			div.entry.buy:hover { background-color: #0e2a33; border-left-color: #7fe4f5; }
 			div.entry.buy span.entry_note { color: #7fe4f5; }
@@ -720,6 +753,26 @@
 			}
 			button#tech_confirm:hover { background-color: #bff; border-color: #bff; }
 
+			/* Same quiet treatment as RESET, and next to it: leaving the window
+			   is not one of the decisions this board is asking about. Anything
+			   staged is simply forgotten, exactly as it is on RESET. */
+			button#tech_close
+			{
+				display: block;
+				margin: 0 8dp 0 0;
+				padding: 7dp 14dp;
+				font-size: 11dp;
+				letter-spacing: 2.4dp;
+
+				color: #3f8fa2;
+				background-color: transparent;
+				border-width: 1dp;
+				border-color: #1b5a6b;
+				font-effect: none;
+				cursor: pointer;
+			}
+			button#tech_close:hover { color: #cff6ff; border-color: #56d9f2; }
+
 			/* Quieter than CONFIRM: undoing a plan should never be the loudest
 			   thing on the row. */
 			button#tech_reset
@@ -740,6 +793,27 @@
 			button#tech_reset:hover { color: #cff6ff; border-color: #56d9f2; }
 			button#tech_reset.idle { color: #23505c; border-color: #123742; cursor: arrow; }
 
+			/* Buys rounds outright rather than staging anything, so it is
+			   deliberately not styled like CONFIRM: amber, the colour this board
+			   already uses for what the hull is carrying. */
+			button#tech_resupply
+			{
+				display: block;
+				margin: 0 8dp 0 0;
+				padding: 7dp 14dp;
+				font-size: 11dp;
+				letter-spacing: 2.4dp;
+
+				color: #ffb340;
+				background-color: transparent;
+				border-width: 1dp;
+				border-color: #7a5320;
+				font-effect: none;
+				cursor: pointer;
+			}
+			button#tech_resupply:hover { color: #ffd68a; border-color: #ffb340; }
+			button#tech_resupply.idle { color: #4a3a1c; border-color: #2b2213; cursor: arrow; }
+
 			/* Nothing staged: still there, so the button never moves, but
 			   plainly not a thing to press. */
 			button#tech_confirm.idle
@@ -756,6 +830,8 @@
 
 		<div id="tech_titlebar">
 			<handle id="tech_grip" move_target="#document">GRAVITARIS &#8212; TECHNOLOGY</handle>
+			<!-- Outside the grip, or dragging the bar would swallow the click. -->
+			<div id="tech_titlebar_close">&#215;</div>
 		</div>
 		<handle id="tech_size" size_target="#document"></handle>
 
@@ -808,6 +884,8 @@
 		<div id="tech_footer">
 			<div id="tech_notice"></div>
 			<span id="tech_staged_cost"></span>
+			<button id="tech_resupply" class="idle">FULL</button>
+			<button id="tech_close">CLOSE</button>
 			<button id="tech_reset" class="idle">RESET</button>
 			<button id="tech_confirm" class="idle">CONFIRM</button>
 		</div>

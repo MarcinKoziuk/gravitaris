@@ -282,3 +282,33 @@ prerequisite depth, `upgrades.toml` remains a flat list of nodes each naming a
 `requires`, so there is no nesting for KDL to express and nothing to gain here.
 Worth revisiting as its own change at the C++23 move, when `kdlpp`'s C++20 floor
 stops being a cost.
+
+## Open: the AI never buys rounds or a better drive
+
+Two fittings landed for the player and were deliberately left unscored for an AI
+pilot -- `SHELL LOCKER` / `WARHEAD LOCKER` (`UpgradeKind::AmmoStore`) and
+`ENGINE` (`UpgradeKind::EngineTier`). `FitScore()` in `upgrade-catalog.cpp`
+returns **0** for both, which is below every line it does score, so
+`PreferredFit` never chooses them. That is the safe default, not a finished
+rule: an AI wing flies stock drives and never restocks.
+
+What scoring them properly needs:
+
+- **The lockers are a real choice, not a tier.** A locker is worth nothing to a
+  hull carrying neither the cannon nor the launcher it feeds, and the two
+  compete for one slot -- so the interesting part is *which* pool a given hull
+  should carry spares for, judged from what it actually fires (how many mounts
+  are armed Heavy, whether a bay is fitted, what it is running dry of). Scoring
+  it like a tier would have every AI buy the same locker.
+- **The drive is straight mobility.** Probably the `Boost` shape: a large score
+  for the first rank, small for the ranks above it.
+- **Nothing rearms.** `ResearchSystem` used to top every magazine up for free
+  whenever a hull sat at a lab; that walk is gone, because rounds are now a
+  purchase (`TechPick::resupply` -> `UpgradeCatalog::Resupply`). Only the
+  player's RESUPPLY button sends one. An AI that lands dry stays dry, and can
+  spend its supplies on a *new* cannon while the one it has sits empty. It needs
+  a reason to buy rounds in the landing routine, ahead of buying more hardware
+  -- `ResupplyCost()` is already the price and needs no new data.
+- **`weight` for the new defs** in `upgrades.toml` is a guess (0.7 for the
+  lockers, 1.0 for the engine); only `PreferredUnlock` reads it, so it orders
+  what a *faction* researches rather than what a hull fits.

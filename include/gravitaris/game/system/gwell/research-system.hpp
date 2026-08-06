@@ -60,6 +60,10 @@ private:
     // for yet.
     void EnsureAccounts();
 
+    // Grants every faction the ranks that cost no Tech at all -- stock hardware
+    // it would be a lie to report as unresearched. Idempotent, run every tick.
+    void IssueFreeUnlocks();
+
     [[nodiscard]] flecs::entity FindAccountEntity(std::uint32_t pilotId) const;
     [[nodiscard]] PilotAccount* FindAccount(std::uint32_t pilotId);
     [[nodiscard]] PilotAccount* AccountFor(flecs::entity ship);

@@ -80,6 +80,11 @@ public:
     // ShieldType. Null when the pool has none.
     [[nodiscard]] const UpgradeDef* FindKind(UpgradeKind kind, ShieldType shieldType = ShieldType::None) const;
 
+    // The ammo locker that feeds `pool`, the same one-per-discriminator lookup
+    // FindKind does for shields. Null for AmmoPool::None, which is what a hull
+    // carrying no locker at all reads as.
+    [[nodiscard]] const UpgradeDef* FindAmmoStore(AmmoPool pool) const;
+
     [[nodiscard]] ShipStats ResolveStats(const UpgradeLevels& levels) const;
 
     // A def's own position in Defs(), which is what TechUnlocks is indexed by.
@@ -153,6 +158,28 @@ public:
     // which leaves a stale click costing nothing exactly as FitRank does.
     bool StripRank(const UpgradeDef& def, ShipLoadout& loadout, bool atLab,
                    std::uint8_t mount = TechPick::NO_MOUNT) const;
+
+    // What filling every magazine this hull carries would cost in Supplies, and
+    // zero for a hull already full (or carrying nothing that runs out) -- which
+    // is what greys the button out.
+    //
+    // A pool's full refill is priced at RESUPPLY_SHARE of the supply cost of the
+    // rank that gives it its capacity, and a partial one pro-rata for the share
+    // actually missing. So topping off a nearly-full magazine is small change
+    // and refilling a dry one is a real purchase, which is the whole point of
+    // having the number depend on what was spent.
+    [[nodiscard]] std::uint32_t ResupplyCost(const ShipLoadout& loadout) const;
+
+    // Fills them, spending from `supplies`. False -- and nothing touched -- when
+    // the hull is not at a yard, has nothing to fill, or cannot afford it,
+    // exactly as FitRank refuses a stale click.
+    bool Resupply(ShipLoadout& loadout, std::uint32_t& supplies, bool atLab) const;
+
+    // Brings both round counts back within what the hull now has fitted. Every
+    // path that can *narrow* a magazine has to call it -- pulling a locker,
+    // swapping to the one for the other pool -- or a hull keeps rounds it no
+    // longer has anywhere to put.
+    void ClampAmmo(ShipLoadout& loadout) const;
 
     // Which line a def arms a mount with, or None for one that isn't mounted.
     [[nodiscard]] static MountArm ArmOf(const UpgradeDef& def);

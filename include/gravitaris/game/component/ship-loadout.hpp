@@ -36,10 +36,10 @@ struct ShipLoadout {
     // it through, not a second rack.
     std::uint8_t missileBays = 0;
 
-    std::uint8_t missileAmmo = 0;
+    std::uint16_t missileAmmo = 0;
     // Rounds left in the cannon's magazine. Deeper than the rack by an order
     // of magnitude -- see the HUD, which draws one tick per ten.
-    std::uint8_t cannonAmmo = 0;
+    std::uint16_t cannonAmmo = 0;
     UpgradeLevels levels;
     // Shield charge, 0..ShipStats::shieldCapacity. ShieldSystem refills it;
     // DamageSystem spends it ahead of the hull. For plating this is the sum of
