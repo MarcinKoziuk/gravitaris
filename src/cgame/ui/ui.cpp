@@ -100,13 +100,13 @@ bool UI::Init()
     // face; Share Tech Mono is for readouts only, where proportional digits
     // would shift the layout as the values change. Lato stays loaded as the
     // fallback for anything neither covers.
-    Rml::LoadFontFace("ui/ChakraPetch-Regular.ttf");
-    Rml::LoadFontFace("ui/ChakraPetch-Bold.ttf");
-    Rml::LoadFontFace("ui/ShareTechMono-Regular.ttf");
-    Rml::LoadFontFace("ui/LatoLatin-Regular.ttf");
-    Rml::LoadFontFace("ui/LatoLatin-Bold.ttf");
-    Rml::LoadFontFace("ui/LatoLatin-BoldItalic.ttf");
-    Rml::LoadFontFace("ui/LatoLatin-Italic.ttf");
+    Rml::LoadFontFace("ui/fonts/ChakraPetch-Regular.ttf");
+    Rml::LoadFontFace("ui/fonts/ChakraPetch-Bold.ttf");
+    Rml::LoadFontFace("ui/fonts/ShareTechMono-Regular.ttf");
+    Rml::LoadFontFace("ui/fonts/LatoLatin-Regular.ttf");
+    Rml::LoadFontFace("ui/fonts/LatoLatin-Bold.ttf");
+    Rml::LoadFontFace("ui/fonts/LatoLatin-BoldItalic.ttf");
+    Rml::LoadFontFace("ui/fonts/LatoLatin-Italic.ttf");
 
     // HUD first so interactive windows loaded after it stack on top of it.
     if (Rml::ElementDocument* hud = m_context->LoadDocument("ui/hud.rml")) {
@@ -200,21 +200,6 @@ bool UI::Init()
         m_resetButton = m_techTree->GetElementById("tech_reset");
         if (m_resetButton) {
             Listen(*m_resetButton, "click", [this](Rml::Event&) { ResetStaged(); });
-        }
-
-        if (Rml::Element* grip = m_techTree->GetElementById("tech_grip")) {
-            // ElementHandle drags by writing top/left, and the board is centred
-            // with `margin: auto` -- so the margin has to go before the first
-            // of those lands, or the box is stretched between the two. Pinning
-            // it where it already is keeps it still meanwhile.
-            Listen(*grip, "dragstart", [this](Rml::Event&) {
-                if (!m_techTree) return;
-                const int left = static_cast<int>(std::lround(m_techTree->GetAbsoluteLeft()));
-                const int top = static_cast<int>(std::lround(m_techTree->GetAbsoluteTop()));
-                m_techTree->SetProperty("margin", "0px");
-                m_techTree->SetProperty("left", std::to_string(left) + "px");
-                m_techTree->SetProperty("top", std::to_string(top) + "px");
-            });
         }
 
         if (Rml::Element* tab = m_techTree->GetElementById("tab_ship")) {
@@ -1689,7 +1674,13 @@ void UI::SetIntroVisible(bool visible)
 
 void UI::SetSeedRowVisible(bool visible)
 {
-    if (m_seedRow) m_seedRow->SetProperty("display", visible ? "block" : "none");
+    if (!m_seedRow) return;
+
+    // An inline property outranks the stylesheet, so showing the row has to
+    // drop the property rather than name a display mode -- naming one would
+    // override the row's `display: flex` and stack its contents.
+    if (visible) m_seedRow->RemoveProperty("display");
+    else m_seedRow->SetProperty("display", "none");
 }
 
 void UI::SetTeamOptions(const std::vector<TeamId>& teams)

@@ -1,8 +1,8 @@
 <rml>
 	<head>
 		<title>Technology</title>
-		<link type="text/rcss" href="rml.rcss"/>
-		<link type="text/rcss" href="vector.rcss"/>
+		<link type="text/rcss" href="theme/rml.rcss"/>
+		<link type="text/rcss" href="theme/vector.rcss"/>
 		<style>
 			/* The chamfer is an overlay frame rather than a border: RCSS has no
 			   clip-path, and a rounded corner would be the wrong read. One PNG
@@ -10,32 +10,32 @@
 			   art drops in over the hatch and leaves these alone. */
 			@spritesheet tech
 			{
-				src: tech-frame-normal.tga;
+				src: textures/tech-frame-normal.tga;
 				tech-frame-normal: 0px 0px 54px 54px;
 			}
 			@spritesheet tech_fitted
 			{
-				src: tech-frame-fitted.tga;
+				src: textures/tech-frame-fitted.tga;
 				tech-frame-fitted: 0px 0px 54px 54px;
 			}
 			@spritesheet tech_staged
 			{
-				src: tech-frame-staged.tga;
+				src: textures/tech-frame-staged.tga;
 				tech-frame-staged: 0px 0px 54px 54px;
 			}
 			@spritesheet tech_dim
 			{
-				src: tech-frame-dim.tga;
+				src: textures/tech-frame-dim.tga;
 				tech-frame-dim: 0px 0px 54px 54px;
 			}
 			@spritesheet tech_selected
 			{
-				src: tech-frame-selected.tga;
+				src: textures/tech-frame-selected.tga;
 				tech-frame-selected: 0px 0px 54px 54px;
 			}
 			@spritesheet tech_hatch
 			{
-				src: tech-hatch.tga;
+				src: textures/tech-hatch.tga;
 				tech-hatch: 0px 0px 54px 54px;
 			}
 
@@ -47,22 +47,22 @@
 			   on every side, which lands the sprite pixel for pixel. */
 			@spritesheet tech_glow_cyan
 			{
-				src: tech-glow-cyan.tga;
+				src: textures/tech-glow-cyan.tga;
 				tech-glow-cyan: 0px 0px 74px 74px;
 			}
 			@spritesheet tech_glow_amber
 			{
-				src: tech-glow-amber.tga;
+				src: textures/tech-glow-amber.tga;
 				tech-glow-amber: 0px 0px 74px 74px;
 			}
 			@spritesheet tech_glow_white
 			{
-				src: tech-glow-white.tga;
+				src: textures/tech-glow-white.tga;
 				tech-glow-white: 0px 0px 74px 74px;
 			}
 			@spritesheet tech_glow_dim
 			{
-				src: tech-glow-dim.tga;
+				src: textures/tech-glow-dim.tga;
 				tech-glow-dim: 0px 0px 74px 74px;
 			}
 
@@ -77,12 +77,26 @@
 				top: -10dp; left: -10dp; right: -10dp; bottom: -10dp;
 			}
 
-			/* Centred over live gameplay, which keeps running behind it. Not a
-			   draggable window: this is a screen you open, read and dismiss. */
+			/* Centred over live gameplay, which keeps running behind it, and
+			   dragged and resized by its own two handles.
+
+			   A column, and a definite height: the height is what the grip in
+			   the corner writes, and the rows below divide it between them.
+			   With `height: auto` a `flex-basis: 0` row would have nothing to
+			   take a share of and collapse. border-box so the dragged size is
+			   the size you see, padding included. */
 			body
 			{
+				display: flex;
+				flex-direction: column;
+				box-sizing: border-box;
+
 				width: 880dp;
-				height: auto;
+				height: 760dp;
+				min-width: 560dp;
+				min-height: 400dp;
+				max-width: 100%;
+				max-height: 100%;
 				margin: auto;
 				padding: 44dp 22dp 22dp 22dp;
 
@@ -107,6 +121,7 @@
 			div#tech_header
 			{
 				display: flex;
+				flex: 0 0 auto;
 				align-items: center;
 				padding-bottom: 12dp;
 				border-bottom-width: 1dp;
@@ -141,6 +156,18 @@
 				font-size: 11dp;
 				letter-spacing: 3dp;
 				color: #7fe4f5;
+			}
+
+			/* Sits in the corner the bottom-right bracket already draws, so the
+			   thing that says "this is a window" is the thing you grab. */
+			handle#tech_size
+			{
+				position: absolute;
+				right: 0;
+				bottom: 0;
+				width: 16dp;
+				height: 16dp;
+				cursor: resize;
 			}
 
 			span#tech_title
@@ -206,13 +233,22 @@
 			   empty margin rather than the drawing. Slots land on top of
 			   this, which is why it is a positioned container of its own. */
 			div#ship_view_panel { display: none; margin-top: 16dp; }
-			div#ship_view_panel.active { display: block; }
+			div#ship_view_panel.active
+			{
+				display: flex;
+				flex-direction: column;
+				flex: 1 1 0;
+				min-height: 0;
+			}
 
 			/* Clips the drawing and the slots hanging off its edges; the lists
-			   below are outside it so they can scroll on their own. */
+			   below are outside it so they can scroll on their own. Never takes
+			   a share of a resize: the drawing inside it is a fixed size, so
+			   extra height belongs to the ledgers underneath. */
 			div#ship_view_stage
 			{
 				position: relative;
+				flex: 0 0 auto;
 				height: 360dp;
 				overflow: hidden;
 
@@ -323,14 +359,24 @@
 			div#ship_lists
 			{
 				display: flex;
+				flex: 1 1 0;
+				min-height: 0;
 				margin-top: 14dp;
 			}
-			div.ship_list { flex: 1 1 0; margin-right: 18dp; }
+			div.ship_list
+			{
+				display: flex;
+				flex-direction: column;
+				flex: 1 1 0;
+				min-height: 0;
+				margin-right: 18dp;
+			}
 			div.ship_list:last-child { margin-right: 0; }
 
 			div.ship_list div.list_head
 			{
 				display: flex;
+				flex: 0 0 auto;
 				align-items: center;
 				padding-bottom: 7dp;
 				border-bottom-width: 1dp;
@@ -350,30 +396,30 @@
 				color: #2f6270;
 			}
 
-			/* Fixed height and its own scrollbar: the board's own height is
-			   already the hull's, and a list that grows the window would move
-			   the drawing every time something was fitted. */
+			/* Takes whatever height the window leaves and scrolls the rest, so
+			   fitting something never moves the drawing above it. */
 			div.list_body
 			{
-				height: 132dp;
+				flex: 1 1 0;
+				min-height: 0;
 				overflow: hidden auto;
 			}
 
-			/* Nothing else in the game styles a scrollbar, so these lists
-			   bring their own: unstyled, RmlUi lays one out at zero width and
-			   the list scrolls on the wheel with nothing to say that it can. */
-			div.list_body scrollbarvertical { width: 6dp; }
-			div.list_body scrollbarvertical slidertrack { background-color: #0b2129; }
-			div.list_body scrollbarvertical sliderbar
+			/* Nothing else in the game styles a scrollbar, so this board brings
+			   its own: unstyled, RmlUi lays one out at zero width and the thing
+			   scrolls on the wheel with nothing to say that it can. */
+			scrollbarvertical { width: 6dp; }
+			scrollbarvertical slidertrack { background-color: #0b2129; }
+			scrollbarvertical sliderbar
 			{
 				width: 6dp;
 				min-height: 24dp;
 				background-color: #1b5a6b;
 			}
-			div.list_body scrollbarvertical sliderbar:hover { background-color: #2f8ea6; }
-			div.list_body scrollbarvertical sliderbar:active { background-color: #56d9f2; }
-			div.list_body scrollbarvertical sliderarrowdec,
-			div.list_body scrollbarvertical sliderarrowinc { height: 0dp; }
+			scrollbarvertical sliderbar:hover { background-color: #2f8ea6; }
+			scrollbarvertical sliderbar:active { background-color: #56d9f2; }
+			scrollbarvertical sliderarrowdec,
+			scrollbarvertical sliderarrowinc { height: 0dp; }
 
 			div.entry
 			{
@@ -436,7 +482,13 @@
 				display: none;
 				margin-top: 16dp;
 			}
-			div#tech_branches.active { display: flex; }
+			div#tech_branches.active
+			{
+				display: flex;
+				flex: 1 1 0;
+				min-height: 0;
+				overflow: hidden auto;
+			}
 			div.branch { flex: 1 1 0; margin-right: 18dp; }
 			div.branch:last-child { margin-right: 0; }
 
@@ -580,6 +632,7 @@
 			div#tech_info
 			{
 				display: flex;
+				flex: 0 0 auto;
 				align-items: center;
 				height: 46dp;
 				padding: 0 12dp;
@@ -625,6 +678,7 @@
 			div#tech_footer
 			{
 				display: flex;
+				flex: 0 0 auto;
 				align-items: center;
 				margin-top: 14dp;
 			}
@@ -703,6 +757,7 @@
 		<div id="tech_titlebar">
 			<handle id="tech_grip" move_target="#document">GRAVITARIS &#8212; TECHNOLOGY</handle>
 		</div>
+		<handle id="tech_size" size_target="#document"></handle>
 
 		<div id="tech_header">
 			<span id="tech_title">TECHNOLOGY</span>

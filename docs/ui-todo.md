@@ -82,7 +82,7 @@ That makes this a placement change, not a technique:
       `UI::SetDimensions`, which is what `RenderInterfaceGL3::SetViewport`
       reads.
 - [x] Marked `docs/selective-postprocess-ui.md` superseded. `CLAUDE.md` and
-      the header comment in `data/ui/vector.rcss` described the old placement
+      the header comment in `data/ui/theme/vector.rcss` described the old placement
       too, and were updated with it.
 - [ ] Eyeball it: UI text should now be crisp with no bloom/scanlines over
       it, and the minimap should still draw. Not checked here — screenshotting

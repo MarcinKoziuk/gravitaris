@@ -1,8 +1,8 @@
 <rml>
 	<head>
 		<title>HUD</title>
-		<link type="text/rcss" href="rml.rcss"/>
-		<link type="text/rcss" href="vector.rcss"/>
+		<link type="text/rcss" href="theme/rml.rcss"/>
+		<link type="text/rcss" href="theme/vector.rcss"/>
 		<style>
 			/* Full-screen overlay: gameplay chrome only. pointer-events: none
 			   keeps the empty area from swallowing mouse input meant for the

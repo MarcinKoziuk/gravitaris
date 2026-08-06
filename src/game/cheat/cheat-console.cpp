@@ -2,8 +2,10 @@
 #include <cctype>
 #include <cmath>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -30,6 +32,11 @@ using Magnum::Vector2d;
 // "/spawn 100000" is a refusal rather than a hung server.
 static constexpr int MAX_BULK = 100;
 
+// Points and supplies are counters, not work -- MAX_BULK would be the wrong
+// ceiling for them, so they get one of their own and a default worth typing.
+static constexpr int MAX_GRANT = 1000000;
+static constexpr int DEFAULT_GRANT = 100;
+
 // How far to one side /tp puts you when the destination is another ship --
 // clear of its hull and its shield bubble, close enough to still be there.
 static constexpr double TP_STANDOFF = 90.;
@@ -43,6 +50,7 @@ static bool ParseInt(const std::string& token, int& out);
 static bool ParseDouble(const std::string& token, double& out);
 static std::optional<TeamId> ParseTeam(const std::string& token);
 static const char* TeamName(TeamId team);
+static std::uint32_t AddCapped(std::uint32_t total, int amount);
 static std::string Format(const char* format, ...);
 
 // Everything a command needs to reach: the sim, who is asking, and the reply
@@ -145,8 +153,8 @@ CheatResult RunCheatCommand(Game& game, flecs::entity subject, TeamId team, cons
 static void CheatHelp(Cheat& c)
 {
     c.Say("cheats (everyone, always):");
-    c.Say("/tech [n] - n technology points into your faction's pool");
-    c.Say("/supply [n] - n supplies into your own account");
+    c.Say("/tech [n] - n technology points into your faction's pool (100)");
+    c.Say("/supply [n] - n supplies into your own account (100)");
     c.Say("/upgrade <key|all|list> [n] - fit one straight onto your ship");
     c.Say("/heal - hull and shields back to full");
     c.Say("/god - stop dying (lost on respawn)");
@@ -169,8 +177,8 @@ static void CheatTech(Cheat& c)
         return;
     }
 
-    const int count = std::clamp(c.IntArg(1, 10), 1, MAX_BULK);
-    faction->techPoints += static_cast<std::uint32_t>(count);
+    const int count = std::clamp(c.IntArg(1, DEFAULT_GRANT), 1, MAX_GRANT);
+    faction->techPoints = AddCapped(faction->techPoints, count);
 
     c.Say(Format("tech: %u to spend in the PERMANENT tree", faction->techPoints));
 }
@@ -183,8 +191,8 @@ static void CheatSupplies(Cheat& c)
         return;
     }
 
-    const int count = std::clamp(c.IntArg(1, 50), 1, MAX_BULK);
-    account->supplies += static_cast<std::uint32_t>(count);
+    const int count = std::clamp(c.IntArg(1, DEFAULT_GRANT), 1, MAX_GRANT);
+    account->supplies = AddCapped(account->supplies, count);
 
     c.Say(Format("supplies: %u to spend in the SHIP tree (land at a lab or high port)",
                  account->supplies));
@@ -603,6 +611,13 @@ static const char* TeamName(TeamId team)
     case TeamId::None: break;
     }
     return "nobody";
+}
+
+static std::uint32_t AddCapped(std::uint32_t total, int amount)
+{
+    const std::uint64_t sum = std::uint64_t{total} + static_cast<std::uint64_t>(amount);
+    return static_cast<std::uint32_t>(
+            std::min<std::uint64_t>(sum, std::numeric_limits<std::uint32_t>::max()));
 }
 
 static std::string Format(const char* format, ...)

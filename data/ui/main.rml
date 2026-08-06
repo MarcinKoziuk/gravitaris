@@ -1,7 +1,7 @@
 <rml>
 	<head>
 		<title>Gravitaris</title>
-		<link type="text/template" href="vector-window.rml" />
+		<link type="text/template" href="theme/vector-window.rml" />
 		<style>
 			/* margin: auto centres the document in the context. */
 			body
