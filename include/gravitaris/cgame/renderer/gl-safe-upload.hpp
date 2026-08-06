@@ -10,10 +10,18 @@
 
 namespace Gravitaris {
 
-// glBufferData occasionally raises a first-chance SEH exception in the
-// NVIDIA driver on this machine (root cause unknown); catch it so it doesn't
-// kill the process. Upload still succeeds either way. Returns 0 on success,
-// or the SEH exception code on failure (caller decides how to log/skip).
+// Catches an SEH exception raised inside glBufferData so it doesn't kill the
+// process. Returns 0 on success, or the SEH exception code on failure (caller
+// decides how to log/skip).
+//
+// The fault this was written for turned out to be ours: a caller handing the
+// driver eight times the byte count it meant to (docs/client-startup-crash.md),
+// fixed at its source. Nothing is known to still need this, and it is worth
+// deleting once a few sessions have passed without it firing -- a swallowed
+// access violation leaves the driver in a state nobody has reasoned about.
+//
+// `data` must stay a `const void*` here: ArrayView<const void>'s typed
+// constructor would multiply `bytes` by sizeof(T) again.
 inline unsigned long SafeUpload(Magnum::GL::Buffer& buf, const void* data, std::size_t bytes)
 {
 #if defined(_WIN32)

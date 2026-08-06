@@ -5,6 +5,7 @@
 
 #include <flecs.h>
 
+#include <Magnum/GL/Buffer.h>
 #include <Magnum/GL/Mesh.h>
 #include <Magnum/Shaders/VertexColor.h>
 #include <Magnum/Math/Matrix3.h>
@@ -30,14 +31,25 @@ private:
         Color3 color;
     };
 
+    // Every strip of a group is a range of that group's one vertex buffer, so
+    // the buffer is uploaded once and the strips only differ in the offset and
+    // count they draw from it. The meshes hold nothing but its GL id
+    // (Magnum's AttributeLayout wraps the id, never a pointer to this object),
+    // so moving a GroupMeshes is fine -- but the buffer has to outlive them,
+    // which is what keeping the two in one struct buys. Declared first so it
+    // is destroyed last.
+    struct GroupMeshes {
+        Magnum::GL::Buffer vertexBuffer;
+        std::vector<MeshColor> strips;
+    };
+
     flecs::world& m_registry;
 
     ResourceLoader& m_resourceLoader;
 
     SimpleLineShader m_shader;
 
-    std::unordered_map<id_t,
-        std::unordered_map<id_t, std::vector<MeshColor>>> m_meshes;
+    std::unordered_map<id_t, std::unordered_map<id_t, GroupMeshes>> m_meshes;
 
     // Same convention as ModelRenderer2 (1 px/unit at zoom 1.0), so switching
     // the active renderer at runtime doesn't change the visible framing.
@@ -53,7 +65,7 @@ private:
 
     [[nodiscard]] Matrix3 ViewProjection() const;
 
-    void RenderGroup(id_t tag, std::unordered_map<id_t, std::vector<MeshColor>>& m_meshGroup, const Transform& transf);
+    void RenderGroup(id_t tag, std::unordered_map<id_t, GroupMeshes>& m_meshGroup, const Transform& transf);
 
 public:
     SimpleModelRenderer(flecs::world& registry, IFilesystem& filesystem, ResourceLoader& resourceLoader);

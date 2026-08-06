@@ -47,6 +47,7 @@
 #include <cgame/ui/debug/debug-ui.hpp>
 
 #include "cgame/input/replay-controller.hpp"
+#include "crash-handler.hpp"
 
 namespace Gravitaris {
 
@@ -261,6 +262,8 @@ GravitarisApplication::GravitarisApplication(const Arguments& arguments)
     , m_ui(m_filesystem)
 {
     HasEnteredMain = true;
+
+    InstallCrashHandler();
 
     using namespace Magnum::Math::Literals;
     Magnum::GL::Renderer::setClearColor(0x000000_rgbf);

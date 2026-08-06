@@ -2,8 +2,13 @@ cmake_minimum_required(VERSION 3.25)
 
 if(POLICY CMP0141)
     cmake_policy(SET CMP0141 NEW)
-    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
-        "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
+    # Left alone when the configure already asked for a format: /ZI is
+    # incompatible with /fsanitize=address, so a sanitizer build has to be
+    # able to pass -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase.
+    if(NOT DEFINED CMAKE_MSVC_DEBUG_INFORMATION_FORMAT)
+        set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
+            "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
+    endif()
 endif()
 
 project(GravitarisNG CXX C)
@@ -600,6 +605,8 @@ add_custom_target(gravitaris-build-info ALL
 if(GRAVITARIS_BUILD_CLIENT)
     add_executable(GravitarisNG
         src/client/gravitaris.cpp
+        src/client/crash-handler.hpp
+        src/client/crash-handler.cpp
         src/cgame/input/replay-controller.hpp
         src/cgame/input/replay-controller.cpp
         src/game/resource/body.cpp
@@ -937,6 +944,11 @@ if(GRAVITARIS_BUILD_CLIENT)
 
         "${CMAKE_DL_LIBS}"
     )
+
+    # Symbolizing the crash handler's stack trace (src/client/crash-handler.cpp).
+    if(WIN32)
+        target_link_libraries(GravitarisNG PRIVATE dbghelp)
+    endif()
 
     # PhysFS target name varies across versions — resolve whichever exists
     if(TARGET PhysFS::PhysFS)

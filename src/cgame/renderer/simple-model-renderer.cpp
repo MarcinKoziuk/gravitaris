@@ -33,29 +33,35 @@ void SimpleModelRenderer::HandleModelAdded(const Model& model, const id_t id)
     auto& meshGroup = m_meshes[id];
 
     for (const auto& [ tag, group ] : model.GetModelGroups()) {
-        std::vector<MeshColor> meshList;
         auto& vertexBuffer = group.vertexBuffer;
         auto& lineStrips = group.lineStrips;
-        meshList.reserve(lineStrips.size());
+
+        GroupMeshes groupMeshes;
+        // arrayView(pointer, count), never ArrayView<const void>{pointer,
+        // bytes}: the void view's typed constructor multiplies the size it
+        // is given by sizeof(T) again, so handing it a byte count off a
+        // typed pointer asks the driver to read sizeof(T) times the
+        // allocation (docs/client-startup-crash.md).
+        groupMeshes.vertexBuffer.setData(
+                Corrade::Containers::arrayView(vertexBuffer.data(), vertexBuffer.size()));
+        groupMeshes.strips.reserve(lineStrips.size());
 
         for (auto& lineStrip : lineStrips) {
             MeshColor meshColor;
-            GL::Buffer buf;
-            buf.setData(Corrade::Containers::ArrayView<const void>{
-                vertexBuffer.data(),
-                vertexBuffer.size() * sizeof(vertexBuffer[0])
-            });
+            // Non-owning (lvalue overload): every strip reads its own range of
+            // the one buffer above, which outlives them all.
             meshColor.mesh.setPrimitive(MeshPrimitive::LineStrip)
                     .setCount(static_cast<Int>(lineStrip.count))
-                    .addVertexBuffer(std::move(buf), static_cast<Int>(lineStrip.offset * sizeof(vertexBuffer[0])),
+                    .addVertexBuffer(groupMeshes.vertexBuffer,
+                                     static_cast<Int>(lineStrip.offset * sizeof(vertexBuffer[0])),
                                      Shaders::VertexColor2D::Position{});
             // No per-entity team data here; show placeholder strokes as white.
             meshColor.color = lineStrip.teamColor ? Color3{1.f} : lineStrip.color;
 
-            meshList.emplace_back(std::move(meshColor));
+            groupMeshes.strips.emplace_back(std::move(meshColor));
         }
 
-        meshGroup.try_emplace(tag, std::move(meshList));
+        meshGroup.try_emplace(tag, std::move(groupMeshes));
     }
 }
 
@@ -74,11 +80,11 @@ Matrix3 SimpleModelRenderer::ViewProjection() const
 }
 
 void SimpleModelRenderer::RenderGroup(id_t tag
-                                     , std::unordered_map<id_t, std::vector<MeshColor>>& meshGroups
+                                     , std::unordered_map<id_t, GroupMeshes>& meshGroups
                                      , const Transform& transf)
 {
     if (!meshGroups.contains(tag)) return;
-    auto& meshes = meshGroups.at(tag);
+    auto& meshes = meshGroups.at(tag).strips;
 
     Matrix3 matrix =
             ViewProjection() *

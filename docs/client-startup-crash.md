@@ -1,9 +1,62 @@
-# Intermittent client startup crash (open)
+# Intermittent client startup crash (fixed)
 
-Status: found 2026-08-01 while checking the round-setup screen. **Not fixed
-— not yet diagnosed past the bisect below.** Pre-existing; the sector
--generation increment did not introduce it, but makes it noticeably more
-frequent.
+Status: found 2026-08-01 while checking the round-setup screen, **fixed
+2026-08-06**. Root cause and fix are at the bottom; the investigation below is
+kept because parts of it pointed the wrong way and it is worth knowing which.
+
+## Root cause
+
+`SimpleModelRenderer::HandleModelAdded` asked the driver to read eight times
+the vertex buffer it was given:
+
+```cpp
+buf.setData(Containers::ArrayView<const void>{
+    vertexBuffer.data(),                            // const Vector2*
+    vertexBuffer.size() * sizeof(vertexBuffer[0])   // already bytes
+});
+```
+
+`ArrayView<const void>` has two constructors that both match here, and the
+typed one wins:
+
+- `(const void* data, size_t size)` — `size` is in bytes.
+- `template<class T> (const T* data, size_t size)` — *"Size is recalculated to
+  size in bytes"*, i.e. `_size = size * sizeof(T)`.
+
+A typed pointer therefore selects the second and multiplies a byte count by
+`sizeof(Vector2)` again. For the refit schematic that meant telling
+`glBufferData` to copy 28160 bytes out of a 3520-byte heap block. The read
+runs off the end of the allocation every single time; it only *faults* when
+the 28 KB it walks happens to cross an unmapped page, which is what made it
+look random and what made it scale with how many models a launch loaded.
+
+The fix is `Containers::arrayView(pointer, count)`, whose size is an element
+count and which converts to the void view with one multiplication.
+
+Verified: 0 crashes in 30 launches after, against 4 in 11 immediately before.
+
+`SafeUpload`'s "glBufferData occasionally raises a first-chance SEH exception
+in the NVIDIA driver, root cause unknown" was this same bug seen from the
+other renderer. Nothing is known to need that SEH swallow any more.
+
+## What actually found it
+
+A `SetUnhandledExceptionFilter` handler that symbolizes the faulting stack
+with dbghelp (`src/client/crash-handler.cpp`), which is what the "how to make
+progress" section below asked for. It named the call in one crashing run.
+AddressSanitizer, tried first, was useless here: the over-read happens inside
+the graphics driver, which ASan cannot instrument, and 10 ASan launches were
+all clean.
+
+## Where the old bisect misled
+
+"It needs structures" and "it scales with entity count" were both true and
+both beside the point -- structures simply meant more models loaded, and every
+model load was a chance for the over-read to land badly. The bisect's
+conclusion that the fault was in world building was wrong: the crash caught in
+the end was in `CGame`'s own constructor, loading the refit schematic, before
+`BuildWorld` ran at all. Removing `BuildWorld` cut the number of model loads,
+not the bug.
 
 ## Symptom
 
