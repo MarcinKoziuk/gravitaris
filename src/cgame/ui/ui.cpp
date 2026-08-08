@@ -813,13 +813,16 @@ void UI::SetStagedRank(std::uint32_t id, int tab, int rank, SlotRef hole)
     // A hole holds one thing, so a pick for it replaces whatever was planned
     // there -- picking a cannon where a gun was staged is a swap, not a second
     // entry, and so is fitting something where a strip was planned. Everything
-    // else is keyed by node and tab: the same def id names a node in each
-    // tree, and learning a rank is not the same plan as fitting one.
+    // else is keyed by the slot it goes into and the tab: the same def id names
+    // a node in each tree, and learning a rank is not the same plan as fitting
+    // one. Only the ship tab has slots to share -- a faction learning the
+    // bubble is not a faction declining the plating.
     for (std::size_t i = m_staged.size(); i > 0; --i) {
         const StagedPick& staged = m_staged[i - 1];
+        const bool sameSlot = tab == 0 ? SharesSlot(staged.id, id) : staged.id == id;
         const bool same = hole.IsHole()
                                 ? (staged.tab == tab && staged.hole == hole)
-                                : (staged.tab == tab && staged.id == id && !staged.hole.IsHole());
+                                : (staged.tab == tab && sameSlot && !staged.hole.IsHole());
         if (!same) continue;
 
         // Clicking the same plan again takes it back off; anything else
@@ -838,7 +841,7 @@ void UI::StageStrip(std::uint32_t id, SlotRef hole)
     for (std::size_t i = m_staged.size(); i > 0; --i) {
         const StagedPick& staged = m_staged[i - 1];
         const bool same = hole.IsHole() ? (staged.tab == 0 && staged.hole == hole)
-                                        : (staged.tab == 0 && staged.id == id
+                                        : (staged.tab == 0 && SharesSlot(staged.id, id)
                                            && !staged.hole.IsHole());
         if (!same) continue;
 
@@ -884,6 +887,31 @@ bool UI::SlotTakes(const ShipSlotView& slot, std::uint32_t nodeId) const
             for (const std::string& fits : node.slots) {
                 if (fits == category) return true;
             }
+        }
+    }
+    return false;
+}
+
+// Whether two ship-tree picks would land in the same place on the hull. Both
+// ammo lockers name the `ammo` slot, as both shield emitters name theirs, and a
+// slot that carries one part cannot stand two plans -- keying that by node id
+// alone left both planned at once, with the older of them showing.
+bool UI::SharesSlot(std::uint32_t a, std::uint32_t b) const
+{
+    if (a == b) return true;
+
+    const TechNodeView* first = nullptr;
+    const TechNodeView* second = nullptr;
+    for (const TechNodeView& node : m_shownNodes) {
+        if (node.tab != 0) continue;
+        if (node.id == a) first = &node;
+        if (node.id == b) second = &node;
+    }
+    if (!first || !second) return false;
+
+    for (const std::string& category : first->slots) {
+        for (const std::string& other : second->slots) {
+            if (category == other) return true;
         }
     }
     return false;

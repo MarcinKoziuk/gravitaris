@@ -1811,19 +1811,26 @@ void TestUpgradeCatalog()
                 "catalog: the cannon goes on before its box");
         const int bare = catalog.ResolveStats(hull.levels).cannonCapacity;
 
-        Require(catalog.FitRank(*shells, 2, hull, all, purse, true),
+        Require(catalog.FitRank(*shells, 1, hull, all, purse, true),
                 "catalog: the shell locker can be fitted");
         Require(catalog.ResolveStats(hull.levels).cannonCapacity > bare,
                 "catalog: a locker deepens the magazine it feeds");
         Require(hull.cannonAmmo <= catalog.ResolveStats(hull.levels).cannonCapacity,
                 "catalog: ...and never leaves more rounds aboard than there is room for");
 
-        // Each locker hangs off the weapon it feeds, so a hull with no launcher
-        // is not offered warheads at all.
+        // A locker is stocked for a weapon the SIDE has learned, not only for
+        // one already on this hull: a pilot refitting from scratch buys the
+        // rounds and the launcher in the same visit. With nothing learned the
+        // gate still gates.
         Require(catalog.ShipState(*warheads, 1,
                                  UpgradeCatalog::ShipContext{&hull, &all, RICH, true})
+                        == TechNodeState::Available,
+                "catalog: a locker is sold for a weapon the faction has researched");
+        TechUnlocks none;
+        Require(catalog.ShipState(*warheads, 1,
+                                 UpgradeCatalog::ShipContext{&hull, &none, RICH, true})
                         == TechNodeState::Locked,
-                "catalog: a locker is locked behind the weapon it loads");
+                "catalog: ...and locked behind a weapon it has not");
         Require(catalog.FitRank(*bay, 1, hull, all, purse, true),
                 "catalog: a launcher for the warheads to feed");
 

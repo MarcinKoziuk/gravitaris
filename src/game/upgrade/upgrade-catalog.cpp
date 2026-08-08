@@ -313,10 +313,11 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
 {
     ShipStats stats;
 
-    // Spares for the one pool this hull's locker feeds. Added inside the
-    // weapon's own block below, so a locker on a hull with no cannon adds
-    // nothing at all -- which is the choice the single ammo slot is asking
-    // about.
+    // Spares for the one pool this hull's locker feeds. Stowage is stowage: the
+    // box holds its rounds whether or not the weapon they belong to is on the
+    // hull right now, so a pilot can buy the two in either order. What a hull
+    // with nothing to fire them through cannot do is *fill* them -- see
+    // FillableCapacity, which is what the yard prices a resupply against.
     int cannonSpares = 0;
     int missileSpares = 0;
     if (const UpgradeDef* def = FindAmmoStore(levels.ammoPool); def && levels.ammoStore > 0) {
@@ -335,21 +336,21 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
 
     // No stock cannon either: the heavy mount is empty until one is fitted,
     // and the tier decides both the weapon and how deep its magazine is.
+    stats.cannonCapacity = cannonSpares;
     if (const UpgradeDef* def = FindKind(UpgradeKind::CannonTier); def && levels.cannonTier > 0) {
         const std::size_t index = std::min<std::size_t>(levels.cannonTier, def->tiers.size()) - 1;
         stats.cannon = FindWeapon(def->tiers[index]);
-        stats.cannonCapacity =
-                def->rack.capacity * static_cast<int>(levels.cannonTier) + cannonSpares;
+        stats.cannonCapacity += def->rack.capacity * static_cast<int>(levels.cannonTier);
     }
     if (stats.cannon) stats.cannonCooldownTicks = stats.cannon->cooldownTicks;
 
     // No stock launcher: a hull that hasn't fitted a bay has no missile at all,
     // and both the round and the rack it goes in come from that bay's tier.
+    stats.missileCapacity = missileSpares;
     if (const UpgradeDef* def = FindKind(UpgradeKind::MissileTier); def && levels.missileTier > 0) {
         const std::size_t index = std::min<std::size_t>(levels.missileTier, def->tiers.size()) - 1;
         stats.missile = FindWeapon(def->tiers[index]);
-        stats.missileCapacity =
-                def->rack.capacity * static_cast<int>(levels.missileTier) + missileSpares;
+        stats.missileCapacity += def->rack.capacity * static_cast<int>(levels.missileTier);
     }
     if (stats.missile) stats.missileCooldownTicks = stats.missile->cooldownTicks;
 
@@ -473,12 +474,17 @@ TechNodeState UpgradeCatalog::ShipState(const UpgradeDef& def, std::uint8_t rank
     // hold a bubble at the moment it fits plating, and asking it to would lock
     // the line behind a state that cannot exist. For those the gate is what the
     // faction has learned, which is what a research prerequisite means anyway.
+    //
+    // A locker is gated the same way: the yard stocks shells for a weapon the
+    // side has learned to build, so a pilot refitting from scratch buys the
+    // rounds and the gun it feeds in one visit rather than having to land twice.
     if (def.requiresId != 0) {
         const UpgradeDef* prereq = Find(def.requiresId);
         if (!prereq) return TechNodeState::Locked;
-        const bool held = Exclusive(def, *prereq)
-                                  ? UnlockedRank(*prereq, *context.unlocked) > 0
-                                  : LevelOf(*prereq, levels) > 0;
+        const bool researchGate =
+                def.kind == UpgradeKind::AmmoStore || Exclusive(def, *prereq);
+        const bool held = researchGate ? UnlockedRank(*prereq, *context.unlocked) > 0
+                                       : LevelOf(*prereq, levels) > 0;
         if (!held) return TechNodeState::Locked;
     }
 

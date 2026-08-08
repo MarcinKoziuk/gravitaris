@@ -195,13 +195,14 @@ supply_cost = [12, 26, 44]
 #
 # `research = false`: shells are not a technology. Neither box appears on the
 # PERMANENT board and no unlocked rank gates them -- a yard sells them off the
-# shelf, at every rank, to any hull carrying the weapon they feed. That
-# `requires` is the only gate either of them has.
+# shelf to any hull whose side has learned the weapon they feed. That `requires`
+# is the only gate either of them has, and it asks what the faction knows rather
+# than what this hull is already carrying: the rounds and the gun are one visit.
 #
-# Spares sit on top of what the weapon's own tier holds, so a box is worth
-# nothing to a hull that hasn't fitted the weapon it feeds. Both are cheap next
-# to the weapon itself: this is the small purchase that keeps a working loadout
-# in the fight, not one that changes what it can do.
+# One rank each: a box is either aboard or it isn't. Spares sit on top of what
+# the weapon's own tier holds, and both are cheap next to the weapon itself --
+# this is the small purchase that keeps a working loadout in the fight, not one
+# that changes what it can do.
 
 [[upgrade]]
 key = "shell_box"
@@ -212,12 +213,12 @@ description = "Belted rounds stowed aft. Half again the magazine, for the mounts
 kind = "ammo_store"
 ammo_pool = "cannon"
 research = false
-max_level = 3
+max_level = 1
 weight = 0.7
-capacity = 20  # per level, on top of the cannon tier's own 40 per rank
+capacity = 20  # on top of the cannon tier's own 40 per rank
 per_pickup = 20
 requires = "heavy_cannons"
-supply_cost = [8, 16, 26]
+supply_cost = 8
 
 [[upgrade]]
 key = "missile_container"
@@ -228,12 +229,12 @@ description = "Four more rounds for the rack, and the space to stow them."
 kind = "ammo_store"
 ammo_pool = "missile"
 research = false
-max_level = 3
+max_level = 1
 weight = 0.7
-capacity = 4 # per level, matching what a rank of the bay itself adds
+capacity = 4 # matching what a rank of the bay itself adds
 per_pickup = 4
 requires = "missile_bay"
-supply_cost = [10, 20, 34]
+supply_cost = 10
 
 # The drive. Straight-line performance: harder acceleration and a higher cruise.
 #

@@ -388,6 +388,9 @@ private:
     };
     [[nodiscard]] SlotPlan PlanFor(const ShipSlotView& slot) const;
     [[nodiscard]] bool SlotTakes(const ShipSlotView& slot, std::uint32_t nodeId) const;
+    // Whether two ship-tree nodes go into the same slot on the hull, which is
+    // what makes planning one displace the other.
+    [[nodiscard]] bool SharesSlot(std::uint32_t a, std::uint32_t b) const;
     void CycleStagePick(std::uint32_t id, int tab);
     void ConfirmStaged();
     void ResetStaged();
