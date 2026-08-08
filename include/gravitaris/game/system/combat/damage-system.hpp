@@ -55,11 +55,18 @@ private:
 
     void ResolveShipRams();
 
-    // Kills anything that has reached a star's surface. A rule, not a
-    // physical result: a sun is not a place you land badly, it is a place
-    // nothing comes back from, so this bypasses the landing curve, the hull's
-    // fragility and any shield outright.
+    // A star cooks whatever comes near it, and destroys outright whatever
+    // reaches the disc. A rule, not a physical result: a sun is not a place
+    // you land badly, it is a place nothing comes back from, so the contact
+    // half bypasses the landing curve, the hull's fragility and any shield.
+    // The heat half does go through the shield -- carrying one is what buys a
+    // few more seconds in the corona.
     void ResolveStarContact();
+
+    // Spends `target`'s shield against radiated heat, which soaks the whole
+    // hull rather than striking one face of it, and returns what still
+    // reaches the hull.
+    float AbsorbHeatWithShield(flecs::entity target, float damage);
 
     // Spends `target`'s shield charge (if it carries one) against `damage`
     // and returns what still reaches the hull. Weapon hits only: a shield is

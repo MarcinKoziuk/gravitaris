@@ -17,6 +17,7 @@
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
+#include <gravitaris/game/game.hpp>
 #include <gravitaris/game/system/combat/damage-system.hpp>
 
 namespace Gravitaris {
@@ -31,7 +32,27 @@ static constexpr float MIN_LANDING_DAMAGE = 1.f;
 // How far above a star's surface the fatal boundary sits, as a fraction of
 // its radius. Slightly outside it, so a hull is gone at the moment it looks
 // like it touched rather than after visibly sinking into the disc.
+//
+// This alone cannot be what kills a ship that comes to rest on a sun: the
+// hull's own collision shape holds its centre a full ship-radius off the
+// surface, which on a 320-unit star is further out than this 2% margin
+// reaches, so a gentle arrival parks just outside it and sits there. What
+// catches that is the heat below -- this stays as the floor for anything that
+// actually reaches the disc, and for the tunnelling case position-testing was
+// written for.
 static constexpr double STAR_LETHAL_MARGIN = 1.02;
+
+// A star's corona: hull points per second at the surface, falling off with
+// the inverse square of distance out to STAR_HEAT_REACH radii, where it
+// reaches exactly zero. Smooth to the boundary on purpose -- a hard edge
+// would mean a ship parked a metre outside it cooks not at all while one a
+// metre inside cooks steadily.
+//
+// The surface figure kills a stock 100hp fighter in under two seconds and a
+// shielded one in about three: long enough to watch the shield go and try to
+// pull out, far too short to stay.
+static constexpr float STAR_SURFACE_HEAT = 60.f;
+static constexpr double STAR_HEAT_REACH = 2.5;
 
 static bool ShieldElementLive(flecs::entity ent, std::uint8_t element)
 {
@@ -288,15 +309,24 @@ void DamageSystem::ResolveStarContact()
 {
     struct Star {
         Magnum::Vector2d pos;
+        double radius = 0.;
         double lethalRadiusSq = 0.;
+        double reachSq = 0.;
     };
     std::vector<Star> stars;
     m_registry.each([&](const Transform& transf, const Planet& planet) {
         if (!planet.star) return;
-        const double radius = static_cast<double>(planet.radius) * transf.scale.x() * STAR_LETHAL_MARGIN;
-        stars.push_back(Star{transf.pos, radius * radius});
+        const double radius = static_cast<double>(planet.radius) * transf.scale.x();
+        const double lethal = radius * STAR_LETHAL_MARGIN;
+        const double reach = radius * STAR_HEAT_REACH;
+        stars.push_back(Star{transf.pos, radius, lethal * lethal, reach * reach});
     });
     if (stars.empty()) return;
+
+    // Normalizes the inverse-square falloff to reach exactly zero at the edge
+    // of the corona, so nothing has to special-case the boundary.
+    const double edgeTerm = 1.0 / (STAR_HEAT_REACH * STAR_HEAT_REACH);
+    const double heatScale = 1.0 / (1.0 - edgeTerm);
 
     // Position, not contact: a hull touching the disc is already gone, and
     // waiting for Chipmunk to resolve a collision against it would let a fast
@@ -305,20 +335,71 @@ void DamageSystem::ResolveStarContact()
         if (dmg.hp <= 0.f || entity.has<Planet>()) return;
 
         for (const Star& star : stars) {
-            if ((star.pos - transf.pos).dot() > star.lethalRadiusSq) continue;
+            const double distSq = (star.pos - transf.pos).dot();
+            if (distSq > star.reachSq) continue;
 
-            dmg.hp = 0.f;
-            // lastDamageTeam is left as it stands: whoever last put a round
-            // into this hull gets the line, exactly as a crash credits the
-            // pursuer that drove it into the ground.
+            const Magnum::Vector2 at{static_cast<float>(transf.pos.x()),
+                                     static_cast<float>(transf.pos.y())};
+
+            if (distSq <= star.lethalRadiusSq) {
+                dmg.hp = 0.f;
+                // lastDamageTeam is left as it stands: whoever last put a
+                // round into this hull gets the line, exactly as a crash
+                // credits the pursuer that drove it into the ground.
+                dmg.lastDamageCause = DamageCause::Star;
+                m_eventQueue.Emit(GameEventType::Impact, entity, at, 0);
+                return;
+            }
+
+            const double falloff = star.radius * star.radius / distSq;
+            const float heat = STAR_SURFACE_HEAT
+                    * static_cast<float>((falloff - edgeTerm) * heatScale * Game::PHYSICS_DELTA);
+            if (heat <= 0.f) continue;
+
+            // Shields first, and only while they last -- a bubble bought a
+            // few more seconds in the corona is the point of carrying one.
+            const float toHull = AbsorbHeatWithShield(entity, heat);
+            if (toHull <= 0.f) return;
+
+            dmg.hp = std::max(0.f, dmg.hp - toHull);
             dmg.lastDamageCause = DamageCause::Star;
-            m_eventQueue.Emit(GameEventType::Impact, entity,
-                              Magnum::Vector2{static_cast<float>(transf.pos.x()),
-                                              static_cast<float>(transf.pos.y())},
-                              0);
             return;
         }
     });
+}
+
+// Radiation bathes the whole hull rather than striking one face of it, so it
+// drains the shield as a pool: the bubble directly, or every live plate at
+// once in proportion to what each still holds. Returns what got through.
+//
+// Deliberately silent -- no per-tick ShieldHit/PlatingHit. This runs every
+// tick for every ship in a corona, and one event per ship per tick is a wire
+// full of noise describing a condition the client can already see from where
+// the ship is and what its bars are doing.
+float DamageSystem::AbsorbHeatWithShield(flecs::entity target, float damage)
+{
+    ShipLoadout* loadout = target.try_get_mut<ShipLoadout>();
+    if (!loadout || loadout->shieldHp <= 0.f) return damage;
+
+    const ShipStats stats = m_catalog.ResolveStats(loadout->levels);
+    const float absorbed = std::min(loadout->shieldHp, damage);
+
+    if (IsPlated(*loadout)) {
+        const float pool = loadout->shieldHp;
+        for (std::uint8_t i = 0; i < loadout->plateCount; ++i) {
+            if (loadout->plates[i] <= 0.f) continue;
+            loadout->plates[i] = std::max(0.f, loadout->plates[i] - absorbed * loadout->plates[i] / pool);
+            loadout->plateRegenDelay[i] = stats.shieldRegenDelayTicks;
+        }
+    }
+    else {
+        loadout->shieldRegenDelay = stats.shieldRegenDelayTicks;
+    }
+
+    // ShieldSystem re-sums this from the plates next tick; keeping it honest
+    // now matters for anything else resolving damage in this one.
+    loadout->shieldHp = std::max(0.f, loadout->shieldHp - absorbed);
+    return damage - absorbed;
 }
 
 // networking-plan Phase 9's destroy rule. Nothing here destroys an entity

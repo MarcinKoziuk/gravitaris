@@ -2761,6 +2761,95 @@ void TestSunIsLethal()
     fs.Shutdown();
 }
 
+// The corona. Held at a fixed radius rather than dropped, so what is measured
+// is the heat and not how long the fall takes.
+//
+// The 1.03R case is the one this file used to miss: a hull's own collision
+// shape holds its centre a ship-radius off the surface, which on a 320-unit
+// star is further out than STAR_LETHAL_MARGIN reaches -- so a ship that came
+// to rest on a sun sat just outside the contact check and cooked forever
+// without dying. The test above passed throughout, because an arrival at
+// speed penetrates far enough to cross the boundary and a resting one never
+// does.
+void TestSunHeat()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    struct Result {
+        bool alive = false;
+        double seconds = 0.;
+        DamageCause cause = DamageCause::Unknown;
+        float shieldLeft = 0.f;
+    };
+
+    const auto heldAt = [&](double factor, bool shielded) {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+
+        flecs::entity sun = spawner.SpawnStar("models/stars/sun"_id, Vector2d{0., 0.});
+        const double radius = sun.get<Planet>().radius * sun.get<Transform>().scale.x();
+
+        flecs::entity ship = spawner.SpawnPlayer("models/ships/fighter-1"_id,
+                                                 Vector2d{0., radius * factor}, TeamId::Blue);
+        cpBody* body = game.GetPhysicsSystem().GetBody(ship.get<PhysicsRef>()).cp.body.get();
+
+        if (shielded) {
+            const UpgradeDef* bubble =
+                    game.GetUpgradeCatalog().FindKind(UpgradeKind::Shield, ShieldType::Bubble);
+            Require(bubble != nullptr, "sun heat: the pool has a bubble shield (setup check)");
+            FitFree(game.GetUpgradeCatalog(), *bubble, 1, ship.get_mut<ShipLoadout>());
+            ShipLoadout& loadout = ship.get_mut<ShipLoadout>();
+            loadout.shieldHp = game.GetUpgradeCatalog().ResolveStats(loadout.levels).shieldCapacity;
+            Require(loadout.shieldHp > 0.f, "sun heat: the bubble starts charged (setup check)");
+        }
+
+        Result result;
+        game.OnDeath().connect([&result](const DeathReport& r) { result.cause = r.cause; });
+
+        const cpVect held = cpv(0., radius * factor);
+        int tick = 0;
+        for (; tick < 1800 && ship.is_alive(); ++tick) {
+            cpBodySetPosition(body, held);
+            cpBodySetVelocity(body, cpvzero);
+            game.Update();
+        }
+
+        result.alive = ship.is_alive();
+        result.seconds = tick / 60.0;
+        if (result.alive) result.shieldLeft = ship.get<ShipLoadout>().shieldHp;
+        return result;
+    };
+
+    // Resting on the surface: the reported bug. 1.03R is where a fighter's
+    // own hull holds it, just outside the contact boundary.
+    const Result resting = heldAt(1.03, /*shielded=*/false);
+    Require(!resting.alive, "sun heat: a ship resting on a star's surface burns up");
+    Require(resting.cause == DamageCause::Star, "sun heat: and the star gets the kill-feed line");
+    Require(resting.seconds < 5.0, "sun heat: quickly enough that it is not somewhere to park");
+
+    // A shield is worth carrying into a corona, and worth exactly as much as
+    // it holds -- it delays, it does not save.
+    const Result shielded = heldAt(1.03, /*shielded=*/true);
+    Require(!shielded.alive, "sun heat: a shield does not make a star survivable");
+    Require(shielded.seconds > resting.seconds,
+            "sun heat: but it absorbs the heat until it is gone, so the hull lasts longer");
+
+    // Falls off with distance: a pass through the outer corona costs, and
+    // outside it there is nothing to pay.
+    const Result grazing = heldAt(2.0, /*shielded=*/false);
+    Require(grazing.seconds > resting.seconds * 3.0,
+            "sun heat: the outer corona is a cost, not a death sentence");
+
+    const Result clear = heldAt(2.6, /*shielded=*/false); // outside STAR_HEAT_REACH
+    Require(clear.alive, "sun heat: beyond the corona a star does nothing at all");
+
+    fs.Shutdown();
+}
+
 // The chat cheats (CheatConsole). Everyone can run them and nothing gates
 // them, so what's worth proving is that each one actually reaches the sim --
 // they run server-side in multiplayer, where a client can't check for itself.
@@ -4382,6 +4471,7 @@ int main()
     TestResearch();
     TestResearchQueue();
     TestSunIsLethal();
+    TestSunHeat();
     TestCheats();
     TestFriendlyFire();
     TestBoost();
