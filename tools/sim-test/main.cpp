@@ -4319,6 +4319,43 @@ void TestInterceptKeepsTargetInSights()
     fs.Shutdown();
 }
 
+// The single-player death/respawn path (Game::HandlePlayerRespawn), which is
+// what a crash into a planet runs.
+void TestPlayerRespawnAfterDeath()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    game.SetPlayerName("Crashy");
+    game.Start();
+
+    for (int life = 0; life < 3; ++life) {
+        const std::optional<flecs::entity> before = game.GetPlayer();
+        Require(before && before->is_alive(), "player respawn: there is a player to kill");
+        const std::uint32_t pilotId = before->get<PilotRef>().pilotId;
+        before->get_mut<Damageable>().hp = 0.f;
+
+        for (int tick = 0; tick < 400; ++tick) {
+            game.Update();
+            const std::optional<flecs::entity> now = game.GetPlayer();
+            if (now && *now != *before && now->is_alive()) break;
+        }
+
+        const std::optional<flecs::entity> after = game.GetPlayer();
+        Require(after && after->is_alive() && *after != *before,
+                "player respawn: a fresh hull turns up after the player dies");
+        Require(after->get<Callsign>().name == "Crashy",
+                "player respawn: the fresh hull flies under the same name");
+        Require(after->get<PilotRef>().pilotId == pilotId,
+                "player respawn: the fresh hull carries the same pilot identity");
+    }
+
+    fs.Shutdown();
+}
+
 } // namespace
 
 int main()
@@ -4333,6 +4370,7 @@ int main()
     TestClientPrediction();
     TestLandingAndClaiming();
     TestShipCollision();
+    TestPlayerRespawnAfterDeath();
     TestStructures();
     TestFreighterEconomy();
     TestSelfDevelopment();

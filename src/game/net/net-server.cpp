@@ -91,8 +91,10 @@ void NetServer::HandleRespawns()
         state.ship.emplace<Callsign>(PeerCallsign(peer, state));
         // The fresh hull spawned with a pilot identity of its own; overwrite
         // it with the one this peer has been flying under, so the account it
-        // built up is still theirs.
-        if (state.pilotId != 0) state.ship.emplace<PilotRef>(PilotRef{state.pilotId});
+        // built up is still theirs. set(), not emplace(): emplace() only
+        // constructs a component the entity doesn't have yet, and SpawnPlayer
+        // has already given this one a PilotRef.
+        if (state.pilotId != 0) state.ship.set<PilotRef>(PilotRef{state.pilotId});
 
         ServerWelcomePacket welcome;
         welcome.clientId = peer;

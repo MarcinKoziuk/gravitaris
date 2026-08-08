@@ -320,8 +320,10 @@ void Game::HandlePlayerRespawn()
                                                 spawn->vel, spawn->rot);
         m_player->emplace<Callsign>(m_playerName);
         // The fresh hull spawned as a pilot of its own; put the player back
-        // behind the identity whose Supplies they have been banking.
-        if (m_playerPilotId != 0) m_player->emplace<PilotRef>(PilotRef{m_playerPilotId});
+        // behind the identity whose Supplies they have been banking. set(), not
+        // emplace(): emplace() only constructs a component the entity doesn't
+        // have yet, and SpawnPlayer has already given this one a PilotRef.
+        if (m_playerPilotId != 0) m_player->set<PilotRef>(PilotRef{m_playerPilotId});
     }
 }
 
