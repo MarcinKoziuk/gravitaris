@@ -27,13 +27,9 @@ void RepairSystem::Update()
         if (!landing.landed || landing.landedOnNetId == 0) return;
         if (hull.hp >= hull.maxHp) return;
 
-        // A station deck counts as its planet's: a High Port only ever orbits
-        // one, and the pairing that makes the rock home is down there.
-        flecs::entity site = m_entitySpawner.EntityForNetId(landing.landedOnNetId);
-        if (const PlanetOrbitAttachment* orbit = site.is_alive() ? site.try_get<PlanetOrbitAttachment>() : nullptr) {
-            site = m_entitySpawner.EntityForNetId(orbit->planetNetId);
-        }
-        if (!IsHomePlanet(m_registry, site, team.id)) return;
+        const flecs::entity site = m_entitySpawner.EntityForNetId(landing.landedOnNetId);
+        const flecs::entity planet = m_entitySpawner.EntityForNetId(SitePlanetNetId(site));
+        if (!IsHomePlanet(m_registry, planet, team.id)) return;
 
         hull.hp = std::min(hull.hp + perTick, hull.maxHp);
     });

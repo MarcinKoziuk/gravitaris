@@ -20,7 +20,10 @@
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
 #include <gravitaris/game/system/gwell/home-site.hpp>
+#include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/system/ship/ai-strategy-system.hpp>
+
+#include "game/system/ship/ai-refit.hpp"
 
 namespace Gravitaris {
 
@@ -121,9 +124,11 @@ AIOrder OrderFor(AIGoal goal, flecs::entity subject)
 
 } // namespace
 
-AIStrategySystem::AIStrategySystem(flecs::world& registry, PhysicsSystem& physicsSystem)
+AIStrategySystem::AIStrategySystem(flecs::world& registry, PhysicsSystem& physicsSystem,
+                                   const UpgradeCatalog& catalog)
         : m_registry(registry)
         , m_physicsSystem(physicsSystem)
+        , m_catalog(catalog)
 {}
 
 void AIStrategySystem::Update()
@@ -159,13 +164,15 @@ void AIStrategySystem::Update()
         }
     });
 
-    // Anything the side has learned to build is a live reason to fly home,
-    // since a hull can only be fitted at a lab -- see the `shopping` term
-    // below. Whether this pilot can afford it is its own business.
-    std::array<bool, NUM_TEAMS> teamUpgradeReady{};
-    m_registry.each([&](const FactionState& fs) {
-        teamUpgradeReady[static_cast<std::size_t>(fs.team)] = AnyRankUnlocked(fs.unlocked);
+    // Held by entity rather than by pointer: what a pilot can afford is read
+    // per leader in the loop below, and a component address is only good
+    // until the world changes shape.
+    std::array<flecs::entity, NUM_TEAMS> factionOf{};
+    m_registry.each([&](flecs::entity ent, const FactionState& fs) {
+        factionOf[static_cast<std::size_t>(fs.team)] = ent;
     });
+
+    const std::vector<HomeSite> homeSites = GatherHomeSites(m_registry);
 
     const auto addStructure = [&](flecs::entity ent, const Damageable& hp, std::uint32_t planetNetId) {
         const auto it = planetByNetId.find(planetNetId);
@@ -291,23 +298,28 @@ void AIStrategySystem::Update()
         // Going home, scaled by how badly the hull is hurt: a scratch is a
         // mild pull that any real objective outscores, and a pilot under its
         // own flee threshold outranks everything, since below that the
-        // tactical layer has stopped picking fights anyway. A pilot that
-        // hasn't collected the upgrades it launched for is in the same
-        // position -- it has business at home either way.
+        // tactical layer has stopped picking fights anyway. A pilot with
+        // something to buy and the money for it is in the same position -- it
+        // has business at home either way.
         const std::size_t myTeamIndex = static_cast<std::size_t>(myTeam.id);
-        const bool shopping = teamHasLab[myTeamIndex]
-                && (teamUpgradeReady[myTeamIndex]
-                    || (pilot.upgradesWanted > 0 && pilot.padWaitRemaining > 0));
+        const flecs::entity factionEntity = factionOf[myTeamIndex];
+        const FactionState* faction =
+                factionEntity.is_alive() ? factionEntity.try_get<FactionState>() : nullptr;
+        const bool shopping = teamHasLab[myTeamIndex] && pilot.padWaitRemaining > 0
+                && WantsRefit(m_catalog, self, pilot, faction);
         const bool damaged = selfHull && selfHull->maxHp > 0.f && selfHull->hp < selfHull->maxHp;
 
         if (damaged || shopping) {
-            // Shopping ends at a lab or it was not worth flying: only that
-            // planet can hand the upgrade over. A hurt pilot just wants the
-            // nearest friendly ground.
-            flecs::entity home;
-            if (shopping) home = FindResearchPlanet(m_registry, myTeam.id, transf.pos);
-            if (!home.is_alive()) home = FindHomePlanet(m_registry, myTeam.id, transf.pos);
-            if (home.is_alive()) {
+            // Shopping ends at a lab or it was not worth flying: only a yard
+            // over one can fit the part. A hurt pilot just wants the nearest
+            // friendly ground -- and either way the port outranks the planet
+            // it orbits, since it serves a pilot identically without the
+            // descent.
+            HomeSite home = SelectHomeSite(homeSites, myTeam.id, transf.pos, /*needsLab=*/shopping);
+            if (!home.IsValid()) {
+                home = SelectHomeSite(homeSites, myTeam.id, transf.pos, /*needsLab=*/false);
+            }
+            if (home.IsValid()) {
                 const double fraction = damaged
                         ? static_cast<double>(selfHull->hp / selfHull->maxHp)
                         : 1.0;
@@ -315,8 +327,8 @@ void AIStrategySystem::Update()
                         (shopping || fraction < pilot.personality.fleeHealthFraction)
                         ? REARM_URGENCY
                         : 1.0 - fraction;
-                const double dist = (home.get<Transform>().pos - transf.pos).length();
-                consider(AIGoal::Rearm, home,
+                const double dist = (home.pos - transf.pos).length();
+                consider(AIGoal::Rearm, home.entity,
                          weights.rearm * urgency * Proximity(dist, EXPANSION_SCALE));
             }
         }

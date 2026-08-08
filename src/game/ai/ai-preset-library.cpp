@@ -12,6 +12,7 @@ static void ReadPersonality(const toml::table& t, AIPersonality& p);
 static void ReadGuidance(const toml::table& t, GuidanceParams& g);
 static void ReadFlight(const toml::table& t, FlightControllerParams& f);
 static void ReadStrategy(const toml::table& t, AIStrategyWeights& w);
+static void ReadFit(const toml::table& t, FitWeights& w);
 static std::uint32_t NextRandom(std::uint32_t& state);
 
 AIPresetLibrary::AIPresetLibrary()
@@ -72,6 +73,7 @@ bool AIPresetLibrary::Load(IFilesystem& filesystem, const char* path)
         if (const toml::table* t = (*entry)["guidance"].as_table()) ReadGuidance(*t, preset.guidance);
         if (const toml::table* t = (*entry)["flight"].as_table()) ReadFlight(*t, preset.flight);
         if (const toml::table* t = (*entry)["strategy"].as_table()) ReadStrategy(*t, preset.strategy);
+        if (const toml::table* t = (*entry)["fit"].as_table()) ReadFit(*t, preset.personality.fit);
 
         presets.push_back(std::move(preset));
     }
@@ -158,6 +160,19 @@ static void ReadPersonality(const toml::table& t, AIPersonality& p)
     if (const auto v = t["reaction_jitter"].value<double>()) p.reactionJitter = *v;
     if (const auto v = t["aim_jitter"].value<double>()) p.aimJitter = *v;
     if (const auto v = t["danger_ignore_chance"].value<double>()) p.dangerIgnoreChance = *v;
+    if (const auto v = t["supply_reserve"].value<std::uint32_t>()) p.supplyReserve = *v;
+}
+
+static void ReadFit(const toml::table& t, FitWeights& w)
+{
+    if (const auto v = t["fire_rate"].value<float>()) w.fireRate = *v;
+    if (const auto v = t["weapon"].value<float>()) w.weapon = *v;
+    if (const auto v = t["cannon"].value<float>()) w.cannon = *v;
+    if (const auto v = t["missile"].value<float>()) w.missile = *v;
+    if (const auto v = t["ammo"].value<float>()) w.ammo = *v;
+    if (const auto v = t["engine"].value<float>()) w.engine = *v;
+    if (const auto v = t["shield"].value<float>()) w.shield = *v;
+    if (const auto v = t["boost"].value<float>()) w.boost = *v;
 }
 
 static void ReadGuidance(const toml::table& t, GuidanceParams& g)

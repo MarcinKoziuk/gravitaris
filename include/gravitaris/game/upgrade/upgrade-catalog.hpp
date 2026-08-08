@@ -207,7 +207,12 @@ public:
         const UpgradeDef* def = nullptr;
         std::uint8_t rank = 0;
     };
-    [[nodiscard]] Choice PreferredFit(const ShipLoadout& loadout, const ShipContext& context) const;
+    // What this hull would buy at a yard, or a null Choice when nothing on
+    // offer is worth the money. `weights` is the pilot's own taste on top of
+    // the catalog's judgement (AIPersonality::fit); the default leaves that
+    // judgement alone.
+    [[nodiscard]] Choice PreferredFit(const ShipLoadout& loadout, const ShipContext& context,
+                                      const FitWeights& weights = {}) const;
 
     // What an AI faction researches next, by the same rule. `budget` is how
     // much of its Tech it is willing to commit right now -- without one a side

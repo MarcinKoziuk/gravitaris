@@ -831,7 +831,7 @@ bool UpgradeCatalog::StripRank(const UpgradeDef& def, ShipLoadout& loadout, bool
 // a gap before deepening a strength": the first shield and the first rounds on
 // an empty rack change what a ship can do at all, while a fourth cannon tier
 // only makes it better at what it already does.
-static int FitScore(const UpgradeDef& def, const ShipLoadout& loadout, int missileCapacity)
+static float FitScore(const UpgradeDef& def, const ShipLoadout& loadout, int missileCapacity)
 {
     const UpgradeLevels& levels = loadout.levels;
     const std::uint8_t level = UpgradeCatalog::LevelOf(def, levels);
@@ -841,42 +841,43 @@ static int FitScore(const UpgradeDef& def, const ShipLoadout& loadout, int missi
         // Nothing keeps a fighter alive like the first shield; a swap to the
         // other type at the cost of the ranks already paid for is the one
         // thing a pilot will not do.
-        if (levels.shieldType == ShieldType::None) return 100;
-        if (levels.shieldType != def.shield.type) return 0;
-        return 60 - 10 * static_cast<int>(level);
+        if (levels.shieldType == ShieldType::None) return 100.f;
+        if (levels.shieldType != def.shield.type) return 0.f;
+        return 60.f - 10.f * static_cast<float>(level);
     case UpgradeKind::MissileTier:
         // The launcher is a weapon the hull does not otherwise have; the ranks
         // above it are only a better round.
-        return level == 0 ? 75 : 45 - 5 * static_cast<int>(level);
+        return level == 0 ? 75.f : 45.f - 5.f * static_cast<float>(level);
     case UpgradeKind::Boost:
         // The first one is mobility it simply lacked; past that it is only a
         // longer burn.
-        return level == 0 ? 70 : 30 - 5 * static_cast<int>(level);
+        return level == 0 ? 70.f : 30.f - 5.f * static_cast<float>(level);
     case UpgradeKind::WeaponTier:
-        return 65 - 5 * static_cast<int>(level);
+        return 65.f - 5.f * static_cast<float>(level);
     case UpgradeKind::CannonTier:
         // The heavy mount is a weapon the hull does not otherwise have; the
         // ranks above it are a better round and a deeper magazine.
-        return level == 0 ? 70 : 40 - 5 * static_cast<int>(level);
+        return level == 0 ? 70.f : 40.f - 5.f * static_cast<float>(level);
     case UpgradeKind::FireRate:
-        return 50 - 5 * static_cast<int>(level);
+        return 50.f - 5.f * static_cast<float>(level);
     // Nothing yet: an AI buys neither spares nor a better drive, so both score
     // below every line above and are never chosen. Deliberate for now -- see
     // docs/tech-tree-plan.md, which records what scoring these properly needs.
     case UpgradeKind::AmmoStore:
     case UpgradeKind::EngineTier:
-        return 0;
+        return 0.f;
     }
-    return 0;
+    return 0.f;
 }
 
 UpgradeCatalog::Choice UpgradeCatalog::PreferredFit(const ShipLoadout& loadout,
-                                                    const ShipContext& context) const
+                                                    const ShipContext& context,
+                                                    const FitWeights& weights) const
 {
     const int capacity = ResolveStats(loadout.levels).missileCapacity;
 
     Choice best;
-    int bestScore = 0;
+    float bestScore = 0.f;
     for (const UpgradeDef& def : m_defs) {
         // Highest affordable rank of a line first: an AI that can reach III
         // has no reason to pay for II on the way, since the price is absolute.
@@ -885,14 +886,16 @@ UpgradeCatalog::Choice UpgradeCatalog::PreferredFit(const ShipLoadout& loadout,
 
             // Ties break toward the earlier def and the higher rank, so the
             // same hull in the same position always buys the same thing.
-            const int value = FitScore(def, loadout, capacity);
+            const float value = FitScore(def, loadout, capacity) * weights.For(def.kind);
             if (best.def && value <= bestScore) break;
             best = Choice{&def, rank};
             bestScore = value;
             break;
         }
     }
-    return best;
+    // A kind a pilot refuses outright scores zero, which is what a line it
+    // already has its fill of scores too -- neither is worth a trip.
+    return bestScore > 0.f ? best : Choice{};
 }
 
 UpgradeCatalog::Choice UpgradeCatalog::PreferredUnlock(const TechUnlocks& unlocked,

@@ -7,6 +7,7 @@
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/gnc/control/flight-controller.hpp>
 #include <gravitaris/game/gnc/guidance/behaviors.hpp>
+#include <gravitaris/game/upgrade/upgrade-def.hpp>
 
 namespace Gravitaris {
 
@@ -94,12 +95,24 @@ struct AIPersonality {
     double groundedThreatRange = 600.0;
 
     // How many upgrades this pilot means to be carrying when it leaves home.
-    // 1 is "take whatever the lab has finished and go"; 2 is a pilot that
-    // sits out most of a research cycle (30s a lab, see economy.toml) to
-    // arrive late and overgunned. padWaitTicks bounds the wait, so a faction
-    // with no labs left never parks its wing forever.
+    // 1 is "take whatever the yard can fit and go"; 2 is a pilot that sits
+    // out most of a research cycle (30s a lab, see economy.toml) to arrive
+    // late and overgunned. padWaitTicks bounds the wait, so a wing whose side
+    // can no longer afford anything never parks forever.
     std::uint32_t upgradeGreed = 1;
     std::uint32_t padWaitTicks = 2700; // 45s at the fixed tick
+
+    // What this pilot walks out of a yard carrying, and what it will not
+    // spend. A trip home is worth making when something scores above zero
+    // here and the purse covers it past the reserve -- so "shopping" is a
+    // question about this pilot's money and taste, not about whether its side
+    // has ever researched anything.
+    FitWeights fit;
+
+    // Supplies kept banked rather than spent on a fitting. Rounds come out of
+    // the same purse (UpgradeCatalog::ResupplyCost), so a pilot that spends
+    // to zero flies home rearmed and dry.
+    std::uint32_t supplyReserve = 0;
 
     std::uint32_t decisionInterval = 15; // ticks between tactical re-evaluations
 

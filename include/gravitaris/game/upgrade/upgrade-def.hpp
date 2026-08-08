@@ -60,6 +60,36 @@ enum class UpgradeKind : std::uint8_t {
     Boost,        // an overburn: more thrust, and briefly past the speed cap
 };
 
+// Per-kind multipliers on UpgradeCatalog's own fit scoring, so two pilots
+// with the same hull and the same purse in front of the same yard do not walk
+// out carrying the same thing. 1 leaves the catalog's judgement alone; 0
+// refuses the kind outright.
+struct FitWeights {
+    float fireRate = 1.f;
+    float weapon = 1.f;
+    float cannon = 1.f;
+    float missile = 1.f;
+    float ammo = 1.f;
+    float engine = 1.f;
+    float shield = 1.f;
+    float boost = 1.f;
+
+    [[nodiscard]] float For(UpgradeKind kind) const
+    {
+        switch (kind) {
+        case UpgradeKind::FireRate:    return fireRate;
+        case UpgradeKind::WeaponTier:  return weapon;
+        case UpgradeKind::CannonTier:  return cannon;
+        case UpgradeKind::MissileTier: return missile;
+        case UpgradeKind::AmmoStore:   return ammo;
+        case UpgradeKind::EngineTier:  return engine;
+        case UpgradeKind::Shield:      return shield;
+        case UpgradeKind::Boost:       return boost;
+        }
+        return 1.f;
+    }
+};
+
 // Which magazine a locker holds spares for. A hull has one ammo slot and the
 // lockers are one per pool, so carrying spares is a choice about which weapon
 // this pilot expects to run dry -- exactly as ShieldType is a choice about how

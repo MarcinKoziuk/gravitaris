@@ -19,19 +19,13 @@
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
+#include <gravitaris/game/system/gwell/home-site.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/system/gwell/research-system.hpp>
 
 namespace Gravitaris {
 
 static constexpr std::size_t NUM_TEAMS = 7; // TeamId::Blue..None
-
-// How close, and how nearly matched in velocity, a ship has to hold to its
-// own High Port to fit parts without landing on the deck. Generous on
-// distance (a station is large and the approach is by eye) but tight on
-// relative speed, so a fly-past never counts as docked.
-static constexpr double DOCK_RADIUS = 90.0;
-static constexpr double DOCK_RELATIVE_SPEED = 25.0;
 
 // How long a purchase is still honoured after the yard closes. Generous
 // against any plausible round trip, and far too short to fly anywhere on: a
@@ -83,23 +77,6 @@ void ResearchSystem::Update(std::uint64_t step)
         }
     });
 
-    // A faction's own High Ports over a lab planet, which a ship can refit at
-    // by holding station alongside rather than setting down on -- see the
-    // docking pass below.
-    struct Dock {
-        TeamId team = TeamId::None;
-        Magnum::Vector2d pos;
-        Magnum::Vector2d vel;
-    };
-    std::vector<Dock> docks;
-    m_registry.each([&](const Structure& s, const Team& team, const Transform& transf,
-                        const PlanetOrbitAttachment& orbit) {
-        if (s.type != StructureType::HighPort || team.id == TeamId::None) return;
-        const std::vector<std::uint32_t>& labPlanets = byTeam[static_cast<std::size_t>(team.id)].labPlanets;
-        if (std::find(labPlanets.begin(), labPlanets.end(), orbit.planetNetId) == labPlanets.end()) return;
-        docks.push_back(Dock{team.id, transf.pos, transf.vel});
-    });
-
     // Every pilot's account earns simply for being out there. Done before the
     // purchases below so a landing and the tick that funds it are never one
     // apart, and before the accounts are read, so a fresh pilot is not a tick
@@ -115,9 +92,11 @@ void ResearchSystem::Update(std::uint64_t step)
         m_registry.each([&](PilotAccount& account) { account.supplies += supplyTick; });
     }
 
-    // Who can fit parts this tick: a landed same-team ship at a lab's own
-    // planet, or one docked at that planet's High Port. Unlike the old draft
-    // this is not one per faction -- a yard serves everyone who reaches it.
+    // Who can fit parts this tick: a same-team ship standing on a lab's own
+    // planet, or on a High Port of its own over that planet -- a station deck
+    // is that planet's pad. Feet down either way; holding station alongside a
+    // port is not being at it. Unlike the old draft this is not one per
+    // faction -- a yard serves everyone who reaches it.
     m_registry.each([&](flecs::entity ship, ResearchAccess& access, const Team& team) {
         if (access.ticksSinceLab < 0xFFFF) ++access.ticksSinceLab;
         access.atLab = false;
@@ -125,42 +104,18 @@ void ResearchSystem::Update(std::uint64_t step)
         const std::vector<std::uint32_t>& labPlanets = byTeam[static_cast<std::size_t>(team.id)].labPlanets;
         if (labPlanets.empty()) return;
 
-        if (const LandingState* landing = ship.try_get<LandingState>();
-            landing && landing->landed && landing->landedOnNetId != 0) {
-            std::uint32_t sitePlanetNetId = landing->landedOnNetId;
-            const flecs::entity site = m_entitySpawner.EntityForNetId(landing->landedOnNetId);
-            bool ownSite = true;
-            if (site.is_alive()) {
-                const Structure* structure = site.try_get<Structure>();
-                const PlanetOrbitAttachment* orbit = site.try_get<PlanetOrbitAttachment>();
-                if (structure && orbit && structure->type == StructureType::HighPort) {
-                    const Team* siteTeam = site.try_get<Team>();
-                    ownSite = siteTeam && siteTeam->id == team.id;
-                    sitePlanetNetId = orbit->planetNetId;
-                }
-            }
-            if (ownSite
-                && std::find(labPlanets.begin(), labPlanets.end(), sitePlanetNetId) != labPlanets.end()) {
-                access.atLab = true;
-                access.ticksSinceLab = 0;
-                return;
-            }
-        }
+        const LandingState* landing = ship.try_get<LandingState>();
+        if (!landing || !landing->landed || landing->landedOnNetId == 0) return;
 
-        // Docking: setting a fighter down on a station deck that is itself
-        // sweeping along its orbit is far fiddlier than landing on a planet,
-        // and failing it reads as the yard simply not being open. Holding
-        // station alongside one -- close, and near its velocity -- counts.
-        const Transform* transf = ship.try_get<Transform>();
-        if (!transf) return;
-        for (const Dock& dock : docks) {
-            if (dock.team != team.id) continue;
-            if ((dock.pos - transf->pos).length() > DOCK_RADIUS) continue;
-            if ((transf->vel - dock.vel).length() > DOCK_RELATIVE_SPEED) continue;
-            access.atLab = true;
-            access.ticksSinceLab = 0;
-            return;
-        }
+        const flecs::entity site = m_entitySpawner.EntityForNetId(landing->landedOnNetId);
+        const Team* siteTeam = site.is_alive() ? site.try_get<Team>() : nullptr;
+        if (site.has<Structure>() && (!siteTeam || siteTeam->id != team.id)) return;
+
+        const std::uint32_t sitePlanetNetId = SitePlanetNetId(site);
+        if (std::find(labPlanets.begin(), labPlanets.end(), sitePlanetNetId) == labPlanets.end()) return;
+
+        access.atLab = true;
+        access.ticksSinceLab = 0;
     });
 
     // Which sides have somebody reading the tree for themselves. Gathered
@@ -253,13 +208,20 @@ void ResearchSystem::ApplyPurchases()
 
         TechPick pick = purchase.pick;
 
-        if (ship.has<AIPilot>() && account) {
+        if (const AIPilot* aiPilot = ship.try_get<AIPilot>(); aiPilot && account) {
             // An AI is offered the same tree and scores it against what it is
-            // already carrying, so a wing ends up spread across shields, racks
-            // and guns rather than every hull buying the same first thing.
-            const UpgradeCatalog::ShipContext context{&loadout, &fs->unlocked, account->supplies,
+            // already carrying and what it has a taste for, so a wing ends up
+            // spread across shields, racks and guns rather than every hull
+            // buying the same first thing. What it keeps back is its own
+            // (AIPersonality::supplyReserve) -- rounds come out of the same
+            // purse, so a pilot that spends to zero flies home dry.
+            const std::uint32_t reserve = aiPilot->personality.supplyReserve;
+            const std::uint32_t spendable =
+                    account->supplies > reserve ? account->supplies - reserve : 0;
+            const UpgradeCatalog::ShipContext context{&loadout, &fs->unlocked, spendable,
                                                       access.atLab};
-            const UpgradeCatalog::Choice choice = m_catalog.PreferredFit(loadout, context);
+            const UpgradeCatalog::Choice choice =
+                    m_catalog.PreferredFit(loadout, context, aiPilot->personality.fit);
             if (choice.def) pick = TechPick{choice.def->id, TechTab::Ship, choice.rank};
         }
 
@@ -429,6 +391,14 @@ void ResearchSystem::EnsureAccounts()
                                         [](const Account& a) { return !a.entity.is_alive(); }),
                          m_accounts.end());
     }
+
+    // The id resolved onto the hull, so anything holding a ship can read the
+    // purse without a scan of its own -- what lets the AI weigh a trip home
+    // against what it can actually afford. Last in the pass, so a hull whose
+    // account was opened or closed above gets this tick's answer.
+    m_registry.each([&](PilotRef& ref) {
+        ref.account = ref.pilotId != 0 ? FindAccountEntity(ref.pilotId) : flecs::entity();
+    });
 }
 
 flecs::entity ResearchSystem::FindAccountEntity(std::uint32_t pilotId) const

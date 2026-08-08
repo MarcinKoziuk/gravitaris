@@ -52,7 +52,9 @@ inline double OrbitRadius(double planetRadius)
 // same radius -- it is under thrust (its _thrust group burns permanently),
 // so it is not obliged to fly a ballistic orbit, and at the true circular
 // speed matching it well enough to set down on the deck is unreasonable.
-inline constexpr double ORBIT_SPEED_FACTOR = 1.0 / 3.0;
+// Landing on the deck is the only way to refit at a port, so this figure is
+// what makes the yard reachable by hand as well as by autopilot.
+inline constexpr double ORBIT_SPEED_FACTOR = 1.0 / 5.0;
 
 } // namespace StructureLayout
 

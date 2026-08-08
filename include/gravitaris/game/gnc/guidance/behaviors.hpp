@@ -65,14 +65,17 @@ Magnum::Math::Vector2<double> InterceptEntity(const Transform& ship, const Trans
 // speed a flip-and-burn can still bleed to params.touchdownSpeed before
 // contact, which kills tangential drift on the way in.
 //
-// `effectiveMass` includes the live gravity multiplier
-// (PhysicsSystem::GetGravityMultiplier), unlike OrbitBody's centerMass:
-// gravity is subtracted from the available thrust here, so its magnitude is
-// the braking margin.
+// `surfaceGravity` is the pull the ship has to hold itself up against at the
+// bottom of the descent, in units/s^2, and it is subtracted from the
+// available thrust to leave the braking margin. Passed as an acceleration
+// rather than solved from the site's own mass because the site is not always
+// what is pulling: a High Port has no mass worth the name, and a ship setting
+// down on its deck is fighting the planet underneath at the station's
+// orbital radius.
 Magnum::Math::Vector2<double> LandOnBody(const Transform& ship,
                                          const Magnum::Math::Vector2<double>& center,
                                          const Magnum::Math::Vector2<double>& centerVel,
-                                         double effectiveMass, double surfaceRadius,
+                                         double surfaceGravity, double surfaceRadius,
                                          const GuidanceParams& params);
 
 // Open the range on a threat: full cruise speed directly away from it,

@@ -37,6 +37,8 @@
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/system/ship/ai-pilot-system.hpp>
 
+#include "game/system/ship/ai-refit.hpp"
+
 namespace Gravitaris {
 
 using Magnum::Vector2d;
@@ -82,6 +84,12 @@ static constexpr double DEPARTURE_MARGIN = 1.25;
 // Padding on a body's radius when testing whether a shot would hit it, so a
 // pilot doesn't graze the surface trying to shoot past a limb.
 static constexpr double SHOT_CLEARANCE = 15.0;
+
+// How much wider than the station itself the blocked arc of its ring is
+// treated as being. Covers the ground both it and the descending ship make
+// while the descent is flown, so a corridor that was clear when it was picked
+// is still clear on arrival.
+static constexpr double RING_GUARD_FACTOR = 4.0;
 
 static double WrapToPi(double angle);
 static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Vector2d& relVel,
@@ -159,63 +167,90 @@ void AIPilotSystem::Update(std::uint64_t step)
         candidates.push_back({ent, transf.pos, team.id});
     });
 
-    // Somewhere to come home to, and whether anything is still being built
-    // there worth coming home for. Both are per-team facts, so they're read
-    // once here rather than per pilot; NetId order keeps the nearest-home tie
-    // break the same on every run (ADR 0001).
-    struct HomePlanet {
-        flecs::entity entity;
-        Vector2d pos;
-        TeamId team;
-        std::uint32_t netId;
-        // Hosts one of this faction's labs. An upgrade can only be collected
-        // at the planet that finished it (ResearchSystem's collector rule), so
-        // a shopping trip that lands anywhere else is a wasted descent.
-        bool hasLab = false;
-    };
-    std::vector<HomePlanet> homePlanets;
+    // Everywhere anyone could set down, gathered before the walk over pilots
+    // because a query run inside another query's callback yields nothing (see
+    // CLAUDE.md) -- which is also why the rings and the site->planet mapping
+    // below are built here rather than asked per pilot.
+    const std::vector<HomeSite> homeSites = GatherHomeSites(m_registry);
 
-    ankerl::unordered_dense::set<std::uint32_t> labPlanets;
     std::array<bool, NUM_TEAMS> teamHasLab{};
-    m_registry.each([&](const Structure& s, const Team& team, const PlanetSurfaceAttachment& attach) {
-        if (s.type != StructureType::Lab || team.id == TeamId::None) return;
-        teamHasLab[static_cast<std::size_t>(team.id)] = true;
-        labPlanets.insert(attach.planetNetId);
+    for (const HomeSite& site : homeSites) {
+        if (site.hasLab) teamHasLab[static_cast<std::size_t>(site.team)] = true;
+    }
+
+    // Held by entity, not by pointer: a component address is only good until
+    // the world changes shape, and this is read per pilot below.
+    std::array<flecs::entity, NUM_TEAMS> factionOf{};
+    m_registry.each([&](flecs::entity ent, const FactionState& fs) {
+        factionOf[static_cast<std::size_t>(fs.team)] = ent;
     });
 
-    // Which sides have learned to build anything at all, which is what makes
-    // a landing worth the trip.
-    std::array<bool, NUM_TEAMS> teamUpgradeReady{};
-    m_registry.each([&](const FactionState& fs) {
-        teamUpgradeReady[static_cast<std::size_t>(fs.team)] = AnyRankUnlocked(fs.unlocked);
+    // Which planet a landing counts against, for every site there is: a
+    // planet is its own, a station is the one it orbits.
+    ankerl::unordered_dense::map<std::uint32_t, flecs::entity> planetByNetId;
+    ankerl::unordered_dense::map<std::uint32_t, std::uint32_t> sitePlanetOf;
+    m_registry.each([&](flecs::entity ent, const Planet&, const NetId& netId) {
+        planetByNetId.emplace(netId.value, ent);
+        sitePlanetOf.emplace(netId.value, netId.value);
     });
 
-    m_registry.each([&](flecs::entity ent, const Planet&, const Transform& transf, const Team& team,
-                        const NetId& netId) {
-        if (IsHomePlanet(m_registry, ent, team.id)) {
-            homePlanets.push_back({ent, transf.pos, team.id, netId.value,
-                                   labPlanets.contains(netId.value)});
+    // Every station ring in the world, whoever holds it. A High Port is solid
+    // and sits squarely on the way down, so it blocks a descent onto the
+    // planet underneath whether it is a friendly yard or an enemy's.
+    struct Ring {
+        flecs::entity entity;
+        std::uint32_t planetNetId = 0;
+        Vector2d pos;
+        double orbitRadius = 0.0;
+        double radius = 0.0;
+        double direction = 1.0;
+    };
+    std::vector<Ring> rings;
+    m_registry.each([&](flecs::entity ent, const Structure& s, const Transform& transf,
+                        const NetId& netId, const PlanetOrbitAttachment& orbit) {
+        sitePlanetOf.emplace(netId.value, orbit.planetNetId);
+        if (s.type != StructureType::HighPort) return;
+        rings.push_back(Ring{ent, orbit.planetNetId, transf.pos, orbit.radius, ObstacleRadius(ent),
+                             orbit.direction});
+    });
+
+    // A descent is radial, and a High Port rides a ring squarely across it.
+    // Where the way down is blocked the answer is to come in beside the
+    // station rather than through it: a point on the ring just past the arc
+    // it blocks, on the side it is travelling away from, so the gap is
+    // opening rather than closing while the ship crosses to it. Deliberately
+    // not the far side of the ring -- guidance arrives in a straight line,
+    // and the straight line to the far side runs through the planet.
+    //
+    // Nothing to do when the station IS the destination, when the ship is
+    // already inside the ring, or when the way down was never blocked.
+    const auto ringEntryPoint = [&](const Vector2d& from, flecs::entity well,
+                                    std::uint32_t planetNetId,
+                                    flecs::entity subject) -> std::optional<Vector2d> {
+        const Source* body = findSource(well);
+        if (!body) return std::nullopt;
+
+        for (const Ring& ring : rings) {
+            if (ring.planetNetId != planetNetId || ring.entity == subject) continue;
+
+            const Vector2d toShip = from - body->pos;
+            const Vector2d toStation = ring.pos - body->pos;
+            if (toShip.length() <= ring.orbitRadius || toStation.length() < 1e-6) continue;
+
+            // How wide the station reads from the planet's centre, widened to
+            // cover the ground both of them make during the descent.
+            const double halfWidth = std::asin(std::clamp(
+                    (ring.radius + SHIP_LANDING_CLEARANCE) / ring.orbitRadius, 0.0, 1.0));
+            const double guard = std::min(halfWidth * RING_GUARD_FACTOR, PI / 2.0);
+            const double bearing = std::atan2(toShip.y(), toShip.x());
+            const double stationBearing = std::atan2(toStation.y(), toStation.x());
+            if (std::abs(WrapToPi(bearing - stationBearing)) > guard) continue;
+
+            const double entryBearing = stationBearing - ring.direction * guard;
+            return body->pos
+                    + Vector2d{std::cos(entryBearing), std::sin(entryBearing)} * ring.orbitRadius;
         }
-    });
-    std::sort(homePlanets.begin(), homePlanets.end(),
-              [](const HomePlanet& a, const HomePlanet& b) { return a.netId < b.netId; });
-
-    // `wantLab` picks the nearest home hosting a lab, falling back to the
-    // nearest home of any kind -- a pilot flying back for an upgrade has to
-    // reach the building that has it, but a hurt one just wants ground.
-    const auto nearestHome = [&homePlanets](TeamId team, const Vector2d& from, bool wantLab) {
-        flecs::entity best;
-        double bestDistSq = std::numeric_limits<double>::max();
-        for (const HomePlanet& home : homePlanets) {
-            if (home.team != team) continue;
-            if (wantLab && !home.hasLab) continue;
-            const double distSq = (home.pos - from).dot();
-            if (distSq < bestDistSq) {
-                bestDistSq = distSq;
-                best = home.entity;
-            }
-        }
-        return best;
+        return std::nullopt;
     };
 
     // Wing orders. A pilot with no AIStrategy of its own -- everything that
@@ -298,32 +333,35 @@ void AIPilotSystem::Update(std::uint64_t step)
             return std::max(personality.evadeRadius, src.radius * EVADE_SURFACE_CLEARANCE);
         };
 
-        // Shopping, for either of two reasons: something is finished and
-        // waiting to be collected right now, or this pilot is holding its pad
-        // for one its labs are still working on (AIPersonality::upgradeGreed,
-        // bounded by padWaitRemaining so a wing never parks forever). With no
-        // labs left nothing is coming either way.
+        // Shopping: something on offer that this pilot wants and can pay for,
+        // for as long as it is still willing to wait around for it
+        // (AIPersonality::upgradeGreed, bounded by padWaitRemaining so a wing
+        // never parks forever). With no lab left there is nowhere to fit it.
         if (pilot.padWaitRemaining > 0) --pilot.padWaitRemaining;
         const std::size_t myTeamIndex = static_cast<std::size_t>(myTeam.id);
-        const bool shopping = teamHasLab[myTeamIndex]
-                && (teamUpgradeReady[myTeamIndex]
-                    || (pilot.upgradesWanted > 0 && pilot.padWaitRemaining > 0));
+        const flecs::entity factionEntity = factionOf[myTeamIndex];
+        const FactionState* faction =
+                factionEntity.is_alive() ? factionEntity.try_get<FactionState>() : nullptr;
+        const bool shopping = teamHasLab[myTeamIndex] && pilot.padWaitRemaining > 0
+                && WantsRefit(m_catalog, ent, pilot, faction);
 
         // A pilot with no strategy of its own flies its leader's objective,
         // except when its own hull or its own shopping list says otherwise --
         // the two things no one else can decide for it. (A leader gets the
         // same trip from AIStrategySystem, as AIGoal::Rearm.)
         if (!ent.has<AIStrategy>()) {
-            flecs::entity home;
+            HomeSite home;
             if (hurt || shopping) {
                 // A shopping trip wants the lab; anything else just wants
-                // friendly ground, and takes the lab planet only if it is
-                // also the nearest.
-                if (shopping) home = nearestHome(myTeam.id, transf.pos, /*wantLab=*/true);
-                if (!home.is_alive()) home = nearestHome(myTeam.id, transf.pos, /*wantLab=*/false);
+                // friendly ground, and takes the lab site only if it is also
+                // the nearest.
+                if (shopping) home = SelectHomeSite(homeSites, myTeam.id, transf.pos, /*needsLab=*/true);
+                if (!home.IsValid()) {
+                    home = SelectHomeSite(homeSites, myTeam.id, transf.pos, /*needsLab=*/false);
+                }
             }
-            if (home.is_alive()) {
-                pilot.order = AIOrder{AIOrderKind::Land, home};
+            if (home.IsValid()) {
+                pilot.order = AIOrder{AIOrderKind::Land, home.entity};
             }
             else {
                 const auto wing = wingOrders.find(static_cast<std::uint8_t>(myTeam.id));
@@ -338,6 +376,43 @@ void AIPilotSystem::Update(std::uint64_t step)
         if (pilot.order.kind == AIOrderKind::Land && pilot.order.subject.is_alive()) {
             const Planet* body = pilot.order.subject.try_get<Planet>();
             if (body && body->star) pilot.order.kind = AIOrderKind::Patrol;
+        }
+
+        // What a Land order names, as something to put legs down on. A planet
+        // states its own radius and pulls with its own mass; a station has
+        // only the extent of its model, and what holds a ship on the deck is
+        // the planet underneath at the station's orbital radius -- which is
+        // also why a deck is landed on rather than merely parked alongside.
+        struct LandingTarget {
+            bool valid = false;
+            Vector2d pos;
+            Vector2d vel;
+            double radius = 0.0;
+            double gravity = 0.0;     // pull at the touchdown point, units/s^2
+            flecs::entity well;       // the body a descent must not be talked out of
+            std::uint32_t planetNetId = 0;
+        };
+
+        LandingTarget landingTarget;
+        if (pilot.order.kind == AIOrderKind::Land && pilot.order.subject.is_alive()) {
+            const flecs::entity subject = pilot.order.subject;
+            const PlanetOrbitAttachment* orbit = subject.try_get<PlanetOrbitAttachment>();
+            const flecs::entity wellEntity = orbit ? planetByNetId[orbit->planetNetId] : subject;
+
+            if (const Source* well = findSource(wellEntity)) {
+                const Transform& siteTransf = subject.get<Transform>();
+                const double pullRadius = orbit ? orbit->radius : well->radius;
+                landingTarget = LandingTarget{
+                        /*valid=*/pullRadius > 0.0,
+                        siteTransf.pos,
+                        siteTransf.vel,
+                        orbit ? LandingRadius(subject) : well->radius,
+                        pullRadius > 0.0 ? PhysicsSystem::GRAVITY_CONSTANT * well->mass
+                                        * gravityMultiplier / (pullRadius * pullRadius)
+                                         : 0.0,
+                        wellEntity,
+                        SitePlanetNetId(subject)};
+            }
         }
 
         // A live Attack order names the target outright -- the strategy layer
@@ -444,11 +519,20 @@ void AIPilotSystem::Update(std::uint64_t step)
         // from the ground is what left a parked ship twitching at its own
         // landing site -- the reflexes are written for a ship in flight and
         // command a climb, a break or a pursuit that the legs then fight.
+        // Where it was sent and where it is standing, both as the planet the
+        // landing counts against: a High Port over the rock is that rock's
+        // pad, so a ship on the deck has arrived at the site it was ordered
+        // to. Comparing the site NetIds outright is what used to send a pilot
+        // that had just landed on its own port back down toward the surface
+        // it was already served by.
         const LandingState* landing = ent.try_get<LandingState>();
-        const NetId* siteNet = ordered && pilot.order.kind == AIOrderKind::Land
-                        && pilot.order.subject.is_alive()
-                ? pilot.order.subject.try_get<NetId>()
-                : nullptr;
+        const std::uint32_t orderedPlanetNet = landingTarget.valid ? landingTarget.planetNetId : 0;
+
+        std::uint32_t standingOnPlanetNet = 0;
+        if (landing && landing->landed) {
+            const auto it = sitePlanetOf.find(landing->landedOnNetId);
+            if (it != sitePlanetOf.end()) standingOnPlanetNet = it->second;
+        }
 
         bool threatOverhead = false;
         for (const Candidate& c : candidates) {
@@ -462,11 +546,13 @@ void AIPilotSystem::Update(std::uint64_t step)
 
         const bool onGround = landing && landing->landed;
         const bool waitingForKit = shopping && onGround
-                && std::any_of(homePlanets.begin(), homePlanets.end(), [&](const HomePlanet& home) {
-                       return home.team == myTeam.id && home.netId == landing->landedOnNetId;
+                && std::any_of(homeSites.begin(), homeSites.end(), [&](const HomeSite& site) {
+                       return site.team == myTeam.id && site.hasLab
+                               && site.planetNetId == standingOnPlanetNet;
                    });
         const bool holding = onGround && !threatOverhead
-                && ((siteNet && siteNet->value == landing->landedOnNetId) || waitingForKit);
+                && ((orderedPlanetNet != 0 && orderedPlanetNet == standingOnPlanetNet)
+                    || waitingForKit);
         if (holding) {
             pilot.behavior = AIBehavior::Landed;
         }
@@ -578,7 +664,9 @@ void AIPilotSystem::Update(std::uint64_t step)
             for (const Vector2d& p : path) {
                 for (const Source& src : sources) {
                     if (src.entity == ent) continue;
-                    if (settingDown && src.entity == pilot.order.subject) continue;
+                    // The well being set down on -- or the one holding up the
+                    // deck being set down on, which is the same descent.
+                    if (settingDown && landingTarget.valid && src.entity == landingTarget.well) continue;
 
                     const double radius = evadeRadiusOf(src);
                     if ((p - src.pos).dot() < radius * radius) {
@@ -699,9 +787,16 @@ void AIPilotSystem::Update(std::uint64_t step)
                 }
                 break;
             case AIBehavior::Land:
-                if (const Source* site = ordered ? findSource(pilot.order.subject) : nullptr) {
-                    desiredVel = LandOnBody(transf, site->pos, site->vel, site->mass * gravityMultiplier,
-                                            site->radius + SHIP_LANDING_CLEARANCE, pilot.guidance);
+                if (landingTarget.valid) {
+                    const std::optional<Vector2d> entry =
+                            ringEntryPoint(transf.pos, landingTarget.well, landingTarget.planetNetId,
+                                           pilot.order.subject);
+                    desiredVel = entry
+                            ? GotoPoint(transf, *entry, pilot.guidance)
+                            : LandOnBody(transf, landingTarget.pos, landingTarget.vel,
+                                         landingTarget.gravity,
+                                         landingTarget.radius + SHIP_LANDING_CLEARANCE,
+                                         pilot.guidance);
 
                     // On the pad the attitude that matters is up -- legs to
                     // the ground, which is what LandingStateSystem's
@@ -712,7 +807,7 @@ void AIPilotSystem::Update(std::uint64_t step)
                     // along its orbit, i.e. a parked pilot spends the whole
                     // stay chasing an attitude taken from the pad's direction
                     // of travel rather than settling on its legs.
-                    const Vector2d r = transf.pos - site->pos;
+                    const Vector2d r = transf.pos - landingTarget.pos;
                     if (r.length() > 1e-6) {
                         coastFacing = r.normalized();
                         hasCoastFacing = true;
@@ -720,10 +815,10 @@ void AIPilotSystem::Update(std::uint64_t step)
                 }
                 break;
             case AIBehavior::Landed:
-                if (const Source* site = findSource(pilot.order.subject)) {
-                    desiredVel = site->vel;
+                if (landingTarget.valid) {
+                    desiredVel = landingTarget.vel;
 
-                    const Vector2d r = transf.pos - site->pos;
+                    const Vector2d r = transf.pos - landingTarget.pos;
                     if (r.length() > 1e-6) {
                         coastFacing = r.normalized();
                         hasCoastFacing = true;

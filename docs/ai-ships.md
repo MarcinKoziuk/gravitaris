@@ -394,6 +394,57 @@ Together those turn a scripted descent from 2500 units (dead every time
 before, at either thrust value) into a 0.3 units/s touchdown with no hull
 damage and a claimed planet.
 
+*A pad is a place, not a planet (2026-08-08), fixing "every AI is stuck on its
+own High Port from the first second of the match".* Two independent defects,
+either of which alone would have looked like the same symptom:
+
+- **Shopping never ended, so `Rearm` never released.** The trip home was
+  gated on `AnyRankUnlocked(faction.unlocked)` — "has this side learned
+  anything" — but `IssueFreeUnlocks` grants every rank that costs no Tech to
+  every faction on the first tick, so that flag was true for the whole match.
+  `AIGoal::Rearm` scores at `REARM_URGENCY`, deliberately above every other
+  goal's ceiling, so every pilot was permanently ordered home; and because
+  the test short-circuited the `upgradesWanted && padWaitRemaining` branch,
+  the `padWaitTicks` bound that exists to stop a wing parking never applied.
+  The question is now about this pilot's own money and taste — something
+  `UpgradeCatalog::PreferredFit` says is worth buying, affordable past
+  `AIPersonality::supplyReserve` — reached through `PilotRef::account`, the
+  resolved account handle `ResearchSystem::EnsureAccounts` now caches on the
+  hull. `AIPersonality::fit` weights that choice per `UpgradeKind`, so
+  `cautious` buys shields, `sniper` buys reach, and `reckless` buys neither.
+- **Home was modelled as a planet, and the pad it was standing on wasn't
+  one.** `FactionSystem::SpawnPosition` launches every AI *off its own High
+  Port* — so a leader's first order was a descent to the surface, straight
+  down through the station under its feet. Arriving was tested by comparing
+  the ordered site's NetId against `LandingState::landedOnNetId`, which a
+  deck landing never matches, so the pilot could neither hold nor give up:
+  it wedged against the deck under power, or cycled Land/Depart forever.
+  `HomeSite` (`system/gwell/home-site.hpp`) now names a landing site as a
+  planet *or* a port over one, `SitePlanetNetId` is the single answer to
+  "which planet does this landing count as" that `ResearchSystem` and
+  `RepairSystem` each used to keep a copy of, and the AI prefers the port:
+  it serves a pilot identically without the descent.
+
+Three things fell out of taking a deck seriously as somewhere to land.
+`LandOnBody` now takes a gravity *acceleration* rather than the site's mass
+and radius, because what holds a ship on a station's deck is the planet
+underneath at the station's orbital radius, not the station. What a descent
+flares against comes from the model's own `spawn` hardpoint — already where
+`FactionSystem` puts a launching fighter's feet — since a High Port's
+bounding radius (70.8) is its longest arm and flaring against that left a
+pilot hovering 90 units above the 9-unit-deep deck it was aiming at;
+`ObstacleRadius` is the separate, much larger figure for flying *around* one.
+And since a port is solid and rides a ring squarely across every descent onto
+the planet it orbits, a blocked descent now enters the ring beside the
+station — just past the arc it blocks, on the side it is travelling away
+from. Deliberately not the far side: guidance arrives in a straight line, and
+the straight line to the far side runs through the planet, which is a crater.
+
+`ORBIT_SPEED_FACTOR` dropped from 1/3 to 1/5 in the same pass. Landing on the
+deck is now the only way to refit at a port — the "hold station alongside and
+it counts" envelope is gone, for players as well as AI — so how matchable
+that deck is has to hold up by hand.
+
 **Phase 6 — strategy layer.** `AIStrategy` per slice-components (build/attack
 decisions) issuing goals to pilots. Separate cadence (every ~1 s, not every
 tick). Design when slice-one economy exists.

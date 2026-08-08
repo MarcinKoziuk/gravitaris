@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include <flecs.h>
+
 namespace Gravitaris {
 
 // One entity per pilot, created lazily as ships turn up (the same shape
@@ -43,6 +45,14 @@ struct PilotAccount {
 // Replication class: server-only.
 struct PilotRef {
     std::uint32_t pilotId = 0;
+
+    // That id resolved to the account entity, refreshed by
+    // ResearchSystem::EnsureAccounts (which already walks every PilotRef, so
+    // it costs nothing) and guarded with is_alive() like every other entity
+    // handle held in a component. The id stays authoritative -- this is only
+    // its resolution, so that a system holding a ship can read the purse
+    // without a scan of its own. Dead until the first EnsureAccounts pass.
+    flecs::entity account;
 };
 
 } // namespace Gravitaris

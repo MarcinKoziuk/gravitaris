@@ -45,7 +45,7 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_deathSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_trajectoryPredictor(m_registry, m_physicsSystem)
         , m_aiPilotSystem(m_registry, m_physicsSystem, m_trajectoryPredictor, m_upgradeCatalog)
-        , m_aiStrategySystem(m_registry, m_physicsSystem)
+        , m_aiStrategySystem(m_registry, m_physicsSystem, m_upgradeCatalog)
         , m_step(0L)
 {
     // Claude: if registry must be initiated first, why don't we construct it before, and pass it to Game::? (could be even moved?)

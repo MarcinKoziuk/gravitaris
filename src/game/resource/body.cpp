@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstring>
 #include <optional>
 
@@ -238,12 +239,16 @@ void Body::AddShape(const NSVGshape* shape, const Matrix4d& transform)
 {
     if (IsCircle(shape)) {
         const CircleShape circle = ShapeToCircle(shape, transform);
+        m_boundingRadius = std::max(m_boundingRadius, circle.pos.length() + circle.radius);
         m_circleShapes.push_back(circle);
     }
     else {
         const std::vector<std::vector<cpvec2>> polygons = ShapeToPolygons(shape, transform);
 
         for (const std::vector<cpvec2>& polygon : polygons) {
+            for (const cpvec2& point : polygon) {
+                m_boundingRadius = std::max(m_boundingRadius, point.length());
+            }
             m_polygonShapes.push_back(polygon);
         }
     }

@@ -21,8 +21,13 @@ class AIStrategySystem {
     // surface gravity the hull can actually out-thrust.
     PhysicsSystem& m_physicsSystem;
 
+    // What a trip home would be worth: whether anything on offer suits this
+    // pilot and its purse (see WantsRefit).
+    const UpgradeCatalog& m_catalog;
+
 public:
-    AIStrategySystem(flecs::world& registry, PhysicsSystem& physicsSystem);
+    AIStrategySystem(flecs::world& registry, PhysicsSystem& physicsSystem,
+                     const UpgradeCatalog& catalog);
 
     void Update();
 };

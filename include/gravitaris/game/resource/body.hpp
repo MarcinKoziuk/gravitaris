@@ -88,6 +88,7 @@ private:
     cpFloat m_friction;
     cpFloat m_thrust = DEFAULT_THRUST;
     cpFloat m_maxSpeed = DEFAULT_MAX_SPEED;
+    cpFloat m_boundingRadius = 0.0;
     float m_landingFragility = 1.f;
     bool m_kinematic = false;
     bool m_gravitySource = false;
@@ -150,6 +151,13 @@ public:
 
     [[nodiscard]] double GetGravityMultiplier() const
     { return m_gravityMultiplier; }
+
+    // Distance from the model's own origin to the furthest point of its
+    // collision shapes. What a descent flares against when the thing being
+    // landed on is a station rather than a planet, since a deck has no
+    // surface radius of its own.
+    [[nodiscard]] cpFloat GetBoundingRadius() const
+    { return m_boundingRadius; }
 
     [[nodiscard]] const std::vector<CircleShape>& GetCircleShapes() const
     { return m_circleShapes; }
