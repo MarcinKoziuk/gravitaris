@@ -501,9 +501,22 @@
 			div.entry.none:hover { background-color: #0e2a33; border-left-color: #7fe4f5; }
 			div.entry.none span.entry_name { color: #6d8f99; }
 
-			div.entry.staged { border-left-color: #fff; background-color: #12303a; }
-			div.entry.staged span.entry_name { color: #fff; }
+			/* Spelled against .none's own name colour and against both hover
+			   rules, all of which outrank a bare .staged -- and the row a
+			   click landed on is still under the cursor when it has to show.
+			   Without these, staging a strip changed nothing on screen. */
+			div.entry.staged,
+			div.entry.buy.staged:hover,
+			div.entry.none.staged:hover { border-left-color: #fff; background-color: #12303a; }
+			div.entry.staged span.entry_name,
+			div.entry.none.staged span.entry_name { color: #fff; }
 			div.entry.staged span.entry_note { color: #fff; }
+
+			/* Fitted, and planned to come off. Amber says the hull carries it,
+			   which is still true until CONFIRM -- the red says it is leaving. */
+			div.entry.pulling { border-left-color: #8a5252; }
+			div.entry.pulling span.entry_name,
+			div.entry.pulling span.entry_note { color: #8a5252; }
 
 			div.entry.poor span.entry_name { color: #6d8f99; }
 			div.entry.poor span.entry_note { color: #8a5252; }

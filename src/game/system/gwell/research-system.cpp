@@ -287,8 +287,13 @@ void ResearchSystem::ApplyPurchases()
 
         // Pulling a part is free and needs nothing but the yard, so it does
         // not go past the purse or the tree at all.
+        //
+        // Feet down, and not merely served: the grace window is there so a
+        // *purchase* clicked on the pad still lands after the ship leaves, and
+        // a pull that rides it can take the drive off a hull already in the
+        // air -- which leaves it with no thrust and no way back to a yard.
         if (pick.strip) {
-            if (!m_catalog.StripRank(*def, loadout, served, pick.mount)) {
+            if (!m_catalog.StripRank(*def, loadout, access.atLab, pick.mount)) {
                 if (!ship.has<AIPilot>()) deny(TechNodeState::NeedsLanding);
                 continue;
             }

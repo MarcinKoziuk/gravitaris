@@ -1424,6 +1424,38 @@ void TestUpgradeCatalog()
         const UpgradeCatalog::ShipContext ctx{&maxed, &all, RICH, true};
         Require(catalog.ShipState(*fireRate, fireRate->maxLevel, ctx) == TechNodeState::Held,
                 "catalog: a rank already fitted is not for sale again");
+        // The ranks under it are still for sale, because fitting one is a
+        // downgrade -- a trade a pilot may want, and a rank is set rather than
+        // climbed, so nothing is in the way of it.
+        Require(catalog.ShipState(*fireRate, 1, ctx) == TechNodeState::Available,
+                "catalog: ...while the ranks under it are offered as a downgrade");
+
+        std::uint32_t spend = RICH;
+        Require(catalog.FitRank(*fireRate, 1, maxed, all, spend, true),
+                "catalog: ...which can be fitted");
+        Require(UpgradeCatalog::LevelOf(*fireRate, maxed.levels) == 1,
+                "catalog: ...and leaves the hull carrying the lower rank");
+    }
+
+    // Pulling the drive is allowed to strand a hull -- it steers, coasts and
+    // falls -- but only ever with feet down, and rank I is issued free to every
+    // side, so a stranded pilot is always one click from flying again.
+    {
+        const UpgradeDef* drive = catalog.FindKind(UpgradeKind::EngineTier);
+        Require(drive != nullptr, "catalog: the pool has a drive");
+
+        ShipLoadout hull;
+        hull.levels.engine = 1;
+        Require(!catalog.StripRank(*drive, hull, /*atLab=*/false),
+                "catalog: a drive cannot be pulled away from a yard");
+        Require(catalog.StripRank(*drive, hull, /*atLab=*/true),
+                "catalog: ...and comes off on the pad");
+        Require(catalog.ResolveStats(hull.levels).thrustScale == 0.f,
+                "catalog: a hull with its drive pulled cannot accelerate");
+
+        const UpgradeCatalog::ShipContext broke{&hull, &all, 0, true};
+        Require(catalog.ShipState(*drive, 1, broke) == TechNodeState::Available,
+                "catalog: ...and can fit the issued rank again on an empty account");
     }
 
     // The missile line: nothing to fire and nowhere to put rounds until a bay

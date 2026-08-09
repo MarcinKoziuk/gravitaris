@@ -771,8 +771,13 @@ void UI::RefreshStagedVisuals()
             refs.counter->SetInnerRML(std::to_string(staged > 0 ? staged : refs.heldRank) + "/"
                                       + std::to_string(refs.maxRank));
         }
+        // Both classes, not just the staged one: a plan may sit *below* the
+        // rank on the hull, and a meter that only ever added lights would draw
+        // a downgrade as the level it is leaving.
         for (std::size_t i = 0; i < refs.pips.size(); ++i) {
-            refs.pips[i]->SetClass("staged", static_cast<int>(i) < staged);
+            const bool lit = static_cast<int>(i) < (staged > 0 ? staged : refs.heldRank);
+            refs.pips[i]->SetClass("staged", staged > 0 && lit);
+            refs.pips[i]->SetClass("fitted", staged == 0 && lit);
         }
     }
 
@@ -796,6 +801,17 @@ void UI::RefreshStagedVisuals()
         }
     }
 
+    // What the hull carries, and whether it is about to stop carrying it. A
+    // planned pull says so on the line itself: the ledger claiming a part is
+    // fitted while the plan beside it is to take that part off is the panel
+    // contradicting itself.
+    for (const InstalledRowRef& row : m_installedRows) {
+        const ShipSlotView* mount = SlotNamed(row.mount);
+        const bool pulling = mount && PlanFor(*mount).strip;
+        row.row->SetClass("pulling", pulling);
+        row.note->SetInnerRML(pulling ? "PULLING" : row.fittedNote);
+    }
+
     // A row is staged when it is the exact fitting planned for the selected
     // slot; CLEAR is staged when the plan is to empty it.
     const ShipSlotView* selected = SelectedSlot();
@@ -803,8 +819,17 @@ void UI::RefreshStagedVisuals()
     const std::vector<SlotOffer> offers = OfferedForSelection();
     for (std::size_t i = 0; i < m_availableRows.size() && i < offers.size(); ++i) {
         const SlotOffer& offer = offers[i];
-        m_availableRows[i]->SetClass("staged", !plan.strip && plan.id == offer.node->id
-                                            && plan.rank == static_cast<int>(offer.rankIndex) + 1);
+        Rml::Element* row = m_availableRows[i];
+        row->SetClass("staged", !plan.strip && plan.id == offer.node->id
+                             && plan.rank == static_cast<int>(offer.rankIndex) + 1);
+
+        // The one row that reads FITTED is the rank in the slot, so it is the
+        // one a pull is about.
+        if (RankInSelection(*offer.node, offer.rankIndex).state != TechRankState::Held) continue;
+        row->SetClass("pulling", plan.strip);
+        if (Rml::Element* note = row->GetChild(row->GetNumChildren() - 1)) {
+            note->SetInnerRML(plan.strip ? "PULLING" : "FITTED");
+        }
     }
     if (m_noneRow) m_noneRow->SetClass("staged", plan.strip);
 
@@ -1177,8 +1202,9 @@ void UI::RebuildShipSlots()
 void UI::SelectShipSlot(const std::string& name)
 {
     m_selectedSlot = name == m_selectedSlot ? std::string() : name;
-    RebuildShipLists();     // a different mount offers different systems
-    RefreshStagedVisuals(); // the slots themselves only change class
+    // A different mount offers different systems. The repaint at the end of
+    // this is what moves the selection ring on the drawing.
+    RebuildShipLists();
 }
 
 TechRankView UI::RankInSelection(const TechNodeView& node, std::size_t rankIndex) const
@@ -1210,15 +1236,7 @@ std::vector<UI::SlotOffer> UI::OfferedForSelection() const
         if (node.tab != 0 || node.ranks.empty()) continue;
         if (!SlotTakes(*selected, node.id)) continue;
 
-        // Everything up to and including what is already in this hole reads as
-        // held, so listing all of them said the pilot had bought I, II *and*
-        // III for one bay. Only the rank actually fitted is worth a line; the
-        // ones under it are choices nobody would make.
-        const int fitted = FittedIn(*selected) == &node ? node.rank : 0;
-
         for (std::size_t i = 0; i < node.ranks.size(); ++i) {
-            if (fitted > 0 && static_cast<int>(i) + 1 < fitted) continue;
-
             // A level the faction has not researched is not a fitting the port
             // can offer, and one gated behind another part is not one this hull
             // can take yet. Neither belongs on a list of choices.
@@ -1244,16 +1262,22 @@ void UI::RebuildShipLists()
     // that shows none). Turned into element pointers once the markup is in, so
     // the per-frame refresh never searches the document.
     std::vector<std::uint32_t> rowAmmoNode;
+    // Which mount each row's line sits in, and what its note says while no
+    // pull is planned against that mount -- both resolved to elements below,
+    // so a staged strip can say so without any of this being written again.
+    std::vector<std::pair<std::string, std::string>> rowMount;
     for (const ShipSlotView& slot : m_shownSlots) {
         if (!RefOf(slot).IsHole() || slot.fittedId == 0) continue;
         for (const TechNodeView& node : m_shownNodes) {
             if (node.tab != 0 || node.id != slot.fittedId) continue;
             ++installedCount;
             const std::string ammo = AmmoSpan(node);
+            const std::string note = Upper(slot.name) + " &#183; " + RankNumeral(node.rank);
             rowAmmoNode.push_back(ammo.empty() ? 0 : node.id);
+            rowMount.emplace_back(slot.name, note);
             installed += "<div class=\"entry installed\"><span class=\"entry_name\">" + node.name
                        + "</span>" + ammo + "<span class=\"entry_note\">"
-                       + Upper(slot.name) + " &#183; " + RankNumeral(node.rank) + "</span></div>";
+                       + note + "</span></div>";
         }
     }
     // Then what the hull carries that sits in no hole at all -- a shield, the
@@ -1265,7 +1289,9 @@ void UI::RebuildShipLists()
         ++installedCount;
 
         const std::string ammo = AmmoSpan(node);
+        const ShipSlotView* slot = SlotHolding(node);
         rowAmmoNode.push_back(ammo.empty() ? 0 : node.id);
+        rowMount.emplace_back(slot ? slot->name : std::string(), RankNumeral(node.rank));
         installed += "<div class=\"entry installed\"><span class=\"entry_name\">" + node.name
                    + "</span>" + ammo + "<span class=\"entry_note\">"
                    + RankNumeral(node.rank) + "</span></div>";
@@ -1320,11 +1346,19 @@ void UI::RebuildShipLists()
     // a row is its count span, which is why AmmoSpan is written second -- the
     // name is child 0 and the mount note is last.
     m_ammoSpans.clear();
+    m_installedRows.clear();
     for (std::size_t row = 0; row < rowAmmoNode.size(); ++row) {
-        if (rowAmmoNode[row] == 0) continue;
         Rml::Element* entry = m_installedList->GetChild(static_cast<int>(row));
-        Rml::Element* span = entry ? entry->GetChild(1) : nullptr;
-        if (span) m_ammoSpans.push_back(AmmoSpanRef{span, rowAmmoNode[row], -1, -1});
+        if (!entry) continue;
+        if (rowAmmoNode[row] != 0) {
+            if (Rml::Element* span = entry->GetChild(1)) {
+                m_ammoSpans.push_back(AmmoSpanRef{span, rowAmmoNode[row], -1, -1});
+            }
+        }
+        // The note is last, whether or not a count came before it.
+        Rml::Element* note = entry->GetChild(entry->GetNumChildren() - 1);
+        if (note) m_installedRows.push_back(InstalledRowRef{entry, note, rowMount[row].first,
+                                                            rowMount[row].second});
     }
 
     if (m_installedCount) m_installedCount->SetInnerRML(std::to_string(installedCount));
@@ -1333,6 +1367,10 @@ void UI::RebuildShipLists()
     }
 
     AttachShipListListeners();
+    // The markup above is written from the hull, which knows nothing of a plan
+    // standing against it -- so a refit staged before this rebuild would come
+    // back unmarked. Last, once every element it repaints has been resolved.
+    RefreshStagedVisuals();
 }
 
 // A row is one fitting: clicking it stages exactly that level, rather than
@@ -1374,9 +1412,24 @@ void UI::AttachShipListListeners()
 
 const ShipSlotView* UI::SelectedSlot() const
 {
-    if (m_selectedSlot.empty()) return nullptr;
+    return SlotNamed(m_selectedSlot);
+}
+
+const ShipSlotView* UI::SlotNamed(const std::string& name) const
+{
+    if (name.empty()) return nullptr;
     for (const ShipSlotView& slot : m_shownSlots) {
-        if (slot.name == m_selectedSlot) return &slot;
+        if (slot.name == name) return &slot;
+    }
+    return nullptr;
+}
+
+// Where a line that goes into no numbered hole sits on the drawing -- a shield,
+// the drive. Exactly one slot takes each of those, by category.
+const ShipSlotView* UI::SlotHolding(const TechNodeView& node) const
+{
+    for (const ShipSlotView& slot : m_shownSlots) {
+        if (!RefOf(slot).IsHole() && SlotTakes(slot, node.id)) return &slot;
     }
     return nullptr;
 }
@@ -1488,10 +1541,8 @@ void UI::RebuildTechTree()
         for (const TechNodeView& node : m_shownNodes) {
             if (node.tab != m_techTab || node.branch != branch) continue;
 
-            bool anyHeld = false;
             bool anyOffered = false;
             for (const TechRankView& rank : node.ranks) {
-                anyHeld = anyHeld || rank.state == TechRankState::Held;
                 anyOffered = anyOffered || rank.state != TechRankState::Locked;
             }
             const bool fitted = node.rank > 0;
@@ -1532,11 +1583,15 @@ void UI::RebuildTechTree()
             rml += "<div class=\"tile_text\"><span class=\"name\">" + node.name + "</span><div class=\"pips\">";
             for (std::size_t i = 0; i < node.ranks.size(); ++i) {
                 const TechRankView& rank = node.ranks[i];
-                // Filled up to the staged rank, the way held ranks are: the bar
-                // is a level meter, and "2/3" with only the second bar lit
-                // reads as neither the rank nor the count.
+                // Filled up to the rank held, or to the one staged: the bar is
+                // a level meter, and "2/3" with only the second bar lit reads
+                // as neither the rank nor the count. Off the rank rather than
+                // off its state, since a rank under the one carried is on
+                // offer as a downgrade and so does not read as held.
                 const bool staged = static_cast<int>(i) < stagedRank;
-                rml += "<div class=\"pip " + std::string(staged ? "staged" : PipClass(rank.state))
+                const bool held = stagedRank == 0 && static_cast<int>(i) < node.rank;
+                rml += "<div class=\"pip "
+                       + std::string(staged ? "staged" : held ? "fitted" : PipClass(rank.state))
                        + "\"></div>";
             }
             rml += "</div></div></div>";
@@ -1667,13 +1722,12 @@ void UI::ShowTechTip(std::uint32_t id, Rml::Element*)
     }
     if (!node || node->ranks.empty()) return;
 
-    // The rank being described: the one staged if there is one, else the next
-    // on offer, else the last held -- the same rank the tile is reporting.
-    std::size_t index = 0;
-    for (std::size_t i = 0; i < node->ranks.size(); ++i) {
-        index = i;
-        if (node->ranks[i].state != TechRankState::Held) break;
-    }
+    // The rank being described: the one staged if there is one, else the one
+    // past what is carried, else the top of the line -- the same rank the tile
+    // is reporting. Counted off the rank rather than found by scanning for the
+    // last held state, which no longer runs contiguously from the bottom.
+    std::size_t index = std::min(static_cast<std::size_t>(std::max(node->rank, 0)),
+                                 node->ranks.size() - 1);
     if (const int staged = StagedRankFor(node->id, m_techTab)) index = static_cast<std::size_t>(staged - 1);
     const TechRankView& rank = node->ranks[index];
 
@@ -1811,6 +1865,7 @@ void UI::DiscardTechMarkup()
     m_availableRows.clear();
     m_noneRow = nullptr;
     m_ammoSpans.clear();
+    m_installedRows.clear();
 
     m_shownNodes.clear();
     m_shownSlots.clear();

@@ -438,6 +438,8 @@ private:
     void ClearStagedForSelection();
     [[nodiscard]] SlotRef SelectionHole() const;
     [[nodiscard]] const ShipSlotView* SelectedSlot() const;
+    [[nodiscard]] const ShipSlotView* SlotNamed(const std::string& name) const;
+    [[nodiscard]] const ShipSlotView* SlotHolding(const TechNodeView& node) const;
 
     // A structural rebuild frees the element a click came from, so it can never
     // run from inside a handler: data changes ask for one here and Update()
@@ -465,6 +467,16 @@ private:
         int heldRank = 0;
     };
     std::vector<TileRefs> m_tileRefs;
+
+    // One row of INSTALLED SYSTEMS, with the mount whose plan can change what
+    // it says and the note it carries while no pull stands against that mount.
+    struct InstalledRowRef {
+        Rml::Element* row = nullptr;
+        Rml::Element* note = nullptr;
+        std::string mount;
+        std::string fittedNote;
+    };
+    std::vector<InstalledRowRef> m_installedRows;
     std::vector<Rml::Element*> m_slotElements;   // parallel to m_shownSlots
     std::vector<Rml::Element*> m_availableRows;  // parallel to OfferedForSelection()
     Rml::Element* m_noneRow = nullptr;           // the NOTHING choice above them

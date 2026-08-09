@@ -502,12 +502,17 @@ TechNodeState UpgradeCatalog::ShipState(const UpgradeDef& def, std::uint8_t rank
     // reading it ship-wide would let a hull arm exactly one position with each
     // line and then refuse every other.
     //
+    // Only the rank actually carried is held. The ones under it are still for
+    // sale, because fitting one is a *downgrade* -- a lighter drive or a
+    // smaller gun is a trade a pilot may want to make, and a rank is set rather
+    // than climbed (see FitRank), so there is nothing in the way of it.
+    //
     // Swapping to the other shield emitter is always on offer, at every
     // unlocked rank: it replaces rather than stacks, and swapping down is the
     // player's call to make.
     const bool swapping =
             def.kind == UpgradeKind::Shield && levels.shieldType != def.shield.type;
-    if (!swapping && HeldInMount(def, loadout, context.mount) && LevelOf(def, levels) >= rank) {
+    if (!swapping && HeldInMount(def, loadout, context.mount) && LevelOf(def, levels) == rank) {
         return TechNodeState::Held;
     }
 
@@ -918,7 +923,9 @@ UpgradeCatalog::Choice UpgradeCatalog::PreferredFit(const ShipLoadout& loadout,
     for (const UpgradeDef& def : m_defs) {
         // Highest affordable rank of a line first: an AI that can reach III
         // has no reason to pay for II on the way, since the price is absolute.
-        for (std::uint8_t rank = RankCount(def); rank >= 1; --rank) {
+        // Never below what it already carries -- a downgrade is on offer to a
+        // pilot weighing a trade, which is not a thing to be scored into.
+        for (std::uint8_t rank = RankCount(def); rank > LevelOf(def, loadout.levels); --rank) {
             if (ShipState(def, rank, context) != TechNodeState::Available) continue;
 
             // Ties break toward the earlier def and the higher rank, so the
