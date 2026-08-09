@@ -278,11 +278,12 @@ FetchContent_MakeAvailable(Chipmunk2D)
 
 # cpHastySpace.c (the optional threaded solver -- we don't use it, nothing in
 # this codebase touches Chipmunk's threading API) assumes any non-Windows
-# platform has <sys/sysctl.h>, true on macOS/BSD but not on Emscripten (or
-# Linux). Chipmunk2D's own CMakeLists globs every src/*.c file unconditionally
-# with no option to exclude it, so strip it from the already-created target
-# instead of patching the fetched source.
-if(EMSCRIPTEN)
+# platform has <sys/sysctl.h> and sysctlbyname(), which is really a macOS/BSD
+# assumption: glibc dropped the header in 2.32, and Emscripten never had it.
+# Chipmunk2D's own CMakeLists globs every src/*.c file unconditionally with no
+# option to exclude it, so strip it from the already-created target instead of
+# patching the fetched source.
+if(NOT WIN32 AND NOT APPLE)
     get_target_property(_chipmunk_sources chipmunk_static SOURCES)
     list(FILTER _chipmunk_sources EXCLUDE REGEX "cpHastySpace\\.c$")
     set_target_properties(chipmunk_static PROPERTIES SOURCES "${_chipmunk_sources}")
