@@ -1,13 +1,13 @@
 #include <cmath>
 
 #include <gravitaris/gravitaris.hpp>
+#include <gravitaris/game/math-utils.hpp>
 #include <gravitaris/game/gnc/control/flight-controller.hpp>
 
 namespace Gravitaris {
 
 using Magnum::Vector2d;
 
-static double WrapToPi(double angle);
 static double HeadingError(const Transform& ship, const Vector2d& bearing);
 static ControlFlags SteerTo(const Transform& ship, double headingError,
                             const FlightControllerParams& params);
@@ -141,13 +141,6 @@ static void SetThrottle(ThrottleState& throttle, bool thrust,
     if (throttle.thrusting == thrust) return;
     throttle.thrusting = thrust;
     throttle.holdTicks = thrust ? params.minBurnTicks : params.minCoastTicks;
-}
-
-static double WrapToPi(double angle)
-{
-    angle = std::fmod(angle + PI, 2.0 * PI);
-    if (angle < 0.0) angle += 2.0 * PI;
-    return angle - PI;
 }
 
 } // namespace Gravitaris

@@ -8,6 +8,7 @@
 #include <ankerl/unordered_dense.h>
 
 #include <gravitaris/gravitaris.hpp>
+#include <gravitaris/game/math-utils.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/bullet.hpp>
@@ -26,6 +27,7 @@
 #include <gravitaris/game/component/ai-strategy.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
+#include <gravitaris/game/component/research-access.hpp>
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/gnc/nav/trajectory-predictor.hpp>
 #include <gravitaris/game/gnc/guidance/behaviors.hpp>
@@ -68,6 +70,11 @@ static constexpr double PATROL_APPROACH_FACTOR = 1.5;
 // own hull rather than the planet's surface (a fighter is ~18 units long).
 static constexpr double SHIP_LANDING_CLEARANCE = 12.0;
 
+// How long clear of a yard before a pilot's shopping budget comes back. Long
+// enough that lifting off the deck is not immediately another shopping trip,
+// short enough that one fight is always followed by a fresh one.
+static constexpr std::uint16_t REFIT_REARM_TICKS = 600; // 10s at the fixed tick
+
 // How far past a departure planet's surface a pilot climbs before it may
 // turn onto its course -- outside the High Port's own orbit
 // (StructureLayout::ORBIT_RADIUS_FACTOR), so leaving means leaving the whole
@@ -91,7 +98,6 @@ static constexpr double SHOT_CLEARANCE = 15.0;
 // is still clear on arrival.
 static constexpr double RING_GUARD_FACTOR = 4.0;
 
-static double WrapToPi(double angle);
 static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Vector2d& relVel,
                                                 double projectileSpeed);
 static double DepartureRadius(flecs::entity site);
@@ -337,7 +343,20 @@ void AIPilotSystem::Update(std::uint64_t step)
         // for as long as it is still willing to wait around for it
         // (AIPersonality::upgradeGreed, bounded by padWaitRemaining so a wing
         // never parks forever). With no lab left there is nowhere to fit it.
-        if (pilot.padWaitRemaining > 0) --pilot.padWaitRemaining;
+        //
+        // The wait is spent standing at a yard, and both budgets come back
+        // once the pilot is clear of one. Counted down every tick from spawn
+        // instead, the window closed 45 seconds into the match and a pilot
+        // that had bought its one allowance never shopped again -- which is
+        // the whole of why an AI wing flew stock hulls all round.
+        const ResearchAccess* access = ent.try_get<ResearchAccess>();
+        if (access && access->atLab) {
+            if (pilot.padWaitRemaining > 0) --pilot.padWaitRemaining;
+        }
+        else if (access && access->ticksSinceLab >= REFIT_REARM_TICKS) {
+            pilot.padWaitRemaining = personality.padWaitTicks;
+            pilot.upgradesWanted = personality.upgradeGreed;
+        }
         const std::size_t myTeamIndex = static_cast<std::size_t>(myTeam.id);
         const flecs::entity factionEntity = factionOf[myTeamIndex];
         const FactionState* faction =
@@ -974,13 +993,6 @@ static double DepartureRadius(flecs::entity site)
         radius = planet->radius * site.get<Transform>().scale.x();
     }
     return radius + DEPARTURE_CLEARANCE;
-}
-
-static double WrapToPi(double angle)
-{
-    angle = std::fmod(angle + PI, 2.0 * PI);
-    if (angle < 0.0) angle += 2.0 * PI;
-    return angle - PI;
 }
 
 // Smallest positive time at which a projectile of `projectileSpeed` (relative

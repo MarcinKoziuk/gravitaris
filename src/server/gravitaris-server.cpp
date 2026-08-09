@@ -79,7 +79,7 @@ private:
 
 static constexpr const char* TEAM_COLORS = "blue|red|green|yellow|magenta|cyan";
 static constexpr const char* COMMAND_USAGE =
-        "spawn [count] [preset] [color]|ai <color> [preset]|list|team <peer-id> <color>|quit";
+        "spawn [count] [preset] [color]|ai [color|fill] [preset]|list|team <peer-id> <color>|quit";
 
 // Claude: can we use https://github.com/Neargye/magic_enum for this stuffie?
 std::optional<TeamId> ParseTeam(const std::string& name)
@@ -145,6 +145,23 @@ void HandleCommand(const std::string& line, Game& game, NetServer& server, bool&
         std::string presetName = "balanced";
         iss >> colorName;
         iss >> presetName;
+
+        // Bare `ai` (or `ai fill`) takes every side nobody is flying, which is
+        // what a host types once the lobby has stopped filling up.
+        if (colorName.empty() || colorName == "fill") {
+            const AIPreset* preset = findPreset(verb, presetName);
+            if (!preset) {
+                return;
+            }
+            const std::vector<TeamId> filled = game.FillEmptyTeamsWithAI(preset->id);
+            if (filled.empty()) {
+                std::printf("ai: every side is already taken\n");
+                return;
+            }
+            std::printf("ai: %zu unfilled side(s) now field a %s leader\n", filled.size(),
+                        presetName.c_str());
+            return;
+        }
 
         const std::optional<TeamId> team = ParseTeam(colorName);
         if (!team) {
@@ -248,15 +265,11 @@ int main(int argc, char** argv)
               << sectorParams.factionCount << " factions, " << sectorParams.stars << " stars)";
     game.BuildWorld(sectorParams);
 
-    // Every side gets a leader up front: the server can't know which teams
-    // humans will join, and a faction is a team rather than one pilot, so a
-    // joining player flies alongside its leader rather than replacing it.
-    // Without any of these the strategy layer has nothing to iterate --
-    // AIStrategy only ever lands on a faction leader, and Start(), the
-    // single-player path that fields one, is exactly what this target skips.
-    for (TeamId team : game.GetRoster()) {
-        game.AddAIFaction(team, ID("balanced"));
-    }
+    // No leaders up front. An empty colour on a dedicated server is a slot
+    // waiting for a player, and claiming it for the machine leaves whoever
+    // joins flying alongside a bot they never asked for. The sides nobody
+    // takes are filled on demand instead -- the `ai` console verb here, or
+    // /ai in chat.
 
     WebRtcServerTransport transport(port, DefaultIceServers(), bindAddress);
     NetServer server(game, transport);

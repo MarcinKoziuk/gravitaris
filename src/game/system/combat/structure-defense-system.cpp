@@ -17,14 +17,6 @@ namespace Gravitaris {
 
 using Magnum::Vector2d;
 
-    // Claude: we have so many duplicates, please create a math utils: include/gravitaris/game/math-utils.hpp (move PI there too)
-static double WrapToPi(double angle)
-{
-    angle = std::fmod(angle + PI, 2.0 * PI);
-    if (angle < 0.0) angle += 2.0 * PI;
-    return angle - PI;
-}
-
     // Claude: how can we best share code? I think small generic math units can go into math-fns
     // maybe intercept there too (but in a related .cpp unit)
 // Smallest positive time at which a projectile of `projectileSpeed`
@@ -87,35 +79,44 @@ void StructureDefenseSystem::Update()
             return;
         }
 
+        // The closest thing inside the envelope, rather than whichever hostile
+        // the registry happened to walk first: an emplacement firing steadily
+        // has to keep working the same target to be worth anything, and the
+        // list's order changes for reasons that have nothing to do with the
+        // fight.
+        const Target* chosen = nullptr;
+        double bestDistSq = fittings.turretFireRange * fittings.turretFireRange;
         for (const Target& target : targets) {
             if (target.team == turretTeam.id) continue;
-
-            const Vector2d relPos = target.pos - transf.pos;
-            if (relPos.length() > fittings.turretFireRange) continue;
-
-            const Vector2d relVel = target.vel - transf.vel;
-            const std::optional<double> t = SolveInterceptTime(relPos, relVel, round->speed);
-            if (!t) continue;
-
-            const Vector2d aim = (relPos + relVel * (*t)).normalized();
-            const Vector2d vel = aim * round->speed + transf.vel;
-
-            // Along the firing solution, not along the turret's own facing:
-            // a round drawn as a streak has to lie on its line of flight.
-            const double rot = std::atan2(aim.y(), aim.x()) + PI / 2.0;
-
-            const flecs::entity bullet =
-                    m_entitySpawner.SpawnBullet(round->modelId, transf.pos, vel, /*sensor=*/true, rot);
-            bullet.emplace<Bullet>(round->lifetimeSeconds, turretTeam.id, round->damage,
-                                   /*ownerNetId=*/0u, turret.id());
-
-            m_eventQueue.Emit(GameEventType::BulletFired, turret,
-                              Magnum::Vector2{static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())},
-                              round->id);
-
-            defense.fireCooldown = fittings.turretFireCooldownTicks;
-            break; // one shot per tick per turret
+            const double distSq = (target.pos - transf.pos).dot();
+            if (distSq > bestDistSq) continue;
+            bestDistSq = distSq;
+            chosen = &target;
         }
+        if (!chosen) return;
+
+        const Vector2d relPos = chosen->pos - transf.pos;
+        const Vector2d relVel = chosen->vel - transf.vel;
+        const std::optional<double> t = SolveInterceptTime(relPos, relVel, round->speed);
+        if (!t) return;
+
+        const Vector2d aim = (relPos + relVel * (*t)).normalized();
+        const Vector2d vel = aim * round->speed + transf.vel;
+
+        // Along the firing solution, not along the turret's own facing:
+        // a round drawn as a streak has to lie on its line of flight.
+        const double rot = std::atan2(aim.y(), aim.x()) + PI / 2.0;
+
+        const flecs::entity bullet =
+                m_entitySpawner.SpawnBullet(round->modelId, transf.pos, vel, /*sensor=*/true, rot);
+        bullet.emplace<Bullet>(round->lifetimeSeconds, turretTeam.id, round->damage,
+                               /*ownerNetId=*/0u, turret.id());
+
+        m_eventQueue.Emit(GameEventType::BulletFired, turret,
+                          Magnum::Vector2{static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())},
+                          round->id);
+
+        defense.fireCooldown = fittings.turretFireCooldownTicks;
     });
 }
 

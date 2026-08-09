@@ -240,11 +240,24 @@
 				border-color: #1b5a6b;
 				font-effect: none;
 			}
+			div#tech_tabs button:hover
+			{
+				color: #cff6ff;
+				background-color: #0e2a33;
+				border-color: #56d9f2;
+			}
 			div#tech_tabs button.active
 			{
 				color: #06121a;
 				background-color: #56d9f2;
 				border-color: #56d9f2;
+			}
+			/* After .active, so the tab already open keeps its filled look
+			   rather than dropping to the dark hover fill under the cursor. */
+			div#tech_tabs button.active:hover
+			{
+				background-color: #9beeff;
+				border-color: #9beeff;
 			}
 
 			/* The ship tab's cutaway: a live texture, drawn by

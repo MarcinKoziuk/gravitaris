@@ -94,12 +94,18 @@ struct AIPersonality {
     // is winnable from the ground, and a stationary target is a free shot.
     double groundedThreatRange = 600.0;
 
-    // How many upgrades this pilot means to be carrying when it leaves home.
-    // 1 is "take whatever the yard can fit and go"; 2 is a pilot that sits
-    // out most of a research cycle (30s a lab, see economy.toml) to arrive
-    // late and overgunned. padWaitTicks bounds the wait, so a wing whose side
-    // can no longer afford anything never parks forever.
-    std::uint32_t upgradeGreed = 1;
+    // How many upgrades this pilot means to be carrying when it leaves home,
+    // PER VISIT. 1 is "take whatever the yard can fit and go"; 3 is a pilot
+    // that sits out most of a research cycle (30s a lab, see economy.toml) to
+    // leave late and overgunned. padWaitTicks bounds the wait, so a wing whose
+    // side can no longer afford anything never parks.
+    //
+    // Both refill once the pilot is away from a yard (AIPilotSystem). They
+    // used to be a lifetime allowance seeded at spawn, which meant a pilot
+    // bought upgradeGreed things in its whole career -- one, for most presets
+    // -- and then flew whatever it had for the rest of the match however much
+    // its side had since learned or its account had since earned.
+    std::uint32_t upgradeGreed = 3;
     std::uint32_t padWaitTicks = 2700; // 45s at the fixed tick
 
     // What this pilot walks out of a yard carrying, and what it will not
@@ -222,11 +228,10 @@ struct AIPilot {
     // next successful shot starts a fresh one of personality.burstCount).
     std::uint32_t burstShotsRemaining = 0;
 
-    // Upgrades this pilot still means to collect before it leaves home, and
-    // the ticks it will wait around for them. Seeded from the personality at
-    // spawn and decremented by ResearchSystem as it actually collects, so the
-    // count is spent by the thing that hands them out rather than inferred
-    // from a loadout diff.
+    // Upgrades this pilot still means to collect on this visit, and the ticks
+    // it will wait around for them. Spent by ResearchSystem as it actually
+    // collects -- the thing that hands them out, rather than a loadout diff --
+    // and refilled by AIPilotSystem once the pilot is clear of the yard.
     std::uint32_t upgradesWanted = 0;
     std::uint32_t padWaitRemaining = 0;
 

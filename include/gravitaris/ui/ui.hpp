@@ -103,6 +103,7 @@ enum class SlotFamilyView : std::uint8_t {
     None,
     Weapon,
     MissileBay,
+    AmmoBay,
 };
 
 // One fitting position on the ship tab's schematic. `x`/`y` are 0..1 across
@@ -502,6 +503,11 @@ private:
 
     // Rebuilds the grid from m_shownNodes for the active tab.
     void RebuildTechTree();
+
+    // Throws away everything the tech window generates, so a closed window
+    // costs no per-frame element walk. Called on hide; the next refresh after
+    // a show puts it all back.
+    void DiscardTechMarkup();
 
     // Re-attaches the click and hover handlers after a rebuild.
     void AttachTechListeners();

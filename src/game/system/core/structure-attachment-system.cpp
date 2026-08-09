@@ -71,11 +71,16 @@ void StructureAttachmentSystem::Update()
         //
         // A station instead keeps its floor (local +Y) toward the planet all
         // the way around, so local -Y points along the radial {c, s}.
+        //
+        // Either way the facing turns at the same rate the ring does, which
+        // the solver needs told: it is what drags a ship parked on a station's
+        // deck round with it instead of leaving it holding a world-frame
+        // attitude the deck has turned out from under.
         const double rot = entity.has<Freighter>()
                 ? std::atan2(localVel.x(), -localVel.y())
                 : std::atan2(c, -s);
 
-        m_physicsSystem.SetKinematicMotion(ref, pos, vel, rot);
+        m_physicsSystem.SetKinematicMotion(ref, pos, vel, rot, angularSpeed);
         transf.pos = pos;
         transf.vel = vel;
     });

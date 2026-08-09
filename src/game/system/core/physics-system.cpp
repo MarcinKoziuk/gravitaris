@@ -259,12 +259,15 @@ void PhysicsSystem::SetMassMultiplier(const PhysicsRef& ref, float multiplier)
 }
 
 void PhysicsSystem::SetKinematicMotion(const PhysicsRef& ref, Magnum::Vector2d pos, Magnum::Vector2d vel,
-                                       std::optional<double> angle)
+                                       std::optional<double> angle, double angularVel)
 {
     cpBody* body = GetBody(ref).cp.body.get();
     cpBodySetPosition(body, cpv(pos.x(), pos.y()));
     cpBodySetVelocity(body, cpv(vel.x(), vel.y()));
-    if (angle) cpBodySetAngle(body, cpFloat(*angle));
+    if (angle) {
+        cpBodySetAngle(body, cpFloat(*angle));
+        cpBodySetAngularVelocity(body, cpFloat(angularVel));
+    }
 }
 
 void PhysicsSystem::Teleport(const PhysicsRef& ref, Magnum::Vector2d pos, Magnum::Vector2d vel)

@@ -24,6 +24,12 @@
 
 namespace Gravitaris {
 
+// What a building is worth in hull next to a fighter's. A complex is meant to
+// be a siege rather than a strafing run: at the model's own hp a passing pilot
+// could delete a Lab in one pass, and a High Port -- which a refit now
+// requires landing on -- with it.
+static constexpr float STRUCTURE_HP_SCALE = 10.f;
+
 static Damageable MakeDamageable(const Body& body);
 static ShipLoadout MakeShipLoadout(const Body& body);
 
@@ -199,11 +205,15 @@ flecs::entity EntitySpawner::SpawnStructureBase(StructureType type, id_t modelId
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
 
+    Damageable hull = MakeDamageable(*body);
+    hull.maxHp *= STRUCTURE_HP_SCALE;
+    hull.hp = hull.maxHp;
+
     auto entity = m_registry.entity();
     entity.emplace<Transform>(initialPos);
     entity.emplace<RigidBodyDesc>("main"_id, body);
     entity.emplace<Team>(team);
-    entity.emplace<Damageable>(MakeDamageable(*body));
+    entity.emplace<Damageable>(hull);
     entity.emplace<Structure>(Structure{type, 0.f, 0.f});
     if (type == StructureType::Base || type == StructureType::HighPort) {
         entity.emplace<StructureDefense>();

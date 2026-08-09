@@ -37,6 +37,12 @@ struct FactionState {
     // What this side has learned how to build, which is the ceiling on what
     // any of its hulls may fit. Outlives every ship, and every pilot.
     TechUnlocks unlocked;
+    // Whether a person is reading this side's tree, which is what stops
+    // ResearchSystem committing its Tech for it. Sticky, deliberately: derived
+    // fresh from "is a human-piloted hull alive right now" it went false for
+    // every respawn delay, and the side spent the player's Tech on the AI's
+    // preferences while they waited to fly again.
+    bool humanLed = false;
 };
 
 } // namespace Gravitaris

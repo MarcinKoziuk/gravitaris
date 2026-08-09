@@ -27,7 +27,7 @@ namespace Gravitaris {
 
 // Bump on any wire-layout change; ReadSnapshot rejects mismatches outright
 // (no cross-version compatibility until there's a reason to have it).
-static constexpr std::uint8_t SNAPSHOT_VERSION = 12; // v12: tech tree -- faction block, supplies, no draft
+static constexpr std::uint8_t SNAPSHOT_VERSION = 15; // v15: per-bay ammo stowage
 
 // Sanity caps so a garbage buffer can't make ReadSnapshot allocate wildly.
 static constexpr std::uint32_t MAX_ENTITIES = 4096;
@@ -87,9 +87,11 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             state.fireRateLevel = loadout->levels.fireRate;
             state.gunTierLevel = loadout->levels.gunTier;
             state.missileTierLevel = loadout->levels.missileTier;
-            state.ammoStoreLevel = loadout->levels.ammoStore;
-            state.ammoPool = loadout->levels.ammoPool;
+            for (std::size_t i = 0; i < MAX_AMMO_BAYS; ++i) {
+                state.ammoBays[i] = static_cast<std::uint8_t>(loadout->ammoBays[i]);
+            }
             state.engineLevel = loadout->levels.engine;
+            state.boostLevel = loadout->levels.boost;
             state.shieldLevel = loadout->levels.shield;
             state.shieldType = loadout->levels.shieldType;
             state.shieldHp = loadout->shieldHp;
@@ -183,6 +185,49 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
     });
 }
 
+void ApplyEntityShipState(flecs::entity entity, const EntityState& state)
+{
+    // maxHp is never sent: a hull's is decided by the model it was spawned
+    // from, which both sides already have.
+    if (Damageable* damageable = entity.try_get_mut<Damageable>()) {
+        damageable->hp = state.hp;
+    }
+    if (ShipLoadout* loadout = entity.try_get_mut<ShipLoadout>()) {
+        loadout->missileAmmo = state.missileAmmo;
+        loadout->cannonAmmo = state.cannonAmmo;
+        for (std::size_t i = 0; i < MAX_WEAPON_MOUNTS; ++i) {
+            // Range-checked rather than cast straight through: this byte comes
+            // off the wire, and an out-of-range enum is UB the moment anything
+            // switches on it.
+            const std::uint8_t arm = state.mounts[i];
+            loadout->mounts[i] = arm <= static_cast<std::uint8_t>(MountArm::Heavy)
+                               ? static_cast<MountArm>(arm) : MountArm::None;
+        }
+        loadout->missileBays = state.missileBays;
+        loadout->levels.fireRate = state.fireRateLevel;
+        loadout->levels.gunTier = state.gunTierLevel;
+        loadout->levels.cannonTier = state.cannonTierLevel;
+        loadout->levels.missileTier = state.missileTierLevel;
+        for (std::size_t i = 0; i < MAX_AMMO_BAYS; ++i) {
+            const std::uint8_t pool = state.ammoBays[i];
+            loadout->ammoBays[i] = pool <= static_cast<std::uint8_t>(AmmoPool::Missile)
+                                 ? static_cast<AmmoPool>(pool) : AmmoPool::None;
+        }
+        // Derived, never sent: the counts are just the bays added up.
+        SyncAmmoStoreCounts(*loadout);
+        loadout->levels.engine = state.engineLevel;
+        loadout->levels.boost = state.boostLevel;
+        loadout->levels.shield = state.shieldLevel;
+        loadout->levels.shieldType = state.shieldType;
+        loadout->shieldHp = state.shieldHp;
+        loadout->plateCount = state.plateCount;
+        loadout->plates = state.plates;
+    }
+    if (ResearchAccess* access = entity.try_get_mut<ResearchAccess>()) {
+        access->atLab = state.atLab;
+    }
+}
+
 void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
 {
     out.WriteU8(SNAPSHOT_VERSION);
@@ -212,9 +257,9 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteU8(e.fireRateLevel);
         out.WriteU8(e.gunTierLevel);
         out.WriteU8(e.missileTierLevel);
-        out.WriteU8(e.ammoStoreLevel);
-        out.WriteU8(static_cast<std::uint8_t>(e.ammoPool));
+        for (const std::uint8_t pool : e.ammoBays) out.WriteU8(pool);
         out.WriteU8(e.engineLevel);
+        out.WriteU8(e.boostLevel);
         out.WriteU8(e.shieldLevel);
         out.WriteU8(static_cast<std::uint8_t>(e.shieldType));
         out.WriteF32(e.shieldHp);
@@ -314,15 +359,15 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.fireRateLevel = in.ReadU8();
         e.gunTierLevel = in.ReadU8();
         e.missileTierLevel = in.ReadU8();
-        e.ammoStoreLevel = in.ReadU8();
-        // Clamped like MountArm below: an out-of-range enum off the wire is UB
-        // the moment anything switches on it.
-        const std::uint8_t pool = in.ReadU8();
-        e.ammoPool = pool <= static_cast<std::uint8_t>(AmmoPool::Missile)
-                   ? static_cast<AmmoPool>(pool) : AmmoPool::None;
+        for (std::uint8_t& pool : e.ammoBays) pool = in.ReadU8();
         e.engineLevel = in.ReadU8();
+        e.boostLevel = in.ReadU8();
         e.shieldLevel = in.ReadU8();
-        e.shieldType = static_cast<ShieldType>(in.ReadU8());
+        // Clamped like MountArm is on the way onto a hull: an out-of-range
+        // enum off the wire is UB the moment anything switches on it.
+        const std::uint8_t emitter = in.ReadU8();
+        e.shieldType = emitter <= static_cast<std::uint8_t>(ShieldType::Plating)
+                     ? static_cast<ShieldType>(emitter) : ShieldType::None;
         e.shieldHp = in.ReadF32();
         // Every float the sender wrote is consumed even if the count is
         // implausible; stopping early would desync the rest of the stream.

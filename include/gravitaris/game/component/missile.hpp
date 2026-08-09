@@ -23,6 +23,10 @@ struct Missile {
     // acceleration, top speed) travels with the round rather than being one
     // global setting every missile type would have to share.
     id_t weaponId = 0;
+    // Ticks since launch, which is what phases the seeker's hunt (see
+    // WeaponDef::Guidance::wobble). Counts up regardless of tier, so a round
+    // whose wobble is zero simply never reads it.
+    std::uint16_t age = 0;
 };
 
 } // namespace Gravitaris

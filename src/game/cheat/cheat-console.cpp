@@ -89,6 +89,7 @@ static void CheatKill(Cheat& c);
 static void CheatTeleport(Cheat& c);
 static void CheatWhere(Cheat& c);
 static void CheatSpawn(Cheat& c);
+static void CheatAI(Cheat& c);
 static void CheatFriendlyFire(Cheat& c);
 static void CheatPlayers(Cheat& c);
 static void CheatNotify(Cheat& c);
@@ -141,6 +142,7 @@ CheatResult RunCheatCommand(Game& game, flecs::entity subject, TeamId team, cons
     else if (verb == "tp" || verb == "teleport") CheatTeleport(cheat);
     else if (verb == "where") CheatWhere(cheat);
     else if (verb == "spawn") CheatSpawn(cheat);
+    else if (verb == "ai") CheatAI(cheat);
     else if (verb == "ff" || verb == "friendlyfire") CheatFriendlyFire(cheat);
     else if (verb == "players" || verb == "who") CheatPlayers(cheat);
     else if (verb == "notify") CheatNotify(cheat);
@@ -164,6 +166,7 @@ static void CheatHelp(Cheat& c)
     c.Say("/where - where you are now");
     c.Say("/players - who is flying, and what they are called");
     c.Say("/spawn [n] [team] - n AI fighters at that team's home");
+    c.Say("/ai [team] - field an AI leader for every side nobody is flying");
     c.Say("/ff [on|off] - friendly fire, for the whole round");
     c.Say("/notify [on|off] - webhook a line when somebody joins");
     c.Say("add @<player> to any of the above to run it on their ship instead");
@@ -427,6 +430,40 @@ static void CheatSpawn(Cheat& c)
 
     c.result.announce = true;
     c.Say(Format("spawn: %d %s fighter%s", count, TeamName(team), count == 1 ? "" : "s"));
+}
+
+// The other half of a dedicated server fielding nobody by default: a side left
+// empty is a slot waiting for a player, and this is what says the wait is over.
+static void CheatAI(Cheat& c)
+{
+    if (c.args.size() > 1 && c.args[1] != "fill") {
+        const std::optional<TeamId> named = ParseTeam(c.args[1]);
+        if (!named) {
+            c.Say("ai: no such side -- blue, red, violet, yellow, magenta, cyan");
+            return;
+        }
+        if (c.game.HasAIFaction(*named)) {
+            c.Say(Format("ai: %s already fields a leader", TeamName(*named)));
+            return;
+        }
+        c.game.AddAIFaction(*named);
+        c.result.announce = true;
+        c.Say(Format("ai: %s now fields a leader", TeamName(*named)));
+        return;
+    }
+
+    const std::vector<TeamId> filled = c.game.FillEmptyTeamsWithAI();
+    if (filled.empty()) {
+        c.Say("ai: every side is already flown or already has a leader");
+        return;
+    }
+
+    std::string names;
+    for (const TeamId team : filled) {
+        names += (names.empty() ? "" : ", ") + std::string(TeamName(team));
+    }
+    c.result.announce = true;
+    c.Say("ai: leaders fielded for " + names);
 }
 
 static void CheatPlayers(Cheat& c)

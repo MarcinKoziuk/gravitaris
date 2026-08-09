@@ -260,8 +260,17 @@ public:
     // omitted -- PhysicsSystem::Update() reads the body's angle back into
     // Transform::rot every tick regardless, so a caller that doesn't care
     // about facing needs no extra call.
+    //
+    // `angularVel` is the rate that angle is turning at, in rad/s, and is only
+    // read when an angle is given. It is what the solver needs to carry
+    // anything *resting on* the body round with it -- a ship parked on a High
+    // Port's deck keeps its own attitude without it, and reads as tipped over
+    // within seconds. Passed rather than derived from the angle delta: the
+    // first tick after a body is placed is an arbitrary jump, and a rate
+    // inferred from that one is a violent spin that throws off whatever is
+    // standing there.
     void SetKinematicMotion(const PhysicsRef& ref, Magnum::Vector2d pos, Magnum::Vector2d vel,
-                            std::optional<double> angle = std::nullopt);
+                            std::optional<double> angle = std::nullopt, double angularVel = 0.0);
 
     // Puts a dynamic body somewhere it could not have flown to, and stops it
     // spinning. Cheats and dev tools only -- the sim moves ships by

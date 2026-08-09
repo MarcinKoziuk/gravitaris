@@ -62,9 +62,9 @@
     <circle cx="373.8750" cy="192.1875" r="7" inkscape:label="support_0" id="slot-support-0" style="fill:none;stroke:#00ccff;stroke-width:1;stroke-dasharray:2,2" />
     <circle cx="328.1250" cy="201.5625" r="7" inkscape:label="gun+cannon_1" id="slot-weapon-1" style="fill:none;stroke:#00ccff;stroke-width:1;stroke-dasharray:2,2" />
     <circle cx="419.6250" cy="201.5625" r="7" inkscape:label="gun+cannon_2" id="slot-weapon-2" style="fill:none;stroke:#00ccff;stroke-width:1;stroke-dasharray:2,2" />
-    <circle cx="373.8750" cy="241.8750" r="7" inkscape:label="ammo_0" id="slot-ammo-0" style="fill:none;stroke:#00ccff;stroke-width:1;stroke-dasharray:2,2" />
+    <circle cx="350.8750" cy="241.8750" r="7" inkscape:label="ammo_0" id="slot-ammo-0" style="fill:none;stroke:#00ccff;stroke-width:1;stroke-dasharray:2,2" />
+    <circle cx="396.8750" cy="241.8750" r="7" inkscape:label="ammo_1" id="slot-ammo-1" style="fill:none;stroke:#00ccff;stroke-width:1;stroke-dasharray:2,2" />
     <circle cx="300.0000" cy="267.1875" r="7" inkscape:label="missile_0" id="slot-missile-0" style="fill:none;stroke:#00ccff;stroke-width:1;stroke-dasharray:2,2" />
-    <circle cx="447.7500" cy="267.1875" r="7" inkscape:label="missile_1" id="slot-missile-1" style="fill:none;stroke:#00ccff;stroke-width:1;stroke-dasharray:2,2" />
     <circle cx="373.8750" cy="300.0000" r="7" inkscape:label="engine_0" id="slot-engine-0" style="fill:none;stroke:#00ccff;stroke-width:1;stroke-dasharray:2,2" />
     <circle cx="328.1250" cy="300.0000" r="7" inkscape:label="thruster_0" id="slot-thruster-0" style="fill:none;stroke:#00ccff;stroke-width:1;stroke-dasharray:2,2" />
   </g>

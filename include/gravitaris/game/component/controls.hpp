@@ -23,8 +23,8 @@ struct ControlFlags {
     // trigger works. Held would toggle every tick the key was down.
     bool toggleWeapon : 1 = false;
     // Held, like thrustForward: a request for the overburn, which
-    // ShipControlsSystem grants only while there is boost left and the
-    // cooldown has expired (see Controls::boostTicks).
+    // ShipControlsSystem grants only while the engine is lit and there is
+    // something left in the tank (see Controls::boostSpent).
     bool boost : 1 = false;
 };
 
@@ -131,14 +131,17 @@ struct Controls {
     // on it, so one click can't spend two purchases.
     TechPick techPick;
 
-    // The overburn's two timers, both in ticks (see UpgradeDef::Boost).
-    // `boostTicks` is what is left of the current burn and is only ever
-    // non-zero on a ship carrying the upgrade; `boostCooldown` is the wait
-    // before another one can start, and runs down whether or not the button
-    // is held. A burn that is cut short still costs the full cooldown, so
-    // tapping it is not free.
-    std::uint16_t boostTicks = 0;
-    std::uint16_t boostCooldown = 0;
+    // The overburn is a tank, not a timer (see UpgradeDef::Boost).
+    // `boostSpent` is how much of ShipStats::boostTicks has been burned, so
+    // zero is full and a fresh hull needs no initialising. It only rises while
+    // the injector is actually feeding a lit engine, which is what makes a tap
+    // cost a tap: letting go, or holding the button while coasting, spends
+    // nothing. `boostRefill` is the sub-tick remainder of refilling it, in
+    // units of one tick of burn per boostCooldownTicks -- a full tank takes the
+    // whole cooldown to come back, so a burst costs exactly the share of it
+    // that was used.
+    std::uint16_t boostSpent = 0;
+    std::uint16_t boostRefill = 0;
     // Whether the overburn is actually running this tick -- what the movement
     // integrator, the wire (PackControlFlags) and the exhaust all read, as
     // opposed to actionFlags.boost, which is only the request.

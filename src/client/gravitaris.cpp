@@ -110,6 +110,14 @@ private:
         m_techPicks.pop_front();
         return pick;
     }
+    // The same, for a call that may decline to run the tick it was offered for
+    // (TickNetClient). Popping first would spend the purchase on a tick that
+    // never left, which is a click the player has to make again.
+    [[nodiscard]] const TechPick& PeekTechPick() const
+    {
+        static const TechPick none;
+        return m_techPicks.empty() ? none : m_techPicks.front();
+    }
     // Seconds left on the footer's refusal line before the panel goes back to
     // talking about the selection.
     float m_techNoticeRemaining = 0.f;
@@ -409,7 +417,9 @@ void GravitarisApplication::tickEvent()
                 m_frameTimeAccumulator = 0.0;
                 break;
             }
-            m_game->TickNetClient(m_currentInput, NextTechPick());
+            if (m_game->TickNetClient(m_currentInput, PeekTechPick()) && !m_techPicks.empty()) {
+                m_techPicks.pop_front();
+            }
             m_frameTimeAccumulator -= Game::PHYSICS_DELTA;
             ++steps;
         }

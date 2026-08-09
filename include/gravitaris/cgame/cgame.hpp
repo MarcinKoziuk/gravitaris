@@ -697,7 +697,12 @@ public:
     // predicts one more tick of its own movement and sends `flags` to the
     // server. Call from the same fixed-step accumulator loop single-player
     // drives Game::Update() from.
-    void TickNetClient(const ControlFlags& flags, const TechPick& techPick = {});
+    //
+    // False when no tick was actually sent -- before the welcome, between a
+    // death and the snapshot that confirms the next hull, or when the clock is
+    // running ahead of the server. `techPick` went nowhere in that case, so a
+    // caller holding a queue of them must not drop the one it offered.
+    bool TickNetClient(const ControlFlags& flags, const TechPick& techPick = {});
 
     // Net debug tab (Phase 4 interpolation tunables + diagnostics).
     [[nodiscard]] float GetInterpDelaySeconds() const { return m_interpDelaySeconds; }

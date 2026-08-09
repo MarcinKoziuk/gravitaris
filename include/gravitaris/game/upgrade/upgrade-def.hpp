@@ -38,6 +38,10 @@ struct WeaponDef {
         double turnRate = 0.;
         double acceleration = 0.;
         double topSpeed = 0.;
+        // Peak heading error the seeker hunts through, in radians. Zero flies
+        // the lead solution exactly; a cheap seeker weaves around it, which is
+        // what a pilot dodges into.
+        double wobble = 0.;
     } guidance;
 
     [[nodiscard]] bool IsGuided() const { return guidance.turnRate > 0.; }
@@ -90,15 +94,18 @@ struct FitWeights {
     }
 };
 
-// Which magazine a locker holds spares for. A hull has one ammo slot and the
-// lockers are one per pool, so carrying spares is a choice about which weapon
-// this pilot expects to run dry -- exactly as ShieldType is a choice about how
-// to absorb a hit. Fitting the other locker replaces rather than stacks.
+// Which magazine a locker holds spares for. Which POOL it feeds, not where it
+// rides: the hull's stowage bays are generic ('ammo_N'), so either locker goes
+// in either bay and a pilot chooses between shells and rounds bay by bay.
 enum class AmmoPool : std::uint8_t {
     None,
     Cannon,  // deepens the heavy mounts' magazine
     Missile, // widens the rack the launcher feeds from
 };
+
+// Every pool that has a locker, which is what UpgradeLevels::ammoStore is
+// indexed by (pool - 1, since None is not one).
+inline constexpr std::size_t NUM_AMMO_POOLS = 2;
 
 // What one weapon mount is armed with. Not which weapon: the rank of a line
 // is the ship's (UpgradeLevels), and this is where each of them sits. A hull
@@ -118,6 +125,7 @@ enum class SlotFamily : std::uint8_t {
     None, // belongs to the ship rather than to a hole: a shield, the overburn
     Weapon,
     MissileBay,
+    AmmoBay,
 };
 
 // Which shield a ship is carrying. Unlike the levels, this is a real choice:
@@ -136,10 +144,17 @@ enum class ShieldType : std::uint8_t {
 inline constexpr std::size_t MAX_SHIELD_PLATES = 16;
 
 // Fixed width of everything indexed by weapon mount -- Controls' per-mount
-// cooldowns, for now. A hull authoring more mounts of one family than this
-// simply doesn't fire the surplus (see ShipControlsSystem), which is a
-// silently quiet gun rather than a crash; fighter-1 carries two.
+// cooldowns, the missile-bay mask. A hull authoring more mounts of one family
+// than this simply doesn't fire the surplus (see ShipControlsSystem), which is
+// a silently quiet gun rather than a crash; fighter-1 carries two.
 inline constexpr std::size_t MAX_WEAPON_MOUNTS = 8;
+
+// The same, for stowage bays -- and tighter, because a bay is not merely a
+// place to hang something: every one of them holding a locker is spares the
+// hull actually carries, so a width nothing authors would be free magazine
+// depth for anything fitting with no bay named (the cheat console, the AI).
+// fighter-1 authors exactly this many.
+inline constexpr std::size_t MAX_AMMO_BAYS = 2;
 
 // Plate index meaning "the bubble", which is one element rather than one of an
 // indexed array. Lives here, with the plate width it sits outside of, so both
@@ -208,17 +223,18 @@ struct UpgradeDef {
     // are not offered to a hull with nothing to fire them from.
     id_t requiresId = 0;
 
+    // CannonTier/MissileTier only: how deep a rank of this line's magazine is.
+    // Nothing says how full a fitting arrives -- every one of them arrives
+    // full (UpgradeCatalog::FitRank).
     struct Rack {
-        int perPickup = 0;
-        int capacity = 0; // MissileTier: per level
+        int capacity = 0; // per level
     } rack;
 
     // AmmoStore only. Rounds on top of what the weapon's own tier holds, so a
     // locker is worth nothing to a hull that hasn't fitted the weapon it feeds.
     struct Ammo {
         AmmoPool pool = AmmoPool::None;
-        int capacity = 0;  // per level
-        int perPickup = 0; // rounds the fitting arrives with
+        int capacity = 0; // per level
     } ammo;
 
     // EngineTier only. Both compounded per level, as FireRate's scale is: rank
@@ -279,15 +295,32 @@ struct UpgradeLevels {
     // Zero means the hull carries no launcher at all, not a stock one: there
     // is nothing to fire and nowhere to put rounds until the bay is fitted.
     std::uint8_t missileTier = 0;
-    // Which locker is fitted and how deep, paired the way the shield's rank and
-    // type are: one ammo slot, so one pool gets spares and the other doesn't.
-    std::uint8_t ammoStore = 0;
-    AmmoPool ammoPool = AmmoPool::None;
+    // How many lockers of each pool the hull is carrying, indexed by pool (see
+    // AmmoStoreRank). A COUNT rather than a tier -- a box is a box, and the
+    // stowage bays are generic, so two of them can hold two of the same. Kept
+    // in step with ShipLoadout::ammoBays, which is where each one sits; this is
+    // the side of the split ResolveStats reads, the way it reads a weapon's
+    // rank without knowing which mount holds it.
+    std::uint8_t ammoStore[NUM_AMMO_POOLS] = {};
     std::uint8_t engine = 0;
     std::uint8_t shield = 0;
     ShieldType shieldType = ShieldType::None;
     std::uint8_t boost = 0;
 };
+
+// How many lockers feeding that pool the hull carries, 0 for none. Out of
+// range for AmmoPool::None, which nothing has a locker for.
+inline std::uint8_t AmmoStoreRank(const UpgradeLevels& levels, AmmoPool pool)
+{
+    return pool == AmmoPool::None ? std::uint8_t{0}
+                                  : levels.ammoStore[static_cast<std::size_t>(pool) - 1];
+}
+
+inline void SetAmmoStoreRank(UpgradeLevels& levels, AmmoPool pool, std::uint8_t rank)
+{
+    if (pool == AmmoPool::None) return;
+    levels.ammoStore[static_cast<std::size_t>(pool) - 1] = rank;
+}
 
 // What a faction has learned how to build: the rank it has unlocked of each
 // def, indexed by that def's position in UpgradeCatalog::Defs(). A ceiling on

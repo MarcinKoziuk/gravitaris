@@ -27,6 +27,10 @@ using Magnum::Vector2d;
 static constexpr float BOX_HP = 30.f; // a couple of primary hits or one ram
 static constexpr double HALF_PI = 1.5707963267948966;
 
+// Least of the tank a burn can be started on. See AdvanceBoost -- it gates
+// lighting the injector, never a burn already running.
+static constexpr float BOOST_ENGAGE_SHARE = 0.1f;
+
 static cpVect ThrustWithinSpeedLimit(cpBody* body, double thrust, double maxSpeed);
 static unsigned PhaseSlotOf(MountArm arm);
 
@@ -72,23 +76,50 @@ std::pair<Vector2d, Vector2d> ShipControlsSystem::ComputeBulletSpawn(const Trans
 
 ShipControlsSystem::BoostEffect ShipControlsSystem::AdvanceBoost(Controls& controls, const ShipStats& stats)
 {
-    if (controls.boostCooldown > 0) --controls.boostCooldown;
-
-    if (controls.boostTicks > 0) {
-        --controls.boostTicks;
+    const std::uint16_t tank = stats.boostTicks;
+    if (tank == 0) { // no injector fitted, or it has been pulled at a yard
+        controls.boostSpent = 0;
+        controls.boostRefill = 0;
+        controls.boosting = false;
+        return BoostEffect{};
     }
-    // A fresh burn needs the upgrade, the button, and the wait behind it.
-    // Thrust is not required: killing speed on the way into a planet is the
-    // whole reason this exists, and the ship is pointed retrograde with the
-    // engine lit for exactly that.
-    else if (stats.boostTicks > 0 && controls.actionFlags.boost && controls.boostCooldown == 0) {
-        controls.boostTicks = stats.boostTicks;
-        // Started here rather than when the burn ends, so letting go early
-        // buys nothing -- the wait is the same either way.
-        controls.boostCooldown = static_cast<std::uint16_t>(stats.boostCooldownTicks + stats.boostTicks);
+    if (controls.boostSpent > tank) controls.boostSpent = tank; // a rank came off mid-flight
+
+    // A burn is worth starting or it is not on offer. Under BOOST_ENGAGE_SHARE
+    // of the tank the trigger does nothing at all, so an injector that has only
+    // just begun refilling cannot be tapped for a tick of thrust every few
+    // ticks -- which is what "boost" degenerated into once the tank ran dry in
+    // a fight. Hysteresis, not a floor on the fuel: the test is on STARTING,
+    // and a burn already lit runs to empty.
+    const std::uint16_t remaining = static_cast<std::uint16_t>(tank - controls.boostSpent);
+    const auto engageFloor = std::max<std::uint16_t>(
+            1, static_cast<std::uint16_t>(static_cast<float>(tank) * BOOST_ENGAGE_SHARE));
+    const bool fuelled = controls.boosting ? remaining > 0 : remaining >= engageFloor;
+
+    // The injector feeds the engine, so it only burns while the engine is lit:
+    // asking for the overburn while coasting spends nothing, and letting go
+    // stops the drain where it stands. Killing speed on the way into a planet
+    // is still the main use of it -- braking is thrust, pointed retrograde.
+    const bool burning = controls.actionFlags.boost && controls.actionFlags.thrustForward
+                      && fuelled;
+    if (burning) {
+        ++controls.boostSpent;
+        controls.boostRefill = 0;
+    }
+    else if (controls.boostSpent > 0 && stats.boostCooldownTicks > 0) {
+        // A full tank takes the whole cooldown to come back, so the wait after
+        // a burst is proportional to the burst -- and a hull that never
+        // emptied it is never held to the full one.
+        controls.boostRefill = static_cast<std::uint16_t>(controls.boostRefill + tank);
+        while (controls.boostRefill >= stats.boostCooldownTicks && controls.boostSpent > 0) {
+            controls.boostRefill =
+                    static_cast<std::uint16_t>(controls.boostRefill - stats.boostCooldownTicks);
+            --controls.boostSpent;
+        }
+        if (controls.boostSpent == 0) controls.boostRefill = 0;
     }
 
-    controls.boosting = controls.boostTicks > 0;
+    controls.boosting = burning;
     return BoostEffectOf(controls.boosting, stats);
 }
 

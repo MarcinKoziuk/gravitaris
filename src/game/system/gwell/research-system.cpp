@@ -130,6 +130,12 @@ void ResearchSystem::Update(std::uint64_t step)
     m_registry.each([&](FactionState& fs) {
         TeamResearch& tr = byTeam[static_cast<std::size_t>(fs.team)];
 
+        // Latched rather than read live: a player between lives has no hull,
+        // and a side judged AI-run for those few seconds spent their Tech on
+        // the catalog's own preferences -- which read, from the tree, exactly
+        // like unlocks arriving from somebody else's faction.
+        if (humanPilot[static_cast<std::size_t>(fs.team)]) fs.humanLed = true;
+
         // Lose every lab and the bar simply stalls where it stood. Nothing
         // else stalls it: Tech banks, and a side that never spends it has only
         // itself to answer to.
@@ -148,7 +154,7 @@ void ResearchSystem::Update(std::uint64_t step)
         // An AI side has nobody reading the tree, so it commits its own Tech.
         // Without this it banks forever and its pilots fly stock hulls all
         // match, however hard its labs work.
-        if (!humanPilot[static_cast<std::size_t>(fs.team)]) {
+        if (!fs.humanLed) {
             const auto budget = static_cast<std::uint32_t>(
                     static_cast<float>(fs.techPoints) * AI_TECH_BUDGET_SHARE);
             const UpgradeCatalog::Choice choice = m_catalog.PreferredUnlock(fs.unlocked, budget);

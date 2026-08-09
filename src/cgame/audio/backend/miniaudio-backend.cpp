@@ -69,6 +69,19 @@ SoundBufferHandle MiniaudioBackend::UploadBuffer(
 void MiniaudioBackend::ReleaseBuffer(SoundBufferHandle buffer)
 {
     if (buffer.id == 0) return;
+
+    // Every voice still reading this clip goes with it. Its ma_audio_buffer_ref
+    // points straight at the PCM about to be freed, and the slot id is about to
+    // be handed to a different clip -- a voice left holding it would rewind
+    // into the old sound rather than rebind to the new one.
+    for (VoiceSlot& voice : m_voices) {
+        if (!voice.initialized || voice.boundBuffer != buffer.id) continue;
+        ma_sound_uninit(voice.sound.get());
+        ma_audio_buffer_ref_uninit(voice.bufferRef.get());
+        voice.initialized = false;
+        voice.boundBuffer = 0;
+    }
+
     BufferSlot& slot = m_buffers[buffer.id - 1];
     slot.samples.clear();
     slot.samples.shrink_to_fit();
@@ -98,18 +111,30 @@ void MiniaudioBackend::ReleaseVoice(VoiceHandle voice)
         ma_sound_uninit(slot.sound.get());
         ma_audio_buffer_ref_uninit(slot.bufferRef.get());
         slot.initialized = false;
+        slot.boundBuffer = 0;
     }
     m_freeVoiceSlots.push_back(voice.id - 1);
 }
 
-bool MiniaudioBackend::RebindVoice(VoiceSlot& voice, const BufferSlot& buffer)
+bool MiniaudioBackend::RebindVoice(VoiceSlot& voice, SoundBufferHandle handle)
 {
+    const BufferSlot& buffer = m_buffers[handle.id - 1];
     if (!buffer.initialized) return false;
+
+    // Same clip again: rewind the cursor. Tearing the sound down and building
+    // another allocates and re-attaches an engine-graph node, which is what a
+    // held trigger was paying for on every round.
+    if (voice.initialized && voice.boundBuffer == handle.id) {
+        ma_sound_stop(voice.sound.get());
+        ma_sound_seek_to_pcm_frame(voice.sound.get(), 0);
+        return true;
+    }
 
     if (voice.initialized) {
         ma_sound_uninit(voice.sound.get());
         ma_audio_buffer_ref_uninit(voice.bufferRef.get());
         voice.initialized = false;
+        voice.boundBuffer = 0;
     }
 
     // Fresh ref per play: its own cursor (starts at 0, see
@@ -124,15 +149,17 @@ bool MiniaudioBackend::RebindVoice(VoiceSlot& voice, const BufferSlot& buffer)
             reinterpret_cast<ma_data_source*>(voice.bufferRef.get()), 0, nullptr, voice.sound.get()) == MA_SUCCESS;
     if (!voice.initialized) {
         ma_audio_buffer_ref_uninit(voice.bufferRef.get());
+        return false;
     }
-    return voice.initialized;
+    voice.boundBuffer = handle.id;
+    return true;
 }
 
 void MiniaudioBackend::PlayOneShot(VoiceHandle voice, SoundBufferHandle buffer, const Vector2& pos, float gain)
 {
     if (voice.id == 0 || buffer.id == 0) return;
     VoiceSlot& v = m_voices[voice.id - 1];
-    if (!RebindVoice(v, m_buffers[buffer.id - 1])) return;
+    if (!RebindVoice(v, buffer)) return;
 
     ConfigurePositional(v.sound.get());
     ma_sound_set_looping(v.sound.get(), MA_FALSE);
@@ -145,7 +172,7 @@ void MiniaudioBackend::PlayLooping(VoiceHandle voice, SoundBufferHandle buffer, 
 {
     if (voice.id == 0 || buffer.id == 0) return;
     VoiceSlot& v = m_voices[voice.id - 1];
-    if (!RebindVoice(v, m_buffers[buffer.id - 1])) return;
+    if (!RebindVoice(v, buffer)) return;
 
     ConfigurePositional(v.sound.get());
     ma_sound_set_looping(v.sound.get(), MA_TRUE);

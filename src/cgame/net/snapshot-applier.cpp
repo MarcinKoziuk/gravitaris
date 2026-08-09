@@ -43,8 +43,6 @@ constexpr double JUMP_TOLERANCE = 3.0;
 
 namespace Gravitaris {
 
-static void ApplyLoadout(flecs::entity entity, const EntityState& state);
-
 SnapshotApplier::SnapshotApplier(flecs::world& world, ResourceLoader& resourceLoader)
         : m_world(world)
         , m_resourceLoader(resourceLoader)
@@ -100,7 +98,7 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
                 // replicated hauler reads as an ordinary fighter.
                 if (state.isFreighter) entity.emplace<Freighter>();
                 entity.emplace<HitOutline>(m_resourceLoader.Load<Body>(state.modelId));
-                ApplyLoadout(entity, state);
+                ApplyEntityShipState(entity, state);
             }
             if (state.type == NetEntityType::Structure) {
                 entity.emplace<Damageable>(state.hp, 100.f);
@@ -199,10 +197,7 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
         if (state.teamId != TeamId::None) {
             entity.set<Team>(Team{state.teamId});
         }
-        if (Damageable* damageable = entity.try_get_mut<Damageable>()) {
-            damageable->hp = state.hp;
-        }
-        ApplyLoadout(entity, state);
+        ApplyEntityShipState(entity, state);
         if (Structure* structure = entity.try_get_mut<Structure>()) {
             structure->rawMaterials = state.rawMaterials;
             structure->finishedMaterials = state.finishedMaterials;
@@ -212,41 +207,6 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
             source->mass = state.gravityMass;
             source->multiplier = state.gravityMultiplier;
         }
-    }
-}
-
-// The replicated half of a ship's ShipLoadout and its yard access. The mirror
-// world never runs ResearchSystem or ShieldSystem, so every field here is a
-// plain copy of what the server decided.
-static void ApplyLoadout(flecs::entity entity, const EntityState& state)
-{
-    if (ShipLoadout* loadout = entity.try_get_mut<ShipLoadout>()) {
-        loadout->missileAmmo = state.missileAmmo;
-        loadout->cannonAmmo = state.cannonAmmo;
-        for (std::size_t i = 0; i < MAX_WEAPON_MOUNTS; ++i) {
-            // Range-checked rather than cast straight through: this byte comes
-            // off the wire, and an out-of-range enum is UB the moment anything
-            // switches on it.
-            const std::uint8_t arm = state.mounts[i];
-            loadout->mounts[i] = arm <= static_cast<std::uint8_t>(MountArm::Heavy)
-                               ? static_cast<MountArm>(arm) : MountArm::None;
-        }
-        loadout->missileBays = state.missileBays;
-        loadout->levels.fireRate = state.fireRateLevel;
-        loadout->levels.gunTier = state.gunTierLevel;
-        loadout->levels.cannonTier = state.cannonTierLevel;
-        loadout->levels.missileTier = state.missileTierLevel;
-        loadout->levels.ammoStore = state.ammoStoreLevel;
-        loadout->levels.ammoPool = state.ammoPool;
-        loadout->levels.engine = state.engineLevel;
-        loadout->levels.shield = state.shieldLevel;
-        loadout->levels.shieldType = state.shieldType;
-        loadout->shieldHp = state.shieldHp;
-        loadout->plateCount = state.plateCount;
-        loadout->plates = state.plates;
-    }
-    if (ResearchAccess* access = entity.try_get_mut<ResearchAccess>()) {
-        access->atLab = state.atLab;
     }
 }
 

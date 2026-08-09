@@ -40,10 +40,8 @@ void LandingStateSystem::Update()
     std::vector<std::pair<TeamId, std::uint32_t>> friendlyLandings;
 
     m_registry.each([&](flecs::entity ship, LandingState& state, Transform& transf, PhysicsRef& ref) {
-        // A High Port is a landing site too: its deck faces away from the
-        // planet it orbits, so a ship set down on it is upright by the same
-        // legs-toward-the-body test a planet uses, with the station as the
-        // body. Planet wins if a ship somehow touches both.
+        // A High Port is a landing site too, judged as a deck rather than as a
+        // surface (see below). Planet wins if a ship somehow touches both.
         struct Ctx {
             flecs::entity planet;
             flecs::entity station;
@@ -58,6 +56,7 @@ void LandingStateSystem::Update()
             }
         }, &ctx);
 
+        const bool onDeck = !ctx.planet.is_alive() && ctx.station.is_alive();
         const flecs::entity site = ctx.planet.is_alive() ? ctx.planet : ctx.station;
 
         bool landed = false;
@@ -65,12 +64,21 @@ void LandingStateSystem::Update()
             const Transform& siteTransf = site.get<Transform>();
 
             const Magnum::Vector2d relVel = transf.vel - siteTransf.vel;
-            const Magnum::Vector2d toCenter = (siteTransf.pos - transf.pos).normalized();
-            const Magnum::Vector2d legs{-std::sin(static_cast<double>(transf.rot)),
-                                        std::cos(static_cast<double>(transf.rot))};
+            landed = relVel.length() < SAFE_LANDING_SPEED;
 
-            landed = relVel.length() < SAFE_LANDING_SPEED
-                    && Magnum::Math::dot(legs, toCenter) > UPRIGHT_DOT_THRESHOLD;
+            // Uprightness is a question about a surface: a slope will hold a
+            // hull on its side, and that is not a landing. A deck will not --
+            // it is a pad, and a ship in contact with one and matched to its
+            // motion is parked whatever way it is pointing. Asking a station
+            // for uprightness also asked the pilot to keep turning with a ring
+            // that goes round once a minute, which is why standing on a High
+            // Port would come and go as somewhere you could refit.
+            if (!onDeck) {
+                const Magnum::Vector2d toCenter = (siteTransf.pos - transf.pos).normalized();
+                const Magnum::Vector2d legs{-std::sin(static_cast<double>(transf.rot)),
+                                            std::cos(static_cast<double>(transf.rot))};
+                landed = landed && Magnum::Math::dot(legs, toCenter) > UPRIGHT_DOT_THRESHOLD;
+            }
         }
 
         if (landed) {

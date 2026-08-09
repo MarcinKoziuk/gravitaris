@@ -21,9 +21,10 @@ namespace {
 // panning gentle for nearby sources and doubles as the minimum distance.
 constexpr float LISTENER_HEIGHT = 250.f;
 
-// Sized so that simultaneous laser/hit one-shots (~0.15s each) from several
-// AI ships at full fire rate rarely exhaust it: stealing a voice that's still
-// mid-clip hard-cuts a near-full-scale waveform, which is an audible click.
+// Sized so that simultaneous hit/explosion one-shots (~0.15s each) from a busy
+// fight rarely exhaust it: stealing a voice that's still mid-clip hard-cuts a
+// near-full-scale waveform, which is an audible click. Gunfire does not draw
+// on this at all -- a muzzle holds its own voice (see PlayShot).
 constexpr std::size_t ONE_SHOT_POOL_SIZE = 24;
 
 // Released thruster loops ramp to silence over this many frames instead of
@@ -39,6 +40,13 @@ constexpr float THRUST_FADE_FRAMES = 6.f;
 // A genuine stop (arrival, death, disengage) still fades out, just a beat
 // later.
 constexpr std::uint32_t THRUST_RELEASE_GRACE_FRAMES = 24;
+
+// How long a muzzle keeps its own voice after its last round. Long enough to
+// cover the slowest weapon's cadence several times over (a missile rack cycles
+// every 26-36 ticks) so a steady rate of fire never gives the voice up
+// mid-burst, short enough that a wing that has broken off is not still holding
+// one voice each.
+constexpr std::uint32_t MUZZLE_IDLE_FRAMES = 90;
 
 constexpr float HIT_GAIN = 0.85f;
 constexpr float SHIELD_HIT_GAIN = 0.35f;
@@ -167,6 +175,45 @@ void AudioSystem::PlayOneShotById(id_t clipId, const Vector2& pos, float gain)
     m_backend->PlayOneShot(m_oneShotPool[chosen], it->second, pos, gain);
 }
 
+void AudioSystem::PlayShot(std::uint32_t shooter, id_t clipId, const Vector2& pos, float gain)
+{
+    // No NetId behind the shot -- nothing to hold a voice against, so it goes
+    // through the pool the way a hit or an explosion does.
+    if (shooter == 0) {
+        PlayOneShotById(clipId, pos, gain);
+        return;
+    }
+
+    const auto bufferIt = m_buffers.find(clipId);
+    if (bufferIt == m_buffers.end()) return;
+
+    auto [it, inserted] = m_muzzles.try_emplace(MuzzleKey{shooter, clipId});
+    MuzzleVoice& muzzle = it->second;
+    if (inserted) muzzle.voice = m_backend->AcquireVoice();
+    muzzle.idleFrames = 0;
+
+    // Rewinds rather than layering: the backend replays a voice already holding
+    // this clip from its first frame (MiniaudioBackend::RebindVoice), which is
+    // what turns a stream of rounds into one running gun.
+    m_backend->PlayOneShot(muzzle.voice, bufferIt->second, pos, gain);
+}
+
+void AudioSystem::SweepMuzzles()
+{
+    for (auto it = m_muzzles.begin(); it != m_muzzles.end();) {
+        // A one-shot ends on its own, so there is nothing to fade here -- the
+        // voice is only held so the next round can reuse it.
+        if (++it->second.idleFrames >= MUZZLE_IDLE_FRAMES
+                && !m_backend->IsVoicePlaying(it->second.voice)) {
+            m_backend->ReleaseVoice(it->second.voice);
+            it = m_muzzles.erase(it);
+        }
+        else {
+            ++it;
+        }
+    }
+}
+
 void AudioSystem::SweepThrusters(flecs::world& world)
 {
     world.each([&](flecs::entity ent, const Transform& transf, const Controls& controls) {
@@ -219,7 +266,7 @@ void AudioSystem::Update(const Vector2& cameraPos, flecs::world* mirrorWorld)
                 // param is the weapon's id, so a weapon brings its own sound
                 // with it -- nothing here knows one gun from another.
                 if (const WeaponDef* weapon = m_catalog.FindWeapon(event.param)) {
-                    PlayOneShotById(weapon->soundId, event.pos, weapon->soundGain);
+                    PlayShot(event.sourceNetId, weapon->soundId, event.pos, weapon->soundGain);
                 }
                 break;
             case GameEventType::ResearchComplete:
@@ -242,6 +289,8 @@ void AudioSystem::Update(const Vector2& cameraPos, flecs::world* mirrorWorld)
                 break; // no sound assigned (PlanetClaimed etc.)
         }
     });
+
+    SweepMuzzles();
 
     // Thruster loops: one looping voice per entity holding thrust. A net
     // client's own ship is the only one in m_registry -- everybody else lives

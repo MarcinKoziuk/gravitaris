@@ -197,6 +197,19 @@ void FreighterSystem::Update()
 
         const flecs::entity planet = m_entitySpawner.EntityForNetId(state.targetPlanetNetId);
 
+        // Somebody else's rock now. A transit is long enough that a world can
+        // change hands during one, and unloading anyway put this side's
+        // buildings on a planet the other side holds. The run is written off:
+        // the freighter is consumed where it stands rather than turned around,
+        // since dispatch has already been paid for and re-targeting it would
+        // be a second decision this system has no business making.
+        const Team* planetTeam = planet.is_alive() ? planet.try_get<Team>() : nullptr;
+        if (planetTeam && planetTeam->id != team.id) {
+            state.cargoRemaining = 0;
+            consumed.push_back(freighter);
+            return;
+        }
+
         if (state.cargoRemaining == 2) {
             if (planet.is_alive()) {
                 if (flecs::entity base = FindBase(m_registry, state.targetPlanetNetId); base.is_alive()) {

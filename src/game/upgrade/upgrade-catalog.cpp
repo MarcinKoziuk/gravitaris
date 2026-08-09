@@ -128,7 +128,6 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
                 break;
             case UpgradeKind::CannonTier:
             case UpgradeKind::MissileTier:
-                def.rack.perPickup = (*entry)["per_pickup"].value_or(0);
                 def.rack.capacity = (*entry)["capacity"].value_or(0);
                 [[fallthrough]];
             case UpgradeKind::WeaponTier: {
@@ -157,7 +156,6 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
                     continue;
                 }
                 def.ammo.capacity = (*entry)["capacity"].value_or(0);
-                def.ammo.perPickup = (*entry)["per_pickup"].value_or(0);
                 break;
             }
             case UpgradeKind::EngineTier:
@@ -313,18 +311,18 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
 {
     ShipStats stats;
 
-    // Spares for the one pool this hull's locker feeds. Stowage is stowage: the
-    // box holds its rounds whether or not the weapon they belong to is on the
-    // hull right now, so a pilot can buy the two in either order. What a hull
-    // with nothing to fire them through cannot do is *fill* them -- see
-    // FillableCapacity, which is what the yard prices a resupply against.
-    int cannonSpares = 0;
-    int missileSpares = 0;
-    if (const UpgradeDef* def = FindAmmoStore(levels.ammoPool); def && levels.ammoStore > 0) {
-        const int spares = def->ammo.capacity * static_cast<int>(levels.ammoStore);
-        if (def->ammo.pool == AmmoPool::Cannon) cannonSpares = spares;
-        else                                   missileSpares = spares;
-    }
+    // Spares from each locker the hull carries. Stowage is stowage: a box holds
+    // its rounds whether or not the weapon they belong to is on the hull right
+    // now, so a pilot can buy the two in either order. What a hull with nothing
+    // to fire them through cannot do is *fill* them -- see FillableCapacity,
+    // which is what the yard prices a resupply against.
+    const auto sparesFor = [&](AmmoPool pool) {
+        const UpgradeDef* def = FindAmmoStore(pool);
+        const std::uint8_t rank = AmmoStoreRank(levels, pool);
+        return def && rank > 0 ? def->ammo.capacity * static_cast<int>(rank) : 0;
+    };
+    const int cannonSpares = sparesFor(AmmoPool::Cannon);
+    const int missileSpares = sparesFor(AmmoPool::Missile);
 
     stats.gun = FindWeapon(m_fittings.shipGun);
     // A gun tier fits a different weapon rather than scaling the stock one,
@@ -342,7 +340,6 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
         stats.cannon = FindWeapon(def->tiers[index]);
         stats.cannonCapacity += def->rack.capacity * static_cast<int>(levels.cannonTier);
     }
-    if (stats.cannon) stats.cannonCooldownTicks = stats.cannon->cooldownTicks;
 
     // No stock launcher: a hull that hasn't fitted a bay has no missile at all,
     // and both the round and the rack it goes in come from that bay's tier.
@@ -354,12 +351,19 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
     }
     if (stats.missile) stats.missileCooldownTicks = stats.missile->cooldownTicks;
 
-    float cooldown = static_cast<float>(stats.gun ? stats.gun->cooldownTicks : 1u);
+    // The feed, on both primaries: the autoloader is a rule about how fast a
+    // mount cycles, not about which of the two lines is in it, and its own
+    // description has always said so.
+    float feedScale = 1.f;
     if (const UpgradeDef* def = FindKind(UpgradeKind::FireRate)) {
-        cooldown *= std::pow(def->fireRate.cooldownScale, static_cast<float>(levels.fireRate));
+        feedScale = std::pow(def->fireRate.cooldownScale, static_cast<float>(levels.fireRate));
     }
-    stats.fireCooldownTicks = std::max(MIN_FIRE_COOLDOWN_TICKS,
-                                       static_cast<std::uint32_t>(std::lround(cooldown)));
+    const auto cycled = [feedScale](const WeaponDef* weapon) {
+        const float cooldown = static_cast<float>(weapon ? weapon->cooldownTicks : 1u) * feedScale;
+        return std::max(MIN_FIRE_COOLDOWN_TICKS, static_cast<std::uint32_t>(std::lround(cooldown)));
+    };
+    stats.fireCooldownTicks = cycled(stats.gun);
+    if (stats.cannon) stats.cannonCooldownTicks = cycled(stats.cannon);
 
     if (const UpgradeDef* def = FindKind(UpgradeKind::EngineTier)) {
         if (levels.engine > 0) {
@@ -498,12 +502,11 @@ TechNodeState UpgradeCatalog::ShipState(const UpgradeDef& def, std::uint8_t rank
     // reading it ship-wide would let a hull arm exactly one position with each
     // line and then refuse every other.
     //
-    // Swapping to the other shield emitter -- or the other ammo locker -- is
-    // always on offer, at every unlocked rank: it replaces rather than stacks,
-    // and swapping down is the player's call to make.
+    // Swapping to the other shield emitter is always on offer, at every
+    // unlocked rank: it replaces rather than stacks, and swapping down is the
+    // player's call to make.
     const bool swapping =
-            (def.kind == UpgradeKind::Shield && levels.shieldType != def.shield.type)
-            || (def.kind == UpgradeKind::AmmoStore && levels.ammoPool != def.ammo.pool);
+            def.kind == UpgradeKind::Shield && levels.shieldType != def.shield.type;
     if (!swapping && HeldInMount(def, loadout, context.mount) && LevelOf(def, levels) >= rank) {
         return TechNodeState::Held;
     }
@@ -531,9 +534,11 @@ std::uint8_t UpgradeCatalog::LevelOf(const UpgradeDef& def, const UpgradeLevels&
     case UpgradeKind::WeaponTier:   return levels.gunTier;
     case UpgradeKind::CannonTier:   return levels.cannonTier;
     case UpgradeKind::MissileTier:  return levels.missileTier;
-    // Same shape as the shield below: the locker for the other pool is not
-    // fitted at any rank, however deep this one is.
-    case UpgradeKind::AmmoStore:    return levels.ammoPool == def.ammo.pool ? levels.ammoStore : 0;
+    // A box is a box: however many bays hold one, the rank on offer is still
+    // rank I. Clamped rather than reported raw so the board's pips and its
+    // "1/1" counter stay inside the ranks the def actually has.
+    case UpgradeKind::AmmoStore:
+        return std::min<std::uint8_t>(AmmoStoreRank(levels, def.ammo.pool), RankCount(def));
     case UpgradeKind::EngineTier:   return levels.engine;
     case UpgradeKind::Shield:       return levels.shieldType == def.shield.type ? levels.shield : 0;
     case UpgradeKind::Boost:        return levels.boost;
@@ -566,7 +571,19 @@ MountArm UpgradeCatalog::ArmOf(const UpgradeDef& def)
 SlotFamily UpgradeCatalog::FamilyOf(const UpgradeDef& def)
 {
     if (ArmOf(def) != MountArm::None) return SlotFamily::Weapon;
-    return def.kind == UpgradeKind::MissileTier ? SlotFamily::MissileBay : SlotFamily::None;
+    switch (def.kind) {
+    case UpgradeKind::MissileTier: return SlotFamily::MissileBay;
+    case UpgradeKind::AmmoStore:   return SlotFamily::AmmoBay;
+    default:                       return SlotFamily::None;
+    }
+}
+
+// How many holes of a family a hull can address. The stowage bays are narrower
+// than everything else, and deliberately so -- see MAX_AMMO_BAYS.
+static std::uint8_t HoleCount(SlotFamily family)
+{
+    return static_cast<std::uint8_t>(family == SlotFamily::AmmoBay ? MAX_AMMO_BAYS
+                                                                   : MAX_WEAPON_MOUNTS);
 }
 
 bool UpgradeCatalog::HeldInMount(const UpgradeDef& def, const ShipLoadout& loadout,
@@ -574,10 +591,13 @@ bool UpgradeCatalog::HeldInMount(const UpgradeDef& def, const ShipLoadout& loado
 {
     // Nothing that goes into a hole, or nobody asking about a particular one:
     // the ship-wide answer, which is what the branch view and the AI want.
-    if (!IsMounted(def) || mount >= MAX_WEAPON_MOUNTS) return true;
+    if (!IsMounted(def) || mount >= HoleCount(FamilyOf(def))) return true;
 
-    if (def.kind == UpgradeKind::MissileTier) return MissileBayFitted(loadout, mount);
-    return loadout.mounts[mount] == ArmOf(def);
+    switch (FamilyOf(def)) {
+    case SlotFamily::MissileBay: return MissileBayFitted(loadout, mount);
+    case SlotFamily::AmmoBay:    return loadout.ammoBays[mount] == def.ammo.pool;
+    default:                     return loadout.mounts[mount] == ArmOf(def);
+    }
 }
 
 // What a pool can hold on this hull as it stands, which is zero when nothing is
@@ -610,9 +630,11 @@ std::uint32_t UpgradeCatalog::ResupplyCost(const ShipLoadout& loadout) const
         if (const UpgradeDef* def = FindKind(weapon); def && weaponRank > 0) {
             price += SupplyCostOf(*def, weaponRank);
         }
-        if (levels.ammoPool == pool && levels.ammoStore > 0) {
+        // Per box, not per rank: the lockers are one rank apiece, and a hull
+        // that stowed two of them paid twice.
+        if (const std::uint8_t boxes = AmmoStoreRank(levels, pool); boxes > 0) {
             if (const UpgradeDef* def = FindAmmoStore(pool)) {
-                price += SupplyCostOf(*def, levels.ammoStore);
+                price += static_cast<std::uint32_t>(SupplyCostOf(*def, 1)) * boxes;
             }
         }
         return price;
@@ -669,39 +691,56 @@ bool UpgradeCatalog::FitRank(const UpgradeDef& def, std::uint8_t rank, ShipLoado
 
     UpgradeLevels& levels = loadout.levels;
 
-    // Rounds are capped by the bay the ship has fitted, resolved rather than
-    // authored on the restock: one number decides rack width, and it is the
-    // one that also decides which round goes in it.
-    const auto load = [&](int rounds) {
-        loadout.missileAmmo = static_cast<std::uint16_t>(
-                std::min(loadout.missileAmmo + rounds, ResolveStats(levels).missileCapacity));
-    };
-    const auto loadCannon = [&](int rounds) {
-        loadout.cannonAmmo = static_cast<std::uint16_t>(
-                std::min(loadout.cannonAmmo + rounds, ResolveStats(levels).cannonCapacity));
+    // A fitting that feeds a magazine arrives with that magazine full. The
+    // alternative -- so many rounds per purchase -- left a pilot who bought
+    // rank II holding rank I's load and having to buy a resupply on the same
+    // visit, which is not a decision anyone was making.
+    //
+    // Resolved rather than authored: one number decides how deep a pool is,
+    // and it is the same one that decides what goes in it.
+    const auto fill = [&](AmmoPool pool) {
+        const ShipStats fitted = ResolveStats(levels);
+        if (pool == AmmoPool::Cannon) {
+            loadout.cannonAmmo = static_cast<std::uint16_t>(fitted.cannonCapacity);
+        }
+        else {
+            loadout.missileAmmo = static_cast<std::uint16_t>(fitted.missileCapacity);
+        }
     };
 
     // Where it goes, for the lines that go somewhere. A pick with no hole
     // named takes the first free one, and failing that the first already
     // holding this line -- re-ranking what is there rather than refusing.
     if (IsMounted(def)) {
-        const MountArm arm = ArmOf(def);
+        const SlotFamily family = FamilyOf(def);
+        const std::uint8_t holes = HoleCount(family);
         const auto occupied = [&](std::uint8_t i) {
-            return arm != MountArm::None ? loadout.mounts[i] != MountArm::None
-                                         : MissileBayFitted(loadout, i);
+            switch (family) {
+            case SlotFamily::MissileBay: return MissileBayFitted(loadout, i);
+            case SlotFamily::AmmoBay:    return loadout.ammoBays[i] != AmmoPool::None;
+            default:                     return loadout.mounts[i] != MountArm::None;
+            }
         };
-        if (mount >= MAX_WEAPON_MOUNTS) {
+        if (mount >= holes) {
             mount = TechPick::NO_MOUNT;
-            for (std::uint8_t i = 0; i < MAX_WEAPON_MOUNTS; ++i) {
+            for (std::uint8_t i = 0; i < holes; ++i) {
                 if (!occupied(i)) { mount = i; break; }
             }
-            for (std::uint8_t i = 0; mount == TechPick::NO_MOUNT && i < MAX_WEAPON_MOUNTS; ++i) {
+            for (std::uint8_t i = 0; mount == TechPick::NO_MOUNT && i < holes; ++i) {
                 if (HeldInMount(def, loadout, i)) mount = i;
             }
         }
-        if (mount < MAX_WEAPON_MOUNTS) {
-            if (arm != MountArm::None) loadout.mounts[mount] = arm;
-            else SetMissileBay(loadout, mount, true);
+        // Nowhere to put it. Refused rather than charged for: the hull is full
+        // of this family and there is nothing this purchase would change.
+        if (mount >= holes) return false;
+
+        switch (family) {
+        case SlotFamily::MissileBay: SetMissileBay(loadout, mount, true); break;
+        // Straight over whatever was in the bay: the two lockers are the same
+        // hole's alternatives, so buying one where the other sat is a swap
+        // rather than a refusal.
+        case SlotFamily::AmmoBay:    loadout.ammoBays[mount] = def.ammo.pool; break;
+        default:                     loadout.mounts[mount] = ArmOf(def); break;
         }
     }
 
@@ -714,26 +753,20 @@ bool UpgradeCatalog::FitRank(const UpgradeDef& def, std::uint8_t rank, ShipLoado
     case UpgradeKind::WeaponTier:
         levels.gunTier = rank;
         break;
-    case UpgradeKind::CannonTier: {
+    case UpgradeKind::CannonTier:
         levels.cannonTier = rank;
-        // Arrives loaded: a cannon with an empty magazine is a purchase that
-        // does nothing until the hull happens to sit at a yard.
-        loadout.cannonAmmo = static_cast<std::uint16_t>(ResolveStats(levels).cannonCapacity);
+        fill(AmmoPool::Cannon);
         break;
-    }
     case UpgradeKind::MissileTier:
         levels.missileTier = rank;
-        load(def.rack.perPickup); // the fitting comes with rounds in it
+        fill(AmmoPool::Missile);
         break;
     case UpgradeKind::AmmoStore:
-        // One slot, one pool: fitting a locker takes the other one off, and the
-        // rounds it was holding go with it. The clamp below is what spends them
-        // -- the pool it fed is back to the weapon's own capacity.
-        levels.ammoPool = def.ammo.pool;
-        levels.ammoStore = rank;
+        // Both pools, not just this one: the bay this went into may have been
+        // holding the other locker, whose spares have just gone with it.
+        SyncAmmoStoreCounts(loadout);
         ClampAmmo(loadout);
-        if (def.ammo.pool == AmmoPool::Cannon) loadCannon(def.ammo.perPickup);
-        else                                   load(def.ammo.perPickup);
+        fill(def.ammo.pool);
         break;
     case UpgradeKind::EngineTier:
         levels.engine = rank;
@@ -769,26 +802,34 @@ bool UpgradeCatalog::StripRank(const UpgradeDef& def, ShipLoadout& loadout, bool
     // that rank later without the faction having to know it.
     const SlotFamily family = FamilyOf(def);
     if (family != SlotFamily::None) {
+        const std::uint8_t holes = HoleCount(family);
         // Nobody named a hole: the last one holding this line, so repeating
         // the call empties them one at a time from the outside in.
-        for (std::uint8_t i = MAX_WEAPON_MOUNTS; i > 0 && mount >= MAX_WEAPON_MOUNTS; --i) {
+        for (std::uint8_t i = holes; i > 0 && mount >= holes; --i) {
             if (HeldInMount(def, loadout, static_cast<std::uint8_t>(i - 1))) {
                 mount = static_cast<std::uint8_t>(i - 1);
             }
         }
-        if (mount >= MAX_WEAPON_MOUNTS || !HeldInMount(def, loadout, mount)) return false;
+        if (mount >= holes || !HeldInMount(def, loadout, mount)) return false;
 
-        if (family == SlotFamily::Weapon) {
+        switch (family) {
+        case SlotFamily::Weapon:
             loadout.mounts[mount] = MountArm::None;
             // The last heavy mount gone leaves nothing to fire the magazine
             // through, so its rounds go back to the yard with the gun.
             if (ArmOf(def) == MountArm::Heavy && MountsArmedWith(loadout, MountArm::Heavy) == 0) {
                 loadout.cannonAmmo = 0;
             }
-        }
-        else {
+            break;
+        case SlotFamily::AmmoBay:
+            loadout.ammoBays[mount] = AmmoPool::None;
+            SyncAmmoStoreCounts(loadout);
+            ClampAmmo(loadout); // the spares in it go back to the yard with it
+            break;
+        default:
             SetMissileBay(loadout, mount, false);
             if (MissileBaysFitted(loadout) == 0) loadout.missileAmmo = 0;
+            break;
         }
         return true;
     }
@@ -799,11 +840,6 @@ bool UpgradeCatalog::StripRank(const UpgradeDef& def, ShipLoadout& loadout, bool
     switch (def.kind) {
     case UpgradeKind::FireRate:
         levels.fireRate = 0;
-        break;
-    case UpgradeKind::AmmoStore:
-        levels.ammoStore = 0;
-        levels.ammoPool = AmmoPool::None;
-        ClampAmmo(loadout); // the spares in it go back to the yard with it
         break;
     case UpgradeKind::EngineTier:
         levels.engine = 0;
@@ -822,6 +858,7 @@ bool UpgradeCatalog::StripRank(const UpgradeDef& def, ShipLoadout& loadout, bool
     case UpgradeKind::WeaponTier:
     case UpgradeKind::CannonTier:
     case UpgradeKind::MissileTier:
+    case UpgradeKind::AmmoStore:
         return false;
     }
     return true;
@@ -937,6 +974,7 @@ static WeaponDef ParseWeapon(const toml::table& entry, const std::string& key)
         weapon.guidance.turnRate = (*guidance)["turn_rate"].value_or(0.0);
         weapon.guidance.acceleration = (*guidance)["acceleration"].value_or(0.0);
         weapon.guidance.topSpeed = (*guidance)["top_speed"].value_or(0.0);
+        weapon.guidance.wobble = (*guidance)["wobble"].value_or(0.0);
     }
     return weapon;
 }
@@ -987,13 +1025,13 @@ static ShieldType ParseShieldType(std::string_view name, bool& ok)
 }
 
 // Whether these two are alternatives rather than companions: one hull hole and
-// one field to hold the rank, so fitting either takes the other off. Both kinds
-// that work this way carry a discriminator (ShieldType, AmmoPool) and are the
-// only two entries of their kind in the pool.
+// one field to hold the rank, so fitting either takes the other off. The two
+// shield emitters are the only pair in the pool that work this way -- the ammo
+// lockers used to, and now have a stowage slot each.
 static bool Exclusive(const UpgradeDef& a, const UpgradeDef& b)
 {
     if (a.kind != b.kind) return false;
-    return a.kind == UpgradeKind::Shield || a.kind == UpgradeKind::AmmoStore;
+    return a.kind == UpgradeKind::Shield;
 }
 
 static AmmoPool ParseAmmoPool(std::string_view name, bool& ok)

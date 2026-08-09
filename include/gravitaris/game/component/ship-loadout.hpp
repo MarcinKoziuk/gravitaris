@@ -36,6 +36,13 @@ struct ShipLoadout {
     // it through, not a second rack.
     std::uint8_t missileBays = 0;
 
+    // What rides in each of the hull's 'ammo_N' stowage bays, indexed the same
+    // way. A bay is generic -- either locker goes in either one -- so this is
+    // where the choice between shells and rounds actually lives;
+    // UpgradeLevels::ammoStore is only the count of each, which is what
+    // ResolveStats needs and all it needs.
+    std::array<AmmoPool, MAX_AMMO_BAYS> ammoBays{};
+
     std::uint16_t missileAmmo = 0;
     // Rounds left in the cannon's magazine. Deeper than the rack by an order
     // of magnitude -- see the HUD, which draws one tick per ten.
@@ -107,6 +114,29 @@ inline int MissileBaysFitted(const ShipLoadout& loadout)
         if (MissileBayFitted(loadout, bay)) ++count;
     }
     return count;
+}
+
+// How many stowage bays hold a locker feeding `pool`. The authority on it:
+// UpgradeLevels::ammoStore is this count, cached where ResolveStats can reach
+// it without a loadout.
+inline std::uint8_t AmmoBaysHolding(const ShipLoadout& loadout, AmmoPool pool)
+{
+    if (pool == AmmoPool::None) return 0;
+
+    std::uint8_t count = 0;
+    for (const AmmoPool held : loadout.ammoBays) {
+        if (held == pool) ++count;
+    }
+    return count;
+}
+
+// Copies the bay placement back onto the levels. Every path that puts a locker
+// in a bay or takes one out has to call it, or the two disagree about how deep
+// the magazines are.
+inline void SyncAmmoStoreCounts(ShipLoadout& loadout)
+{
+    SetAmmoStoreRank(loadout.levels, AmmoPool::Cannon, AmmoBaysHolding(loadout, AmmoPool::Cannon));
+    SetAmmoStoreRank(loadout.levels, AmmoPool::Missile, AmmoBaysHolding(loadout, AmmoPool::Missile));
 }
 
 inline bool IsPlated(const ShipLoadout& loadout)

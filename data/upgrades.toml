@@ -26,6 +26,10 @@ sound_gain = 0.5
 # Each tier hits harder and throws flatter, and cycles faster as the feed
 # improves -- any one of them can be tuned without touching the others.
 #
+# Every tier out-cycles and out-ranges the light gun of the same rank
+# (speed * lifetime_seconds is the reach): the magazine is what a heavy mount
+# pays for that, and the light guns' case against it is that they never run dry.
+#
 # A heavy round is a tracer, not a dot: the tiers fire bullet-heavy rather
 # than the stock bullet-0, and the top one its own cyan streak, so what a ship
 # is shooting is readable from the rounds alone.
@@ -33,10 +37,10 @@ sound_gain = 0.5
 key = "gatling_1"
 hardpoint = "weapon"
 name = "Gatling"
-cooldown_ticks = 6
+cooldown_ticks = 5
 damage = 15.0
 speed = 224.0
-lifetime_seconds = 3.0
+lifetime_seconds = 3.6
 model = "models/bullets/bullet-heavy"
 sound = "sounds/gatling-1.wav"
 sound_gain = 0.7
@@ -45,10 +49,10 @@ sound_gain = 0.7
 key = "gatling_2"
 hardpoint = "weapon"
 name = "Gatling II"
-cooldown_ticks = 5
+cooldown_ticks = 4
 damage = 21.0
 speed = 320.0
-lifetime_seconds = 3.2
+lifetime_seconds = 3.8
 model = "models/bullets/bullet-heavy"
 sound = "sounds/gatling-1.wav"
 sound_gain = 0.7
@@ -59,10 +63,10 @@ sound_gain = 0.7
 key = "gatling_3"
 hardpoint = "weapon"
 name = "Gatling III"
-cooldown_ticks = 5
+cooldown_ticks = 3
 damage = 30.0
 speed = 420.0
-lifetime_seconds = 3.5
+lifetime_seconds = 4.2
 model = "models/bullets/bullet-heavy-cyan"
 sound = "sounds/gatling-1.wav"
 sound_gain = 0.7
@@ -70,10 +74,15 @@ sound_gain = 0.7
 # The missile line. A hull carries no launcher at all until MISSILE BAY is
 # fitted; each tier of that upgrade fits the next round up and widens the rack.
 #
-# `guidance` is MissileSystem's homing envelope -- turn_rate in rad/s. The
-# governing number of the whole line is lifetime_seconds: a round that loiters
-# is one a pilot cannot break from, however hard they turn, so even the top
-# tier burns out in four seconds. Everything else here is tuned around that.
+# `guidance` is MissileSystem's homing envelope -- turn_rate in rad/s. A round
+# that loiters is one a pilot cannot break from, however hard they turn, so
+# lifetime_seconds is what separates a nuisance from a threat: the first tier
+# burns out before it has crossed a dogfight, the last one follows you out of
+# it. Everything else here is tuned around that.
+#
+# `wobble` is how badly the seeker hunts around its lead solution, in radians of
+# heading error. A cheap seeker weaves visibly and is worth dodging into; the
+# top tier is zero and flies the solution dead straight.
 # The light-gun line. Rank 1 is the weapon every hull spawns with, so the line
 # starts at what a pilot already has rather than above it; the ranks above are a
 # wider bore on the same mount. No feed, no magazine -- see `light_guns`.
@@ -108,10 +117,10 @@ name = "Missile"
 cooldown_ticks = 36
 damage = 22.0
 speed = 140.0
-lifetime_seconds = 2.5
+lifetime_seconds = 4.0
 model = "models/missiles/missile-0"
 sound = "sounds/laser-1.wav"
-guidance = { turn_rate = 1.2, acceleration = 90.0, top_speed = 210.0 }
+guidance = { turn_rate = 1.2, acceleration = 90.0, top_speed = 210.0, wobble = 0.22 }
 
 [[weapon]]
 key = "missile_mk2"
@@ -120,10 +129,10 @@ name = "Missile II"
 cooldown_ticks = 30
 damage = 28.0
 speed = 150.0
-lifetime_seconds = 3.2
+lifetime_seconds = 5.5
 model = "models/missiles/missile-0"
 sound = "sounds/laser-1.wav"
-guidance = { turn_rate = 1.6, acceleration = 110.0, top_speed = 235.0 }
+guidance = { turn_rate = 1.6, acceleration = 110.0, top_speed = 235.0, wobble = 0.09 }
 
 [[weapon]]
 key = "missile_mk3"
@@ -132,10 +141,10 @@ name = "Missile III"
 cooldown_ticks = 26
 damage = 34.0
 speed = 160.0
-lifetime_seconds = 4.0
+lifetime_seconds = 7.0
 model = "models/missiles/missile-0"
 sound = "sounds/laser-1.wav"
-guidance = { turn_rate = 2.0, acceleration = 130.0, top_speed = 260.0 }
+guidance = { turn_rate = 2.0, acceleration = 130.0, top_speed = 260.0, wobble = 0.0 }
 
 # ---- fittings --------------------------------------------------------------
 
@@ -145,11 +154,14 @@ guidance = { turn_rate = 2.0, acceleration = 130.0, top_speed = 260.0 }
 gun = "autocannon"
 
 # Base/High Port turrets (StructureDefenseSystem) fire the same round a stock
-# ship does, on their own much slower cadence.
+# ship does. An emplacement has no magazine to run dry and nothing to do but
+# shoot, so it holds a steady stream on whatever comes inside its range rather
+# than taking the occasional pot shot -- getting close to a defended complex is
+# meant to be the hard part of taking one.
 [turret]
 weapon = "autocannon"
-fire_range = 400.0
-fire_cooldown_ticks = 90
+fire_range = 600.0
+fire_cooldown_ticks = 9
 
 # ---- the tech pool ---------------------------------------------------------
 #
@@ -169,29 +181,31 @@ fire_cooldown_ticks = 90
 # small change of every landing.
 
 # The launcher itself, and the only way onto the missile line: a hull that
-# hasn't fitted this has no rack, and MISSILE RACK stays off its tree
-# (`requires`). Each rank fits the next round up and widens the rack by
-# `capacity`, so the ceiling is 12 rounds -- a handful of kills, not a
-# standoff weapon.
+# hasn't fitted this has no rack, and MISSILE CONTAINER stays off its tree
+# (`requires`). Each rank fits the next round up and deepens the rack by
+# `capacity`, so the ceiling is 24 rounds.
+#
+# A hull carries exactly one bay (fighter-1 authors one `missile_0` slot), so a
+# rank here is a better round rather than another tube.
 [[upgrade]]
 key = "missile_bay"
 slots = ["missile"]
 icon = "bay"
 name = "MISSILE BAY"
-description = "Fits the launcher, then a harder round. Four more tubes each time."
+description = "Fits the launcher, then a harder round. Eight more rounds each time."
 kind = "missile_tier"
 max_level = 3
 weight = 1.0
 tiers = ["missile_mk1", "missile_mk2", "missile_mk3"]
-per_pickup = 4 # rounds that come with the fitting
-capacity = 4   # per level
+capacity = 8 # per level; the fitting arrives with the rack full
 tech_cost = [3, 5, 8]
 supply_cost = [12, 26, 44]
 
-# The two ammo boxes. A hull has ONE ammo slot and there is one box per
-# magazine, so fitting either takes the other one off -- carrying spares is a
-# choice about which weapon this pilot expects to run dry, the same shape of
-# decision the two shield emitters are.
+# The two ammo boxes. Both go in the hull's generic stowage bays (`ammo`, two
+# of them on fighter-1), and either box fits either bay -- so what a pilot
+# stows is a choice rather than a pair of fixed holes: two boxes of shells, two
+# containers of rounds, or one of each. Buying a box into an occupied bay swaps
+# what was there.
 #
 # `research = false`: shells are not a technology. Neither box appears on the
 # PERMANENT board and no unlocked rank gates them -- a yard sells them off the
@@ -199,24 +213,24 @@ supply_cost = [12, 26, 44]
 # is the only gate either of them has, and it asks what the faction knows rather
 # than what this hull is already carrying: the rounds and the gun are one visit.
 #
-# One rank each: a box is either aboard or it isn't. Spares sit on top of what
-# the weapon's own tier holds, and both are cheap next to the weapon itself --
-# this is the small purchase that keeps a working loadout in the fight, not one
-# that changes what it can do.
+# One rank each: a box is either in a bay or it isn't, and a second one is a
+# second bay rather than a better box. Spares sit on top of what the weapon's
+# own tier holds, and both are cheap next to the weapon itself -- this is the
+# small purchase that keeps a working loadout in the fight, not one that
+# changes what it can do.
 
 [[upgrade]]
 key = "shell_box"
 slots = ["ammo"]
 icon = "shl"
 name = "CANNON SHELL BOX"
-description = "Belted rounds stowed aft. Half again the magazine, for the mounts that run out."
+description = "Belted rounds stowed aft. A whole magazine again, for the mounts that run out."
 kind = "ammo_store"
 ammo_pool = "cannon"
 research = false
 max_level = 1
 weight = 0.7
-capacity = 20  # on top of the cannon tier's own 40 per rank
-per_pickup = 20
+capacity = 40 # on top of the cannon tier's own 40 per rank
 requires = "heavy_cannons"
 supply_cost = 8
 
@@ -225,14 +239,13 @@ key = "missile_container"
 slots = ["ammo"]
 icon = "mis"
 name = "MISSILE CONTAINER"
-description = "Four more rounds for the rack, and the space to stow them."
+description = "Eight more rounds for the rack, and the space to stow them."
 kind = "ammo_store"
 ammo_pool = "missile"
 research = false
 max_level = 1
 weight = 0.7
-capacity = 4 # matching what a rank of the bay itself adds
-per_pickup = 4
+capacity = 8 # matching what a rank of the bay itself adds
 requires = "missile_bay"
 supply_cost = 10
 
@@ -311,11 +324,10 @@ max_level = 3
 weight = 1.0
 # One weapon per rank, in order: fitting the rank fits its weapon.
 tiers = ["gatling_1", "gatling_2", "gatling_3"]
-# Rounds the magazine holds per rank, and what a fitting arrives loaded with.
-# Deep next to the missile rack's handful: this is the weapon a pilot leans on
-# until it is dry, not one they save for a shot worth taking.
+# Rounds the magazine holds per rank; a fitting arrives with it full. Deep next
+# to the missile rack's handful: this is the weapon a pilot leans on until it is
+# dry, not one they save for a shot worth taking.
 capacity = 40
-per_pickup = 40
 tech_cost = [3, 6, 10]
 supply_cost = [14, 30, 52]
 
@@ -325,9 +337,13 @@ supply_cost = [14, 30, 52]
 # breaking speed in a fight -- and it is deliberately modest, since the whole
 # combat model assumes a ship can be caught.
 #
+# duration_seconds is a TANK, not a timer: it only drains while the injector is
+# actually feeding a lit engine, so a burst costs what it burns and nothing
+# else, and cooldown_seconds is how long refilling an empty one takes.
+#
 # max_speed_scale is the one number that bounds a boosted hull: 1.2 of the
-# hull's own [physics] max_speed, and levels never move it. They lengthen the
-# burn and shorten the wait instead.
+# hull's own [physics] max_speed, and levels never move it. They deepen the
+# tank and shorten the refill instead.
 [[upgrade]]
 key = "overburn"
 # Its own hole, not the engine's: the drive and the injector are two fittings a
@@ -336,7 +352,7 @@ key = "overburn"
 slots = ["thruster"]
 icon = "ovb"
 name = "OVERBURN"
-description = "Injector overrun: hard thrust, briefly past the redline. Then it has to cool."
+description = "Injector overrun: hard thrust, briefly past the redline. Burn it in bursts; it refills when you let off."
 kind = "boost"
 requires = "engine"
 max_level = 3

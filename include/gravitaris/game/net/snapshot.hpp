@@ -102,12 +102,16 @@ struct EntityState {
     std::uint8_t gunTierLevel = 0;
     std::uint8_t cannonTierLevel = 0;
     std::uint8_t missileTierLevel = 0;
-    // The ammo locker's rank and which magazine it feeds -- paired for the same
-    // reason the shield's two are: the rank alone cannot say which pool got the
-    // spares, and the refit board draws the locker either way.
-    std::uint8_t ammoStoreLevel = 0;
-    AmmoPool ammoPool = AmmoPool::None;
+    // One byte per stowage bay (AmmoPool), as ShipLoadout::ammoBays holds them.
+    // The placement rather than the counts: the bays are generic, so the refit
+    // board has to know which locker is in which one, and the counts
+    // UpgradeLevels carries fall straight out of it (SyncAmmoStoreCounts).
+    std::array<std::uint8_t, MAX_AMMO_BAYS> ammoBays{};
     std::uint8_t engineLevel = 0;
+    // The overburn's rank. Replicated like the drive's: a client resolves its
+    // own hull's ShipStats to predict the burn (ClientPrediction::Step), and
+    // the refit board reads it to know the injector is already aboard.
+    std::uint8_t boostLevel = 0;
     std::uint8_t shieldLevel = 0;
     ShieldType shieldType = ShieldType::None;
     float shieldHp = 0.f;
@@ -189,6 +193,24 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
                     std::uint32_t suppressBulletsOwnedBy = 0);
 
 void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out);
+
+// Writes the replicated half of one ship back onto `entity` -- its hull, its
+// ShipLoadout and its yard access, the exact inverse of what GatherSnapshot
+// read off it, and a no-op for each component the entity doesn't carry.
+//
+// One function rather than one per client-side world. A mirror-world remote
+// ship and this peer's own predicted hull take the same wire fields, and two
+// hand-kept copies of the mapping drifted twice: the own hull's copy never
+// learned mounts, bays or the cannon/missile tiers, so a refit that landed
+// server-side left the board showing the loadout the ship spawned with -- and
+// it never learned `hp` either, which froze that peer's own hull bar at full
+// for the life of the ship while everyone else's read correctly.
+//
+// Hull is here rather than beside the loadout for exactly that reason: damage
+// is not predicted (ClientPrediction runs no DamageSystem), so the wire is the
+// only thing that ever moves a client's `Damageable::hp`, and every world that
+// takes a snapshot needs it.
+void ApplyEntityShipState(flecs::entity entity, const EntityState& state);
 
 // Gather + Serialize in one call (the common server-side path).
 void WriteSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::uint64_t tick,

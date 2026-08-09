@@ -454,6 +454,18 @@ predictor cost matters: worker thread, double-buffered trajectory results,
 main thread never blocks. The replan-from-actual-state loop already tolerates
 stale predictions, so this is a drop-in optimization, not a redesign.
 
+*Empty sides are slots, not bots (2026-08-09).* A dedicated server used to
+call `AddAIFaction` for every colour in the roster at startup, so a joining
+player always landed alongside a leader they had not asked for and no side was
+ever genuinely free. It now fields none, and `Game::FillEmptyTeamsWithAI`
+takes only the sides with neither a leader nor a human on them — reachable as
+the console's bare `ai` (or `ai fill`) and as `/ai` in chat. "Human" is a
+`Callsign` with no `AIPilot` behind it; a leader carries one of those too, so
+the name alone cannot tell a pilot from a bot. `AddAIFaction` is now
+idempotent per team, which is what lets both entry points be typed twice.
+Single-player is unchanged: `SpawnCombatants` still fields a leader on every
+side the player is not flying, because there nobody else is coming.
+
 ## Risks
 
 - **Guidance in strong wells is the hard part** (Lunar Lander with a

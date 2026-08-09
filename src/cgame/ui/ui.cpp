@@ -130,11 +130,14 @@ bool UI::Init()
         m_chatLog = hud->GetElementById("chat_log");
         m_chatInput = hud->GetElementById("chat_input");
 
-        if (Rml::Element* grip = hud->GetElementById("chat_grip")) {
-            // ElementHandle drags by writing top/left, so the window's
-            // bottom-left anchor has to go before the first of those lands --
-            // otherwise a definite top and bottom stretch the box between them.
-            // Pinning top to where it already is keeps it still meanwhile.
+        // ElementHandle drags by writing top/left and resizes by writing
+        // width/height, so the window's bottom-left anchor has to go before
+        // either lands -- otherwise a definite top and bottom stretch the box
+        // between them, and a taller box grows upward out of the corner being
+        // dragged. Pinning top to where it already is keeps it still meanwhile.
+        for (const char* id : {"chat_grip", "chat_size"}) {
+            Rml::Element* grip = hud->GetElementById(id);
+            if (!grip) continue;
             Listen(*grip, "dragstart", [this](Rml::Event&) {
                 if (!m_chat) return;
                 const int top = static_cast<int>(std::lround(m_chat->GetOffsetTop()));
@@ -1207,7 +1210,15 @@ std::vector<UI::SlotOffer> UI::OfferedForSelection() const
         if (node.tab != 0 || node.ranks.empty()) continue;
         if (!SlotTakes(*selected, node.id)) continue;
 
+        // Everything up to and including what is already in this hole reads as
+        // held, so listing all of them said the pilot had bought I, II *and*
+        // III for one bay. Only the rank actually fitted is worth a line; the
+        // ones under it are choices nobody would make.
+        const int fitted = FittedIn(*selected) == &node ? node.rank : 0;
+
         for (std::size_t i = 0; i < node.ranks.size(); ++i) {
+            if (fitted > 0 && static_cast<int>(i) + 1 < fitted) continue;
+
             // A level the faction has not researched is not a fitting the port
             // can offer, and one gated behind another part is not one this hull
             // can take yet. Neither belongs on a list of choices.
@@ -1763,8 +1774,47 @@ void UI::SetResupplyCallback(std::function<void()> callback)
 void UI::SetTechTreeVisible(bool visible)
 {
     if (!m_techTree) return;
-    if (visible) m_techTree->Show();
-    else m_techTree->Hide();
+
+    if (visible) {
+        m_techTree->Show();
+        // The boards come back with the next RefreshTechTree, which the toggle
+        // runs on the frame it opens -- DiscardTechMarkup emptied the caches
+        // the Set* guards compare against, so that call rebuilds rather than
+        // deciding nothing changed.
+        return;
+    }
+
+    m_techTree->Hide();
+    DiscardTechMarkup();
+}
+
+// A hidden document is not a free one: RmlUi walks every element of every
+// document each Context::Update, `display: none` included, so a board left
+// standing behind a closed window is paid for on every frame of the round.
+// Nothing here is state -- it is all redrawn from the sim when the window
+// opens -- except the staged plan, which is deliberately kept: closing the
+// window to go and look at something should not throw away a refit half
+// planned.
+void UI::DiscardTechMarkup()
+{
+    if (m_techGrid) m_techGrid->SetInnerRML("");
+    m_techListeners.clear();
+    m_tileRefs.clear();
+
+    if (m_shipSlotLayer) m_shipSlotLayer->SetInnerRML("");
+    m_slotListeners.clear();
+    m_slotElements.clear();
+
+    if (m_installedList) m_installedList->SetInnerRML("");
+    if (m_availableList) m_availableList->SetInnerRML("");
+    m_listListeners.clear();
+    m_availableRows.clear();
+    m_noneRow = nullptr;
+    m_ammoSpans.clear();
+
+    m_shownNodes.clear();
+    m_shownSlots.clear();
+    m_techRebuildPending = false;
 }
 
 bool UI::IsTechTreeVisible() const

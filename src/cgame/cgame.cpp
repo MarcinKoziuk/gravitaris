@@ -259,24 +259,17 @@ CGame::BoostReadout CGame::GetBoostReadout()
     const ShipStats stats = m_upgradeCatalog.ResolveStats(loadout->levels);
     if (stats.boostTicks == 0) return {};
 
-    // Mid-burn the bar drains with the burn; afterwards it refills with the
-    // cooldown. Both are "how much of a boost you have", so they share one
-    // track rather than reading as two separate meters.
-    if (controls->boostTicks > 0) {
-        return BoostReadout{true,
-                            static_cast<float>(controls->boostTicks) / static_cast<float>(stats.boostTicks),
-                            false};
-    }
-    // A spectated unit's timers are never simulated on this side -- only the
-    // granted-burn bit reaches us (SnapshotApplier) -- so its bar reports
-    // that it is burning without pretending to know how much is left.
-    if (controls->boosting) return BoostReadout{true, 1.f, false};
-    if (controls->boostCooldown > 0 && stats.boostCooldownTicks > 0) {
-        const float remaining = static_cast<float>(controls->boostCooldown)
-                / static_cast<float>(stats.boostCooldownTicks);
-        return BoostReadout{true, std::clamp(1.f - remaining, 0.f, 1.f), true};
-    }
-    return BoostReadout{true, 1.f, false};
+    // One track for one tank: it drains while the burn is on and creeps back
+    // when it isn't, and `cooling` only says which of the two is happening.
+    const float left = std::clamp(
+            1.f - static_cast<float>(controls->boostSpent) / static_cast<float>(stats.boostTicks),
+            0.f, 1.f);
+
+    // A spectated unit's tank is never simulated on this side -- only the
+    // burning bit reaches us (SnapshotApplier) -- so its bar reports that it is
+    // burning without pretending to know how much is left.
+    if (controls->boosting) return BoostReadout{true, controls->boostSpent > 0 ? left : 1.f, false};
+    return BoostReadout{true, left, left < 1.f};
 }
 
 // What the port says when it turns a refit away. Worded as the yard talking
@@ -803,6 +796,11 @@ std::vector<CGame::ShipSlot> CGame::GetShipSlots()
                 slot.fittedId = def->id;
             }
         }
+        if (loadout && slot.family == SlotFamily::AmmoBay && slot.mount < loadout->ammoBays.size()) {
+            if (const UpgradeDef* def = m_upgradeCatalog.FindAmmoStore(loadout->ammoBays[slot.mount])) {
+                slot.fittedId = def->id;
+            }
+        }
         slot.uv = m_shipViewRenderer.PanelUV(*m_shipSchematicModel, m_shipSchematicModel.Id(),
                                              Magnum::Vector2{static_cast<float>(marker.pos.x()),
                                                              static_cast<float>(marker.pos.y())});
@@ -827,9 +825,9 @@ void CGame::ConnectToServer(const std::string& wsUrl, TeamId requestedTeam)
     m_netTransport->ConnectSignaling(wsUrl);
 }
 
-void CGame::TickNetClient(const ControlFlags& flags, const TechPick& techPick)
+bool CGame::TickNetClient(const ControlFlags& flags, const TechPick& techPick)
 {
-    if (!m_netClient->IsWelcomed()) return;
+    if (!m_netClient->IsWelcomed()) return false;
 
     if (m_ownShipSync->DropIfStale()) {
         m_player.reset();
@@ -837,7 +835,7 @@ void CGame::TickNetClient(const ControlFlags& flags, const TechPick& techPick)
     if (const std::optional<flecs::entity> spawned = m_ownShipSync->SpawnIfConfirmed()) {
         m_player = *spawned;
     }
-    if (!m_clientPrediction.HasOwnShip()) return;
+    if (!m_clientPrediction.HasOwnShip()) return false;
 
     // Smoothed clock, not the integer estimate: the target is compared
     // against a free-running counter a fraction of a tick at a time now (see
@@ -852,7 +850,7 @@ void CGame::TickNetClient(const ControlFlags& flags, const TechPick& techPick)
         // this call: no step, no input stamped, one frame of the own ship
         // holding still while wall clock closes the gap.
         ++m_netDiagnostics.tickSkipCount;
-        return;
+        return false;
     }
     if (advance.resyncDrift) {
         // A lost tick is permanent backward drift vs. the server's
@@ -879,38 +877,27 @@ void CGame::TickNetClient(const ControlFlags& flags, const TechPick& techPick)
         m_bulletLifetimeSystem.Update(PHYSICS_DELTA);
 
         // The own ship is predicted locally, so it never passes through
-        // SnapshotApplier -- its loadout, its yard access and its pilot's
-        // Supplies have to be copied off the wire here or the sidebar would
-        // report the state it spawned with forever. Neither missile fire nor a
-        // purchase is predicted,
-        // so this arriving a round trip late is the whole story of the
-        // readouts' latency.
+        // SnapshotApplier -- its hull, its loadout, its yard access and its
+        // pilot's Supplies have to be copied off the wire here or the sidebar
+        // would report the state it spawned with forever. Through the same
+        // ApplyEntityShipState a mirrored remote ship goes through: neither a
+        // refit nor damage is predicted, so what the board draws is whatever
+        // the server last said, and one hull's copy of the mapping must not be
+        // a subset of another's. Nothing here is predicted, so this arriving a
+        // round trip late is the whole story of the readouts' latency.
         const std::uint32_t yourShipNetId = m_netClient->GetYourShipNetId();
         if (const std::optional<flecs::entity> player = GetPlayer(); player && yourShipNetId != 0) {
             for (const EntityState& state : snapshot->entities) {
                 if (state.netId != yourShipNetId) continue;
-                if (ShipLoadout* loadout = player->try_get_mut<ShipLoadout>()) {
-                    loadout->missileAmmo = state.missileAmmo;
-                    loadout->levels.fireRate = state.fireRateLevel;
-                    loadout->levels.gunTier = state.gunTierLevel;
-                    loadout->levels.ammoStore = state.ammoStoreLevel;
-                    loadout->levels.ammoPool = state.ammoPool;
-                    loadout->levels.engine = state.engineLevel;
-                    loadout->levels.shield = state.shieldLevel;
-                    loadout->levels.shieldType = state.shieldType;
-                    loadout->shieldHp = state.shieldHp;
-                    loadout->plateCount = state.plateCount;
-                    loadout->plates = state.plates;
-                }
-                if (ResearchAccess* access = player->try_get_mut<ResearchAccess>()) {
-                    access->atLab = state.atLab;
-                }
+                ApplyEntityShipState(*player, state);
                 m_ownAtLab = state.atLab;
                 m_ownSupplies = state.supplies;
                 break;
             }
         }
     }
+
+    return true;
 }
 
 void CGame::ReconcileOwnShipIfNeeded()
@@ -1212,14 +1199,15 @@ std::unique_ptr<EntitySpawner> CGame::CreateEntitySpawner()
 }
 
 // Which family of hull holes a slot addresses, from what it accepts. Only the
-// slots that take a mounted line address one at all: a shield or an ammo slot
-// carries an index of its own, and reading the mount array with one of those
-// had every `_0` slot on the hull reporting whatever was in the nose.
+// slots that take a mounted line address one at all: a shield carries an index
+// of its own, and reading the mount array with one of those had every `_0`
+// slot on the hull reporting whatever was in the nose.
 static SlotFamily SlotFamilyOf(const std::vector<std::string>& categories)
 {
     for (const std::string& category : categories) {
         if (category == "gun" || category == "cannon") return SlotFamily::Weapon;
         if (category == "missile") return SlotFamily::MissileBay;
+        if (category == "ammo") return SlotFamily::AmmoBay;
     }
     return SlotFamily::None;
 }

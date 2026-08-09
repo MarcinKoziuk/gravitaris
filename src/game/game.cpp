@@ -6,6 +6,7 @@
 
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
+#include <gravitaris/game/component/ai-pilot.hpp>
 #include <gravitaris/game/component/callsign.hpp>
 #include <gravitaris/game/component/pilot-account.hpp>
 #include <gravitaris/game/net/protocol.hpp>
@@ -157,6 +158,8 @@ void Game::SpawnCombatants(TeamId playerTeam)
 
 void Game::AddAIFaction(TeamId team, id_t preset)
 {
+    if (HasAIFaction(team)) return;
+
     m_aiFactions.push_back(AIFaction{team, preset});
     AIFaction& faction = m_aiFactions.back();
 
@@ -166,6 +169,31 @@ void Game::AddAIFaction(TeamId team, id_t preset)
                                                         site->rot);
         faction.leader->emplace<Callsign>(LeaderCallsign(team));
     }
+}
+
+bool Game::HasAIFaction(TeamId team) const
+{
+    return std::any_of(m_aiFactions.begin(), m_aiFactions.end(),
+                       [team](const AIFaction& faction) { return faction.team == team; });
+}
+
+std::vector<TeamId> Game::FillEmptyTeamsWithAI(id_t preset)
+{
+    // A Callsign with no AIPilot behind it is a person: leaders carry one too
+    // (LeaderCallsign), so the name alone cannot tell a pilot from a bot.
+    std::vector<TeamId> flown;
+    m_registry.each([&](flecs::entity ship, const Callsign&, const Team& team) {
+        if (!ship.has<AIPilot>()) flown.push_back(team.id);
+    });
+
+    std::vector<TeamId> filled;
+    for (const TeamId team : m_roster) {
+        if (HasAIFaction(team)) continue;
+        if (std::find(flown.begin(), flown.end(), team) != flown.end()) continue;
+        AddAIFaction(team, preset);
+        filled.push_back(team);
+    }
+    return filled;
 }
 
 // One per faction, so it needs no counter to stay unique -- and it is what

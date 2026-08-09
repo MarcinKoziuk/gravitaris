@@ -214,10 +214,19 @@ public:
 
     // Fields a leader for `team` -- the ship that plays the mode rather than
     // only fighting in it -- and keeps it respawning for the round. `preset`
-    // is an AIPresetLibrary key; 0 takes the library's default. A dedicated
-    // server calls this itself for the sides no human is playing, since it
-    // builds its own scenario instead of calling Start().
+    // is an AIPresetLibrary key; 0 takes the library's default. A side that
+    // already fields one is left alone, so calling this twice does not put two
+    // leaders on the same colour.
     void AddAIFaction(TeamId team, id_t preset = 0);
+
+    [[nodiscard]] bool HasAIFaction(TeamId team) const;
+
+    // Fields a leader on every rostered side that has neither an AI faction
+    // nor anybody flying for it, and reports the ones it took. A dedicated
+    // server starts with none of these -- an empty colour is a slot waiting
+    // for a player, not one the machine should claim -- so this is what fills
+    // the round out once it is clear nobody else is coming (the /ai cheat).
+    std::vector<TeamId> FillEmptyTeamsWithAI(id_t preset = 0);
 
     // BuildClassicWorld() + SpawnCombatants(TeamId::Blue).
     void Start();

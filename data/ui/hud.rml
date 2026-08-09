@@ -370,6 +370,11 @@
 				height: 190dp;
 				box-sizing: border-box;
 
+				/* Floors for the resize grip: below these the log holds no
+				   readable line and the grip starts eating the input row. */
+				min-width: 220dp;
+				min-height: 96dp;
+
 				display: flex;
 				flex-direction: column;
 
@@ -380,6 +385,19 @@
 			div#chat:hover
 			{
 				background-color: #000c;
+			}
+
+			/* Sits on the bottom-right bracket div.corner.br already draws, so
+			   the thing that says "this is a window" is the thing you grab --
+			   the same trade the tech window's #tech_size makes. */
+			handle#chat_size
+			{
+				position: absolute;
+				right: 0;
+				bottom: 0;
+				width: 14dp;
+				height: 14dp;
+				cursor: resize;
 			}
 
 			handle#chat_grip
@@ -630,6 +648,8 @@
 				<handle id="chat_grip" move_target="#parent">COMMS</handle>
 				<div id="chat_log"></div>
 				<div id="chat_input" class="readout"></div>
+				<!-- Last, so it sits over the log rather than under it. -->
+				<handle id="chat_size" size_target="#parent"></handle>
 			</div>
 
 			<button id="recenter">Focus my ship</button>

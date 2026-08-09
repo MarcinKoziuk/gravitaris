@@ -1483,14 +1483,19 @@ void TestUpgradeCatalog()
                             && round.missile->lifetimeSeconds > previous->lifetimeSeconds
                             && round.missile->guidance.turnRate > previous->guidance.turnRate,
                     "catalog: each missile tier hits harder, flies longer and turns tighter");
+            Require(round.missile->guidance.wobble < previous->guidance.wobble,
+                    "catalog: ...and hunts less around its solution");
         }
         previous = round.missile;
         previousCapacity = round.missileCapacity;
     }
-    // A round that loiters is one a pilot cannot break from however hard they
-    // turn, so the top tier's burn stays short whatever else it gains.
-    Require(previous->lifetimeSeconds <= 4.0, "catalog: even the top missile burns out in four seconds");
-    Require(previousCapacity <= 12, "catalog: the widest rack is twelve rounds");
+    // How long a round can chase is what separates the tiers, so it is bounded
+    // at the top rather than everywhere: a first-tier missile burns out before
+    // it has crossed a dogfight, and the last one flies the whole engagement.
+    Require(previous->lifetimeSeconds <= 8.0,
+            "catalog: even the top missile eventually burns out");
+    Require(previous->guidance.wobble == 0.0, "catalog: ...and the top one never wobbles");
+    Require(previousCapacity <= 24, "catalog: the widest rack the bay alone gives is 24 rounds");
 
     // The PERMANENT tree is a ladder: ranks are learned in order, each spends
     // Tech, and nothing is offered past the last one.
@@ -1798,8 +1803,9 @@ void TestUpgradeCatalog()
                 "catalog: a hull short of the top rank is still sold the one below it");
     }
 
-    // The two ammo lockers: spares on top of the weapon's own magazine, one
-    // pool at a time, and rounds that leave with the fitting that held them.
+    // The two ammo lockers: spares on top of the weapon's own magazine, generic
+    // stowage bays either of them fits, and rounds that leave with the fitting
+    // that held them.
     {
         const UpgradeDef* shells = catalog.FindAmmoStore(AmmoPool::Cannon);
         const UpgradeDef* warheads = catalog.FindAmmoStore(AmmoPool::Missile);
@@ -1834,22 +1840,55 @@ void TestUpgradeCatalog()
         Require(catalog.FitRank(*bay, 1, hull, all, purse, true),
                 "catalog: a launcher for the warheads to feed");
 
-        // One slot, so the other locker replaces this one -- and the spares it
-        // was holding go with it.
+        // A bay each, taken in order, so fitting one says nothing about the
+        // other.
+        const int deepened = catalog.ResolveStats(hull.levels).cannonCapacity;
         Require(catalog.FitRank(*warheads, 1, hull, all, purse, true),
-                "catalog: the other locker can be swapped in");
-        Require(hull.levels.ammoPool == AmmoPool::Missile && hull.levels.ammoStore == 1,
-                "catalog: swapping locker starts the new one at the rank bought");
-        Require(catalog.ResolveStats(hull.levels).cannonCapacity == bare,
-                "catalog: ...and the cannon is back to its own capacity");
-        Require(hull.cannonAmmo <= bare,
-                "catalog: ...with the rounds it can no longer stow gone");
-        Require(UpgradeCatalog::LevelOf(*shells, hull.levels) == 0,
-                "catalog: the locker for the other pool reads as unfitted at every rank");
+                "catalog: the other locker goes into the next bay along");
+        Require(AmmoStoreRank(hull.levels, AmmoPool::Missile) == 1
+                        && AmmoStoreRank(hull.levels, AmmoPool::Cannon) == 1,
+                "catalog: a hull can carry both lockers at once");
+        Require(catalog.ResolveStats(hull.levels).cannonCapacity == deepened,
+                "catalog: ...and the shells are still stowed after the warheads go on");
+        Require(UpgradeCatalog::LevelOf(*shells, hull.levels) == 1,
+                "catalog: each locker reports its own rank");
 
         Require(catalog.StripRank(*warheads, hull, true), "catalog: a locker can be pulled");
-        Require(hull.levels.ammoStore == 0 && hull.levels.ammoPool == AmmoPool::None,
-                "catalog: ...which leaves the hull carrying neither");
+        Require(AmmoStoreRank(hull.levels, AmmoPool::Missile) == 0
+                        && AmmoStoreRank(hull.levels, AmmoPool::Cannon) == 1,
+                "catalog: ...which leaves the other one where it was");
+
+        // The bays are interchangeable, which is the whole point of them being
+        // generic: two of the same box stack, and a box bought into an occupied
+        // bay swaps what was there rather than being refused.
+        {
+            ShipLoadout twin = StockLoadout();
+            std::uint32_t pocket = RICH;
+            Require(catalog.FitRank(*cannonLine, 1, twin, all, pocket, true),
+                    "catalog: a gun for the shells to feed");
+            const int oneGun = catalog.ResolveStats(twin.levels).cannonCapacity;
+
+            Require(catalog.FitRank(*shells, 1, twin, all, pocket, true, 0)
+                            && catalog.FitRank(*shells, 1, twin, all, pocket, true, 1),
+                    "catalog: both bays will take a shell box");
+            Require(AmmoStoreRank(twin.levels, AmmoPool::Cannon) == 2,
+                    "catalog: ...and the magazine counts both of them");
+            Require(catalog.ResolveStats(twin.levels).cannonCapacity
+                            == oneGun + 2 * shells->ammo.capacity,
+                    "catalog: a second box is a second box's worth of spares");
+            Require(UpgradeCatalog::LevelOf(*shells, twin.levels) == 1,
+                    "catalog: ...but a box is still one rank, however many are aboard");
+
+            Require(catalog.FitRank(*bay, 1, twin, all, pocket, true),
+                    "catalog: a launcher, so the warheads have somewhere to go");
+            Require(catalog.FitRank(*warheads, 1, twin, all, pocket, true, 1),
+                    "catalog: a locker bought into an occupied bay swaps into it");
+            Require(AmmoStoreRank(twin.levels, AmmoPool::Cannon) == 1
+                            && AmmoStoreRank(twin.levels, AmmoPool::Missile) == 1,
+                    "catalog: ...and the box it replaced is off the hull");
+            Require(twin.cannonAmmo <= catalog.ResolveStats(twin.levels).cannonCapacity,
+                    "catalog: ...taking the rounds it was stowing with it");
+        }
     }
 
     // The drive scales the hull's own numbers, and the overburn's ceiling stays
@@ -1977,11 +2016,14 @@ void TestHardpointMounts()
     Require(body->FindMount("plasma", 0) == nullptr,
             "hardpoints: a family the hull doesn't carry resolves to nothing, so a weapon can fall back");
 
-    const Body::Hardpoint* rackA = body->FindMount("missile", 0);
-    const Body::Hardpoint* rackB = body->FindMount("missile", 1);
-    Require(rackA && rackB && rackA->pos != rackB->pos,
-            "hardpoints: a hull's two racks are separate mounts");
-    Require(body->FindMount("missile", 2) == rackA, "hardpoints: the mount index wraps");
+    // One bay, and it is not one of the gun mounts: a launcher leaves from
+    // where the model says it does, and there is exactly one place to say.
+    const Body::Hardpoint* rack = body->FindMount("missile", 0);
+    Require(rack && body->CountMounts("missile") == 1,
+            "hardpoints: fighter-1 carries a single missile bay");
+    Require(rack->pos != forward->pos && rack->pos != wing->pos,
+            "hardpoints: ...at a point of its own on the hull");
+    Require(body->FindMount("missile", 1) == rack, "hardpoints: the mount index wraps");
 
     // Mounts a pilot cannot tell apart are mounts the feature does not have:
     // every pair on a hull has to be far enough apart to read at ship scale.
@@ -1990,7 +2032,7 @@ void TestHardpointMounts()
         return (a->pos - b->pos).length() > 1.0;
     };
     Require(farApart(forward, wing), "hardpoints: two weapon muzzles are visibly apart");
-    Require(farApart(rackA, rackB), "hardpoints: the two racks are visibly apart");
+    Require(farApart(rack, forward), "hardpoints: the bay is visibly clear of the guns");
     Require(farApart(body->FindMount("weapon", 1), body->FindMount("weapon", 2)),
             "hardpoints: the paired wing mounts are visibly apart");
     Require(body->FindMount("weapon", 3) == forward, "hardpoints: the mount index wraps");
@@ -2190,6 +2232,72 @@ void TestShields()
     Require(stopped > 0, "shields: plating stops rounds whole rather than bleeding every one");
     Require(stopped + leaked == rounds,
             "shields: every round is either stopped whole or leaks exactly the tier's share");
+
+    fs.Shutdown();
+}
+
+// A High Port deck is somewhere a pilot can stand and stay standing. The ring
+// turns once a minute or so, and the deck used to be judged by the same
+// legs-toward-the-body test a planet's surface is -- so a parked ship, whose
+// attitude the kinematic station never carried round with it, drifted out of
+// the upright cone within seconds and the yard closed under its feet.
+void TestHighPortDeck()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    flecs::entity planet =
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 1e-9, 800., 1.0, 0.0);
+    planet.set<Team>(Team{TeamId::Blue});
+    spawner.SpawnStructure(StructureType::Lab, "models/structures/lab"_id, planet, TeamId::Blue);
+    spawner.SpawnOrbitingStructure(StructureType::HighPort, "models/structures/high-port-0"_id, planet,
+                                   TeamId::Blue,
+                                   StructureLayout::OrbitRadius(planet.get<Planet>().radius), 1.0, 0.0);
+    game.Update(); // the station takes its orbital velocity on the first tick
+
+    // Set down exactly where a launch puts a pilot: feet on the deck, matched
+    // to the ring's motion.
+    const std::optional<FactionSystem::SpawnPoint> pad =
+            game.GetFactionSystem().SpawnPosition(TeamId::Blue);
+    Require(pad.has_value(), "highport: the station is a place to launch from");
+    flecs::entity ship = spawner.SpawnPlayer("models/ships/fighter-1"_id, pad->pos, TeamId::Blue,
+                                             pad->vel, pad->rot);
+
+    for (int tick = 0; tick < 600 && ship.is_alive() && !ship.get<ResearchAccess>().atLab; ++tick) {
+        game.Update();
+    }
+    Require(ship.is_alive() && ship.get<ResearchAccess>().atLab,
+            "highport: a ship settled on the deck is at the yard");
+
+    // Long enough for the ring to carry it well past the arc any upright cone
+    // would cover -- the whole of what used to close the yard again.
+    int open = 0;
+    const int watched = 2400; // 40s
+    for (int tick = 0; tick < watched && ship.is_alive(); ++tick) {
+        game.Update();
+        if (ship.get<ResearchAccess>().atLab) ++open;
+    }
+    Require(ship.is_alive(), "highport: the parked ship survives the ride");
+    Require(open >= watched - 60,
+            "highport: ...and the yard stays open all the way round the ring");
+
+    // A deck is a pad, not a hillside: which way the hull happens to be
+    // pointing while it sits on one is not what decides whether the yard will
+    // serve it.
+    cpBody* shipBody = game.GetPhysicsSystem().GetBody(ship.get<PhysicsRef>()).cp.body.get();
+    cpBodySetAngle(shipBody, cpBodyGetAngle(shipBody) + CP_PI / 2.0);
+    for (int tick = 0; tick < 120 && ship.is_alive(); ++tick) game.Update(); // settle
+    int openTipped = 0;
+    for (int tick = 0; tick < 300 && ship.is_alive(); ++tick) {
+        game.Update();
+        if (ship.get<ResearchAccess>().atLab) ++openTipped;
+    }
+    Require(openTipped >= 250, "highport: a hull sitting across the deck is still at the yard");
 
     fs.Shutdown();
 }
@@ -3015,7 +3123,8 @@ void TestFriendlyFire()
 }
 
 // The overburn: while it is burning a hull exceeds the speed its own engine
-// could otherwise reach, and having spent it, it has to wait.
+// could otherwise reach, it only burns while the engine is lit, and what it
+// spends is what it has to wait for.
 void TestBoost()
 {
     FilesystemPhysFS fs;
@@ -3036,16 +3145,17 @@ void TestBoost()
     flecs::entity ship = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.}, TeamId::Blue);
     const double hullMaxSpeed = game.GetPhysicsSystem().GetBody(ship.get<PhysicsRef>()).body->GetMaxSpeed();
 
-    const auto flyWith = [&](bool boost, int ticks) {
+    const auto fly = [&](bool thrust, bool boost, int ticks) {
         for (int tick = 0; tick < ticks && ship.is_alive(); ++tick) {
             InputCommand cmd;
             cmd.tick = game.GetStep();
-            cmd.flags.thrustForward = true;
+            cmd.flags.thrustForward = thrust;
             cmd.flags.boost = boost;
             ship.get_mut<InputQueue>().Push(cmd);
             game.Update();
         }
     };
+    const auto flyWith = [&](bool boost, int ticks) { fly(/*thrust=*/true, boost, ticks); };
     const auto speed = [&] { return ship.get<Transform>().vel.length(); };
 
     // Unupgraded: the button does nothing at all, and the hull's own cap holds.
@@ -3070,22 +3180,57 @@ void TestBoost()
     Require(peak <= hullMaxSpeed * static_cast<double>(stats.boostMaxSpeedScale) * 1.02,
             "boost: and no further than the upgrade's own ceiling");
 
-    // Spent: the burn runs out and the wait starts, whether or not the button
-    // is still held.
-    flyWith(/*boost=*/true, static_cast<int>(stats.boostTicks) + 5);
-    Require(!ship.get<Controls>().boosting, "boost: a burn ends on its own timer, not on the button");
-    Require(ship.get<Controls>().boostCooldown > 0, "boost: spending one starts the wait");
+    // Spent: the loop above burned the tank dry, so the next tick on the button
+    // grants nothing. Exactly one tick, not a handful -- with the trigger held
+    // an empty tank refills to the engage floor and lights again all by itself
+    // (see below), which is the rule working rather than a state to assert on.
+    flyWith(/*boost=*/true, 1);
+    Require(!ship.get<Controls>().boosting, "boost: a burn ends when the tank does");
+    Require(ship.get<Controls>().boostSpent == stats.boostTicks, "boost: ...with the tank empty");
 
-    flyWith(/*boost=*/true, 5);
-    Require(!ship.get<Controls>().boosting, "boost: holding the button through the wait grants nothing");
+    // And it will not re-light on the first drops back into it. A burn has to
+    // be worth starting (BOOST_ENGAGE_SHARE): without that floor a dry injector
+    // lights again on one tick of fuel, and the overburn degenerates into a
+    // stutter that is on more often than off. A twentieth of the wait is far
+    // too little to clear the floor -- asked for with the trigger released, so
+    // what is being tested is the start and not a burn already running.
+    fly(/*thrust=*/true, /*boost=*/false, static_cast<int>(stats.boostCooldownTicks) / 20);
+    const std::uint16_t dribble = ship.get<Controls>().boostSpent;
+    Require(dribble > 0 && dribble < stats.boostTicks,
+            "boost: a spent tank starts refilling, and is nowhere near full yet");
+    flyWith(/*boost=*/true, 1);
+    Require(!ship.get<Controls>().boosting,
+            "boost: ...and that little back in it will not light the injector");
 
-    // ...and comes back once it has cooled.
+    // ...and comes back as it refills.
     for (int tick = 0; tick < static_cast<int>(stats.boostCooldownTicks) + stats.boostTicks + 5
                  && !ship.get<Controls>().boosting;
          ++tick) {
         flyWith(/*boost=*/true, 1);
     }
-    Require(ship.get<Controls>().boosting, "boost: another burn is available once the wait is over");
+    Require(ship.get<Controls>().boosting, "boost: another burn is available once it has refilled");
+
+    // Coasting spends nothing: the injector feeds the engine, so asking for the
+    // overburn with the throttle shut is not a burn and does not cost one.
+    fly(/*thrust=*/false, /*boost=*/false, static_cast<int>(stats.boostCooldownTicks) + 10);
+    Require(ship.get<Controls>().boostSpent == 0, "boost: the tank refills to full");
+    fly(/*thrust=*/false, /*boost=*/true, 60);
+    Require(!ship.get<Controls>().boosting && ship.get<Controls>().boostSpent == 0,
+            "boost: holding it while coasting burns nothing");
+
+    // A tap costs a tap. Letting go leaves the rest of the tank where it was,
+    // rather than committing the whole burn and the whole wait.
+    const int tap = static_cast<int>(stats.boostTicks) / 4;
+    Require(tap > 0, "boost: the fitted tank is deep enough to tap");
+    flyWith(/*boost=*/true, tap);
+    const std::uint16_t afterTap = ship.get<Controls>().boostSpent;
+    Require(afterTap > 0 && afterTap <= tap + 1, "boost: a tap spends only what it burned");
+    // Long enough for the refill's remainder to carry at least one tick of burn
+    // back (a full tank takes the whole cooldown, so a tick returns far less
+    // than a tick), and far short of the whole wait a spent tank would cost.
+    flyWith(/*boost=*/false, 12);
+    Require(ship.get<Controls>().boostSpent < afterTap && ship.get<Controls>().boostSpent > 0,
+            "boost: letting go stops the drain and starts the refill where it stood");
 
     // The drive raises the cruise the hull's own thruster can reach -- and the
     // burn's ceiling stays a multiple of the hull's number rather than of the
@@ -3906,6 +4051,108 @@ void TestSnapshotRoundtrip(Game& game)
             "re-serialized snapshot is byte-identical");
 }
 
+// A refitted, shot-up hull has to reach a client whole. GatherSnapshot reading
+// a field and the wire carrying it is not enough -- ApplyEntityShipState has to
+// put it back, and every field it forgets is a readout stuck at whatever the
+// ship spawned with. That is exactly what shipped, twice: the own hull's copy
+// of this mapping never learned its mounts, its bays or the cannon/missile
+// tiers (a cannon could be bought and never appear), and it never learned `hp`
+// (the hull bar sat at 100% until the ship died out from under it).
+void TestLoadoutReplication()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    flecs::entity server = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.});
+    flecs::entity client = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{5000., 0.});
+
+    // Every field distinct from both the spawn default and its neighbours, so
+    // a copy that drops one or crosses two over cannot pass.
+    ShipLoadout& refit = server.get_mut<ShipLoadout>();
+    refit.mounts[0] = MountArm::Heavy;
+    refit.mounts[1] = MountArm::Light;
+    SetMissileBay(refit, 1, true);
+    refit.missileAmmo = 13;
+    refit.cannonAmmo = 57;
+    refit.levels.fireRate = 2;
+    refit.levels.gunTier = 3;
+    refit.levels.cannonTier = 2;
+    refit.levels.missileTier = 3;
+    refit.ammoBays[0] = AmmoPool::Missile;
+    refit.ammoBays[1] = AmmoPool::Cannon;
+    SyncAmmoStoreCounts(refit);
+    refit.levels.engine = 3;
+    refit.levels.boost = 2;
+    refit.levels.shield = 3;
+    refit.levels.shieldType = ShieldType::Plating;
+    refit.shieldHp = 42.f;
+    server.get_mut<ResearchAccess>().atLab = true;
+    // Not part of the loadout, and the reason this hull is shot up: damage is
+    // resolved server-side only, so the wire is the sole thing that ever moves
+    // a client's hull bar.
+    server.get_mut<Damageable>().hp = 37.f;
+
+    SnapshotData gathered;
+    GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), game.GetStep(), 0, gathered);
+
+    ByteWriter wire;
+    SerializeSnapshot(gathered, wire);
+    ByteReader reader(wire.Data(), wire.Size());
+    SnapshotData parsed;
+    Require(ReadSnapshot(reader, parsed), "loadout replication: the snapshot parses");
+
+    const std::uint32_t netId = server.get<NetId>().value;
+    const auto it = std::find_if(parsed.entities.begin(), parsed.entities.end(),
+                                 [&](const EntityState& e) { return e.netId == netId; });
+    Require(it != parsed.entities.end(), "loadout replication: the refitted hull is in the snapshot");
+
+    ApplyEntityShipState(client, *it);
+
+    Require(client.get<Damageable>().hp == server.get<Damageable>().hp,
+            "loadout replication: hull damage, which nothing on a client predicts");
+
+    const ShipLoadout& applied = client.get<ShipLoadout>();
+    Require(applied.mounts == refit.mounts, "loadout replication: what each mount is armed with");
+    Require(applied.missileBays == refit.missileBays, "loadout replication: which bays carry a launcher");
+    Require(applied.missileAmmo == refit.missileAmmo && applied.cannonAmmo == refit.cannonAmmo,
+            "loadout replication: rounds left in both magazines");
+    Require(applied.levels.fireRate == refit.levels.fireRate, "loadout replication: the feed's rank");
+    Require(applied.levels.gunTier == refit.levels.gunTier, "loadout replication: the light line's rank");
+    Require(applied.levels.cannonTier == refit.levels.cannonTier, "loadout replication: the heavy line's rank");
+    Require(applied.levels.missileTier == refit.levels.missileTier, "loadout replication: the bay's rank");
+    Require(applied.ammoBays == refit.ammoBays,
+            "loadout replication: which locker rides in which stowage bay");
+    for (std::size_t i = 0; i < NUM_AMMO_POOLS; ++i) {
+        Require(applied.levels.ammoStore[i] == refit.levels.ammoStore[i],
+                "loadout replication: ...and the count of each that falls out of it");
+    }
+    Require(applied.levels.engine == refit.levels.engine, "loadout replication: the drive's rank");
+    Require(applied.levels.boost == refit.levels.boost, "loadout replication: the overburn's rank");
+    Require(applied.levels.shield == refit.levels.shield
+                    && applied.levels.shieldType == refit.levels.shieldType,
+            "loadout replication: the emitter fitted and its rank");
+    Require(applied.shieldHp == refit.shieldHp, "loadout replication: shield charge");
+    Require(client.get<ResearchAccess>().atLab, "loadout replication: yard access");
+
+    // The board resolves what it draws through the catalog, so a rank that
+    // arrived is worth nothing if the stats it feeds don't come out the same.
+    const UpgradeCatalog& catalog = game.GetUpgradeCatalog();
+    const ShipStats expected = catalog.ResolveStats(refit.levels);
+    const ShipStats got = catalog.ResolveStats(applied.levels);
+    Require(got.cannon == expected.cannon && got.missile == expected.missile
+                    && got.cannonCapacity == expected.cannonCapacity
+                    && got.missileCapacity == expected.missileCapacity
+                    && got.boostTicks == expected.boostTicks,
+            "loadout replication: a client resolves the same weapons, magazines and burn");
+
+    fs.Shutdown();
+}
+
 // docs/networking-plan.md 3.2-3.4: a NetServer/NetClient pair talking over a
 // LoopbackTransport (no sockets -- proves the protocol/spawn/broadcast wiring
 // itself, independent of whatever real transport Phase 3.1 eventually picks).
@@ -4468,6 +4715,7 @@ int main()
     TestHardpointMounts();
     TestPhysicsSlotStability();
     TestShields();
+    TestHighPortDeck();
     TestResearch();
     TestResearchQueue();
     TestSunIsLethal();
@@ -4478,6 +4726,7 @@ int main()
     TestFactionDefeatAndWin();
     TestSectorGeneration();
     TestOwnBulletSuppression();
+    TestLoadoutReplication();
     TestTakeoff();
     TestRepairAndReachability();
     TestAITactics();

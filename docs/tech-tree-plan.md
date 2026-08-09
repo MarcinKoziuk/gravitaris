@@ -286,7 +286,7 @@ stops being a cost.
 ## Open: the AI never buys rounds or a better drive
 
 Two fittings landed for the player and were deliberately left unscored for an AI
-pilot -- `SHELL LOCKER` / `WARHEAD LOCKER` (`UpgradeKind::AmmoStore`) and
+pilot -- `CANNON SHELL BOX` / `MISSILE CONTAINER` (`UpgradeKind::AmmoStore`) and
 `ENGINE` (`UpgradeKind::EngineTier`). `FitScore()` in `upgrade-catalog.cpp`
 returns **0** for both, which is below every line it does score, so
 `PreferredFit` never chooses them. That is the safe default, not a finished
@@ -295,11 +295,14 @@ rule: an AI wing flies stock drives and never restocks.
 What scoring them properly needs:
 
 - **The lockers are a real choice, not a tier.** A locker is worth nothing to a
-  hull carrying neither the cannon nor the launcher it feeds, and the two
-  compete for one slot -- so the interesting part is *which* pool a given hull
-  should carry spares for, judged from what it actually fires (how many mounts
+  hull carrying neither the cannon nor the launcher it feeds, and they compete
+  for the hull's generic stowage bays (`ammo_N`, two on fighter-1; either box
+  fits either bay) -- so the interesting part is *how many* bays a given hull
+  should give to each pool, judged from what it actually fires (how many mounts
   are armed Heavy, whether a bay is fitted, what it is running dry of). Scoring
-  it like a tier would have every AI buy the same locker.
+  it like a tier would have every AI buy the same locker. Note that a hull can
+  now stow two of the same box, so the score has to fall off with the count
+  already aboard rather than being a yes/no.
 - **The drive is straight mobility.** Probably the `Boost` shape: a large score
   for the first rank, small for the ranks above it.
 - **Nothing rearms.** `ResearchSystem` used to top every magazine up for free

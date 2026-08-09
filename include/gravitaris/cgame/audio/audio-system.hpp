@@ -28,7 +28,7 @@ using Magnum::Vector2;
 // (mirrors ModelRenderer2's OnCreate<Model>/OnDestroy<Model> pattern) rather
 // than read/parsed ad hoc.
 //
-// One-shots (gunshots, hits, explosions) come from the sim's GameEventQueue
+// One-shots (hits, explosions) and gunfire come from the sim's GameEventQueue
 // via this system's own cursor -- the same stream a network client will
 // receive, so audio needs no knowledge of how the sim produced them (it
 // previously inferred shots from a Bullet-creation observer and hits from a
@@ -79,6 +79,34 @@ private:
         float gain = 0.f;
     };
 
+    // One shooter firing one weapon. Keyed by both because a ship launching a
+    // missile while its guns are running is two sounds, not one interrupting
+    // the other.
+    struct MuzzleKey {
+        std::uint32_t shooter = 0; // the shooter's NetId
+        id_t clip = 0;
+
+        bool operator==(const MuzzleKey& other) const
+        { return shooter == other.shooter && clip == other.clip; }
+    };
+
+    struct MuzzleKeyHash {
+        std::size_t operator()(const MuzzleKey& key) const
+        {
+            return std::hash<std::uint64_t>{}(static_cast<std::uint64_t>(key.shooter)
+                                              ^ (static_cast<std::uint64_t>(key.clip)
+                                                 * 0x9e3779b97f4a7c15ull));
+        }
+    };
+
+    // A muzzle's own voice, held between rounds. Retired once it has been
+    // quiet long enough that the gun has plainly stopped -- see
+    // MUZZLE_IDLE_FRAMES.
+    struct MuzzleVoice {
+        VoiceHandle voice;
+        std::uint32_t idleFrames = 0;
+    };
+
     flecs::world& m_registry;
     ResourceLoader& m_resourceLoader;
     const GameEventQueue& m_eventQueue;
@@ -126,11 +154,21 @@ private:
 
     std::unordered_map<ThrusterKey, ThrusterLoop, ThrusterKeyHash> m_thrusters;
     std::vector<FadingVoice> m_fadingVoices;
+    std::unordered_map<MuzzleKey, MuzzleVoice, MuzzleKeyHash> m_muzzles;
 
     void HandleClipAdded(const AudioClip& clip, id_t id);
     void HandleClipRemoved(const AudioClip& clip, id_t id);
 
     void PlayOneShotById(id_t clipId, const Vector2& pos, float gain);
+
+    // A round out of one muzzle. Unlike PlayOneShotById this does not take a
+    // fresh voice per round: a held trigger restarts the muzzle's own voice, so
+    // sustained fire is one sound repeating at the gun's cadence rather than a
+    // dozen copies of the clip overlapping each other out of the pool.
+    void PlayShot(std::uint32_t shooter, id_t clipId, const Vector2& pos, float gain);
+
+    // Hands back the voice of any muzzle that has gone quiet.
+    void SweepMuzzles();
 
     void AcquireVoicePool();
 
