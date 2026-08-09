@@ -41,7 +41,7 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_missileSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_upgradeCatalog)
         , m_factionSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_landingStateSystem(m_registry, m_physicsSystem, m_factionSystem)
-        , m_repairSystem(m_registry, *m_entitySpawner, m_economyConfig)
+        , m_repairSystem(m_registry, *m_entitySpawner, m_upgradeCatalog, m_economyConfig)
         , m_conquestSystem(m_registry, *m_entitySpawner, m_eventQueue, m_factionSystem, m_economyConfig)
         , m_deathSystem(m_registry, *m_entitySpawner, m_eventQueue)
         , m_trajectoryPredictor(m_registry, m_physicsSystem)

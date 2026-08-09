@@ -185,6 +185,11 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
                         def.shield.leakFraction.push_back(leak.value_or(0.f));
                     }
                 }
+                if (const toml::array* mends = (*entry)["hull_regen_seconds"].as_array()) {
+                    for (const toml::node& seconds : *mends) {
+                        def.shield.hullRegenSeconds.push_back(seconds.value_or(0.f));
+                    }
+                }
                 if (def.shield.leakChance > 0.f && def.shield.leakFraction.empty()) {
                     LOG(error) << "upgrades: " << *key
                                << ": a leaking shield needs a `leak_fraction` per level; skipped";
@@ -410,6 +415,12 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
             const std::size_t index =
                     std::min<std::size_t>(levels.shield, def->shield.leakFraction.size()) - 1;
             stats.shieldLeakFraction = def->shield.leakFraction[index];
+        }
+        if (!def->shield.hullRegenSeconds.empty()) {
+            const std::size_t index =
+                    std::min<std::size_t>(levels.shield, def->shield.hullRegenSeconds.size()) - 1;
+            const float seconds = def->shield.hullRegenSeconds[index];
+            if (seconds > 0.f) stats.hullRegenFractionPerSecond = 1.f / seconds;
         }
     }
 

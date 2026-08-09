@@ -387,7 +387,7 @@ key = "plating_shield"
 slots = ["shield"]
 icon = "plt"
 name = "FIELD PLATING"
-description = "Hull-hugging. Some rounds get through it -- fewer with every layer."
+description = "Hull-hugging. Some rounds get through -- but it mends what does."
 kind = "shield"
 shield_type = "plating"
 # The bubble first: a side learns to hold a field at all before it learns to
@@ -409,5 +409,9 @@ leak_chance = 0.5
 # One entry per level: a quarter of the round gets through at the first layer,
 # a tenth at the third.
 leak_fraction = [0.25, 0.175, 0.10]
+# Seconds to mend a full hull, one entry per level. The plates' answer to what
+# they let through: the damage is real but it is not permanent, so a plated
+# pilot need not fly home for every leak the way a bubble pilot must.
+hull_regen_seconds = [90.0, 45.0, 30.0]
 tech_cost = [3, 5, 9]
 supply_cost = [15, 32, 55]

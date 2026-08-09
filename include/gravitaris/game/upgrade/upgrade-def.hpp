@@ -280,6 +280,11 @@ struct UpgradeDef {
         // a deeper stack of plates leaks less of each round that gets through,
         // not fewer of them.
         std::vector<float> leakFraction;
+        // Seconds this emitter takes to walk a hull from nothing back to full,
+        // one entry per level. Empty on an emitter that mends no hull at all --
+        // which is what makes the plates worth their leak: what gets past them
+        // is not permanent the way what gets past a bubble is.
+        std::vector<float> hullRegenSeconds;
     } shield;
 };
 
@@ -387,6 +392,10 @@ struct ShipStats {
     // hull. Both zero on an emitter that stops everything it has charge for.
     float shieldLeakChance = 0.f;
     float shieldLeakFraction = 0.f;
+    // Share of the hull the emitter mends every second, wherever the ship is
+    // standing -- a fraction rather than hit points, because the plates wrap
+    // whatever hull they are fitted to. Zero on an emitter that mends none.
+    float hullRegenFractionPerSecond = 0.f;
 
     // Zero boostTicks means the ship isn't carrying the upgrade at all, which
     // is what ShipControlsSystem tests before granting a burn -- the scales

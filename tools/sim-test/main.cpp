@@ -3654,6 +3654,56 @@ void TestRepairAndReachability()
     Require(hullGainedWhileLanded(/*developed=*/false) == 0.f,
             "repair: a bare rock repairs nothing, however long you sit on it");
 
+    // Field plating mends the hull under it wherever the ship is, at a rate its
+    // tier sets -- the leak's counterweight, and the one repair that does not
+    // want a planet. Flown nowhere near one, so home ground can't explain it.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        const UpgradeCatalog& catalog = game.GetUpgradeCatalog();
+
+        const UpgradeDef* plating = catalog.FindKind(UpgradeKind::Shield, ShieldType::Plating);
+        const UpgradeDef* bubble = catalog.FindKind(UpgradeKind::Shield, ShieldType::Bubble);
+        Require(plating != nullptr && bubble != nullptr, "repair: the pool has both emitters");
+
+        float hullMaxHp = 0.f;
+        const auto hullGainedOver = [&](const UpgradeDef* def, std::uint8_t rank, int ticks) {
+            flecs::entity ship = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.});
+            if (def) FitFree(catalog, *def, rank, ship.get_mut<ShipLoadout>());
+            Damageable& hull = ship.get_mut<Damageable>();
+            hullMaxHp = hull.maxHp;
+            hull.hp = hull.maxHp * 0.4f;
+            const float before = hull.hp;
+            for (int tick = 0; tick < ticks; ++tick) game.Update();
+            const float gained = ship.get<Damageable>().hp - before;
+            ship.destruct();
+            return gained;
+        };
+
+        const float second = static_cast<float>(1.0 / Game::PHYSICS_DELTA);
+        Require(hullGainedOver(nullptr, 0, static_cast<int>(second)) == 0.f,
+                "repair: an unshielded hull in open space mends nothing");
+        Require(hullGainedOver(bubble, bubble->maxLevel, static_cast<int>(second)) == 0.f,
+                "repair: a bubble covers the hull, it does not mend it");
+
+        float mendedBefore = 0.f;
+        for (std::uint8_t rank = 1; rank <= plating->maxLevel; ++rank) {
+            const float mended = hullGainedOver(plating, rank, static_cast<int>(second));
+            Require(mended > mendedBefore, "repair: each plating tier mends the hull faster");
+            mendedBefore = mended;
+        }
+
+        // The authored headline: top plating walks a full hull back in 30s, so
+        // the 60% this hull is missing takes 18 -- worth flying out with, not
+        // worth standing still for.
+        const float over18s = hullGainedOver(plating, plating->maxLevel, static_cast<int>(18.f * second));
+        const float missing = hullMaxHp * 0.6f;
+        Require(std::abs(over18s - missing) < 1.f,
+                "repair: top plating mends a full hull in the authored 30 seconds");
+        Require(hullGainedOver(plating, plating->maxLevel, static_cast<int>(40.f * second)) <= missing,
+                "repair: and stops at full rather than climbing past it");
+    }
+
     // Reachability: an enemy well past the old engage-range cutoff used to
     // leave a pilot circling the nearest body instead. Nothing else is in
     // this scene, so Orbit here would be a pilot with nowhere to be.
