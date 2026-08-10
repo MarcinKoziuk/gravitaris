@@ -11,17 +11,20 @@ InputSystem::InputSystem(flecs::world& registry)
 void InputSystem::Update(std::uint64_t step)
 {
     m_registry.each([&](InputQueue& queue, Controls& controls) {
-        while (!queue.Empty() && queue.Front().tick < step) {
-            queue.PopFront();
-        }
-
         // One-shots are cleared every tick; only the held flags below carry
         // over when no command arrives.
         controls.techPick = {};
 
-        if (!queue.Empty() && queue.Front().tick == step) {
+        // Everything up to and including this tick is consumable, newest
+        // wins. A command that missed its stamped tick is applied late rather
+        // than discarded: discarding it latches the last-consumed flags
+        // instead, so a networked client whose stamps run even slightly
+        // behind the server loses *every* command and its ship stops
+        // responding entirely. A pick from a superseded command still
+        // commits -- a purchase must not be lost to a catch-up burst.
+        while (!queue.Empty() && queue.Front().tick <= step) {
             controls.actionFlags = queue.Front().flags;
-            controls.techPick = queue.Front().techPick;
+            if (queue.Front().techPick.IsSet()) controls.techPick = queue.Front().techPick;
             queue.PopFront();
         }
         // No command for this tick: Controls keeps its previous value

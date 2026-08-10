@@ -4,6 +4,7 @@
 #include <utility>
 
 #include <gravitaris/game/net/byte-stream.hpp>
+#include <gravitaris/game/net/predicted-tick-clock.hpp>
 #include <gravitaris/game/net/protocol.hpp>
 #include <gravitaris/game/net/net-client.hpp>
 
@@ -133,7 +134,15 @@ std::uint64_t NetClient::ComputeInputLeadTicks(float rttMs, float jitterMs, std:
     const float msPerTick = 1000.f / static_cast<float>(std::max(tickRate, 1u));
     const float needMs = std::max(rttMs, 0.f) + JITTER_ALLOWANCE * std::max(jitterMs, 0.f) + msPerTick;
 
-    const auto ticks = static_cast<std::uint64_t>(std::ceil(needMs / msPerTick));
+    // PredictedTickClock only corrects once it is more than
+    // RESYNC_THRESHOLD_TICKS behind its target, so the tick a command is
+    // actually stamped with sits anywhere in that band below what this
+    // returns. That lateness lands on the wire like any other, so the lead
+    // has to carry it -- without it a client whose sim loses ticks (any
+    // frame rate below the tick rate) parks near the threshold and every
+    // command it sends arrives stale.
+    const auto ticks = static_cast<std::uint64_t>(std::ceil(needMs / msPerTick))
+            + PredictedTickClock::RESYNC_THRESHOLD_TICKS;
     return std::clamp(ticks, MIN_INPUT_LEAD_TICKS, MAX_INPUT_LEAD_TICKS);
 }
 

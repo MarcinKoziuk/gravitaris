@@ -47,12 +47,19 @@ class NetServer {
         // command), so without this the same commands get pushed again every
         // packet and silently evict genuinely-new ones once the 64-slot ring
         // fills up. Commands with tick <= this are duplicates and skipped.
-        // Seeded to the welcome tick, so the dead-man timeout below measures
-        // from "joined" rather than from tick 0.
+        // Only ever advanced by a command the peer actually sent: moving it
+        // to some server-side tick instead would swallow every command the
+        // peer has in flight below that mark, silently and without limit.
         std::uint64_t lastQueuedInputTick = 0;
-        // Commands arriving with tick < the server's current tick -- already
-        // stale, InputSystem would drop them anyway (see its own comment) --
-        // counted here as a health metric, not currently surfaced anywhere.
+        // The server tick at which a real command last landed, which is what
+        // the dead-man sweep below measures silence against -- deliberately
+        // not lastQueuedInputTick, which lives in the *client's* stamped-tick
+        // space and sits a whole input lead ahead of it.
+        std::uint64_t lastInputArrivalTick = 0;
+        // Commands arriving with tick < the server's current tick. Applied a
+        // tick or more late rather than lost (see InputSystem), so this is a
+        // health metric for the peer's input lead, not a loss count; not
+        // currently surfaced anywhere.
         std::uint64_t staleInputCount = 0;
         // Dead-man latch: true once the input timeout has injected a
         // synthetic idle command for the current stall episode (see

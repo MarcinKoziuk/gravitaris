@@ -193,12 +193,22 @@ void TestInputLeadSizing()
     Require(NetClient::ComputeInputLeadTicks(0.f, 0.f, TICK_RATE) == NetClient::MIN_INPUT_LEAD_TICKS,
             "lead: a zero-latency loopback still keeps the minimum slack");
 
-    // 100ms rtt + 2*10ms jitter + one tick (16.67) = 136.67ms -> 9 ticks.
-    Require(NetClient::ComputeInputLeadTicks(100.f, 10.f, TICK_RATE) == 9,
+    // 100ms rtt + 2*10ms jitter + one tick (16.67) = 136.67ms -> 9 ticks, plus
+    // the stamping clock's own tolerated lag (PredictedTickClock::
+    // RESYNC_THRESHOLD_TICKS) on top.
+    Require(NetClient::ComputeInputLeadTicks(100.f, 10.f, TICK_RATE)
+                    == 9 + PredictedTickClock::RESYNC_THRESHOLD_TICKS,
             "lead: sized off full rtt plus two jitter deviations plus a tick");
 
-    // 90ms rtt + no jitter + one tick = 106.67ms -> 7 ticks.
-    Require(NetClient::ComputeInputLeadTicks(90.f, 0.f, TICK_RATE) == 7, "lead: jitter-free sizing");
+    // 90ms rtt + no jitter + one tick = 106.67ms -> 7 ticks (plus the same).
+    Require(NetClient::ComputeInputLeadTicks(90.f, 0.f, TICK_RATE)
+                    == 7 + PredictedTickClock::RESYNC_THRESHOLD_TICKS,
+            "lead: jitter-free sizing");
+    // The whole point of that term: a client sitting at the resync threshold
+    // stamps that many ticks below the lead this returns, and must still land
+    // at or ahead of the server's current tick.
+    Require(NetClient::ComputeInputLeadTicks(0.f, 0.f, TICK_RATE) > PredictedTickClock::RESYNC_THRESHOLD_TICKS,
+            "lead: covers the stamping clock's tolerated lag even on a perfect line");
     // Jitter alone moves it: same rtt, calmer line, fewer ticks.
     Require(NetClient::ComputeInputLeadTicks(100.f, 0.f, TICK_RATE) <
                     NetClient::ComputeInputLeadTicks(100.f, 10.f, TICK_RATE),
@@ -4458,6 +4468,51 @@ void TestNetRoundtrip(Game& game)
     Require(client.TakeChatMessages().empty(), "chat: an empty line is never broadcast");
 }
 
+// A client whose stamped ticks land behind the server's must still fly. Its
+// commands are late, not absent: dropping them latches the last-consumed
+// flags, so the peer's ship stops answering the controls entirely while the
+// player keeps flying a predicted copy that gets snapped back on the next
+// reconciliation. Two ways that used to happen, both covered here -- the
+// dead-man sweep advancing the *dedupe* watermark to the server's own tick
+// (which then swallowed every command still in flight below it, silently and
+// for as long as the peer stayed behind), and InputSystem discarding anything
+// that missed its exact tick.
+void TestLateInputStillFlies(Game& game)
+{
+    auto [serverTransport, clientTransport] = LoopbackTransport::CreatePair();
+    NetServer server(game, *serverTransport);
+    NetClient client(*clientTransport, "sim-test-late-client");
+
+    for (int i = 0; i < 5; ++i) {
+        server.IngestInput(game.GetStep());
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+    }
+    Require(client.IsWelcomed(), "late input: client welcomed");
+
+    const flecs::entity ship = game.GetEntitySpawner().EntityForNetId(client.GetYourShipNetId());
+    Require(ship.is_alive(), "late input: server-side ship exists (test setup check)");
+
+    // Well past NetServer::INPUT_TIMEOUT_TICKS, so the dead-man sweep fires
+    // during the run rather than the run finishing inside its window.
+    constexpr std::uint64_t LATE_BY = 5;
+    for (int i = 0; i < 90; ++i) {
+        server.IngestInput(game.GetStep());
+        ControlFlags thrust{};
+        thrust.thrustForward = true;
+        client.SendInput(game.GetStep() - LATE_BY, thrust);
+        game.Update();
+        server.BroadcastSnapshot(game.GetStep());
+        client.Update();
+    }
+
+    Require(ship.get<Controls>().actionFlags.thrustForward,
+            "late input: a command past its stamped tick still reaches Controls");
+    Require(ship.get<Transform>().vel.length() > 1.0,
+            "late input: a peer stamping behind the server still actually moves");
+}
+
 // docs/networking-plan.md's known-gap fix: a peer whose ship dies must not
 // become a permanent ghost. Own NetServer/NetClient pair (a second peer in
 // `game`, independent of TestNetRoundtrip's) so killing this ship can't
@@ -4798,6 +4853,7 @@ RunResult RunSimulation()
 
     TestSnapshotRoundtrip(game);
     TestNetRoundtrip(game);
+    TestLateInputStillFlies(game);
     TestPeerRespawn(game);
     TestTeamAssignment(game);
 

@@ -12,6 +12,7 @@
 #include <gravitaris/game/component/controls.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/input/input-command.hpp>
+#include <gravitaris/game/net/predicted-tick-clock.hpp>
 #include <gravitaris/game/net/protocol.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 #include <gravitaris/game/net/transport.hpp>
@@ -247,9 +248,11 @@ public:
     }
 
     // Never below this even on a zero-latency loopback: one tick of slack for
-    // the send/receive landing either side of a tick boundary, and the
-    // interval between the client's own frames is itself ~a tick.
-    static constexpr std::uint64_t MIN_INPUT_LEAD_TICKS = 2;
+    // the send/receive landing either side of a tick boundary, the interval
+    // between the client's own frames is itself ~a tick, and the stamping
+    // clock is entitled to sit a further PredictedTickClock::
+    // RESYNC_THRESHOLD_TICKS behind its target before it corrects.
+    static constexpr std::uint64_t MIN_INPUT_LEAD_TICKS = 2 + PredictedTickClock::RESYNC_THRESHOLD_TICKS;
     static constexpr std::uint64_t MAX_INPUT_LEAD_TICKS = 180;
 
     // The lead a given measurement calls for, in ticks. Pure and static so

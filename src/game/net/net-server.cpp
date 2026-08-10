@@ -49,12 +49,11 @@ void NetServer::IngestInput(std::uint64_t currentTick)
     // instead of replaying its last held flags forever.
     for (auto& [peer, state] : m_peers) {
         if (!state.welcomed || !state.ship.is_alive() || state.idleInjected) continue;
-        if (currentTick <= state.lastQueuedInputTick + INPUT_TIMEOUT_TICKS) continue;
+        if (currentTick <= state.lastInputArrivalTick + INPUT_TIMEOUT_TICKS) continue;
 
         InputCommand idle;
         idle.tick = currentTick;
         state.ship.get_mut<InputQueue>().Push(idle);
-        state.lastQueuedInputTick = currentTick;
         state.idleInjected = true;
         LOG(info) << "net: peer " << peer << " input timed out (" << INPUT_TIMEOUT_TICKS
                   << " ticks silent, " << state.staleInputCount << " stale so far), zeroing controls";
@@ -162,7 +161,7 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             it->second.pilotId = ship.get<PilotRef>().pilotId;
             it->second.ship = ship;
             it->second.welcomed = true;
-            it->second.lastQueuedInputTick = currentTick; // dead-man baseline: "joined now", not tick 0
+            it->second.lastInputArrivalTick = currentTick; // dead-man baseline: "joined now", not tick 0
 
             ServerWelcomePacket welcome;
             welcome.clientId = peer;
@@ -193,22 +192,22 @@ void NetServer::HandlePacket(PeerId peer, const std::uint8_t* data, std::size_t 
             for (const InputCommand& cmd : input.commands) {
                 if (cmd.tick <= it->second.lastQueuedInputTick) continue; // already queued, part of the resend window
                 if (cmd.tick < currentTick) {
-                    // Diagnostic (2026-07-19): this command is already stale
-                    // by the time it's queued -- InputSystem will drop it on
-                    // sight (tick < step) and repeat the last-consumed flags
-                    // instead, which is a candidate cause for the "own ship
-                    // teleports" reconciliation symptom (see CGame::
-                    // ReconcileOwnShipIfNeeded's matching log). Lateness in
-                    // ticks roughly indicates whether INPUT_LEAD_TICKS is
-                    // enough slack for this connection's real RTT/jitter.
+                    // Applied late rather than dropped (see InputSystem), so
+                    // this is latency, not loss -- but it's latency the input
+                    // lead was supposed to have covered, and it feeds the
+                    // reconciliation corrections CGame::ReconcileOwnShipIfNeeded
+                    // logs against. Lateness in ticks is the direct read on
+                    // whether this connection's lead is sized for its real
+                    // RTT/jitter.
                     ++it->second.staleInputCount;
                     LOG(trace) << "net: peer " << peer << " input for tick " << cmd.tick
                               << " arrived " << (currentTick - cmd.tick) << " ticks late (currentTick "
-                              << currentTick << "), dropped by InputSystem -- " << it->second.staleInputCount
-                              << " stale so far";
+                              << currentTick << "), applied late -- " << it->second.staleInputCount
+                              << " late so far";
                 }
                 queue.Push(cmd);
                 it->second.lastQueuedInputTick = cmd.tick;
+                it->second.lastInputArrivalTick = currentTick;
                 it->second.idleInjected = false; // fresh input: stall episode (if any) is over
             }
             break;
