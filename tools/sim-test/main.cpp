@@ -4459,6 +4459,9 @@ void TestLoadoutReplication()
     ShipLoadout& refit = server.get_mut<ShipLoadout>();
     refit.mounts[0] = MountArm::Heavy;
     refit.mounts[1] = MountArm::Light;
+    // All three arms, so the range check the mount byte is read through cannot
+    // quietly clamp the newest of them back to an empty hole.
+    refit.mounts[2] = MountArm::Laser;
     SetMissileBay(refit, 1, true);
     refit.missileAmmo = 13;
     refit.cannonAmmo = 57;
@@ -4471,6 +4474,7 @@ void TestLoadoutReplication()
     SyncAmmoStoreCounts(refit);
     refit.levels.engine = 3;
     refit.levels.capacitor = 2;
+    refit.levels.laserTier = 1;
     refit.levels.shield = 3;
     refit.levels.shieldType = ShieldType::Plating;
     refit.shieldHp = 42.f;
@@ -4517,6 +4521,8 @@ void TestLoadoutReplication()
     Require(applied.levels.engine == refit.levels.engine, "loadout replication: the drive's rank");
     Require(applied.levels.capacitor == refit.levels.capacitor,
             "loadout replication: the bank's rank");
+    Require(applied.levels.laserTier == refit.levels.laserTier,
+            "loadout replication: the beam emitter's rank");
     Require(applied.levels.shield == refit.levels.shield
                     && applied.levels.shieldType == refit.levels.shieldType,
             "loadout replication: the emitter fitted and its rank");

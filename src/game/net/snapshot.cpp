@@ -202,7 +202,7 @@ void ApplyEntityShipState(flecs::entity entity, const EntityState& state)
             // off the wire, and an out-of-range enum is UB the moment anything
             // switches on it.
             const std::uint8_t arm = state.mounts[i];
-            loadout->mounts[i] = arm <= static_cast<std::uint8_t>(MountArm::Heavy)
+            loadout->mounts[i] = arm <= static_cast<std::uint8_t>(MountArm::Laser)
                                ? static_cast<MountArm>(arm) : MountArm::None;
         }
         loadout->missileBays = state.missileBays;

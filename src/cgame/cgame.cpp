@@ -819,9 +819,10 @@ std::vector<CGame::ShipSlot> CGame::GetShipSlots()
 
         if (loadout && slot.family == SlotFamily::Weapon && slot.mount < loadout->mounts.size()) {
             const MountArm arm = loadout->mounts[slot.mount];
-            const UpgradeKind kind = arm == MountArm::Heavy ? UpgradeKind::CannonTier
-                                                            : UpgradeKind::WeaponTier;
             if (arm != MountArm::None) {
+                const UpgradeKind kind = arm == MountArm::Heavy  ? UpgradeKind::CannonTier
+                                       : arm == MountArm::Laser ? UpgradeKind::LaserTier
+                                                                : UpgradeKind::WeaponTier;
                 if (const UpgradeDef* def = m_upgradeCatalog.FindKind(kind)) slot.fittedId = def->id;
             }
         }
