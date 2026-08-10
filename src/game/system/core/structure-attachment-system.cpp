@@ -1,6 +1,7 @@
 #include <cmath>
 #include <optional>
 
+#include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
@@ -29,6 +30,16 @@ void StructureAttachmentSystem::Update()
         const Transform& planetTransf = planet.get<Transform>();
         const Vector2d pos = planetTransf.pos + attach.localOffset;
         const Vector2d vel = planetTransf.vel;
+
+        // Diagnostic (2026-08-10): see SpawnStructure's own note. Says which
+        // of the two terms is the non-finite one, which the death log alone
+        // could not. Capped so a permanent NaN can't fill the log at 60 Hz.
+        if (!std::isfinite(pos.x()) && m_nanReports < NAN_REPORT_LIMIT) {
+            ++m_nanReports;
+            LOG(error) << "attach NaN: planet netId " << attach.planetNetId << " pos ("
+                       << planetTransf.pos.x() << ", " << planetTransf.pos.y() << ") offset ("
+                       << attach.localOffset.x() << ", " << attach.localOffset.y() << ")";
+        }
 
         m_physicsSystem.SetKinematicMotion(ref, pos, vel, std::nullopt);
         transf.pos = pos;

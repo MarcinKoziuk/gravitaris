@@ -334,6 +334,14 @@ void DamageSystem::ResolveStarContact()
     m_registry.each([&](flecs::entity entity, const Transform& transf, Damageable& dmg) {
         if (dmg.hp <= 0.f || entity.has<Planet>()) return;
 
+        // Every test below is a positive comparison, and a NaN fails all of
+        // them: it passes the reach check without being culled, then the
+        // lethal check without being killed, and lands on std::max(0.f, NaN),
+        // which returns 0.f. So a hull that arrives here with a non-finite
+        // position is destroyed and the star gets the blame, wherever the NaN
+        // actually came from. Leave it alone and let it be visibly wrong.
+        if (!std::isfinite(transf.pos.x()) || !std::isfinite(transf.pos.y())) return;
+
         for (const Star& star : stars) {
             const double distSq = (star.pos - transf.pos).dot();
             if (distSq > star.reachSq) continue;

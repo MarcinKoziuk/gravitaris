@@ -15,9 +15,13 @@ namespace Gravitaris {
 // PhysicsSystem::Simulate (gravity/collision should see today's position,
 // not last tick's).
 class StructureAttachmentSystem {
+    static constexpr int NAN_REPORT_LIMIT = 24; // diagnostic; see Update()
+
     flecs::world& m_registry;
     EntitySpawner& m_entitySpawner;
     PhysicsSystem& m_physicsSystem;
+
+    int m_nanReports = 0;
 
 public:
     StructureAttachmentSystem(flecs::world& registry, EntitySpawner& entitySpawner, PhysicsSystem& physicsSystem);
