@@ -4,6 +4,7 @@
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 
@@ -56,9 +57,10 @@ constexpr float RESEARCH_GAIN = 0.8f;
 constexpr bool RESEARCH_CHIME = false;
 constexpr float CHAT_GAIN = 0.6f;
 constexpr float THRUST_GAIN = 0.55f;
-// Under the engine's: a beam is a thin sound and a ship holding one is usually
-// also under thrust, so the two have to sit together.
-constexpr float BEAM_GAIN = 0.35f;
+// On top of the emitter's own authored gain. Held rather than struck, and a
+// ship burning a beam is usually also under thrust, so the two have to sit
+// together -- which the per-shot figure a weapon carries is not scaled for.
+constexpr float BEAM_GAIN_SCALE = 0.8f;
 
 } // namespace
 
@@ -85,7 +87,6 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
     // once (if) one does.
     m_thrustClip = m_resourceLoader.Load<AudioClip>("sounds/thrust-1.wav"_id);
     m_thrustBoostClip = m_resourceLoader.Load<AudioClip>("sounds/thrust-boost-1.wav"_id);
-    m_beamClip = m_resourceLoader.Load<AudioClip>("sounds/laser-loop-1.wav"_id);
     m_hitClip    = m_resourceLoader.Load<AudioClip>("sounds/hit-1.wav"_id);
     // Two clips, not one: a bubble absorbing a round and a metal plate
     // taking one are different events to the player, and the shield type is
@@ -121,7 +122,6 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
 
     HandleClipAdded(*m_thrustClip, m_thrustClip.Id());
     HandleClipAdded(*m_thrustBoostClip, m_thrustBoostClip.Id());
-    HandleClipAdded(*m_beamClip, m_beamClip.Id());
     HandleClipAdded(*m_hitClip, m_hitClip.Id());
     HandleClipAdded(*m_bubbleClip, m_bubbleClip.Id());
     HandleClipAdded(*m_platingClip, m_platingClip.Id());
@@ -261,14 +261,23 @@ void AudioSystem::SweepThrusters(flecs::world& world)
 
 void AudioSystem::SweepBeams(flecs::world& world)
 {
-    world.each([&](flecs::entity ent, const Transform& transf, const Controls& controls) {
+    world.each([&](flecs::entity ent, const Transform& transf, const Controls& controls,
+                   const ShipLoadout& loadout) {
         // What the bank actually granted, not what the trigger asked for -- a
         // dry capacitor should go quiet, which is most of how a pilot hears
         // that they have run out.
         if (!controls.laserFiring) return;
 
+        // The emitter's own clip, the way a gun's round carries its own: a
+        // rank that sounds heavier is then a data edit. Resolved off the
+        // replicated loadout, so a remote ship's beam sounds right here
+        // without this side ever seeing its owner's purchases.
+        const ShipStats stats = m_catalog.ResolveStats(loadout.levels);
+        if (!stats.laser || !stats.laser->IsBeam() || stats.laser->soundId == 0) return;
+
         const Vector2 pos{static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())};
-        HoldLoop(world, ent, LoopKind::Beam, m_beamClip.Id(), pos, BEAM_GAIN);
+        HoldLoop(world, ent, LoopKind::Beam, stats.laser->soundId, pos,
+                 stats.laser->soundGain * BEAM_GAIN_SCALE);
     });
 }
 

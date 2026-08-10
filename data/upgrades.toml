@@ -87,8 +87,9 @@ key = "laser_1"
 hardpoint = "weapon"
 name = "Laser"
 damage = 0.0 # per-hit damage means nothing to a beam; see [beam] below
-sound = "sounds/laser-1.wav"
-sound_gain = 0.4
+# Held for as long as the trigger is, so the clip loops rather than firing.
+sound = "sounds/laser-loop-1.wav"
+sound_gain = 0.5
 
 [weapon.beam]
 range = 450.0
@@ -108,8 +109,8 @@ key = "laser_2"
 hardpoint = "weapon"
 name = "Laser II"
 damage = 0.0
-sound = "sounds/laser-1.wav"
-sound_gain = 0.4
+sound = "sounds/laser-loop-1.wav"
+sound_gain = 0.6
 
 [weapon.beam]
 range = 560.0
@@ -127,8 +128,8 @@ key = "laser_3"
 hardpoint = "weapon"
 name = "Laser III"
 damage = 0.0
-sound = "sounds/laser-1.wav"
-sound_gain = 0.45
+sound = "sounds/laser-loop-1.wav"
+sound_gain = 0.7
 
 [weapon.beam]
 range = 680.0

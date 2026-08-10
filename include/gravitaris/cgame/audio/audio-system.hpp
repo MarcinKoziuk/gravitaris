@@ -143,8 +143,6 @@ private:
     // The same loop with the injectors open, played instead of m_thrustClip
     // while a ship is boosting (Controls::boosting).
     ResourcePtr<const AudioClip> m_thrustBoostClip;
-    // The beams' held note, looped for as long as they are burning.
-    ResourcePtr<const AudioClip> m_beamClip;
     ResourcePtr<const AudioClip> m_hitClip;
     // Borrows the stock gun's clip at a lower gain until a shield hit gets
     // its own.
