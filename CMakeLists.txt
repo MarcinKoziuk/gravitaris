@@ -289,6 +289,19 @@ if(NOT WIN32 AND NOT APPLE)
     set_target_properties(chipmunk_static PROPERTIES SOURCES "${_chipmunk_sources}")
 endif()
 
+# Chipmunk2D's own CMakeLists appends -ffast-math to the release profile, and
+# cpBodyGetType tells a kinematic body from a dynamic one by testing
+# `body->m == INFINITY`. -ffast-math implies -ffinite-math-only, which lets the
+# compiler assume that comparison is never true and fold it away: every
+# kinematic body then reports itself DYNAMIC. Chipmunk integrates it, gravity
+# is applied to it at its infinite mass, and inf * (1/inf) puts a NaN in the
+# velocity of every star and planet on the second step -- from where it
+# reaches everything, since a NaN distance passes every range test.
+# Comes after the flags CMake takes from the release profile, so it wins.
+if(NOT MSVC)
+    target_compile_options(chipmunk_static PRIVATE -fno-fast-math)
+endif()
+
 # ---------------------------------------------------------------------------
 # PhysFS
 # ---------------------------------------------------------------------------

@@ -233,19 +233,6 @@ flecs::entity EntitySpawner::SpawnStructure(StructureType type, id_t modelId, fl
     const Vector2d initialPos = planet.get<Transform>().pos + localOffset;
     flecs::entity entity = SpawnStructureBase(type, modelId, initialPos, team);
     entity.emplace<PlanetSurfaceAttachment>(PlanetSurfaceAttachment{planet.get<NetId>().value, localOffset});
-
-    // Diagnostic (2026-08-10): every planetside structure on the dedicated
-    // server reaches tick 1 at (nan, nan) while the High Port off the same
-    // planet is fine, which narrows it to this offset -- but a Base's is a
-    // literal zero vector, so the value read back is not the value written.
-    // Prints both ends of that write. Remove once the cause is known.
-    const PlanetSurfaceAttachment& stored = entity.get<PlanetSurfaceAttachment>();
-    LOG(info) << "spawn structure: planet netId " << planet.get<NetId>().value
-              << " radius " << planetRadius << " pos (" << planet.get<Transform>().pos.x() << ", "
-              << planet.get<Transform>().pos.y() << ") offset (" << localOffset.x() << ", "
-              << localOffset.y() << ") stored (" << stored.localOffset.x() << ", "
-              << stored.localOffset.y() << ") initial (" << initialPos.x() << ", " << initialPos.y() << ")";
-
     return entity;
 }
 
