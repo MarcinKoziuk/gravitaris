@@ -31,6 +31,7 @@
 #include <gravitaris/cgame/net/snapshot-interpolator.hpp>
 #include <gravitaris/cgame/camera-director.hpp>
 #include <gravitaris/game/gnc/autopilot.hpp>
+#include <gravitaris/cgame/renderer/laser-renderer.hpp>
 #include <gravitaris/cgame/renderer/simple-model-renderer.hpp>
 #include <gravitaris/cgame/renderer/model-renderer2.hpp>
 #include <gravitaris/cgame/renderer/starfield-renderer.hpp>
@@ -77,6 +78,19 @@ protected:
     HitFlashSystem m_hitFlashSystem;
     CameraDirector m_cameraDirector;
     IndicatorRenderer m_indicatorRenderer;
+
+    // Beams are gathered from whichever worlds are being drawn this frame (in
+    // MP that is both: the own predicted ship here, everyone else in the
+    // mirror) and drawn in one pass, so the scratch outlives a single gather.
+    LaserRenderer m_laserRenderer;
+    std::vector<LaserRenderer::Beam> m_beams;
+
+    void GatherBeams(flecs::world& world);
+    void DrawBeams(const Camera& camera);
+    [[nodiscard]] const Body* HullOf(flecs::entity ent);
+    [[nodiscard]] double BeamReach(flecs::world& world, flecs::entity shooter,
+                                   const Magnum::Vector2d& from, const Magnum::Vector2d& heading,
+                                   double range);
 
     RendererKind m_activeRenderer = RendererKind::Baked;
 
@@ -312,6 +326,7 @@ public:
         m_modelRenderer2.SetViewportSize(size);
         m_mirrorRenderer2.SetViewportSize(size);
         m_starfieldRenderer.SetViewportSize(size);
+        m_laserRenderer.SetViewportSize(size);
     }
 
     // framebuffer-pixels per design unit: the display's own scaling times the
@@ -325,6 +340,7 @@ public:
         m_modelRenderer2.SetContentScale(scale);
         m_mirrorRenderer2.SetContentScale(scale);
         m_starfieldRenderer.SetContentScale(scale);
+        m_laserRenderer.SetContentScale(scale);
     }
 
     StarfieldRenderer& GetStarfieldRenderer() { return m_starfieldRenderer; }
@@ -429,6 +445,22 @@ public:
     // what anything reasoning about how much of the world fits on screen wants,
     // since world->design is exactly `zoom` with no scale left in it.
     [[nodiscard]] Magnum::Vector2 GetDesignViewportSize() const { return m_viewportSize / m_contentScale; }
+
+    // World position under a point in the scene viewport, given in viewport
+    // pixels with the origin at its bottom-left corner -- the same convention
+    // GetViewportOrigin is expressed in. The inverse of what the renderers
+    // project with.
+    [[nodiscard]] Magnum::Vector2 ViewportToWorld(const Magnum::Vector2& viewportPixel);
+
+    // Where the pilot is pointing, packed for the wire (ControlFlags::aim): the
+    // world angle from the player's own hull to whatever is under the cursor.
+    // The hull's gimbal arc is deliberately NOT folded in here -- clamping is
+    // the sim's, applied identically on both sides of the wire, so what travels
+    // is the request and not one client's idea of the answer. Empty when there
+    // is nothing to aim from, or when the cursor is sitting on the hull itself
+    // -- in both cases the caller should hold the angle it already had rather
+    // than snap the mounts somewhere arbitrary.
+    [[nodiscard]] std::optional<std::uint16_t> AimAt(const Magnum::Vector2& viewportPixel);
 
     [[nodiscard]] float GetUiScale() const { return m_uiScale; }
     void SetUiScale(float scale) { m_uiScale = std::clamp(scale, MIN_UI_SCALE, MAX_UI_SCALE); }

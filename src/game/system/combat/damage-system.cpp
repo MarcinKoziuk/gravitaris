@@ -437,7 +437,7 @@ void DamageSystem::ResolveBeams(std::uint64_t step)
             if (loadout.mounts[mount] != MountArm::Laser) continue;
 
             const ShipControlsSystem::BeamOrigin origin = ShipControlsSystem::ComputeBeamOrigin(
-                    transf, phys, static_cast<unsigned>(mount), controls.actionFlags.aim);
+                    transf, phys.body.Get(), static_cast<unsigned>(mount), controls.actionFlags.aim);
             const Magnum::Vector2d far = origin.pos
                     + Magnum::Vector2d{std::cos(origin.angle), std::sin(origin.angle)} * beam.range;
 

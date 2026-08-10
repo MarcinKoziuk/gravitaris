@@ -152,11 +152,11 @@ double ShipControlsSystem::ClampAimToArc(double desired, double heading, double 
 }
 
 ShipControlsSystem::BeamOrigin ShipControlsSystem::ComputeBeamOrigin(const Transform& transf,
-                                                                    const PhysicsBody& phys,
+                                                                    const Body* hull,
                                                                     unsigned mount, std::uint16_t aim)
 {
-    const Body::Hardpoint* hp = phys.body ? phys.body->FindMount(WEAPON_HARDPOINT, mount) : nullptr;
-    if (!hp && phys.body) hp = phys.body->FindMount(GUN_HARDPOINT, mount);
+    const Body::Hardpoint* hp = hull ? hull->FindMount(WEAPON_HARDPOINT, mount) : nullptr;
+    if (!hp && hull) hp = hull->FindMount(GUN_HARDPOINT, mount);
 
     Vector2d pos = transf.pos;
     if (hp) {
@@ -167,7 +167,7 @@ ShipControlsSystem::BeamOrigin ShipControlsSystem::ComputeBeamOrigin(const Trans
     }
 
     const double heading = double(transf.rot) - HALF_PI; // nose is local -Y
-    const double halfWidth = phys.body ? phys.body->GetAimArcHalfWidth() : HALF_PI;
+    const double halfWidth = hull ? hull->GetAimArcHalfWidth() : HALF_PI;
 
     return BeamOrigin{pos, ClampAimToArc(UnpackAim(aim), heading, halfWidth)};
 }

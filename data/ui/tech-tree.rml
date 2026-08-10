@@ -531,7 +531,7 @@
 				color: #2f6270;
 			}
 
-			/* Three equal branches. No `gap` in RCSS -- the spacing is a margin
+			/* Equal branches, however many there are. No `gap` in RCSS -- the spacing is a margin
 			   on each column, cleared on the last. The TECH tab only: the
 			   ship's own fitting is done on the hull and in the two lists under
 			   it, so the columns would be a second way to buy the same things.

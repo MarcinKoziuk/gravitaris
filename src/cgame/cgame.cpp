@@ -23,6 +23,9 @@
 #include <gravitaris/game/component/faction-state.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/structure.hpp>
+#include <gravitaris/game/component/physics.hpp>
+#include <gravitaris/game/resource/body.hpp>
+#include <gravitaris/game/system/ship/ship-controls-system.hpp>
 #include <gravitaris/game/event/death-report.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 #include <gravitaris/game/net/protocol.hpp>
@@ -31,6 +34,7 @@
 #include <gravitaris/cgame/fx/hit-flash-system.hpp>
 #include <gravitaris/cgame/team-color.hpp>
 #include <gravitaris/cgame/component/shield-flash.hpp>
+#include <gravitaris/cgame/component/hit-outline.hpp>
 
 #include <gravitaris/cgame/resource/shape.hpp>
 #include <gravitaris/cgame/spawner/centity-spawner.hpp>
@@ -80,6 +84,7 @@ CGame::CGame(IFilesystem &filesystem, float contentScale)
     , m_hitFlashSystem(m_registry, m_eventQueue, *m_entitySpawner)
     , m_cameraDirector(Defaults::cameraZoom)
     , m_indicatorRenderer(m_resourceLoader)
+    , m_laserRenderer(filesystem)
     , m_clientPrediction(m_registry, m_physicsSystem, *m_entitySpawner, m_eventQueue, m_resourceLoader,
                          m_upgradeCatalog)
     , m_cosmeticBulletDespawner(m_registry, m_mirrorWorld)
@@ -245,6 +250,29 @@ CGame::ShieldReadout CGame::GetShieldReadout()
 
     return ShieldReadout{loadout->shieldHp, stats.shieldCapacity, loadout->levels.shieldType,
                          std::move(segments)};
+}
+
+Magnum::Vector2 CGame::ViewportToWorld(const Magnum::Vector2& viewportPixel)
+{
+    const Camera& camera = m_cameraDirector.GetCamera();
+    const float pixelsPerUnit = std::max(camera.GetZoom() * m_contentScale, 1e-6f);
+    return camera.GetPosition() + (viewportPixel - m_viewportSize * 0.5f) / pixelsPerUnit;
+}
+
+std::optional<std::uint16_t> CGame::AimAt(const Magnum::Vector2& viewportPixel)
+{
+    const std::optional<flecs::entity> player = GetPlayer();
+    if (!player || !player->is_alive()) return std::nullopt;
+
+    const Transform* transf = player->try_get<Transform>();
+    if (!transf) return std::nullopt;
+
+    const Magnum::Vector2 world = ViewportToWorld(viewportPixel);
+    const Magnum::Vector2d offset{static_cast<double>(world.x()) - transf->pos.x(),
+                                  static_cast<double>(world.y()) - transf->pos.y()};
+    if (offset.dot() < 1e-9) return std::nullopt;
+
+    return PackAim(std::atan2(offset.y(), offset.x()));
 }
 
 CGame::CapacitorReadout CGame::GetCapacitorReadout()
@@ -1095,6 +1123,15 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
 
     m_modelRenderer2.Render(0.0);
 
+    // Both worlds: this peer's own beams are predicted locally and everyone
+    // else's arrive as a trigger bit and an angle. Gathered before the
+    // interpolation override above is undone, so a beam leaves the hull where
+    // the hull was actually drawn rather than where the sim last left it.
+    m_beams.clear();
+    GatherBeams(m_registry);
+    GatherBeams(m_mirrorWorld);
+    DrawBeams(camera);
+
     for (const auto& [entity, pos] : m_renderPosRestore) {
         if (entity.is_alive()) entity.get_mut<Transform>().pos = pos;
     }
@@ -1194,10 +1231,115 @@ void CGame::Render(double delta)
         }
     }
 
+    // After the hulls, so a beam reads as light laid over what it is crossing,
+    // and still inside the scene target so the glow pass picks it up.
+    m_beams.clear();
+    GatherBeams(m_activeRenderer == RendererKind::Mirror ? m_mirrorWorld : m_registry);
+    DrawBeams(camera);
+
     {
         ScopedPerfTimer timer(m_perfMonitor, "Audio");
         m_audioSystem.Update(camera.GetPosition());
     }
+}
+
+// Every beam burning in `world` this frame, drawn where its own hull says it
+// leaves from and cut off at whatever it first crosses. Nothing about a beam is
+// replicated beyond the trigger and the angle (see EntityState::aim) -- the
+// geometry is re-derived here off the same rules the sim resolves damage with,
+// which is why a beam looks like it hits what it is actually hurting.
+void CGame::GatherBeams(flecs::world& world)
+{
+    world.each([&](flecs::entity ship, const Transform& transf, const Controls& controls,
+                   const ShipLoadout& loadout) {
+        if (!controls.laserFiring) return;
+
+        const ShipStats stats = m_upgradeCatalog.ResolveStats(loadout.levels);
+        if (!stats.laser || !stats.laser->IsBeam()) return;
+
+        const Body* hull = HullOf(ship);
+        const WeaponDef::Beam& beam = stats.laser->beam;
+        // The side's own colour, run hot with the rank: a beam crossing the
+        // sector should say who fired it before it says what it is.
+        const Team* team = ship.try_get<Team>();
+        const Magnum::Color3 color = Magnum::Math::lerp(
+                TeamColor(team ? team->id : TeamId::None), Magnum::Color3{1.f}, beam.heat);
+
+        for (std::size_t mount = 0; mount < MAX_WEAPON_MOUNTS; ++mount) {
+            if (loadout.mounts[mount] != MountArm::Laser) continue;
+
+            const ShipControlsSystem::BeamOrigin origin = ShipControlsSystem::ComputeBeamOrigin(
+                    transf, hull, static_cast<unsigned>(mount), controls.actionFlags.aim);
+            const Magnum::Vector2d heading{std::cos(origin.angle), std::sin(origin.angle)};
+            const double reach = BeamReach(world, ship, origin.pos, heading,
+                                           static_cast<double>(beam.range));
+
+            const Magnum::Vector2d end = origin.pos + heading * reach;
+            const auto share = static_cast<float>(reach / beam.range);
+            m_beams.push_back(LaserRenderer::Beam{
+                    Magnum::Vector2{static_cast<float>(origin.pos.x()),
+                                    static_cast<float>(origin.pos.y())},
+                    Magnum::Vector2{static_cast<float>(end.x()), static_cast<float>(end.y())},
+                    color, beam.widthNear,
+                    // A beam stopped short is only as wide as it got.
+                    beam.widthNear + (beam.widthFar - beam.widthNear) * share});
+        }
+    });
+
+}
+
+void CGame::DrawBeams(const Camera& camera)
+{
+    if (m_beams.empty()) return;
+
+    m_laserRenderer.SetZoom(camera.GetZoom());
+    m_laserRenderer.SetCameraPosition(camera.GetPosition());
+    m_laserRenderer.Render(m_beams);
+}
+
+// The hull a beam leaves from, wherever this world keeps it: a simulated ship
+// reaches it through its physics body, a replicated one through the HitOutline
+// derived from the same replicated modelId (ADR 0001 -- a mirror ship has no
+// physics at all).
+const Body* CGame::HullOf(flecs::entity ent)
+{
+    if (const HitOutline* outline = ent.try_get<HitOutline>()) return outline->body.Get();
+    if (const PhysicsRef* ref = ent.try_get<PhysicsRef>()) {
+        return GetPhysicsSystem().GetBody(*ref).body.Get();
+    }
+    return nullptr;
+}
+
+// How far a beam gets before it meets a hull. Bounding circles rather than the
+// collision polygons the sim sweeps: this decides where to stop DRAWING, it
+// runs in both the real world and a mirror one where nothing has physics at
+// all, and being a few units generous at the edge of a silhouette is invisible.
+double CGame::BeamReach(flecs::world& world, flecs::entity shooter, const Magnum::Vector2d& from,
+                        const Magnum::Vector2d& heading, double range)
+{
+    double nearest = range;
+
+    world.each([&](flecs::entity ent, const Transform& transf, const Damageable&) {
+        if (ent == shooter) return;
+
+        const Body* hull = HullOf(ent);
+        if (!hull) return;
+        const double radius = hull->GetBoundingRadius() * transf.scale.x();
+        if (radius <= 0.) return;
+
+        // Closest approach of the ray to the hull's centre, and the chord it
+        // cuts if it comes inside the circle at all.
+        const Magnum::Vector2d toTarget = transf.pos - from;
+        const double along = Magnum::Math::dot(toTarget, heading);
+        if (along <= 0. || along > nearest) return;
+
+        const double offSq = toTarget.dot() - along * along;
+        if (offSq > radius * radius) return;
+
+        nearest = std::max(0., along - std::sqrt(radius * radius - offSq));
+    });
+
+    return nearest;
 }
 
 std::unique_ptr<EntitySpawner> CGame::CreateEntitySpawner()

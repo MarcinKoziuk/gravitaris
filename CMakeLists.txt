@@ -822,6 +822,10 @@ if(GRAVITARIS_BUILD_CLIENT)
         src/cgame/renderer/shader/starfield-shader.cpp
         include/gravitaris/cgame/renderer/starfield-renderer.hpp
         src/cgame/renderer/starfield-renderer.cpp
+        include/gravitaris/cgame/renderer/shader/laser-shader.hpp
+        src/cgame/renderer/shader/laser-shader.cpp
+        include/gravitaris/cgame/renderer/laser-renderer.hpp
+        src/cgame/renderer/laser-renderer.cpp
         include/gravitaris/cgame/renderer/gl-safe-upload.hpp
         src/cgame/renderer/detail/line2-batch.hpp
         include/gravitaris/cgame/renderer/minimap-renderer.hpp

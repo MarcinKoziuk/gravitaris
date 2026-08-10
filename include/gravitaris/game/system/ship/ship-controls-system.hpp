@@ -176,7 +176,13 @@ public:
     // sim resolves damage from this and the client draws from it, so the two
     // cannot disagree about where a beam actually went -- which is the whole
     // reason a beam's endpoints are never replicated.
-    [[nodiscard]] static BeamOrigin ComputeBeamOrigin(const Transform& transf, const PhysicsBody& phys,
+    //
+    // Takes the hull resource rather than a PhysicsBody because a replicated
+    // ship on a client has no physics at all (ADR 0001) and still has to draw
+    // its beams; it reaches the same Body through HitOutline. Null is a hull
+    // whose model never loaded: the beam then leaves the ship's centre along
+    // the raw aim.
+    [[nodiscard]] static BeamOrigin ComputeBeamOrigin(const Transform& transf, const Body* hull,
                                                       unsigned mount, std::uint16_t aim);
 
     // An absolute world angle folded into `halfWidth` either side of the

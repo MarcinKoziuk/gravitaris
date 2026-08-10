@@ -11,6 +11,7 @@
 #include <gravitaris/game/fwd.hpp>
 
 struct cpShape;
+struct cpSpace;
 
 namespace Gravitaris {
 

@@ -96,6 +96,12 @@ private:
     // command per sim tick. The sim never reads the keyboard directly.
     ControlFlags m_currentInput{};
     bool m_autostart = false;
+
+    // Where the cursor last was, in framebuffer pixels with the origin at the
+    // top-left (what the platform reports). The beam's aim is re-derived from
+    // it every tick rather than on movement alone: the ship flies out from
+    // under a resting cursor, and the angle has to follow it.
+    Magnum::Vector2 m_pointerPx{};
     // Confirmed tech picks waiting for a tick to carry them: a command holds
     // one, and CONFIRM can approve a whole refit at once, so they go out one
     // per tick in the order they were staged.
@@ -162,6 +168,8 @@ private:
     // shows for it.
     void ApplySectorSeed(std::uint32_t seed);
     void FeedInput();
+    // Re-points the gimballed mounts at wherever the cursor is now.
+    void UpdateAim();
     void ToggleRecording();
     void StartReplay();
     void StopReplay();
@@ -412,6 +420,7 @@ void GravitarisApplication::tickEvent()
         m_frameTimeAccumulator += frameTime;
         static constexpr int MAX_STEPS_PER_FRAME = 5;
         int steps = 0;
+        UpdateAim();
         while (m_frameTimeAccumulator >= Game::PHYSICS_DELTA) {
             if (steps >= MAX_STEPS_PER_FRAME) {
                 m_frameTimeAccumulator = 0.0;
@@ -697,6 +706,8 @@ void GravitarisApplication::FeedInput()
     std::optional<flecs::entity> maybePlayer = m_game->GetPlayer();
     if (!maybePlayer) return;
 
+    UpdateAim();
+
     const std::uint64_t tick = m_game->GetStep();
 
     InputCommand cmd;
@@ -708,13 +719,17 @@ void GravitarisApplication::FeedInput()
     else {
         cmd.flags = m_currentInput;
         cmd.techPick = NextTechPick();
-        // Autopilot overrides movement but not fire.
+        // Autopilot overrides movement but not fire -- and the mounts stay the
+        // pilot's however the hull is being flown, which is most of the point
+        // of aiming them separately.
         if (std::optional<ControlFlags> autopilot = m_game->ComputeAutopilotControls()) {
             cmd.flags = *autopilot;
             cmd.flags.firePrimary = m_currentInput.firePrimary;
             cmd.flags.fireSecondary = m_currentInput.fireSecondary;
             cmd.flags.fireMissile = m_currentInput.fireMissile;
             cmd.flags.toggleWeapon = m_currentInput.toggleWeapon;
+            cmd.flags.fireLaser = m_currentInput.fireLaser;
+            cmd.flags.aim = m_currentInput.aim;
         }
     }
 
@@ -726,6 +741,21 @@ void GravitarisApplication::FeedInput()
     // (firePrimary is held; released on key-up.)
     m_currentInput.fireSecondary = false;
     m_currentInput.toggleWeapon = false;
+}
+
+// The scene viewport's own pixel space, bottom-left origin, from the platform's
+// top-left one -- CGame projects the world in the former and knows nothing
+// about the window the latter is measured in.
+void GravitarisApplication::UpdateAim()
+{
+    const Magnum::Vector2 origin = m_game->GetViewportOrigin();
+    const auto fbHeight = static_cast<float>(framebufferSize().y());
+    const Magnum::Vector2 inViewport{m_pointerPx.x() - origin.x(),
+                                     fbHeight - m_pointerPx.y() - origin.y()};
+
+    if (const std::optional<std::uint16_t> aim = m_game->AimAt(inViewport)) {
+        m_currentInput.aim = *aim;
+    }
 }
 
 void GravitarisApplication::ToggleRecording()
@@ -1211,9 +1241,19 @@ void GravitarisApplication::pointerPressEvent(PointerEvent& event)
     }
 
     const Magnum::Vector2i p = UiPointerPosition(event.position());
+    m_pointerPx = Magnum::Vector2{p};
     m_ui.ProcessMouseMove(p.x(), p.y());
     if (m_ui.ProcessMouseButton(RmlButtonIndex(event.pointer()), true)) {
         event.setAccepted();
+        return;
+    }
+
+    // Whatever the UI did not want is the pilot shooting: the beams are held,
+    // like the guns' trigger, and the sim decides whether the bank will serve
+    // them.
+    if (event.pointer() == Pointer::MouseLeft && !m_replay.IsReplaying()) {
+        m_game->StopSpectating();
+        m_currentInput.fireLaser = true;
     }
 }
 
@@ -1223,6 +1263,11 @@ void GravitarisApplication::pointerReleaseEvent(PointerEvent& event)
         event.setAccepted();
         return;
     }
+
+    // Released unconditionally, even when the UI takes the event: a button that
+    // went down over the world and came up over a panel would otherwise stay
+    // held for good.
+    if (event.pointer() == Pointer::MouseLeft) m_currentInput.fireLaser = false;
 
     if (m_ui.ProcessMouseButton(RmlButtonIndex(event.pointer()), false)) {
         event.setAccepted();
@@ -1237,6 +1282,9 @@ void GravitarisApplication::pointerMoveEvent(PointerMoveEvent& event)
     }
 
     const Magnum::Vector2i p = UiPointerPosition(event.position());
+    // Recorded whoever ends up handling the move: the mounts follow the cursor
+    // across a panel as readily as across the sky.
+    m_pointerPx = Magnum::Vector2{p};
     if (m_ui.ProcessMouseMove(p.x(), p.y())) {
         event.setAccepted();
     }
