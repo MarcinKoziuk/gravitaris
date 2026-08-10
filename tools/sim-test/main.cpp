@@ -3364,6 +3364,7 @@ void TestLasers()
         float spent = 0.f;
         bool firing = false;
         bool fitted = false;
+        int drawable = 0;
     };
 
     // One run of the trigger held on a hull `at` units along +X (negative puts
@@ -3403,8 +3404,17 @@ void TestLasers()
             firing = firing || shooter.get<Controls>().laserFiring;
         }
 
+        // The renderer finds its beams with exactly this query, and it is the
+        // one link in the chain no headless test would otherwise cover: a
+        // signature that matches nothing draws nothing, silently.
+        int drawable = 0;
+        game.GetRegistry().each([&](flecs::entity, const Transform&, const Controls& controls,
+                                    const ShipLoadout& loadout) {
+            if (controls.laserFiring && MountsArmedWith(loadout, MountArm::Laser) > 0) ++drawable;
+        });
+
         const float lost = target.is_alive() ? startHp - target.get<Damageable>().hp : startHp;
-        return Burn{lost, shooter.get<Controls>().capacitorSpent, firing, fitted};
+        return Burn{lost, shooter.get<Controls>().capacitorSpent, firing, fitted, drawable};
     };
 
     // Point blank against half a reach away. laser_1 falls off from the muzzle,
@@ -3414,6 +3424,7 @@ void TestLasers()
     const Burn far = burn(/*at=*/330., /*aimAngle=*/0., /*fitBank=*/true, 30);
     Require(near.fitted, "lasers: an emitter goes into a weapon mount");
     Require(near.firing && near.damage > 0.f, "lasers: a held beam burns what it is pointed at");
+    Require(near.drawable == 1, "lasers: a burning beam is findable by what draws it");
     Require(far.damage > 0.f && near.damage > far.damage * 1.5f,
             "lasers: ...and burns it far harder up close than out at range");
     Require(near.spent > 0.f, "lasers: firing spends the bank");

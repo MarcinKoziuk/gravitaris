@@ -32,6 +32,12 @@ public:
         Magnum::Color3 color;
         float widthNear = 1.f;
         float widthFar = 6.f;
+        // How much of its punch the beam still has where it ends: 1 where it
+        // was stopped at the muzzle, 0 out at the limit of its reach. A beam
+        // cut short by a hull is still strong there and has to look it -- one
+        // that always faded to nothing appeared to die before reaching what it
+        // was actually burning.
+        float endStrength = 0.f;
     };
 
     explicit LaserRenderer(IFilesystem& filesystem);

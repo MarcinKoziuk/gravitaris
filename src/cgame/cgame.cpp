@@ -1251,6 +1251,18 @@ void CGame::Render(double delta)
 // which is why a beam looks like it hits what it is actually hurting.
 void CGame::GatherBeams(flecs::world& world)
 {
+    // Gathered up front, never inside the walk below: a flecs query run inside
+    // another query's callback silently iterates nothing (see CLAUDE.md), so a
+    // per-beam lookup would quietly stop truncating anything at all.
+    m_beamTargets.clear();
+    world.each([&](flecs::entity ent, const Transform& transf, const Damageable&) {
+        const Body* hull = HullOf(ent);
+        if (!hull) return;
+
+        const double radius = hull->GetBoundingRadius() * transf.scale.x();
+        if (radius > 0.) m_beamTargets.push_back(BeamTarget{ent, transf.pos, radius});
+    });
+
     world.each([&](flecs::entity ship, const Transform& transf, const Controls& controls,
                    const ShipLoadout& loadout) {
         if (!controls.laserFiring) return;
@@ -1272,8 +1284,7 @@ void CGame::GatherBeams(flecs::world& world)
             const ShipControlsSystem::BeamOrigin origin = ShipControlsSystem::ComputeBeamOrigin(
                     transf, hull, static_cast<unsigned>(mount), controls.actionFlags.aim);
             const Magnum::Vector2d heading{std::cos(origin.angle), std::sin(origin.angle)};
-            const double reach = BeamReach(world, ship, origin.pos, heading,
-                                           static_cast<double>(beam.range));
+            const double reach = BeamReach(ship, origin.pos, heading, static_cast<double>(beam.range));
 
             const Magnum::Vector2d end = origin.pos + heading * reach;
             const auto share = static_cast<float>(reach / beam.range);
@@ -1282,8 +1293,10 @@ void CGame::GatherBeams(flecs::world& world)
                                     static_cast<float>(origin.pos.y())},
                     Magnum::Vector2{static_cast<float>(end.x()), static_cast<float>(end.y())},
                     color, beam.widthNear,
-                    // A beam stopped short is only as wide as it got.
-                    beam.widthNear + (beam.widthFar - beam.widthNear) * share});
+                    // A beam stopped short is only as wide as it got, and
+                    // still carries whatever its falloff has left where it
+                    // lands -- so the picture and the damage agree.
+                    beam.widthNear + (beam.widthFar - beam.widthNear) * share, 1.f - share});
         }
     });
 
@@ -1315,32 +1328,38 @@ const Body* CGame::HullOf(flecs::entity ent)
 // collision polygons the sim sweeps: this decides where to stop DRAWING, it
 // runs in both the real world and a mirror one where nothing has physics at
 // all, and being a few units generous at the edge of a silhouette is invisible.
-double CGame::BeamReach(flecs::world& world, flecs::entity shooter, const Magnum::Vector2d& from,
+double CGame::BeamReach(flecs::entity shooter, const Magnum::Vector2d& from,
                         const Magnum::Vector2d& heading, double range)
 {
     double nearest = range;
 
-    world.each([&](flecs::entity ent, const Transform& transf, const Damageable&) {
-        if (ent == shooter) return;
+    for (const BeamTarget& target : m_beamTargets) {
+        if (target.entity == shooter) continue;
 
-        const Body* hull = HullOf(ent);
-        if (!hull) return;
-        const double radius = hull->GetBoundingRadius() * transf.scale.x();
-        if (radius <= 0.) return;
+        const Magnum::Vector2d toTarget = target.pos - from;
+        const double radiusSq = target.radius * target.radius;
+        // A hull the muzzle is already inside cannot be what stops the beam --
+        // the mount is buried in its own ship, and a bounding circle is coarse
+        // enough that a neighbour's can swallow it too. Truncating to zero
+        // there left a beam with no length at all, which is a beam that does
+        // not draw: the sim was burning a target, the sound was playing, and
+        // the screen showed nothing.
+        if (toTarget.dot() <= radiusSq) continue;
 
         // Closest approach of the ray to the hull's centre, and the chord it
         // cuts if it comes inside the circle at all.
-        const Magnum::Vector2d toTarget = transf.pos - from;
         const double along = Magnum::Math::dot(toTarget, heading);
-        if (along <= 0. || along > nearest) return;
+        if (along <= 0. || along > nearest) continue;
 
         const double offSq = toTarget.dot() - along * along;
-        if (offSq > radius * radius) return;
+        if (offSq > radiusSq) continue;
 
-        nearest = std::max(0., along - std::sqrt(radius * radius - offSq));
-    });
+        nearest = std::max(0., along - std::sqrt(radiusSq - offSq));
+    }
 
-    return nearest;
+    // Never nothing: a beam that got nowhere still has to read as a beam
+    // rather than vanish.
+    return std::max(nearest, range * MIN_BEAM_SHARE);
 }
 
 std::unique_ptr<EntitySpawner> CGame::CreateEntitySpawner()

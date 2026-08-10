@@ -192,6 +192,7 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
             // the granted state directly -- nothing here runs the timers that
             // would otherwise decide it.
             controls->boosting = controls->actionFlags.boost;
+            controls->laserFiring = controls->actionFlags.fireLaser;
         }
         // Ownership changes mid-round (planet claims); creation-time Team
         // alone would leave the mirror stale.

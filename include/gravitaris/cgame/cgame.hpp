@@ -85,12 +85,23 @@ protected:
     LaserRenderer m_laserRenderer;
     std::vector<LaserRenderer::Beam> m_beams;
 
+    // What a beam can be stopped by, flattened to circles ahead of the walk
+    // over the beams themselves -- see GatherBeams on why it cannot be a query.
+    struct BeamTarget {
+        flecs::entity entity;
+        Magnum::Vector2d pos;
+        double radius = 0.;
+    };
+    std::vector<BeamTarget> m_beamTargets;
+
+    // Shortest a beam may be drawn, as a share of its reach.
+    static constexpr double MIN_BEAM_SHARE = 0.05;
+
     void GatherBeams(flecs::world& world);
     void DrawBeams(const Camera& camera);
     [[nodiscard]] const Body* HullOf(flecs::entity ent);
-    [[nodiscard]] double BeamReach(flecs::world& world, flecs::entity shooter,
-                                   const Magnum::Vector2d& from, const Magnum::Vector2d& heading,
-                                   double range);
+    [[nodiscard]] double BeamReach(flecs::entity shooter, const Magnum::Vector2d& from,
+                                   const Magnum::Vector2d& heading, double range);
 
     RendererKind m_activeRenderer = RendererKind::Baked;
 

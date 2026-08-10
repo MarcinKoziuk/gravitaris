@@ -71,6 +71,10 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             // exhaust, and this byte is what the exhaust is drawn from.
             ControlFlags shown = controls->actionFlags;
             shown.boost = controls->boosting;
+            // Same rule as the burn: what the bank granted, not what the
+            // trigger asked for, so a peer draws beams that are really burning
+            // rather than ones a dry capacitor refused.
+            shown.fireLaser = controls->laserFiring;
             state.controlsFlags = PackControlFlags(shown);
             state.aim = controls->actionFlags.aim;
         }
