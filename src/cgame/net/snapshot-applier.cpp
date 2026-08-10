@@ -186,6 +186,7 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
 
         if (Controls* controls = entity.try_get_mut<Controls>()) {
             controls->actionFlags = UnpackControlFlags(state.controlsFlags);
+            controls->actionFlags.aim = state.aim;
             // The wire carries the burn the server granted, not the button
             // the pilot held (see GatherSnapshot), so this world's copy is
             // the granted state directly -- nothing here runs the timers that

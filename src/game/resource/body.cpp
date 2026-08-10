@@ -81,6 +81,12 @@ ResourcePtr<const Body> Body::Create(id_t id, LoadingContext& context)
         }
     }
 
+    if (const toml::table* weaponsCfg = cfg["weapons"].as_table()) {
+        if (const auto arc = (*weaponsCfg)["aim_arc_degrees"].value<double>()) {
+            body->m_aimArcDegrees = std::clamp(*arc, 0.0, 360.0);
+        }
+    }
+
     if (const toml::table* gravityCfg = cfg["gravity"].as_table()) {
         if (const auto isSource = (*gravityCfg)["is_source"].value<bool>()) {
             body->m_gravitySource = *isSource;
@@ -116,6 +122,12 @@ ResourcePtr<const Body> Body::Create(id_t id, LoadingContext& context)
     }
 
     return body;
+}
+
+double Body::GetAimArcHalfWidth() const
+{
+    constexpr double PI = 3.141592653589793;
+    return m_aimArcDegrees * PI / 360.0; // half of the arc, in radians
 }
 
 void Body::AddHardpoint(const NSVGshape* shape, const Matrix4d& transform)

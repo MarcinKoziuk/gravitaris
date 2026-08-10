@@ -78,7 +78,8 @@ void WriteClientInput(const ClientInputPacket& packet, ByteWriter& out)
     for (std::size_t i = packet.commands.size() - count; i < packet.commands.size(); ++i) {
         const InputCommand& cmd = packet.commands[i];
         out.WriteU64(cmd.tick);
-        out.WriteU8(PackControlFlags(cmd.flags));
+        out.WriteU16(PackControlFlags(cmd.flags));
+        out.WriteU16(cmd.flags.aim);
         out.WriteU32(cmd.techPick.node);
         out.WriteU8(static_cast<std::uint8_t>(cmd.techPick.tab));
         out.WriteU8(cmd.techPick.rank);
@@ -99,7 +100,8 @@ bool ReadClientInputBody(ByteReader& in, ClientInputPacket& out)
     for (std::uint8_t i = 0; i < count; ++i) {
         InputCommand cmd;
         cmd.tick = in.ReadU64();
-        cmd.flags = UnpackControlFlags(in.ReadU8());
+        cmd.flags = UnpackControlFlags(in.ReadU16());
+        cmd.flags.aim = in.ReadU16();
         cmd.techPick.node = in.ReadU32();
         // Range-checked rather than cast straight through: this byte comes
         // from a peer, and an out-of-range enum is UB the moment anything

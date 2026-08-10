@@ -71,6 +71,74 @@ model = "models/bullets/bullet-heavy-cyan"
 sound = "sounds/gatling-1.wav"
 sound_gain = 0.7
 
+# The beam line. Nothing here is a projectile: a laser reaches whatever it is
+# pointed at the tick the trigger goes down, so `speed`, `lifetime_seconds` and
+# `model` mean nothing to one and are left out. What it has instead is a
+# [beam] block, and a non-zero `range` in it is what marks a weapon as one.
+#
+# Weaker than the guns and paid for differently: damage is per SECOND rather
+# than per hit, it falls away to nothing across the reach, and every second of
+# it comes out of the capacitor rather than a magazine. Point blank a beam
+# out-damages the autocannon; at half its reach it does not, and at the far end
+# it is a light show. That is the whole weapon -- it rewards being close, which
+# is exactly where a pilot least wants to be.
+[[weapon]]
+key = "laser_1"
+hardpoint = "weapon"
+name = "Laser"
+damage = 0.0 # per-hit damage means nothing to a beam; see [beam] below
+sound = "sounds/laser-1.wav"
+sound_gain = 0.4
+
+[weapon.beam]
+range = 450.0
+# Against the autocannon's ~86/s: better in the first third of the reach, worse
+# after it.
+damage_per_second = 95.0
+# A rank-I capacitor is 160, so a bank spends itself on about two and a half
+# seconds of held fire -- and none of it is available to the overburn.
+energy_per_second = 65.0
+falloff_start = 0.0
+width_near = 0.8
+width_far = 5.0
+heat = 0.15
+
+[[weapon]]
+key = "laser_2"
+hardpoint = "weapon"
+name = "Laser II"
+damage = 0.0
+sound = "sounds/laser-1.wav"
+sound_gain = 0.4
+
+[weapon.beam]
+range = 560.0
+damage_per_second = 130.0
+energy_per_second = 72.0
+# Reach is the tier's real reward as much as the damage: the first third of it
+# is now full-strength rather than only the muzzle.
+falloff_start = 0.3
+width_near = 0.9
+width_far = 5.5
+heat = 0.3
+
+[[weapon]]
+key = "laser_3"
+hardpoint = "weapon"
+name = "Laser III"
+damage = 0.0
+sound = "sounds/laser-1.wav"
+sound_gain = 0.45
+
+[weapon.beam]
+range = 680.0
+damage_per_second = 170.0
+energy_per_second = 80.0
+falloff_start = 0.45
+width_near = 1.0
+width_far = 6.0
+heat = 0.45
+
 # The missile line. A hull carries no launcher at all until MISSILE BAY is
 # fitted; each tier of that upgrade fits the next round up and widens the rack.
 #
@@ -343,6 +411,29 @@ tiers = ["gatling_1", "gatling_2", "gatling_3"]
 capacity = 40
 tech_cost = [3, 6, 10]
 supply_cost = [14, 30, 52]
+
+# Beam emitters, in the same mounts the guns and cannons compete for -- so a
+# three-mount hull chooses between three lasers, three cannons, or any mix of
+# them, and that choice is the loadout rather than a slot the ship happens to
+# have. Aimed rather than pointed: its own trigger, swung with the mouse
+# through whatever arc the hull's gimbals allow ([weapons] aim_arc_degrees).
+#
+# Behind the CAPACITOR rather than behind another weapon, because that is
+# literally what fires it -- an emitter on a hull with no bank is a hole in the
+# wing.
+[[upgrade]]
+key = "lasers"
+slots = ["gun", "cannon"]
+icon = "lsr"
+name = "LASERS"
+description = "Gimballed beam emitter. Aim it with the mouse. Hits hardest up close, fades to nothing at range, and drinks the bank."
+kind = "laser_tier"
+requires = "capacitor"
+max_level = 3
+weight = 1.0
+tiers = ["laser_1", "laser_2", "laser_3"]
+tech_cost = [3, 6, 10]
+supply_cost = [12, 26, 44]
 
 # The bank. Everything that draws power in flight draws it from here: the
 # drive's overburn, and every laser a hull is carrying. Nothing else decides how

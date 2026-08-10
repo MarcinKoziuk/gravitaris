@@ -7,6 +7,7 @@
 
 #include <Magnum/Math/Vector2.h>
 
+#include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/fwd.hpp>
 
 struct cpShape;
@@ -55,6 +56,20 @@ private:
 
     void ResolveShipRams();
 
+    // Burns every beam that the capacitor lit this tick (Controls::laserFiring)
+    // and applies what it reaches. A beam is not a projectile and has no entity
+    // of its own: it is a ray from each armed mount, resolved fresh every tick,
+    // stopping at the first damageable thing along it -- so it lands through
+    // the same shield/plate path a round does, and cover works against it the
+    // same way.
+    //
+    // Damage falls off with distance to nothing at the weapon's reach, which is
+    // the whole character of the weapon: it rewards closing, and a beam fired
+    // across the sector is a light show. `step` throttles the hit events, since
+    // one per tick per beam would drown the queue describing a condition the
+    // wire already carries.
+    void ResolveBeams(std::uint64_t step);
+
     // A star cooks whatever comes near it, and destroys outright whatever
     // reaches the disc. A rule, not a physical result: a sun is not a place
     // you land badly, it is a place nothing comes back from, so the contact
@@ -76,6 +91,28 @@ private:
     // or nullopt when the round reached bare hull.
     float AbsorbWithShield(std::uint64_t step, flecs::entity target, float damage,
                            const Magnum::Vector2& at, std::optional<std::uint8_t> element);
+
+    // The first thing along a line that can actually be hurt, or a dead entity
+    // if the line meets nothing. Shared by the bullet sweep and the beams so
+    // the two cannot come to disagree about what counts as a hit -- the
+    // shooter's own hull, a friendly, a planet and a spent shield plate are all
+    // passed through, and the nearest of what is left wins.
+    struct HitSearch {
+        DamageSystem* self = nullptr;
+        flecs::entity ignore; // the round itself; nothing for a beam
+        TeamId team = TeamId::Blue;
+        bool friendlyFire = false;
+        flecs::entity_t shooter = 0;
+
+        flecs::entity target;
+        Magnum::Vector2 point{};
+        // Fraction along the queried segment, so a caller that cares about
+        // range (a beam's falloff does) can recover the distance.
+        double alpha = 0.;
+        std::optional<std::uint8_t> element;
+    };
+    void QueryFirstHit(cpSpace* space, const Magnum::Vector2d& from, const Magnum::Vector2d& to,
+                       double radius, HitSearch& search);
 
     // Which of `ent`'s shield shapes `shape` is, or nullopt for plain hull.
     [[nodiscard]] std::optional<std::uint8_t> ShieldElementFor(flecs::entity ent, const cpShape* shape);

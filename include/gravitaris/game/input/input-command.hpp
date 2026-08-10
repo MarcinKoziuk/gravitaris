@@ -16,32 +16,36 @@ struct InputCommand {
     TechPick techPick;
 };
 
-// 1-byte packing for replay files and the future wire format. Keep in sync
-// with ControlFlags.
-inline std::uint8_t PackControlFlags(const ControlFlags& f)
+// The bits alone, for replay files and the wire. Two bytes since the laser's
+// trigger: the eight below filled the first one exactly. `aim` is not in here
+// -- it is a whole word of its own and every caller writes it beside this.
+// Keep in sync with ControlFlags.
+inline std::uint16_t PackControlFlags(const ControlFlags& f)
 {
-    return static_cast<std::uint8_t>(
-        (f.thrustForward ? 0x01 : 0) |
-        (f.rotateLeft    ? 0x02 : 0) |
-        (f.rotateRight   ? 0x04 : 0) |
-        (f.firePrimary   ? 0x08 : 0) |
-        (f.fireSecondary ? 0x10 : 0) |
-        (f.fireMissile   ? 0x20 : 0) |
-        (f.boost         ? 0x40 : 0) |
-        (f.toggleWeapon  ? 0x80 : 0));
+    return static_cast<std::uint16_t>(
+        (f.thrustForward ? 0x001 : 0) |
+        (f.rotateLeft    ? 0x002 : 0) |
+        (f.rotateRight   ? 0x004 : 0) |
+        (f.firePrimary   ? 0x008 : 0) |
+        (f.fireSecondary ? 0x010 : 0) |
+        (f.fireMissile   ? 0x020 : 0) |
+        (f.boost         ? 0x040 : 0) |
+        (f.toggleWeapon  ? 0x080 : 0) |
+        (f.fireLaser     ? 0x100 : 0));
 }
 
-inline ControlFlags UnpackControlFlags(std::uint8_t b)
+inline ControlFlags UnpackControlFlags(std::uint16_t b)
 {
     ControlFlags f{};
-    f.thrustForward = (b & 0x01) != 0;
-    f.rotateLeft    = (b & 0x02) != 0;
-    f.rotateRight   = (b & 0x04) != 0;
-    f.firePrimary   = (b & 0x08) != 0;
-    f.fireSecondary = (b & 0x10) != 0;
-    f.fireMissile   = (b & 0x20) != 0;
-    f.toggleWeapon  = (b & 0x80) != 0;
-    f.boost         = (b & 0x40) != 0;
+    f.thrustForward = (b & 0x001) != 0;
+    f.rotateLeft    = (b & 0x002) != 0;
+    f.rotateRight   = (b & 0x004) != 0;
+    f.firePrimary   = (b & 0x008) != 0;
+    f.fireSecondary = (b & 0x010) != 0;
+    f.fireMissile   = (b & 0x020) != 0;
+    f.toggleWeapon  = (b & 0x080) != 0;
+    f.boost         = (b & 0x040) != 0;
+    f.fireLaser     = (b & 0x100) != 0;
     return f;
 }
 

@@ -42,7 +42,13 @@ struct EntityState {
     Magnum::Vector2 scale{1.f, 1.f};
     Magnum::Vector2 vel{};
     float angVel = 0.f;
-    std::uint8_t controlsFlags = 0; // PackControlFlags(); drives remote thruster visuals
+    std::uint16_t controlsFlags = 0; // PackControlFlags(); drives remote thruster visuals
+    // Where this ship's gimballed mounts are pointing (ControlFlags::aim).
+    // Only meaningful alongside the laser bit above -- it is what lets a peer
+    // draw somebody else's beam, which is the whole of what a beam replicates:
+    // where it starts and which way it goes. How far it reaches is re-derived
+    // locally, since every client already has the geometry to sweep.
+    std::uint16_t aim = 0;
     float hp = 0.f;
     // Only meaningful for NetEntityType::Planet (0 otherwise): GravitySource's
     // fields, replicated so client-side prediction (Phase 5) can compute
@@ -101,6 +107,7 @@ struct EntityState {
     std::uint8_t fireRateLevel = 0;
     std::uint8_t gunTierLevel = 0;
     std::uint8_t cannonTierLevel = 0;
+    std::uint8_t laserTierLevel = 0;
     std::uint8_t missileTierLevel = 0;
     // One byte per stowage bay (AmmoPool), as ShipLoadout::ammoBays holds them.
     // The placement rather than the counts: the bays are generic, so the refit

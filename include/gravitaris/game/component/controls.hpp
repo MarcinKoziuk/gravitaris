@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 
 #include <gravitaris/game/id.hpp>
@@ -12,6 +13,11 @@ namespace Gravitaris {
 // sim acts on) and InputCommand (tick-stamped, queued in an InputQueue).
 // firePrimary is a held state (true for as long as the button is down); the
 // fire rate is enforced by ShipControlsSystem, per mount (Controls::gunCooldown).
+//
+// Not all bits, despite the name: `aim` rides here too, because every path that
+// carries a tick's input already carries one of these -- the queue, the wire,
+// the replay log, the prediction history -- and a second struct threaded
+// alongside would have to be kept in step with all of them.
 struct ControlFlags {
     bool thrustForward : 1 = false;
     bool rotateLeft : 1 = false;
@@ -26,7 +32,33 @@ struct ControlFlags {
     // ShipControlsSystem grants only while the engine is lit and there is
     // something left in the bank (see Controls::capacitorSpent).
     bool boost : 1 = false;
+    // Held, like firePrimary, and paced by nothing: the laser mounts burn for
+    // as long as the button is down and the capacitor has charge to give them.
+    bool fireLaser : 1 = false;
+
+    // Where the pilot is pointing the gimballed mounts, as an absolute world
+    // angle in 65536 steps of a turn -- about 0.005 degrees, far finer than a
+    // hull can hold a beam. Quantised here rather than at the wire so a client
+    // predicts its own beam off exactly the number the server will resolve it
+    // from, instead of off a float the wire then rounds.
+    std::uint16_t aim = 0;
 };
+
+// A whole turn in 65536 steps. Absolute world angle, in the same frame as
+// Transform::rot, so nothing has to know a ship's heading to read one.
+inline std::uint16_t PackAim(double radians)
+{
+    constexpr double TURN = 6.283185307179586;
+    const double turns = radians / TURN;
+    return static_cast<std::uint16_t>(
+            static_cast<std::int64_t>(std::floor(turns * 65536.0)) & 0xFFFF);
+}
+
+inline double UnpackAim(std::uint16_t packed)
+{
+    constexpr double TURN = 6.283185307179586;
+    return static_cast<double>(packed) * TURN / 65536.0;
+}
 
 // One tech-tree purchase this tick's command is committing. Kept out of
 // ControlFlags because it isn't a held state and needs far more than a bit --
@@ -143,6 +175,10 @@ struct Controls {
     // integrator, the wire (PackControlFlags) and the exhaust all read, as
     // opposed to actionFlags.boost, which is only the request.
     bool boosting = false;
+    // The same distinction for the beams: the trigger is a request, and this
+    // is what the bank actually granted. DamageSystem burns whatever this says
+    // is burning, and it is what travels so a peer draws real beams only.
+    bool laserFiring = false;
 };
 
 } // namespace Gravitaris

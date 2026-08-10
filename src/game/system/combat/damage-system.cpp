@@ -6,6 +6,8 @@
 
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
+#include <gravitaris/game/component/controls.hpp>
+#include <gravitaris/game/system/ship/ship-controls-system.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/pilot-account.hpp>
@@ -25,6 +27,17 @@ namespace Gravitaris {
 // Forgiveness radius around the swept segment, so a fast bullet's exact
 // centerline doesn't have to intersect the target polygon precisely.
 static constexpr double BULLET_QUERY_RADIUS = 2.0;
+
+// The same for a beam, and tighter: a bullet's segment is where it travelled
+// between two ticks and wants some slack, while a beam is a line the pilot is
+// holding and should hit what it is actually drawn across.
+static constexpr double BEAM_QUERY_RADIUS = 1.0;
+
+// How often a burning beam raises a hit event. Every tick would spend the whole
+// event ring on one held trigger; this is often enough to keep the flash alive
+// and the sound going, and each one carries the damage of the whole interval so
+// the numbers still add up.
+static constexpr std::uint64_t BEAM_HIT_EVENT_TICKS = 6;
 
 // Landing/ram damage below one hull point is discarded entirely.
 static constexpr float MIN_LANDING_DAMAGE = 1.f;
@@ -61,6 +74,7 @@ static bool ShieldElementLive(flecs::entity ent, std::uint8_t element)
 }
 
 static float LeakRoll(std::uint64_t step, std::uint32_t seq, std::uint8_t element);
+static float BeamFalloff(double alpha, const WeaponDef::Beam& beam);
 
 DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
                            const UpgradeCatalog& catalog)
@@ -74,6 +88,7 @@ void DamageSystem::Update(std::uint64_t step)
 {
     ResolveShipRams();
     ResolveStarContact();
+    ResolveBeams(step);
 
     // Landing / ram damage from this step's hard contacts.
     for (const ImpactEvent& ev : m_physicsSystem.DrainImpacts()) {
@@ -126,77 +141,14 @@ void DamageSystem::Update(std::uint64_t step)
 
         cpSpace* space = m_physicsSystem.GetBody(ref).cp.space.get();
 
-        const cpVect from = cpv(transf.prevPos.x(), transf.prevPos.y());
-        const cpVect to = cpv(transf.pos.x(), transf.pos.y());
-
-        const cpShapeFilter filter =
-                cpShapeFilterNew(PhysicsSystem::BULLET_GROUP, CP_ALL_CATEGORIES, CP_ALL_CATEGORIES);
-
-        // The nearest DAMAGEABLE shape along the path, not simply the nearest
-        // shape: planetside structures are nested INSIDE their planet's own
-        // collision circle (see EntitySpawner::SpawnStructure), so the nearest
-        // shape to a shot aimed at a Base/Colony/Lab/Comm Center is always the
-        // planet -- which isn't damageable. Stopping at that one meant such a
-        // shot neither hurt the structure nor was consumed; it sailed on
-        // through. Only structures poking out past their planet's rim, or
-        // orbiting clear of it (the High Port), could ever be hit.
-        //
-        // A planet deliberately does NOT block the shot: it encloses the whole
-        // complex, so blocking would put every planetside structure back out
-        // of reach. Shots that meet only bare planet therefore still fly
-        // through it -- longstanding, and its own fix (structures would have
-        // to sit outside the planet's shape).
-        struct HitSearch {
-            DamageSystem* self;
-            flecs::entity bulletEnt;
-            TeamId team;
-            bool friendlyFire;
-            flecs::entity_t shooter;
-            flecs::entity target;
-            cpVect targetPoint{};
-            cpFloat targetAlpha = 0.f;
-            std::optional<std::uint8_t> targetElement;
-        } search{this, bulletEnt, bullet.team, m_friendlyFire, bullet.shooter};
-
-        cpSpaceSegmentQuery(space, from, to, BULLET_QUERY_RADIUS, filter,
-                            [](cpShape* shape, cpVect point, cpVect, cpFloat alpha, void* data) {
-            auto* s = static_cast<HitSearch*>(data);
-            const flecs::entity ent = s->self->m_physicsSystem.GetEntityForShape(shape);
-            if (!ent.is_alive() || ent == s->bulletEnt) return;
-            // Nothing ever shoots itself: the round starts inside its own
-            // shooter's hull, so this is the sweep's first hit every time.
-            if (s->shooter != 0 && ent.id() == s->shooter) return;
-
-            const Team* entTeam = ent.try_get<Team>();
-            // A round meeting its own side passes through unless the round is
-            // being fought with friendly fire on.
-            if (!s->friendlyFire && entTeam && entTeam->id == s->team) return;
-
-            if (!ent.try_get<Damageable>()) return; // a planet: shots pass through it
-
-            // A spent plate or a dropped bubble is ignored outright rather
-            // than recorded as a hit that absorbs nothing, so the shot carries
-            // on to whatever is behind it. That -- plus nearest-alpha-wins
-            // below -- is the whole gap rule: a round threading the space
-            // between two plates simply never meets a shield shape, and the
-            // hull polygon behind them is what it lands on.
-            const std::optional<std::uint8_t> element = s->self->ShieldElementFor(ent, shape);
-            if (element && !ShieldElementLive(ent, *element)) return;
-
-            if (!s->target.is_alive() || alpha < s->targetAlpha) {
-                s->target = ent;
-                s->targetPoint = point;
-                s->targetAlpha = alpha;
-                s->targetElement = element;
-            }
-        }, &search);
+        HitSearch search{this, bulletEnt, bullet.team, m_friendlyFire, bullet.shooter};
+        QueryFirstHit(space, transf.prevPos, transf.pos, BULLET_QUERY_RADIUS, search);
 
         if (!search.target.is_alive()) return;
 
-        const Magnum::Vector2 hitPoint{static_cast<float>(search.targetPoint.x),
-                                       static_cast<float>(search.targetPoint.y)};
+        const Magnum::Vector2 hitPoint = search.point;
         const float toHull =
-                AbsorbWithShield(step, search.target, bullet.damage, hitPoint, search.targetElement);
+                AbsorbWithShield(step, search.target, bullet.damage, hitPoint, search.element);
 
         // A hit stopped entirely by a shield still consumes the round, but
         // emits no Impact -- the hull took nothing, and the hit flash reads
@@ -237,6 +189,59 @@ void DamageSystem::Update(std::uint64_t step)
     for (flecs::entity bulletEnt : spent) {
         bulletEnt.destruct();
     }
+}
+
+// The nearest DAMAGEABLE shape along the path, not simply the nearest shape:
+// planetside structures are nested INSIDE their planet's own collision circle
+// (see EntitySpawner::SpawnStructure), so the nearest shape to a shot aimed at
+// a Base/Colony/Lab/Comm Center is always the planet -- which isn't damageable.
+// Stopping at that one meant such a shot neither hurt the structure nor was
+// consumed; it sailed on through. Only structures poking out past their
+// planet's rim, or orbiting clear of it (the High Port), could ever be hit.
+//
+// A planet deliberately does NOT block the shot: it encloses the whole complex,
+// so blocking would put every planetside structure back out of reach. Shots
+// that meet only bare planet therefore still fly through it -- longstanding,
+// and its own fix (structures would have to sit outside the planet's shape).
+void DamageSystem::QueryFirstHit(cpSpace* space, const Magnum::Vector2d& from,
+                                 const Magnum::Vector2d& to, double radius, HitSearch& search)
+{
+    const cpShapeFilter filter =
+            cpShapeFilterNew(PhysicsSystem::BULLET_GROUP, CP_ALL_CATEGORIES, CP_ALL_CATEGORIES);
+
+    cpSpaceSegmentQuery(space, cpv(from.x(), from.y()), cpv(to.x(), to.y()), radius, filter,
+                        [](cpShape* shape, cpVect point, cpVect, cpFloat alpha, void* data) {
+        auto* s = static_cast<HitSearch*>(data);
+        const flecs::entity ent = s->self->m_physicsSystem.GetEntityForShape(shape);
+        if (!ent.is_alive() || (s->ignore.is_alive() && ent == s->ignore)) return;
+        // Nothing ever shoots itself: the round starts inside its own shooter's
+        // hull, and a beam leaves from a mount buried in it, so this is the
+        // sweep's first hit every time.
+        if (s->shooter != 0 && ent.id() == s->shooter) return;
+
+        const Team* entTeam = ent.try_get<Team>();
+        // A shot meeting its own side passes through unless the round is being
+        // fought with friendly fire on.
+        if (!s->friendlyFire && entTeam && entTeam->id == s->team) return;
+
+        if (!ent.try_get<Damageable>()) return; // a planet: shots pass through it
+
+        // A spent plate or a dropped bubble is ignored outright rather than
+        // recorded as a hit that absorbs nothing, so the shot carries on to
+        // whatever is behind it. That -- plus nearest-alpha-wins below -- is
+        // the whole gap rule: a round threading the space between two plates
+        // simply never meets a shield shape, and the hull polygon behind them
+        // is what it lands on.
+        const std::optional<std::uint8_t> element = s->self->ShieldElementFor(ent, shape);
+        if (element && !ShieldElementLive(ent, *element)) return;
+
+        if (!s->target.is_alive() || alpha < s->alpha) {
+            s->target = ent;
+            s->point = Magnum::Vector2{static_cast<float>(point.x), static_cast<float>(point.y)};
+            s->alpha = alpha;
+            s->element = element;
+        }
+    }, &search);
 }
 
 float DamageSystem::AbsorbWithShield(std::uint64_t step, flecs::entity target, float damage,
@@ -408,6 +413,78 @@ float DamageSystem::AbsorbHeatWithShield(flecs::entity target, float damage)
     // now matters for anything else resolving damage in this one.
     loadout->shieldHp = std::max(0.f, loadout->shieldHp - absorbed);
     return damage - absorbed;
+}
+
+void DamageSystem::ResolveBeams(std::uint64_t step)
+{
+    m_registry.each([&](flecs::entity shooter, const Transform& transf, const Controls& controls,
+                        const ShipLoadout& loadout, const PhysicsRef& ref) {
+        if (!controls.laserFiring) return;
+
+        const ShipStats stats = m_catalog.ResolveStats(loadout.levels);
+        if (!stats.laser || !stats.laser->IsBeam()) return;
+
+        const WeaponDef::Beam& beam = stats.laser->beam;
+        const PhysicsBody& phys = m_physicsSystem.GetBody(ref);
+        cpSpace* space = phys.cp.space.get();
+        if (!space) return;
+
+        const Team* shooterTeam = shooter.try_get<Team>();
+        const PilotRef* pilot = shooter.try_get<PilotRef>();
+        const float perTick = beam.damagePerSecond * static_cast<float>(Game::PHYSICS_DELTA);
+
+        for (std::size_t mount = 0; mount < MAX_WEAPON_MOUNTS; ++mount) {
+            if (loadout.mounts[mount] != MountArm::Laser) continue;
+
+            const ShipControlsSystem::BeamOrigin origin = ShipControlsSystem::ComputeBeamOrigin(
+                    transf, phys, static_cast<unsigned>(mount), controls.actionFlags.aim);
+            const Magnum::Vector2d far = origin.pos
+                    + Magnum::Vector2d{std::cos(origin.angle), std::sin(origin.angle)} * beam.range;
+
+            HitSearch search{this, flecs::entity{}, shooterTeam ? shooterTeam->id : TeamId::Blue,
+                             m_friendlyFire, shooter.id()};
+            QueryFirstHit(space, origin.pos, far, BEAM_QUERY_RADIUS, search);
+            if (!search.target.is_alive()) continue;
+
+            const float damage = perTick * BeamFalloff(search.alpha, beam);
+            if (damage <= 0.f) continue; // reached, but out where it carries nothing
+
+            const float toHull =
+                    AbsorbWithShield(step, search.target, damage, search.point, search.element);
+            if (toHull <= 0.f) continue;
+
+            Damageable& targetDmg = search.target.get_mut<Damageable>();
+            targetDmg.hp -= toHull;
+            targetDmg.lastDamageCause = DamageCause::Gunfire;
+            targetDmg.lastDamageTeam = search.target == shooter ? TeamId::None
+                                                                : (shooterTeam ? shooterTeam->id
+                                                                               : TeamId::None);
+            targetDmg.lastDamagePilotId = pilot ? pilot->pilotId : 0;
+
+            // Not every tick. A held beam lands sixty times a second, and one
+            // event apiece would spend the whole 256-entry ring on a condition
+            // the wire already describes -- the beam itself replicates, so a
+            // client can see where it ends without being told. What these are
+            // still for is the flash and the noise of being hit.
+            if (step % BEAM_HIT_EVENT_TICKS == 0) {
+                m_eventQueue.Emit(GameEventType::Impact, search.target, search.point,
+                                  static_cast<std::uint32_t>(toHull * BEAM_HIT_EVENT_TICKS * 10.f));
+            }
+        }
+    });
+}
+
+// What a beam still carries at `alpha` of its reach: everything inside
+// falloffStart, then straight down to nothing at the far end. This -- not the
+// damage figure -- is the weapon: a pilot who wants a laser's numbers has to
+// fly into knife range for them.
+static float BeamFalloff(double alpha, const WeaponDef::Beam& beam)
+{
+    const auto travelled = static_cast<float>(std::clamp(alpha, 0.0, 1.0));
+    if (travelled <= beam.falloffStart) return 1.f;
+    if (beam.falloffStart >= 1.f) return 1.f;
+
+    return 1.f - (travelled - beam.falloffStart) / (1.f - beam.falloffStart);
 }
 
 // networking-plan Phase 9's destroy rule. Nothing here destroys an entity

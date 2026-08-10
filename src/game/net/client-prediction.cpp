@@ -231,10 +231,16 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
 
     PhysicsBody& phys = m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>());
     Controls& ownControls = m_ownShip.get_mut<Controls>();
-    const ShipControlsSystem::BoostEffect boost =
-            ShipControlsSystem::AdvanceCapacitor(ownControls, stats);
+    // The bank is predicted for the same reason the burn is: the beams come
+    // out of it too, so a client that only predicted the thrust would draw a
+    // power bar that disagreed with its own trigger. What a beam does when it
+    // lands stays the server's (ClientPrediction runs no DamageSystem).
+    const auto laserMounts =
+            static_cast<unsigned>(ownLoadout ? MountsArmedWith(*ownLoadout, MountArm::Laser) : 0);
+    const ShipControlsSystem::PowerGrant power =
+            ShipControlsSystem::AdvanceCapacitor(ownControls, stats, laserMounts);
     const ShipControlsSystem::Motion motion =
-            ShipControlsSystem::MotionOf(*phys.body, stats, boost);
+            ShipControlsSystem::MotionOf(*phys.body, stats, power.boost);
     ShipControlsSystem::ApplyMovement(phys.cp.body.get(), flags, motion.thrust, motion.maxSpeed);
 
     m_physicsSystem.Simulate(Game::PHYSICS_DELTA);

@@ -577,6 +577,8 @@
 			div.branch.mobility span.role { color: #8ee9fb; }
 			div.branch.defense  div.branch_head { border-bottom-color: #7fe4f5; }
 			div.branch.defense  span.role { color: #7fe4f5; }
+			div.branch.beams    div.branch_head { border-bottom-color: #a8f0ff; }
+			div.branch.beams    span.role { color: #a8f0ff; }
 
 			/* One row per upgrade: tile, then name and pips beside it. */
 			div.tile_row

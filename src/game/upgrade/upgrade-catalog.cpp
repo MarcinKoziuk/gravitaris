@@ -132,7 +132,8 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
             case UpgradeKind::MissileTier:
                 def.rack.capacity = (*entry)["capacity"].value_or(0);
                 [[fallthrough]];
-            case UpgradeKind::WeaponTier: {
+            case UpgradeKind::WeaponTier:
+            case UpgradeKind::LaserTier: {
                 const toml::array* tiers = (*entry)["tiers"].as_array();
                 if (tiers) {
                     for (const toml::node& tier : *tiers) {
@@ -355,6 +356,14 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
     }
     if (stats.missile) stats.missileCooldownTicks = stats.missile->cooldownTicks;
 
+    // No stock emitter either, and nothing here says whether it can actually
+    // fire: that is the capacitor's answer, asked every tick rather than at
+    // fitting time.
+    if (const UpgradeDef* def = FindKind(UpgradeKind::LaserTier); def && levels.laserTier > 0) {
+        const std::size_t index = std::min<std::size_t>(levels.laserTier, def->tiers.size()) - 1;
+        stats.laser = FindWeapon(def->tiers[index]);
+    }
+
     // The feed, on both primaries: the autoloader is a rule about how fast a
     // mount cycles, not about which of the two lines is in it, and its own
     // description has always said so.
@@ -548,6 +557,7 @@ std::uint8_t UpgradeCatalog::LevelOf(const UpgradeDef& def, const UpgradeLevels&
     case UpgradeKind::FireRate:     return levels.fireRate;
     case UpgradeKind::WeaponTier:   return levels.gunTier;
     case UpgradeKind::CannonTier:   return levels.cannonTier;
+    case UpgradeKind::LaserTier:    return levels.laserTier;
     case UpgradeKind::MissileTier:  return levels.missileTier;
     // A box is a box: however many bays hold one, the rank on offer is still
     // rank I. Clamped rather than reported raw so the board's pips and its
@@ -579,6 +589,7 @@ MountArm UpgradeCatalog::ArmOf(const UpgradeDef& def)
     switch (def.kind) {
     case UpgradeKind::WeaponTier: return MountArm::Light;
     case UpgradeKind::CannonTier: return MountArm::Heavy;
+    case UpgradeKind::LaserTier:  return MountArm::Laser;
     default:                      return MountArm::None;
     }
 }
@@ -768,6 +779,9 @@ bool UpgradeCatalog::FitRank(const UpgradeDef& def, std::uint8_t rank, ShipLoado
     case UpgradeKind::WeaponTier:
         levels.gunTier = rank;
         break;
+    case UpgradeKind::LaserTier:
+        levels.laserTier = rank;
+        break;
     case UpgradeKind::CannonTier:
         levels.cannonTier = rank;
         fill(AmmoPool::Cannon);
@@ -872,6 +886,7 @@ bool UpgradeCatalog::StripRank(const UpgradeDef& def, ShipLoadout& loadout, bool
     // Mounted lines never reach here -- they came out above.
     case UpgradeKind::WeaponTier:
     case UpgradeKind::CannonTier:
+    case UpgradeKind::LaserTier:
     case UpgradeKind::MissileTier:
     case UpgradeKind::AmmoStore:
         return false;
@@ -912,6 +927,11 @@ static float FitScore(const UpgradeDef& def, const ShipLoadout& loadout, int mis
         return level == 0 ? 70.f : 40.f - 5.f * static_cast<float>(level);
     case UpgradeKind::FireRate:
         return 50.f - 5.f * static_cast<float>(level);
+    // Nothing yet: no AI pilot aims a beam, so one would sit in a mount that
+    // could have held a gun (see docs -- the sim runs the emitter for anyone,
+    // it is the aiming that is missing).
+    case UpgradeKind::LaserTier:
+        return 0.f;
     // Nothing yet: an AI buys neither spares nor a better drive, so both score
     // below every line above and are never chosen. Deliberate for now -- see
     // docs/tech-tree-plan.md, which records what scoring these properly needs.
@@ -987,6 +1007,16 @@ static WeaponDef ParseWeapon(const toml::table& entry, const std::string& key)
     weapon.soundGain = entry["sound_gain"].value_or(weapon.soundGain);
     weapon.hardpoint = entry["hardpoint"].value_or(weapon.hardpoint);
 
+    if (const toml::table* beam = entry["beam"].as_table()) {
+        weapon.beam.range = (*beam)["range"].value_or(0.0);
+        weapon.beam.damagePerSecond = (*beam)["damage_per_second"].value_or(0.f);
+        weapon.beam.energyPerSecond = (*beam)["energy_per_second"].value_or(0.f);
+        weapon.beam.falloffStart = (*beam)["falloff_start"].value_or(0.f);
+        weapon.beam.widthNear = (*beam)["width_near"].value_or(weapon.beam.widthNear);
+        weapon.beam.widthFar = (*beam)["width_far"].value_or(weapon.beam.widthFar);
+        weapon.beam.heat = (*beam)["heat"].value_or(0.f);
+    }
+
     if (const toml::table* guidance = entry["guidance"].as_table()) {
         weapon.guidance.turnRate = (*guidance)["turn_rate"].value_or(0.0);
         weapon.guidance.acceleration = (*guidance)["acceleration"].value_or(0.0);
@@ -1001,6 +1031,7 @@ static UpgradeKind ParseKind(std::string_view name, bool& ok)
     if (name == "fire_rate")      return UpgradeKind::FireRate;
     if (name == "weapon_tier")    return UpgradeKind::WeaponTier;
     if (name == "cannon_tier")    return UpgradeKind::CannonTier;
+    if (name == "laser_tier")     return UpgradeKind::LaserTier;
     if (name == "missile_tier")   return UpgradeKind::MissileTier;
     if (name == "ammo_store")     return UpgradeKind::AmmoStore;
     if (name == "engine_tier")    return UpgradeKind::EngineTier;

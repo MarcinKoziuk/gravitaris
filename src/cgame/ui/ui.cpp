@@ -700,11 +700,11 @@ static std::string AmmoSpan(const TechNodeView& node)
            + "</span>";
 }
 
-// The three role branches, in board order. Names and classes only -- what goes
+// The role branches, in board order. Names and classes only -- what goes
 // in them is whatever the pool says belongs there (TechNodeView::branch).
-static constexpr const char* BRANCH_NAMES[] = {"WEAPONS", "MOBILITY", "DEFENSE"};
-static constexpr const char* BRANCH_CLASSES[] = {"weapons", "mobility", "defense"};
-static constexpr int BRANCH_COUNT = 3;
+static constexpr const char* BRANCH_NAMES[] = {"WEAPONS", "MOBILITY", "DEFENSE", "BEAMS"};
+static constexpr const char* BRANCH_CLASSES[] = {"weapons", "mobility", "defense", "beams"};
+static constexpr int BRANCH_COUNT = 4;
 
 static constexpr float TILE_SIZE = 54.f;
 

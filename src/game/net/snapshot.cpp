@@ -72,6 +72,7 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             ControlFlags shown = controls->actionFlags;
             shown.boost = controls->boosting;
             state.controlsFlags = PackControlFlags(shown);
+            state.aim = controls->actionFlags.aim;
         }
         if (const Damageable* damageable = entity.try_get<Damageable>()) {
             state.hp = damageable->hp;
@@ -84,6 +85,7 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             }
             state.missileBays = loadout->missileBays;
             state.cannonTierLevel = loadout->levels.cannonTier;
+            state.laserTierLevel = loadout->levels.laserTier;
             state.fireRateLevel = loadout->levels.fireRate;
             state.gunTierLevel = loadout->levels.gunTier;
             state.missileTierLevel = loadout->levels.missileTier;
@@ -207,6 +209,7 @@ void ApplyEntityShipState(flecs::entity entity, const EntityState& state)
         loadout->levels.fireRate = state.fireRateLevel;
         loadout->levels.gunTier = state.gunTierLevel;
         loadout->levels.cannonTier = state.cannonTierLevel;
+        loadout->levels.laserTier = state.laserTierLevel;
         loadout->levels.missileTier = state.missileTierLevel;
         for (std::size_t i = 0; i < MAX_AMMO_BAYS; ++i) {
             const std::uint8_t pool = state.ammoBays[i];
@@ -247,13 +250,15 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteF32(e.vel.x());
         out.WriteF32(e.vel.y());
         out.WriteF32(e.angVel);
-        out.WriteU8(e.controlsFlags);
+        out.WriteU16(e.controlsFlags);
+        out.WriteU16(e.aim);
         out.WriteF32(e.hp);
         out.WriteU16(e.missileAmmo);
         out.WriteU16(e.cannonAmmo);
         for (const std::uint8_t mount : e.mounts) out.WriteU8(mount);
         out.WriteU8(e.missileBays);
         out.WriteU8(e.cannonTierLevel);
+        out.WriteU8(e.laserTierLevel);
         out.WriteU8(e.fireRateLevel);
         out.WriteU8(e.gunTierLevel);
         out.WriteU8(e.missileTierLevel);
@@ -349,13 +354,15 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.vel.x() = in.ReadF32();
         e.vel.y() = in.ReadF32();
         e.angVel = in.ReadF32();
-        e.controlsFlags = in.ReadU8();
+        e.controlsFlags = in.ReadU16();
+        e.aim = in.ReadU16();
         e.hp = in.ReadF32();
         e.missileAmmo = in.ReadU16();
         e.cannonAmmo = in.ReadU16();
         for (std::uint8_t& mount : e.mounts) mount = in.ReadU8();
         e.missileBays = in.ReadU8();
         e.cannonTierLevel = in.ReadU8();
+        e.laserTierLevel = in.ReadU8();
         e.fireRateLevel = in.ReadU8();
         e.gunTierLevel = in.ReadU8();
         e.missileTierLevel = in.ReadU8();

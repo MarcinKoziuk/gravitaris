@@ -3349,6 +3349,97 @@ void TestFriendlyFire()
     fs.Shutdown();
 }
 
+// The beams: aimed rather than pointed, paid for out of the bank rather than a
+// magazine, and worth less the further they have to reach.
+void TestLasers()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    struct Burn {
+        float damage = 0.f;
+        float spent = 0.f;
+        bool firing = false;
+        bool fitted = false;
+    };
+
+    // One run of the trigger held on a hull `at` units along +X (negative puts
+    // it astern), with the mounts asked for `aimAngle` in world terms.
+    const auto burn = [&fs](double at, double aimAngle, bool fitBank, int ticks) {
+        Game game(fs);
+        const UpgradeCatalog& catalog = game.GetUpgradeCatalog();
+        EntitySpawner& spawner = game.GetEntitySpawner();
+
+        flecs::entity shooter =
+                spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.}, TeamId::Blue);
+        flecs::entity target =
+                spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{at, 0.}, TeamId::Red);
+
+        const UpgradeDef* lasers = catalog.FindKind(UpgradeKind::LaserTier);
+        const UpgradeDef* bank = catalog.FindKind(UpgradeKind::Capacitor);
+        Require(lasers && bank, "lasers: the pool has an emitter and a bank");
+
+        if (fitBank) FitFree(catalog, *bank, 1, shooter.get_mut<ShipLoadout>());
+        FitFree(catalog, *lasers, 1, shooter.get_mut<ShipLoadout>());
+        const bool fitted = MountsArmedWith(shooter.get<ShipLoadout>(), MountArm::Laser) > 0;
+
+        // Nose at +X, where the target is. Nothing was built here, so no well
+        // pulls either hull off its mark.
+        cpBody* body = game.GetPhysicsSystem().GetBody(shooter.get<PhysicsRef>()).cp.body.get();
+        cpBodySetAngle(body, CP_PI / 2.);
+
+        const float startHp = target.get<Damageable>().hp;
+        bool firing = false;
+        for (int tick = 0; tick < ticks && target.is_alive(); ++tick) {
+            InputCommand cmd;
+            cmd.tick = game.GetStep();
+            cmd.flags.fireLaser = true;
+            cmd.flags.aim = PackAim(aimAngle);
+            shooter.get_mut<InputQueue>().Push(cmd);
+            game.Update();
+            firing = firing || shooter.get<Controls>().laserFiring;
+        }
+
+        const float lost = target.is_alive() ? startHp - target.get<Damageable>().hp : startHp;
+        return Burn{lost, shooter.get<Controls>().capacitorSpent, firing, fitted};
+    };
+
+    // Point blank against half a reach away. laser_1 falls off from the muzzle,
+    // so the near burn is worth strictly more than the far one for exactly the
+    // same charge spent.
+    const Burn near = burn(/*at=*/120., /*aimAngle=*/0., /*fitBank=*/true, 30);
+    const Burn far = burn(/*at=*/330., /*aimAngle=*/0., /*fitBank=*/true, 30);
+    Require(near.fitted, "lasers: an emitter goes into a weapon mount");
+    Require(near.firing && near.damage > 0.f, "lasers: a held beam burns what it is pointed at");
+    Require(far.damage > 0.f && near.damage > far.damage * 1.5f,
+            "lasers: ...and burns it far harder up close than out at range");
+    Require(near.spent > 0.f, "lasers: firing spends the bank");
+
+    // Past the emitter's reach it lands nothing at all -- while still costing
+    // exactly as much to hold, which is the mistake the weapon punishes.
+    const Burn beyond = burn(/*at=*/700., /*aimAngle=*/0., /*fitBank=*/true, 30);
+    Require(beyond.damage == 0.f, "lasers: nothing reaches past the emitter's range");
+    Require(beyond.firing && beyond.spent > 0.f, "lasers: ...and holding it out there still costs");
+
+    // Directly astern is outside fighter-1's 300-degree gimbal, and asking for
+    // it pins the beam to the edge of the arc rather than swinging it around --
+    // so the hull on its tail is not hit, however precisely the pilot aims.
+    const Burn behind = burn(/*at=*/-150., /*aimAngle=*/CP_PI, /*fitBank=*/true, 30);
+    Require(behind.firing, "lasers: the emitter still burns with the aim on its stop");
+    Require(behind.damage == 0.f, "lasers: ...but the gimbal will not swing into the blind cone");
+
+    // And none of it without a bank to fire out of: the emitter is not merely
+    // quiet, it cannot be fitted at all.
+    const Burn unbanked = burn(/*at=*/120., /*aimAngle=*/0., /*fitBank=*/false, 30);
+    Require(!unbanked.fitted, "lasers: no capacitor, no emitter to fit");
+    Require(!unbanked.firing && unbanked.damage == 0.f, "lasers: ...and nothing burns");
+
+    fs.Shutdown();
+}
+
 // The capacitor, through the one thing that draws on it so far: while it is
 // burning a hull exceeds the speed its own engine could otherwise reach, it
 // only burns while the engine is lit, and what it spends is what it has to
@@ -5064,6 +5155,7 @@ int main()
     TestCheats();
     TestFriendlyFire();
     TestCapacitor();
+    TestLasers();
     TestFactionDefeatAndWin();
     TestSectorGeneration();
     TestOwnBulletSuppression();

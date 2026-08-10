@@ -46,6 +46,12 @@ public:
     // limit is the point.
     static constexpr cpFloat DEFAULT_MAX_SPEED = 400.0;
 
+    // Total swing a hull's gimballed mounts can be aimed through, centred on
+    // the nose, for one that doesn't name its own in [weapons] aim_arc_degrees.
+    // 360 is free traverse; anything less leaves a blind cone directly astern,
+    // which is what stops a laser being the answer to everything behind you.
+    static constexpr double DEFAULT_AIM_ARC_DEGREES = 300.0;
+
     // Vertex budget for the bubble's collision polygon. The authored outline
     // flattens to far more points than a convex hitbox needs; sampling it down
     // to this many keeps the Chipmunk poly cheap without visibly shrinking it.
@@ -90,6 +96,7 @@ private:
     cpFloat m_maxSpeed = DEFAULT_MAX_SPEED;
     cpFloat m_boundingRadius = 0.0;
     float m_landingFragility = 1.f;
+    double m_aimArcDegrees = DEFAULT_AIM_ARC_DEGREES;
     bool m_kinematic = false;
     bool m_gravitySource = false;
     double m_gravityMultiplier = 1.0;
@@ -138,6 +145,11 @@ public:
     // hard set-down, above 1 is a hull that folds.
     [[nodiscard]] float GetLandingFragility() const
     { return m_landingFragility; }
+
+    // Half the traverse of this hull's gimballed mounts, in radians: the most
+    // a beam can be swung off the nose in either direction. Pi is free
+    // traverse; the difference between that and this is the blind cone astern.
+    [[nodiscard]] double GetAimArcHalfWidth() const;
 
     // Kinematic: an immovable body whose motion is driven externally (e.g. by
     // OrbitSystem), unaffected by collisions, forces or gravity.

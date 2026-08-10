@@ -395,15 +395,21 @@ static AmmoPool PoolOf(const UpgradeDef& def)
     }
 }
 
-// Three role branches over the kinds. A map rather than a toml field: there is
+// Four role branches over the kinds. A map rather than a toml field: there is
 // nothing to author yet, and the day a branch stops matching a kind is the day
 // it earns one.
+//
+// The beams have a column of their own rather than sitting with the guns:
+// they are aimed rather than pointed, they are paid for out of the bank rather
+// than a magazine, and a pilot choosing between them and the cannons is
+// choosing between two ways to fly, not between two guns.
 static int BranchOf(UpgradeKind kind)
 {
     switch (kind) {
     case UpgradeKind::Capacitor:
     case UpgradeKind::EngineTier: return 1; // MOBILITY
     case UpgradeKind::Shield:     return 2; // DEFENSE
+    case UpgradeKind::LaserTier:  return 3; // BEAMS
     default:                      return 0; // WEAPONS -- rounds included
     }
 }

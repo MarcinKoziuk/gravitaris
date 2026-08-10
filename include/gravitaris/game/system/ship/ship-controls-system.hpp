@@ -74,13 +74,30 @@ public:
     // slingshot still carries a ship past its engine's limit.
     static void ApplyMovement(cpBody* body, const ControlFlags& flags, double thrust, double maxSpeed);
 
-    // Draws one tick against the capacitor and reports what the overburn
-    // grants. Both sides of the wire call this off the same input and the same
-    // resolved stats -- the sim for every ship, ClientPrediction for the own
-    // one -- so a boosted ship is predicted with the force it really got.
-    // Call exactly once per ship per simulated tick: it is what spends the
-    // bank and refills it.
-    static BoostEffect AdvanceCapacitor(Controls& controls, const ShipStats& stats);
+    // What the bank granted this tick. Both consumers in one answer because
+    // they come out of one pool and have to be decided together.
+    struct PowerGrant {
+        BoostEffect boost;
+        bool laserFiring = false;
+    };
+
+    // Draws one tick against the capacitor and reports what it granted. Both
+    // sides of the wire call this off the same input and the same resolved
+    // stats -- the sim for every ship, ClientPrediction for the own one -- so a
+    // boosted ship is predicted with the force it really got and a firing one
+    // with the beams it really lit. Call exactly once per ship per simulated
+    // tick: it is what spends the bank and refills it.
+    //
+    // The overburn is served before the beams. Something has to go first when
+    // there is not enough charge for both, and a pilot who is out of speed is
+    // in more trouble than one who is out of guns.
+    static PowerGrant AdvanceCapacitor(Controls& controls, const ShipStats& stats,
+                                       unsigned laserMounts);
+
+    // What holding the beam trigger costs the bank each tick. Per mount rather
+    // than per ship: three emitters burn three times as much as one, and do
+    // three times the damage for it.
+    [[nodiscard]] static float LaserDrainPerTick(const ShipStats& stats, unsigned laserMounts);
 
     // The same grant without advancing anything, for replaying an already
     // -decided tick (ClientPrediction's reconciliation) where the timers
@@ -147,6 +164,26 @@ public:
     // The family every weapon mount belongs to: one hull position per index,
     // armed by the loadout rather than claimed by a weapon.
     static constexpr const char* WEAPON_HARDPOINT = "weapon";
+
+    // Where a beam leaves the hull and which way it points, in world space.
+    struct BeamOrigin {
+        Magnum::Math::Vector2<double> pos;
+        double angle = 0.;
+    };
+
+    // The muzzle and heading of one beam mount, with the pilot's requested aim
+    // clamped into the hull's own gimbal arc (Body::GetAimArcHalfWidth). The
+    // sim resolves damage from this and the client draws from it, so the two
+    // cannot disagree about where a beam actually went -- which is the whole
+    // reason a beam's endpoints are never replicated.
+    [[nodiscard]] static BeamOrigin ComputeBeamOrigin(const Transform& transf, const PhysicsBody& phys,
+                                                      unsigned mount, std::uint16_t aim);
+
+    // An absolute world angle folded into `halfWidth` either side of the
+    // hull's nose. Out past the limit it pins to the nearer edge rather than
+    // refusing: a gimbal on its stop still fires, and a beam that silently
+    // stopped when the cursor crossed behind the ship would read as a fault.
+    [[nodiscard]] static double ClampAimToArc(double desired, double heading, double halfWidth);
 
     // Runs one tick of a ship's primary fire and reports what it fired, so the
     // sim and client-side prediction cannot pace differently. `onShot` is

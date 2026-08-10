@@ -17,6 +17,7 @@
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
+#include <gravitaris/game/game.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
 #include <gravitaris/game/system/ship/ship-controls-system.hpp>
 
@@ -74,14 +75,23 @@ std::pair<Vector2d, Vector2d> ShipControlsSystem::ComputeBulletSpawn(const Trans
     return std::make_pair(pos, vel);
 }
 
-ShipControlsSystem::BoostEffect ShipControlsSystem::AdvanceCapacitor(Controls& controls,
-                                                                    const ShipStats& stats)
+float ShipControlsSystem::LaserDrainPerTick(const ShipStats& stats, unsigned laserMounts)
+{
+    if (!stats.laser || laserMounts == 0) return 0.f;
+    return stats.laser->beam.energyPerSecond * static_cast<float>(Game::PHYSICS_DELTA)
+         * static_cast<float>(laserMounts);
+}
+
+ShipControlsSystem::PowerGrant ShipControlsSystem::AdvanceCapacitor(Controls& controls,
+                                                                    const ShipStats& stats,
+                                                                    unsigned laserMounts)
 {
     const float bank = stats.capacitorCharge;
     if (bank <= 0.f) { // no capacitor fitted, or it has been pulled at a yard
         controls.capacitorSpent = 0.f;
         controls.boosting = false;
-        return BoostEffect{};
+        controls.laserFiring = false;
+        return PowerGrant{};
     }
     if (controls.capacitorSpent > bank) controls.capacitorSpent = bank; // a rank came off mid-flight
 
@@ -90,21 +100,32 @@ ShipControlsSystem::BoostEffect ShipControlsSystem::AdvanceCapacitor(Controls& c
     // capacitor that has only just begun refilling cannot be tapped for a tick
     // of thrust every few ticks -- which is what "boost" degenerated into once
     // the bank ran dry in a fight. Hysteresis, not a floor on the charge: the
-    // test is on STARTING, and a burn already lit runs to empty.
-    const float remaining = bank - controls.capacitorSpent;
-    const float engageFloor = std::max(stats.boostDrainPerTick, bank * CAPACITOR_ENGAGE_SHARE);
-    const bool charged = controls.boosting ? remaining > 0.f : remaining >= engageFloor;
+    // test is on STARTING, and a draw already running goes to empty.
+    float remaining = bank - controls.capacitorSpent;
+    const auto engaged = [&](bool running, float cost) {
+        if (cost <= 0.f) return false;
+        const float floor = std::max(cost, bank * CAPACITOR_ENGAGE_SHARE);
+        return running ? remaining > 0.f : remaining >= floor;
+    };
 
     // The injector feeds the engine, so it only burns while the engine is lit:
     // asking for the overburn while coasting spends nothing, and letting go
     // stops the drain where it stands. Killing speed on the way into a planet
     // is still the main use of it -- braking is thrust, pointed retrograde.
     const bool burning = controls.actionFlags.boost && controls.actionFlags.thrustForward
-                      && charged && stats.boostDrainPerTick > 0.f;
+                      && engaged(controls.boosting, stats.boostDrainPerTick);
 
     // One accumulated draw rather than a branch per consumer: the bank refills
-    // only on a tick nothing at all reached into it.
-    const float draw = burning ? stats.boostDrainPerTick : 0.f;
+    // only on a tick nothing at all reached into it. The beams are asked after
+    // the burn and against what it left, so a hull doing both runs out of
+    // shooting first -- see the header on why that order and not the other.
+    float draw = burning ? stats.boostDrainPerTick : 0.f;
+    remaining -= draw;
+
+    const float laserDraw = LaserDrainPerTick(stats, laserMounts);
+    const bool firing = controls.actionFlags.fireLaser && engaged(controls.laserFiring, laserDraw);
+    if (firing) draw += laserDraw;
+
     if (draw > 0.f) {
         controls.capacitorSpent = std::min(bank, controls.capacitorSpent + draw);
     }
@@ -113,7 +134,42 @@ ShipControlsSystem::BoostEffect ShipControlsSystem::AdvanceCapacitor(Controls& c
     }
 
     controls.boosting = burning;
-    return BoostEffectOf(controls.boosting, stats);
+    controls.laserFiring = firing;
+    return PowerGrant{BoostEffectOf(controls.boosting, stats), firing};
+}
+
+double ShipControlsSystem::ClampAimToArc(double desired, double heading, double halfWidth)
+{
+    constexpr double PI = 3.141592653589793;
+    constexpr double TURN = 6.283185307179586;
+    if (halfWidth >= PI) return desired;
+
+    double delta = std::fmod(desired - heading, TURN);
+    if (delta > PI) delta -= TURN;
+    if (delta < -PI) delta += TURN;
+
+    return heading + std::clamp(delta, -halfWidth, halfWidth);
+}
+
+ShipControlsSystem::BeamOrigin ShipControlsSystem::ComputeBeamOrigin(const Transform& transf,
+                                                                    const PhysicsBody& phys,
+                                                                    unsigned mount, std::uint16_t aim)
+{
+    const Body::Hardpoint* hp = phys.body ? phys.body->FindMount(WEAPON_HARDPOINT, mount) : nullptr;
+    if (!hp && phys.body) hp = phys.body->FindMount(GUN_HARDPOINT, mount);
+
+    Vector2d pos = transf.pos;
+    if (hp) {
+        const double s = std::sin(double(transf.rot));
+        const double c = std::cos(double(transf.rot));
+        pos += Vector2d(hp->pos.x() * c - hp->pos.y() * s,
+                        hp->pos.x() * s + hp->pos.y() * c);
+    }
+
+    const double heading = double(transf.rot) - HALF_PI; // nose is local -Y
+    const double halfWidth = phys.body ? phys.body->GetAimArcHalfWidth() : HALF_PI;
+
+    return BeamOrigin{pos, ClampAimToArc(UnpackAim(aim), heading, halfWidth)};
 }
 
 ShipControlsSystem::BoostEffect ShipControlsSystem::BoostEffectOf(bool boosting, const ShipStats& stats)
@@ -351,8 +407,13 @@ void ShipControlsSystem::Update(std::uint64_t step)
         // fighters rather than about everything with an engine bell.
         const ShipStats stats = loadout ? m_catalog.ResolveStats(loadout->levels) : ShipStats{};
 
-        const BoostEffect boost = AdvanceCapacitor(scontrols, stats);
-        const Motion motion = MotionOf(*phys.body, stats, boost);
+        // The beams are not paced or spawned here -- they are a state, not a
+        // shot. All this tick owes them is the charge, and DamageSystem burns
+        // whatever the bank agreed to light (Controls::laserFiring).
+        const auto laserMounts =
+                static_cast<unsigned>(loadout ? MountsArmedWith(*loadout, MountArm::Laser) : 0);
+        const PowerGrant power = AdvanceCapacitor(scontrols, stats, laserMounts);
+        const Motion motion = MotionOf(*phys.body, stats, power.boost);
         ApplyMovement(body, scontrols.actionFlags, motion.thrust, motion.maxSpeed);
 
         // firePrimary is held, not one-shot; each armed mount's own cooldown

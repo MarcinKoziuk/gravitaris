@@ -16,3 +16,9 @@ friction = 0.0
 # the stock airframe every other hull is judged against.
 [landing]
 fragility = 1.0
+
+[weapons]
+# How far off the nose this hull's gimbals can swing a beam, total. The 60
+# degrees it leaves out are directly astern: a pilot with something on their
+# tail has to turn into it, not just look at it.
+aim_arc_degrees = 300

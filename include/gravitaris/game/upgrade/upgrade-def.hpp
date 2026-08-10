@@ -32,6 +32,33 @@ struct WeaponDef {
     // so a new heavy line is a toml edit and the sim never learns weapon names.
     std::string hardpoint = "gun";
 
+    // Beam weapons only. A laser is not a projectile: it arrives the tick it
+    // is fired, does its damage per second rather than per hit, and is paid
+    // for out of the capacitor rather than out of a magazine -- so none of
+    // speed/lifetime/model above mean anything on one. A non-zero `range` is
+    // what makes a weapon a beam.
+    struct Beam {
+        double range = 0.;
+        float damagePerSecond = 0.f;
+        float energyPerSecond = 0.f;
+        // Where the falloff begins, as a share of range: damage is full inside
+        // it and slides to nothing at the far end. Zero falls away from the
+        // muzzle, which is what makes closing the distance the whole skill of
+        // the weapon.
+        float falloffStart = 0.f;
+        // The wedge it is drawn as: this wide where it leaves the mount, this
+        // wide where it ends, fading out across the difference -- the picture
+        // of the falloff rather than a decoration on top of it.
+        float widthNear = 1.f;
+        float widthFar = 6.f;
+        // How far the beam's colour is pushed off its team's toward white. 0
+        // draws the side's own colour flat, which is what makes a beam
+        // crossing the sector tell you who fired it; higher ranks run hotter.
+        float heat = 0.f;
+    } beam;
+
+    [[nodiscard]] bool IsBeam() const { return beam.range > 0.; }
+
     // MissileSystem's homing envelope. Zero turnRate means unguided, which is
     // what every gun round is.
     struct Guidance {
@@ -57,6 +84,7 @@ enum class UpgradeKind : std::uint8_t {
     FireRate,     // shorter cooldown, whichever weapon is fitted
     WeaponTier,   // fits the next gun up its line
     CannonTier,   // fits the next cannon up, and the magazine it feeds from
+    LaserTier,    // fits the next beam emitter up, in a weapon mount
     MissileTier,  // fits the launcher, then the next round up, and widens the rack
     AmmoStore,    // spare rounds for one magazine -- and only one (see AmmoPool)
     EngineTier,   // a stronger drive: harder acceleration, higher cruise, a fiercer overburn
@@ -72,6 +100,7 @@ struct FitWeights {
     float fireRate = 1.f;
     float weapon = 1.f;
     float cannon = 1.f;
+    float laser = 1.f;
     float missile = 1.f;
     float ammo = 1.f;
     float engine = 1.f;
@@ -84,6 +113,7 @@ struct FitWeights {
         case UpgradeKind::FireRate:    return fireRate;
         case UpgradeKind::WeaponTier:  return weapon;
         case UpgradeKind::CannonTier:  return cannon;
+        case UpgradeKind::LaserTier:   return laser;
         case UpgradeKind::MissileTier: return missile;
         case UpgradeKind::AmmoStore:   return ammo;
         case UpgradeKind::EngineTier:  return engine;
@@ -115,6 +145,9 @@ enum class MountArm : std::uint8_t {
     None,  // empty: this mount fires nothing
     Light, // the light-gun line, which never runs out
     Heavy, // the heavy-cannon line, which feeds from the magazine
+    // The beam line, which feeds from the capacitor and is aimed rather than
+    // pointed -- its own trigger, gimballed inside the hull's arc.
+    Laser,
 };
 
 // Which family of numbered holes on a hull a fitting goes into. A hull counts
@@ -307,6 +340,9 @@ struct UpgradeLevels {
     // Zero means the hull carries no cannon: unlike the gun, the heavy mount
     // is something a pilot fits rather than something a hull comes with.
     std::uint8_t cannonTier = 0;
+    // Zero means no emitter fitted. Gated behind the capacitor rather than
+    // behind a weapon: there is nothing to fire a beam out of without one.
+    std::uint8_t laserTier = 0;
     // Zero means the hull carries no launcher at all, not a stock one: there
     // is nothing to fire and nowhere to put rounds until the bay is fitted.
     std::uint8_t missileTier = 0;
@@ -377,6 +413,9 @@ struct ShipStats {
     const WeaponDef* gun = nullptr;
     const WeaponDef* cannon = nullptr;
     const WeaponDef* missile = nullptr;
+    // The beam emitter, null on a hull carrying none. Its own trigger and its
+    // own mounts, so it is not one of the primaries above.
+    const WeaponDef* laser = nullptr;
 
     // The gun's own cooldown with the fire-rate tier applied; the missile's is
     // the fitted round's own, since its tier already carries the cadence.
