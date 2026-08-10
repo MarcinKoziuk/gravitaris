@@ -247,7 +247,7 @@ CGame::ShieldReadout CGame::GetShieldReadout()
                          std::move(segments)};
 }
 
-CGame::BoostReadout CGame::GetBoostReadout()
+CGame::CapacitorReadout CGame::GetCapacitorReadout()
 {
     const std::optional<flecs::entity> subject = CameraSubject();
     if (!subject) return {};
@@ -257,19 +257,20 @@ CGame::BoostReadout CGame::GetBoostReadout()
     if (!loadout || !controls) return {};
 
     const ShipStats stats = m_upgradeCatalog.ResolveStats(loadout->levels);
-    if (stats.boostTicks == 0) return {};
+    if (stats.capacitorCharge <= 0.f) return {};
 
-    // One track for one tank: it drains while the burn is on and creeps back
-    // when it isn't, and `cooling` only says which of the two is happening.
-    const float left = std::clamp(
-            1.f - static_cast<float>(controls->boostSpent) / static_cast<float>(stats.boostTicks),
-            0.f, 1.f);
+    // One track for one bank: it drains while something is drawing and creeps
+    // back when nothing is, and `charging` only says which of the two is
+    // happening.
+    const float left = std::clamp(1.f - controls->capacitorSpent / stats.capacitorCharge, 0.f, 1.f);
 
-    // A spectated unit's tank is never simulated on this side -- only the
+    // A spectated unit's bank is never simulated on this side -- only the
     // burning bit reaches us (SnapshotApplier) -- so its bar reports that it is
     // burning without pretending to know how much is left.
-    if (controls->boosting) return BoostReadout{true, controls->boostSpent > 0 ? left : 1.f, false};
-    return BoostReadout{true, left, left < 1.f};
+    if (controls->boosting) {
+        return CapacitorReadout{true, controls->capacitorSpent > 0.f ? left : 1.f, false};
+    }
+    return CapacitorReadout{true, left, left < 1.f};
 }
 
 // What the port says when it turns a refit away. Worded as the yard talking
@@ -400,7 +401,7 @@ static AmmoPool PoolOf(const UpgradeDef& def)
 static int BranchOf(UpgradeKind kind)
 {
     switch (kind) {
-    case UpgradeKind::Boost:
+    case UpgradeKind::Capacitor:
     case UpgradeKind::EngineTier: return 1; // MOBILITY
     case UpgradeKind::Shield:     return 2; // DEFENSE
     default:                      return 0; // WEAPONS -- rounds included

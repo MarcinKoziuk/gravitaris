@@ -132,8 +132,8 @@ struct AIPersonality {
     double missileTolerance = 0.35;
     std::uint32_t missileInterval = 150; // ticks between launches (2.5s)
 
-    // Overburn (the OVERBURN upgrade; nothing happens on a pilot that hasn't
-    // collected it). Spent when the velocity correction the pilot is flying
+    // Overburn (nothing happens on a pilot carrying no CAPACITOR to burn out
+    // of). Spent when the velocity correction the pilot is flying
     // is at least this large -- which is exactly the arrival it cannot
     // otherwise brake out of, and the hard break or hard close of a fight.
     // 0 disables.

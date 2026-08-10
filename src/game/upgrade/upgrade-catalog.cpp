@@ -29,6 +29,8 @@ static bool Exclusive(const UpgradeDef& a, const UpgradeDef& b);
 static WeaponDef ParseWeapon(const toml::table& entry, const std::string& key);
 static void ParseCostCurve(const toml::table& entry, const char* key,
                            std::uint16_t (&out)[MAX_UPGRADE_RANKS]);
+static void ParseFloats(const toml::table& entry, const char* key, std::vector<float>& out);
+static float PerRank(const std::vector<float>& curve, std::uint8_t rank, float fallback);
 
 bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
 {
@@ -161,13 +163,18 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
             case UpgradeKind::EngineTier:
                 def.engine.thrustScale = (*entry)["thrust_scale"].value_or(1.f);
                 def.engine.maxSpeedScale = (*entry)["max_speed_scale"].value_or(1.f);
+                ParseFloats(*entry, "boost_thrust_scale", def.engine.boostThrustScale);
+                def.engine.boostMaxSpeedScale = (*entry)["boost_max_speed_scale"].value_or(1.f);
+                def.engine.boostDrainPerSecond = (*entry)["boost_drain_per_second"].value_or(0.f);
                 break;
-            case UpgradeKind::Boost:
-                def.boost.thrustScale = (*entry)["thrust_scale"].value_or(1.f);
-                def.boost.maxSpeedScale = (*entry)["max_speed_scale"].value_or(1.f);
-                def.boost.durationSeconds = (*entry)["duration_seconds"].value_or(0.f);
-                def.boost.cooldownSeconds = (*entry)["cooldown_seconds"].value_or(0.f);
-                def.boost.minCooldownSeconds = (*entry)["min_cooldown_seconds"].value_or(0.f);
+            case UpgradeKind::Capacitor:
+                ParseFloats(*entry, "charge", def.capacitor.charge);
+                ParseFloats(*entry, "recharge_seconds", def.capacitor.rechargeSeconds);
+                if (def.capacitor.charge.empty() || def.capacitor.rechargeSeconds.empty()) {
+                    LOG(error) << "upgrades: " << *key
+                               << ": a capacitor needs `charge` and `recharge_seconds`; skipped";
+                    continue;
+                }
                 break;
             case UpgradeKind::Shield: {
                 const auto typeName = (*entry)["shield_type"].value<std::string>();
@@ -180,16 +187,8 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
                 def.shield.regenPerSecond = (*entry)["regen_per_second"].value_or(0.f);
                 def.shield.regenDelaySeconds = (*entry)["regen_delay_seconds"].value_or(0.f);
                 def.shield.leakChance = (*entry)["leak_chance"].value_or(0.f);
-                if (const toml::array* leaks = (*entry)["leak_fraction"].as_array()) {
-                    for (const toml::node& leak : *leaks) {
-                        def.shield.leakFraction.push_back(leak.value_or(0.f));
-                    }
-                }
-                if (const toml::array* mends = (*entry)["hull_regen_seconds"].as_array()) {
-                    for (const toml::node& seconds : *mends) {
-                        def.shield.hullRegenSeconds.push_back(seconds.value_or(0.f));
-                    }
-                }
+                ParseFloats(*entry, "leak_fraction", def.shield.leakFraction);
+                ParseFloats(*entry, "hull_regen_seconds", def.shield.hullRegenSeconds);
                 if (def.shield.leakChance > 0.f && def.shield.leakFraction.empty()) {
                     LOG(error) << "upgrades: " << *key
                                << ": a leaking shield needs a `leak_fraction` per level; skipped";
@@ -380,6 +379,11 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
             const auto above = static_cast<float>(levels.engine - 1);
             stats.thrustScale = std::pow(def->engine.thrustScale, above);
             stats.maxSpeedScale = std::pow(def->engine.maxSpeedScale, above);
+
+            stats.boostThrustScale = PerRank(def->engine.boostThrustScale, levels.engine, 1.f);
+            stats.boostMaxSpeedScale = def->engine.boostMaxSpeedScale;
+            stats.boostDrainPerTick =
+                    def->engine.boostDrainPerSecond * static_cast<float>(Game::PHYSICS_DELTA);
         }
         else {
             // No drive, no acceleration. Rank 1 is issued to every faction and
@@ -390,18 +394,13 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
         }
     }
 
-    if (const UpgradeDef* def = FindKind(UpgradeKind::Boost); def && levels.boost > 0) {
-        const auto level = static_cast<float>(levels.boost);
-        stats.boostThrustScale = def->boost.thrustScale;
-        stats.boostMaxSpeedScale = def->boost.maxSpeedScale;
-        stats.boostTicks = static_cast<std::uint16_t>(
-                std::lround(def->boost.durationSeconds * level / Game::PHYSICS_DELTA));
-        // Levels shorten the wait rather than lengthening it, down to a floor
-        // -- otherwise a second tier would be strictly worse between burns.
-        const float cooldown = std::max(def->boost.minCooldownSeconds,
-                                        def->boost.cooldownSeconds / level);
-        stats.boostCooldownTicks =
-                static_cast<std::uint16_t>(std::lround(cooldown / Game::PHYSICS_DELTA));
+    if (const UpgradeDef* def = FindKind(UpgradeKind::Capacitor); def && levels.capacitor > 0) {
+        stats.capacitorCharge = PerRank(def->capacitor.charge, levels.capacitor, 0.f);
+        const float seconds = PerRank(def->capacitor.rechargeSeconds, levels.capacitor, 0.f);
+        if (seconds > 0.f) {
+            stats.capacitorRefillPerTick =
+                    stats.capacitorCharge * static_cast<float>(Game::PHYSICS_DELTA) / seconds;
+        }
     }
 
     if (const UpgradeDef* def = FindKind(UpgradeKind::Shield, levels.shieldType); def && levels.shield > 0) {
@@ -557,7 +556,7 @@ std::uint8_t UpgradeCatalog::LevelOf(const UpgradeDef& def, const UpgradeLevels&
         return std::min<std::uint8_t>(AmmoStoreRank(levels, def.ammo.pool), RankCount(def));
     case UpgradeKind::EngineTier:   return levels.engine;
     case UpgradeKind::Shield:       return levels.shieldType == def.shield.type ? levels.shield : 0;
-    case UpgradeKind::Boost:        return levels.boost;
+    case UpgradeKind::Capacitor:    return levels.capacitor;
     }
     return 0;
 }
@@ -787,8 +786,8 @@ bool UpgradeCatalog::FitRank(const UpgradeDef& def, std::uint8_t rank, ShipLoado
     case UpgradeKind::EngineTier:
         levels.engine = rank;
         break;
-    case UpgradeKind::Boost:
-        levels.boost = rank;
+    case UpgradeKind::Capacitor:
+        levels.capacitor = rank;
         break;
     case UpgradeKind::Shield:
         // Switching type starts the new emitter empty rather than carrying the
@@ -860,8 +859,8 @@ bool UpgradeCatalog::StripRank(const UpgradeDef& def, ShipLoadout& loadout, bool
     case UpgradeKind::EngineTier:
         levels.engine = 0;
         break;
-    case UpgradeKind::Boost:
-        levels.boost = 0;
+    case UpgradeKind::Capacitor:
+        levels.capacitor = 0;
         break;
     case UpgradeKind::Shield:
         levels.shield = 0;
@@ -901,9 +900,9 @@ static float FitScore(const UpgradeDef& def, const ShipLoadout& loadout, int mis
         // The launcher is a weapon the hull does not otherwise have; the ranks
         // above it are only a better round.
         return level == 0 ? 75.f : 45.f - 5.f * static_cast<float>(level);
-    case UpgradeKind::Boost:
-        // The first one is mobility it simply lacked; past that it is only a
-        // longer burn.
+    case UpgradeKind::Capacitor:
+        // The first bank is what makes the drive's overburn usable at all --
+        // mobility the hull simply lacked. Past that it is only a longer burn.
         return level == 0 ? 70.f : 30.f - 5.f * static_cast<float>(level);
     case UpgradeKind::WeaponTier:
         return 65.f - 5.f * static_cast<float>(level);
@@ -1006,7 +1005,7 @@ static UpgradeKind ParseKind(std::string_view name, bool& ok)
     if (name == "ammo_store")     return UpgradeKind::AmmoStore;
     if (name == "engine_tier")    return UpgradeKind::EngineTier;
     if (name == "shield")         return UpgradeKind::Shield;
-    if (name == "boost")          return UpgradeKind::Boost;
+    if (name == "capacitor")      return UpgradeKind::Capacitor;
     ok = false;
     return UpgradeKind::FireRate; // unused: the caller drops the entry on !ok
 }
@@ -1014,6 +1013,22 @@ static UpgradeKind ParseKind(std::string_view name, bool& ok)
 // A scalar charges the same for every rank; a list charges per rank, with its
 // last entry standing for every rank past its end -- so a three-rank line does
 // not have to spell out prices for ranks it can never reach.
+static void ParseFloats(const toml::table& entry, const char* key, std::vector<float>& out)
+{
+    const toml::array* values = entry[key].as_array();
+    if (!values) return;
+    for (const toml::node& value : *values) out.push_back(value.value_or(0.f));
+}
+
+// A per-rank curve read at `rank`, with the last entry standing for every rank
+// past its end -- so a line does not have to spell out figures for ranks it
+// can never reach. Rank 0 carries nothing and gets the fallback.
+static float PerRank(const std::vector<float>& curve, std::uint8_t rank, float fallback)
+{
+    if (rank == 0 || curve.empty()) return fallback;
+    return curve[std::min<std::size_t>(rank, curve.size()) - 1];
+}
+
 static void ParseCostCurve(const toml::table& entry, const char* key,
                            std::uint16_t (&out)[MAX_UPGRADE_RANKS])
 {

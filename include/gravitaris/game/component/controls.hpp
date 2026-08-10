@@ -24,7 +24,7 @@ struct ControlFlags {
     bool toggleWeapon : 1 = false;
     // Held, like thrustForward: a request for the overburn, which
     // ShipControlsSystem grants only while the engine is lit and there is
-    // something left in the tank (see Controls::boostSpent).
+    // something left in the bank (see Controls::capacitorSpent).
     bool boost : 1 = false;
 };
 
@@ -131,17 +131,14 @@ struct Controls {
     // on it, so one click can't spend two purchases.
     TechPick techPick;
 
-    // The overburn is a tank, not a timer (see UpgradeDef::Boost).
-    // `boostSpent` is how much of ShipStats::boostTicks has been burned, so
-    // zero is full and a fresh hull needs no initialising. It only rises while
-    // the injector is actually feeding a lit engine, which is what makes a tap
-    // cost a tap: letting go, or holding the button while coasting, spends
-    // nothing. `boostRefill` is the sub-tick remainder of refilling it, in
-    // units of one tick of burn per boostCooldownTicks -- a full tank takes the
-    // whole cooldown to come back, so a burst costs exactly the share of it
-    // that was used.
-    std::uint16_t boostSpent = 0;
-    std::uint16_t boostRefill = 0;
+    // The capacitor is a bank, not a timer (see UpgradeDef::Capacitor).
+    // `capacitorSpent` is how much of ShipStats::capacitorCharge has been drawn
+    // out, so zero is full and a fresh hull needs no initialising. It only
+    // rises while something is actually drawing -- the injector feeding a lit
+    // engine, and in time a laser holding its trigger -- which is what makes a
+    // tap cost a tap: letting go, or holding the button while coasting, spends
+    // nothing.
+    float capacitorSpent = 0.f;
     // Whether the overburn is actually running this tick -- what the movement
     // integrator, the wire (PackControlFlags) and the exhaust all read, as
     // opposed to actionFlags.boost, which is only the request.

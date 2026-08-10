@@ -27,9 +27,9 @@ using Magnum::Vector2d;
 static constexpr float BOX_HP = 30.f; // a couple of primary hits or one ram
 static constexpr double HALF_PI = 1.5707963267948966;
 
-// Least of the tank a burn can be started on. See AdvanceBoost -- it gates
+// Least of the bank a draw can be started on. See AdvanceCapacitor -- it gates
 // lighting the injector, never a burn already running.
-static constexpr float BOOST_ENGAGE_SHARE = 0.1f;
+static constexpr float CAPACITOR_ENGAGE_SHARE = 0.1f;
 
 static cpVect ThrustWithinSpeedLimit(cpBody* body, double thrust, double maxSpeed);
 static unsigned PhaseSlotOf(MountArm arm);
@@ -74,49 +74,42 @@ std::pair<Vector2d, Vector2d> ShipControlsSystem::ComputeBulletSpawn(const Trans
     return std::make_pair(pos, vel);
 }
 
-ShipControlsSystem::BoostEffect ShipControlsSystem::AdvanceBoost(Controls& controls, const ShipStats& stats)
+ShipControlsSystem::BoostEffect ShipControlsSystem::AdvanceCapacitor(Controls& controls,
+                                                                    const ShipStats& stats)
 {
-    const std::uint16_t tank = stats.boostTicks;
-    if (tank == 0) { // no injector fitted, or it has been pulled at a yard
-        controls.boostSpent = 0;
-        controls.boostRefill = 0;
+    const float bank = stats.capacitorCharge;
+    if (bank <= 0.f) { // no capacitor fitted, or it has been pulled at a yard
+        controls.capacitorSpent = 0.f;
         controls.boosting = false;
         return BoostEffect{};
     }
-    if (controls.boostSpent > tank) controls.boostSpent = tank; // a rank came off mid-flight
+    if (controls.capacitorSpent > bank) controls.capacitorSpent = bank; // a rank came off mid-flight
 
-    // A burn is worth starting or it is not on offer. Under BOOST_ENGAGE_SHARE
-    // of the tank the trigger does nothing at all, so an injector that has only
-    // just begun refilling cannot be tapped for a tick of thrust every few
-    // ticks -- which is what "boost" degenerated into once the tank ran dry in
-    // a fight. Hysteresis, not a floor on the fuel: the test is on STARTING,
-    // and a burn already lit runs to empty.
-    const std::uint16_t remaining = static_cast<std::uint16_t>(tank - controls.boostSpent);
-    const auto engageFloor = std::max<std::uint16_t>(
-            1, static_cast<std::uint16_t>(static_cast<float>(tank) * BOOST_ENGAGE_SHARE));
-    const bool fuelled = controls.boosting ? remaining > 0 : remaining >= engageFloor;
+    // A draw is worth starting or it is not on offer. Under
+    // CAPACITOR_ENGAGE_SHARE of the bank the trigger does nothing at all, so a
+    // capacitor that has only just begun refilling cannot be tapped for a tick
+    // of thrust every few ticks -- which is what "boost" degenerated into once
+    // the bank ran dry in a fight. Hysteresis, not a floor on the charge: the
+    // test is on STARTING, and a burn already lit runs to empty.
+    const float remaining = bank - controls.capacitorSpent;
+    const float engageFloor = std::max(stats.boostDrainPerTick, bank * CAPACITOR_ENGAGE_SHARE);
+    const bool charged = controls.boosting ? remaining > 0.f : remaining >= engageFloor;
 
     // The injector feeds the engine, so it only burns while the engine is lit:
     // asking for the overburn while coasting spends nothing, and letting go
     // stops the drain where it stands. Killing speed on the way into a planet
     // is still the main use of it -- braking is thrust, pointed retrograde.
     const bool burning = controls.actionFlags.boost && controls.actionFlags.thrustForward
-                      && fuelled;
-    if (burning) {
-        ++controls.boostSpent;
-        controls.boostRefill = 0;
+                      && charged && stats.boostDrainPerTick > 0.f;
+
+    // One accumulated draw rather than a branch per consumer: the bank refills
+    // only on a tick nothing at all reached into it.
+    const float draw = burning ? stats.boostDrainPerTick : 0.f;
+    if (draw > 0.f) {
+        controls.capacitorSpent = std::min(bank, controls.capacitorSpent + draw);
     }
-    else if (controls.boostSpent > 0 && stats.boostCooldownTicks > 0) {
-        // A full tank takes the whole cooldown to come back, so the wait after
-        // a burst is proportional to the burst -- and a hull that never
-        // emptied it is never held to the full one.
-        controls.boostRefill = static_cast<std::uint16_t>(controls.boostRefill + tank);
-        while (controls.boostRefill >= stats.boostCooldownTicks && controls.boostSpent > 0) {
-            controls.boostRefill =
-                    static_cast<std::uint16_t>(controls.boostRefill - stats.boostCooldownTicks);
-            --controls.boostSpent;
-        }
-        if (controls.boostSpent == 0) controls.boostRefill = 0;
+    else if (controls.capacitorSpent > 0.f) {
+        controls.capacitorSpent = std::max(0.f, controls.capacitorSpent - stats.capacitorRefillPerTick);
     }
 
     controls.boosting = burning;
@@ -358,7 +351,7 @@ void ShipControlsSystem::Update(std::uint64_t step)
         // fighters rather than about everything with an engine bell.
         const ShipStats stats = loadout ? m_catalog.ResolveStats(loadout->levels) : ShipStats{};
 
-        const BoostEffect boost = AdvanceBoost(scontrols, stats);
+        const BoostEffect boost = AdvanceCapacitor(scontrols, stats);
         const Motion motion = MotionOf(*phys.body, stats, boost);
         ApplyMovement(body, scontrols.actionFlags, motion.thrust, motion.maxSpeed);
 

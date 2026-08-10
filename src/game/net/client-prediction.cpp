@@ -232,7 +232,7 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
     PhysicsBody& phys = m_physicsSystem.GetBody(m_ownShip.get<PhysicsRef>());
     Controls& ownControls = m_ownShip.get_mut<Controls>();
     const ShipControlsSystem::BoostEffect boost =
-            ShipControlsSystem::AdvanceBoost(ownControls, stats);
+            ShipControlsSystem::AdvanceCapacitor(ownControls, stats);
     const ShipControlsSystem::Motion motion =
             ShipControlsSystem::MotionOf(*phys.body, stats, boost);
     ShipControlsSystem::ApplyMovement(phys.cp.body.get(), flags, motion.thrust, motion.maxSpeed);
@@ -345,9 +345,9 @@ std::optional<Magnum::Vector2d> ClientPrediction::Reconcile(std::uint64_t author
         // tradeoffs the class doc comment already accepts.
         SyncCollisionProxies(snapshotEntities, ownShipNetId, authoritativeTick, pending.tick);
         m_ownShip.get_mut<Controls>().actionFlags = pending.flags;
-        // Replayed with the grant the tick actually flew with; AdvanceBoost
-        // is deliberately not called here, since its timers already ran when
-        // this tick was first predicted.
+        // Replayed with the grant the tick actually flew with;
+        // AdvanceCapacitor is deliberately not called here, since the bank was
+        // already drawn against when this tick was first predicted.
         const ShipControlsSystem::BoostEffect replayBoost =
                 ShipControlsSystem::BoostEffectOf(pending.boosting, replayStats);
         const ShipControlsSystem::Motion replayMotion =

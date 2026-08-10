@@ -108,10 +108,10 @@ struct EntityState {
     // UpgradeLevels carries fall straight out of it (SyncAmmoStoreCounts).
     std::array<std::uint8_t, MAX_AMMO_BAYS> ammoBays{};
     std::uint8_t engineLevel = 0;
-    // The overburn's rank. Replicated like the drive's: a client resolves its
-    // own hull's ShipStats to predict the burn (ClientPrediction::Step), and
-    // the refit board reads it to know the injector is already aboard.
-    std::uint8_t boostLevel = 0;
+    // The charge bank's rank. Replicated like the drive's: a client resolves
+    // its own hull's ShipStats to predict the burn (ClientPrediction::Step),
+    // and the refit board reads it to know the bank is already aboard.
+    std::uint8_t capacitorLevel = 0;
     std::uint8_t shieldLevel = 0;
     ShieldType shieldType = ShieldType::None;
     float shieldHp = 0.f;

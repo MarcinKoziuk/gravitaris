@@ -91,7 +91,7 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
                 state.ammoBays[i] = static_cast<std::uint8_t>(loadout->ammoBays[i]);
             }
             state.engineLevel = loadout->levels.engine;
-            state.boostLevel = loadout->levels.boost;
+            state.capacitorLevel = loadout->levels.capacitor;
             state.shieldLevel = loadout->levels.shield;
             state.shieldType = loadout->levels.shieldType;
             state.shieldHp = loadout->shieldHp;
@@ -216,7 +216,7 @@ void ApplyEntityShipState(flecs::entity entity, const EntityState& state)
         // Derived, never sent: the counts are just the bays added up.
         SyncAmmoStoreCounts(*loadout);
         loadout->levels.engine = state.engineLevel;
-        loadout->levels.boost = state.boostLevel;
+        loadout->levels.capacitor = state.capacitorLevel;
         loadout->levels.shield = state.shieldLevel;
         loadout->levels.shieldType = state.shieldType;
         loadout->shieldHp = state.shieldHp;
@@ -259,7 +259,7 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteU8(e.missileTierLevel);
         for (const std::uint8_t pool : e.ammoBays) out.WriteU8(pool);
         out.WriteU8(e.engineLevel);
-        out.WriteU8(e.boostLevel);
+        out.WriteU8(e.capacitorLevel);
         out.WriteU8(e.shieldLevel);
         out.WriteU8(static_cast<std::uint8_t>(e.shieldType));
         out.WriteF32(e.shieldHp);
@@ -361,7 +361,7 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.missileTierLevel = in.ReadU8();
         for (std::uint8_t& pool : e.ammoBays) pool = in.ReadU8();
         e.engineLevel = in.ReadU8();
-        e.boostLevel = in.ReadU8();
+        e.capacitorLevel = in.ReadU8();
         e.shieldLevel = in.ReadU8();
         // Clamped like MountArm is on the way onto a hull: an out-of-range
         // enum off the wire is UB the moment anything switches on it.

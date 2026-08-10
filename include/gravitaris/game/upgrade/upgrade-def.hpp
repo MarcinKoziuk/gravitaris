@@ -59,9 +59,9 @@ enum class UpgradeKind : std::uint8_t {
     CannonTier,   // fits the next cannon up, and the magazine it feeds from
     MissileTier,  // fits the launcher, then the next round up, and widens the rack
     AmmoStore,    // spare rounds for one magazine -- and only one (see AmmoPool)
-    EngineTier,   // a stronger drive: harder acceleration, higher cruise
+    EngineTier,   // a stronger drive: harder acceleration, higher cruise, a fiercer overburn
     Shield,       // a damage buffer in front of the hull
-    Boost,        // an overburn: more thrust, and briefly past the speed cap
+    Capacitor,    // the charge bank the overburn and the lasers both draw on
 };
 
 // Per-kind multipliers on UpgradeCatalog's own fit scoring, so two pilots
@@ -76,7 +76,7 @@ struct FitWeights {
     float ammo = 1.f;
     float engine = 1.f;
     float shield = 1.f;
-    float boost = 1.f;
+    float capacitor = 1.f;
 
     [[nodiscard]] float For(UpgradeKind kind) const
     {
@@ -88,7 +88,7 @@ struct FitWeights {
         case UpgradeKind::AmmoStore:   return ammo;
         case UpgradeKind::EngineTier:  return engine;
         case UpgradeKind::Shield:      return shield;
-        case UpgradeKind::Boost:       return boost;
+        case UpgradeKind::Capacitor:   return capacitor;
         }
         return 1.f;
     }
@@ -122,7 +122,7 @@ enum class MountArm : std::uint8_t {
 // `missile_1` are both index 1 and are not the same place -- so an index is
 // only meaningful alongside the family it belongs to.
 enum class SlotFamily : std::uint8_t {
-    None, // belongs to the ship rather than to a hole: a shield, the overburn
+    None, // belongs to the ship rather than to a hole: a shield, the capacitor
     Weapon,
     MissileBay,
     AmmoBay,
@@ -237,11 +237,21 @@ struct UpgradeDef {
         int capacity = 0; // per level
     } ammo;
 
-    // EngineTier only. Both compounded per level, as FireRate's scale is: rank
-    // III of a 1.15 drive is 1.52x the hull's own thrust.
+    // EngineTier only. The first two are compounded per level, as FireRate's
+    // scale is: rank III of a 1.15 drive is 1.52x the hull's own thrust.
+    //
+    // The overburn belongs to the drive rather than to a fitting of its own --
+    // a bigger motor is what makes a fiercer burn. Its thrust multiplier is
+    // authored per rank rather than compounded, because a burn is a step
+    // change and reads better as three chosen numbers than as a curve. The
+    // speed ceiling is ONE number for every rank, which is what keeps a single
+    // figure bounding how fast anything in the game can travel.
     struct Engine {
         float thrustScale = 1.f;
         float maxSpeedScale = 1.f;
+        std::vector<float> boostThrustScale;
+        float boostMaxSpeedScale = 1.f;
+        float boostDrainPerSecond = 0.f;
     } engine;
 
     struct FireRate {
@@ -254,18 +264,18 @@ struct UpgradeDef {
     // Level N means tiers[N - 1], so maxLevel is bounded by this list's length.
     std::vector<id_t> tiers;
 
-    // Boost only. The whole point is stopping: a ship bearing down on a
-    // planet gets the thrust to kill its speed in time, and the same button
-    // buys a burst of closing or breaking speed in a fight. Levels lengthen
-    // the burn and shorten the wait; the speed ceiling does not move with
-    // them -- one number decides how fast a boosted hull can ever go.
-    struct Boost {
-        float thrustScale = 1.f;         // multiplier on the hull's own thrust
-        float maxSpeedScale = 1.f;       // multiplier on the hull's own speed cap
-        float durationSeconds = 0.f;     // per level
-        float cooldownSeconds = 0.f;     // per level, floored at minCooldownSeconds
-        float minCooldownSeconds = 0.f;
-    } boost;
+    // Capacitor only. The one bank every draw in the game comes out of: the
+    // overburn's, and each laser's. Nothing else decides how long a hull can
+    // burn or shoot, so a ship carrying no capacitor can do neither however
+    // good its drive or its emitters are.
+    //
+    // Both figures are authored per rank rather than scaled off level, so a
+    // deeper bank is not forced to be a slower one -- the last entry stands for
+    // every rank past its end.
+    struct Capacitor {
+        std::vector<float> charge;         // how much it holds
+        std::vector<float> rechargeSeconds; // empty to full, drawing nothing
+    } capacitor;
 
     struct Shield {
         ShieldType type = ShieldType::None;
@@ -310,7 +320,9 @@ struct UpgradeLevels {
     std::uint8_t engine = 0;
     std::uint8_t shield = 0;
     ShieldType shieldType = ShieldType::None;
-    std::uint8_t boost = 0;
+    // Zero means no bank aboard, which is what stops a burn before it starts
+    // and leaves any laser fitted unable to fire a shot.
+    std::uint8_t capacitor = 0;
 };
 
 // How many lockers feeding that pool the hull carries, 0 for none. Out of
@@ -397,11 +409,16 @@ struct ShipStats {
     // whatever hull they are fitted to. Zero on an emitter that mends none.
     float hullRegenFractionPerSecond = 0.f;
 
-    // Zero boostTicks means the ship isn't carrying the upgrade at all, which
-    // is what ShipControlsSystem tests before granting a burn -- the scales
-    // below are 1 in that case, so an unboosted hull needs no special case.
-    std::uint16_t boostTicks = 0;
-    std::uint16_t boostCooldownTicks = 0;
+    // The charge bank, and what refills it. Zero capacity means no capacitor
+    // fitted, which is what ShipControlsSystem tests before granting a burn --
+    // the scales below are 1 in that case, so an unbanked hull needs no
+    // special case.
+    float capacitorCharge = 0.f;
+    float capacitorRefillPerTick = 0.f;
+
+    // The overburn, resolved off the drive's rank. Its drain is what a lit
+    // burn costs the bank each tick; a laser's own draw is the weapon's.
+    float boostDrainPerTick = 0.f;
     float boostThrustScale = 1.f;
     float boostMaxSpeedScale = 1.f;
 };

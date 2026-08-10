@@ -27,7 +27,10 @@ enum class PacketType : std::uint8_t {
     ChatMessage = 8, // server -> clients, that line attributed to its sender
 };
 
-inline constexpr std::uint32_t PROTOCOL_VERSION = 8; // v8: wider ammo counts, and a resupply pick
+// v9 keeps v8's layout: the byte that carried the overburn's rank now carries
+// the capacitor's, which an unversioned v8 peer would resolve as a fitting that
+// no longer exists.
+inline constexpr std::uint32_t PROTOCOL_VERSION = 9;
 
 // How many trailing commands ClientInput carries per send -- redundancy
 // instead of reliability (quake3-style): as long as one of the last N sends

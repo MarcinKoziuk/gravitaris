@@ -510,8 +510,8 @@ void GravitarisApplication::UpdateUi()
                            shield.type == ShieldType::Plating ? "plating" : "");
     m_ui.SetShieldSegments(shield.segments);
 
-    const CGame::BoostReadout boost = m_game->GetBoostReadout();
-    m_ui.SetBoostReadout(boost.fitted ? boost.fraction : -1.f, boost.cooling);
+    const CGame::CapacitorReadout power = m_game->GetCapacitorReadout();
+    m_ui.SetCapacitorReadout(power.fitted ? power.fraction : -1.f, power.charging);
 
     RefreshTechTree();
 
@@ -989,8 +989,8 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         case KeyEvent::Key::S:
             if (!event.isRepeated()) m_currentInput.toggleWeapon = true;
             break;
-        // Held, like thrust. Harmless without the OVERBURN upgrade -- the sim
-        // simply never grants a burn (ShipControlsSystem::AdvanceBoost).
+        // Held, like thrust. Harmless without the CAPACITOR upgrade -- the sim
+        // simply never grants a burn (ShipControlsSystem::AdvanceCapacitor).
         case KeyEvent::Key::LeftShift:
         case KeyEvent::Key::RightShift:
             ResumeOwnShip();

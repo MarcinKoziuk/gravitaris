@@ -145,8 +145,8 @@ bool UI::Init()
                 m_chat->SetProperty("bottom", "auto");
             });
         }
-        m_boostFill = hud->GetElementById("boost_fill");
-        m_boostValue = hud->GetElementById("boost_value");
+        m_capacitorFill = hud->GetElementById("capacitor_fill");
+        m_capacitorValue = hud->GetElementById("capacitor_value");
         m_researchFill = hud->GetElementById("research_fill");
         m_researchValue = hud->GetElementById("research_value");
         m_researchRate = hud->GetElementById("research_rate_value");
@@ -592,31 +592,31 @@ void UI::SetChatInput(bool active, const std::string& text)
     m_chatInput->SetInnerRML(active ? "say: " + EscapeRml(text) + "_" : "");
 }
 
-void UI::SetBoostReadout(float fraction, bool cooling)
+void UI::SetCapacitorReadout(float fraction, bool charging)
 {
-    if (!m_boostFill || !m_boostValue) return;
+    if (!m_capacitorFill || !m_capacitorValue) return;
 
     const float quantised =
             fraction < 0.f ? -1.f : std::round(std::clamp(fraction, 0.f, 1.f) * 100.f) / 100.f;
-    if (quantised == m_boostFraction && cooling == m_boostCooling) return;
+    if (quantised == m_capacitorFraction && charging == m_capacitorCharging) return;
 
-    m_boostFraction = quantised;
-    m_boostCooling = cooling;
-    m_boostFill->SetClass("cooling", cooling);
+    m_capacitorFraction = quantised;
+    m_capacitorCharging = charging;
+    m_capacitorFill->SetClass("charging", charging);
 
     if (quantised < 0.f) {
-        m_boostFill->SetProperty("width", "0%");
-        m_boostValue->SetInnerRML("--");
+        m_capacitorFill->SetProperty("width", "0%");
+        m_capacitorValue->SetInnerRML("--");
         return;
     }
 
     const int percent = static_cast<int>(std::lround(quantised * 100.f));
-    m_boostFill->SetProperty("width", std::to_string(percent) + "%");
-    // Three states off two inputs: the injectors are cooling (how far along),
-    // a burn is running (nothing useful to count down to), or it is there to
-    // be spent.
-    if (cooling) m_boostValue->SetInnerRML(std::to_string(percent) + "%");
-    else m_boostValue->SetInnerRML(quantised < 1.f ? "BURN" : "READY");
+    m_capacitorFill->SetProperty("width", std::to_string(percent) + "%");
+    // Three states off two inputs: the bank is filling (how far along),
+    // something is drawing on it (nothing useful to count down to), or it is
+    // there to be spent.
+    if (charging) m_capacitorValue->SetInnerRML(std::to_string(percent) + "%");
+    else m_capacitorValue->SetInnerRML(quantised < 1.f ? "DRAW" : "READY");
 }
 
 void UI::SetResearchReadout(float fraction, const std::string& text)

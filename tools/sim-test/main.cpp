@@ -2000,8 +2000,8 @@ void TestUpgradeCatalog()
     // a multiple of the hull's rather than of the drive's.
     {
         const UpgradeDef* engine = catalog.FindKind(UpgradeKind::EngineTier);
-        const UpgradeDef* burn = catalog.FindKind(UpgradeKind::Boost);
-        Require(engine && burn, "catalog: the pool has both the drive and the overburn");
+        const UpgradeDef* bank = catalog.FindKind(UpgradeKind::Capacitor);
+        Require(engine && bank, "catalog: the pool has both the drive and the bank");
 
         // A hull with no drive at all does not move under its own power. Nothing
         // ever flies in that state -- rank 1 is issued and fitted at spawn --
@@ -3349,10 +3349,11 @@ void TestFriendlyFire()
     fs.Shutdown();
 }
 
-// The overburn: while it is burning a hull exceeds the speed its own engine
-// could otherwise reach, it only burns while the engine is lit, and what it
-// spends is what it has to wait for.
-void TestBoost()
+// The capacitor, through the one thing that draws on it so far: while it is
+// burning a hull exceeds the speed its own engine could otherwise reach, it
+// only burns while the engine is lit, and what it spends is what it has to
+// wait for.
+void TestCapacitor()
 {
     FilesystemPhysFS fs;
     if (!fs.Init()) {
@@ -3364,8 +3365,8 @@ void TestBoost()
     EntitySpawner& spawner = game.GetEntitySpawner();
 
     const UpgradeCatalog& catalog = game.GetUpgradeCatalog();
-    const UpgradeDef* def = catalog.FindKind(UpgradeKind::Boost);
-    Require(def != nullptr, "boost: the pool has a boost upgrade");
+    const UpgradeDef* def = catalog.FindKind(UpgradeKind::Capacitor);
+    Require(def != nullptr, "capacitor: the pool has a capacitor upgrade");
 
     // Empty space, no wells: whatever speed this ship reaches is its engine's
     // doing and nothing else's.
@@ -3385,79 +3386,93 @@ void TestBoost()
     const auto flyWith = [&](bool boost, int ticks) { fly(/*thrust=*/true, boost, ticks); };
     const auto speed = [&] { return ship.get<Transform>().vel.length(); };
 
-    // Unupgraded: the button does nothing at all, and the hull's own cap holds.
+    // No bank aboard: the button does nothing at all however good the drive is,
+    // and the hull's own cap holds.
     flyWith(/*boost=*/true, 900);
-    Require(!ship.get<Controls>().boosting, "boost: a ship without the upgrade never burns");
+    Require(!ship.get<Controls>().boosting, "capacitor: a ship with no bank never burns");
     Require(speed() <= hullMaxSpeed * 1.02,
-            "boost: an unupgraded hull is still held to its own top speed");
+            "capacitor: an unbanked hull is still held to its own top speed");
 
     FitFree(catalog, *def, 1, ship.get_mut<ShipLoadout>());
     const ShipStats stats = catalog.ResolveStats(ship.get<ShipLoadout>().levels);
-    Require(stats.boostTicks > 0 && stats.boostCooldownTicks > 0,
-            "boost: the fitted upgrade resolves to a real burn and a real wait");
+    Require(stats.capacitorCharge > 0.f && stats.capacitorRefillPerTick > 0.f,
+            "capacitor: the fitted bank resolves to real charge and a real refill");
+    Require(stats.boostDrainPerTick > 0.f, "capacitor: and the drive draws on it");
+
+    // Rounded up: a bank that divides into a fraction of a tick's drain still
+    // has that fraction to burn, and the last sliver of it is a real tick.
+    const auto burnTicks =
+            static_cast<int>(std::ceil(stats.capacitorCharge / stats.boostDrainPerTick));
+    const auto refillTicks =
+            static_cast<int>(std::ceil(stats.capacitorCharge / stats.capacitorRefillPerTick));
+    const auto spent = [&] { return ship.get<Controls>().capacitorSpent; };
 
     // Burning: past the cap the engine alone could reach, with no gravity to
     // credit it to.
     double peak = 0.;
-    for (int tick = 0; tick < static_cast<int>(stats.boostTicks) && ship.is_alive(); ++tick) {
+    for (int tick = 0; tick < burnTicks && ship.is_alive(); ++tick) {
         flyWith(/*boost=*/true, 1);
         peak = std::max(peak, speed());
     }
-    Require(peak > hullMaxSpeed, "boost: a burn carries the hull past its own top speed");
+    Require(peak > hullMaxSpeed, "capacitor: a burn carries the hull past its own top speed");
     Require(peak <= hullMaxSpeed * static_cast<double>(stats.boostMaxSpeedScale) * 1.02,
-            "boost: and no further than the upgrade's own ceiling");
+            "capacitor: and no further than the drive's own ceiling");
 
-    // Spent: the loop above burned the tank dry, so the next tick on the button
-    // grants nothing. Exactly one tick, not a handful -- with the trigger held
-    // an empty tank refills to the engage floor and lights again all by itself
-    // (see below), which is the rule working rather than a state to assert on.
+    // Spent: the loop above drew the bank dry, so the next tick on the button
+    // grants nothing. Emptiness is read before that tick rather than after --
+    // a tick that grants no burn is a tick the bank spends refilling, so by
+    // then it is already a sliver off empty. Exactly one tick, not a handful:
+    // with the trigger held an empty bank refills to the engage floor and
+    // lights again all by itself (see below), which is the rule working rather
+    // than a state to assert on.
+    Require(spent() >= stats.capacitorCharge, "capacitor: a burn empties the bank");
     flyWith(/*boost=*/true, 1);
-    Require(!ship.get<Controls>().boosting, "boost: a burn ends when the tank does");
-    Require(ship.get<Controls>().boostSpent == stats.boostTicks, "boost: ...with the tank empty");
+    Require(!ship.get<Controls>().boosting, "capacitor: ...and ends when the charge does");
 
-    // And it will not re-light on the first drops back into it. A burn has to
-    // be worth starting (BOOST_ENGAGE_SHARE): without that floor a dry injector
-    // lights again on one tick of fuel, and the overburn degenerates into a
-    // stutter that is on more often than off. A twentieth of the wait is far
-    // too little to clear the floor -- asked for with the trigger released, so
-    // what is being tested is the start and not a burn already running.
-    fly(/*thrust=*/true, /*boost=*/false, static_cast<int>(stats.boostCooldownTicks) / 20);
-    const std::uint16_t dribble = ship.get<Controls>().boostSpent;
-    Require(dribble > 0 && dribble < stats.boostTicks,
-            "boost: a spent tank starts refilling, and is nowhere near full yet");
+    // And it will not re-light on the first drops back into it. A draw has to
+    // be worth starting (CAPACITOR_ENGAGE_SHARE): without that floor a dry
+    // injector lights again on one tick of charge, and the overburn degenerates
+    // into a stutter that is on more often than off. A twentieth of the refill
+    // is far too little to clear the floor -- asked for with the trigger
+    // released, so what is being tested is the start and not a burn already
+    // running.
+    fly(/*thrust=*/true, /*boost=*/false, refillTicks / 20);
+    const float dribble = spent();
+    Require(dribble > 0.f && dribble < stats.capacitorCharge,
+            "capacitor: a spent bank starts refilling, and is nowhere near full yet");
     flyWith(/*boost=*/true, 1);
     Require(!ship.get<Controls>().boosting,
-            "boost: ...and that little back in it will not light the injector");
+            "capacitor: ...and that little back in it will not light the injector");
 
     // ...and comes back as it refills.
-    for (int tick = 0; tick < static_cast<int>(stats.boostCooldownTicks) + stats.boostTicks + 5
-                 && !ship.get<Controls>().boosting;
-         ++tick) {
+    for (int tick = 0; tick < refillTicks + burnTicks + 5 && !ship.get<Controls>().boosting; ++tick) {
         flyWith(/*boost=*/true, 1);
     }
-    Require(ship.get<Controls>().boosting, "boost: another burn is available once it has refilled");
+    Require(ship.get<Controls>().boosting,
+            "capacitor: another burn is available once it has refilled");
 
     // Coasting spends nothing: the injector feeds the engine, so asking for the
     // overburn with the throttle shut is not a burn and does not cost one.
-    fly(/*thrust=*/false, /*boost=*/false, static_cast<int>(stats.boostCooldownTicks) + 10);
-    Require(ship.get<Controls>().boostSpent == 0, "boost: the tank refills to full");
+    fly(/*thrust=*/false, /*boost=*/false, refillTicks + 10);
+    Require(spent() == 0.f, "capacitor: the bank refills to full");
     fly(/*thrust=*/false, /*boost=*/true, 60);
-    Require(!ship.get<Controls>().boosting && ship.get<Controls>().boostSpent == 0,
-            "boost: holding it while coasting burns nothing");
+    Require(!ship.get<Controls>().boosting && spent() == 0.f,
+            "capacitor: holding it while coasting burns nothing");
 
-    // A tap costs a tap. Letting go leaves the rest of the tank where it was,
+    // A tap costs a tap. Letting go leaves the rest of the bank where it was,
     // rather than committing the whole burn and the whole wait.
-    const int tap = static_cast<int>(stats.boostTicks) / 4;
-    Require(tap > 0, "boost: the fitted tank is deep enough to tap");
+    const int tap = burnTicks / 4;
+    Require(tap > 0, "capacitor: the fitted bank is deep enough to tap");
     flyWith(/*boost=*/true, tap);
-    const std::uint16_t afterTap = ship.get<Controls>().boostSpent;
-    Require(afterTap > 0 && afterTap <= tap + 1, "boost: a tap spends only what it burned");
-    // Long enough for the refill's remainder to carry at least one tick of burn
-    // back (a full tank takes the whole cooldown, so a tick returns far less
-    // than a tick), and far short of the whole wait a spent tank would cost.
+    const float afterTap = spent();
+    Require(afterTap > 0.f && afterTap <= stats.boostDrainPerTick * static_cast<float>(tap + 1),
+            "capacitor: a tap spends only what it burned");
+    // Long enough for the refill to put a measurable amount back (a full bank
+    // takes the whole recharge, so a tick returns far less than a tick of burn
+    // costs), and far short of the whole wait an empty one would.
     flyWith(/*boost=*/false, 12);
-    Require(ship.get<Controls>().boostSpent < afterTap && ship.get<Controls>().boostSpent > 0,
-            "boost: letting go stops the drain and starts the refill where it stood");
+    Require(spent() < afterTap && spent() > 0.f,
+            "capacitor: letting go stops the drain and starts the refill where it stood");
 
     // The drive raises the cruise the hull's own thruster can reach -- and the
     // burn's ceiling stays a multiple of the hull's number rather than of the
@@ -3487,8 +3502,8 @@ void TestBoost()
         Require(driven.get<Transform>().vel.length() > hullMaxSpeed * 1.02,
                 "engine: a driven hull really does fly faster than a stock one's cap");
 
-        // The same hull with the burn as well: the ceiling is the higher of the
-        // two, and the drive is what decides it here.
+        // The same hull with a bank to burn as well: the ceiling is the higher
+        // of the two, and the drive is what decides it here.
         FitFree(catalog, *def, 1, driven.get_mut<ShipLoadout>());
         const ShipStats both = catalog.ResolveStats(driven.get<ShipLoadout>().levels);
         const ShipControlsSystem::Motion burning = ShipControlsSystem::MotionOf(
@@ -3982,9 +3997,9 @@ void TestAIUsesItsUpgrades()
                                                   /*velocity=*/Vector2d{1500., 0.});
         spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{-3000., 0.}, TeamId::Blue);
 
-        const UpgradeDef* boost = game.GetUpgradeCatalog().FindKind(UpgradeKind::Boost);
-        Require(boost != nullptr, "ai upgrades: the pool has a boost upgrade (setup check)");
-        FitFree(game.GetUpgradeCatalog(), *boost, 1, pilot.get_mut<ShipLoadout>());
+        const UpgradeDef* bank = game.GetUpgradeCatalog().FindKind(UpgradeKind::Capacitor);
+        Require(bank != nullptr, "ai upgrades: the pool has a capacitor upgrade (setup check)");
+        FitFree(game.GetUpgradeCatalog(), *bank, 1, pilot.get_mut<ShipLoadout>());
 
         bool burned = false;
         for (int tick = 0; tick < 600 && pilot.is_alive() && !burned; ++tick) {
@@ -4364,7 +4379,7 @@ void TestLoadoutReplication()
     refit.ammoBays[1] = AmmoPool::Cannon;
     SyncAmmoStoreCounts(refit);
     refit.levels.engine = 3;
-    refit.levels.boost = 2;
+    refit.levels.capacitor = 2;
     refit.levels.shield = 3;
     refit.levels.shieldType = ShieldType::Plating;
     refit.shieldHp = 42.f;
@@ -4409,7 +4424,8 @@ void TestLoadoutReplication()
                 "loadout replication: ...and the count of each that falls out of it");
     }
     Require(applied.levels.engine == refit.levels.engine, "loadout replication: the drive's rank");
-    Require(applied.levels.boost == refit.levels.boost, "loadout replication: the overburn's rank");
+    Require(applied.levels.capacitor == refit.levels.capacitor,
+            "loadout replication: the bank's rank");
     Require(applied.levels.shield == refit.levels.shield
                     && applied.levels.shieldType == refit.levels.shieldType,
             "loadout replication: the emitter fitted and its rank");
@@ -4424,8 +4440,8 @@ void TestLoadoutReplication()
     Require(got.cannon == expected.cannon && got.missile == expected.missile
                     && got.cannonCapacity == expected.cannonCapacity
                     && got.missileCapacity == expected.missileCapacity
-                    && got.boostTicks == expected.boostTicks,
-            "loadout replication: a client resolves the same weapons, magazines and burn");
+                    && got.capacitorCharge == expected.capacitorCharge,
+            "loadout replication: a client resolves the same weapons, magazines and bank");
 
     fs.Shutdown();
 }
@@ -5047,7 +5063,7 @@ int main()
     TestSunHeat();
     TestCheats();
     TestFriendlyFire();
-    TestBoost();
+    TestCapacitor();
     TestFactionDefeatAndWin();
     TestSectorGeneration();
     TestOwnBulletSuppression();

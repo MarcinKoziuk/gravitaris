@@ -137,7 +137,7 @@ public:
     //
     // `mount` is which weapon mount a gun or cannon is going into; the rank is
     // the ship's either way, but where it sits is not. Ignored by everything
-    // that isn't mounted (a shield, the overburn), and TechPick::NO_MOUNT on a
+    // that isn't mounted (a shield, the capacitor), and TechPick::NO_MOUNT on a
     // weapon line arms the first free mount -- what the cheat console and the
     // AI want, neither of which has a schematic in front of it.
     bool FitRank(const UpgradeDef& def, std::uint8_t rank, ShipLoadout& loadout,
@@ -185,7 +185,7 @@ public:
     [[nodiscard]] static MountArm ArmOf(const UpgradeDef& def);
 
     // Which family of holes a def goes into, or None for one that belongs to
-    // the ship as a whole (a shield, the overburn).
+    // the ship as a whole (a shield, the capacitor).
     [[nodiscard]] static SlotFamily FamilyOf(const UpgradeDef& def);
 
     // Whether a def goes into a numbered hole on the hull at all.

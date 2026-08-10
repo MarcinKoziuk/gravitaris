@@ -257,21 +257,34 @@ supply_cost = 10
 # game is tuned against. Rank III of a 1.12/1.08 engine is therefore 1.25x the
 # thrust and 1.17x the speed of stock, not 1.4x and 1.26x.
 #
-# Deliberately NOT a multiplier on the overburn: OVERBURN's max_speed_scale
-# stays a multiple of the hull's own [physics] max_speed, so one number still
-# bounds how fast anything in the game can ever travel. A hull whose engines
+# The overburn is the drive's too. Its real job is arriving: a hull bearing down
+# on a planet at cruise cannot brake in time on its own thrust, and this is what
+# turns that into a stop. The extra speed is the sweetener -- a burst of closing
+# or breaking speed in a fight -- and it is deliberately modest, since the whole
+# combat model assumes a ship can be caught.
+#
+# boost_thrust_scale is authored per rank rather than compounded: a burn is a
+# step change, and three chosen numbers read better than a curve. Nothing here
+# says how LONG a burn lasts -- that is the capacitor's, and a hull carrying no
+# bank cannot light the injector at all however good its motor is.
+#
+# boost_max_speed_scale is the one number that bounds a boosted hull: 1.2 of the
+# hull's own [physics] max_speed, and ranks never move it. A hull whose engines
 # already out-run that ceiling gets thrust out of a burn and no more speed.
 [[upgrade]]
 key = "engine"
 slots = ["engine"]
 icon = "eng"
 name = "ENGINE"
-description = "A bigger drive on the same hull. Gets there faster, and stops asking as much of the burn."
+description = "A bigger drive on the same hull. Gets there faster, and burns harder when you overrun it."
 kind = "engine_tier"
 max_level = 3
 weight = 1.0
 thrust_scale = 1.12
 max_speed_scale = 1.08
+boost_thrust_scale = [1.8, 2.2, 2.6]
+boost_max_speed_scale = 1.2
+boost_drain_per_second = 100.0
 # Rank I costs no Tech, which is what marks it as issued rather than researched:
 # every faction starts holding it (ResearchSystem::IssueFreeUnlocks) and every
 # hull spawns with it fitted, the same way it spawns with its light guns. A hull
@@ -331,37 +344,31 @@ capacity = 40
 tech_cost = [3, 6, 10]
 supply_cost = [14, 30, 52]
 
-# The overburn. Its real job is arriving: a hull bearing down on a planet at
-# cruise cannot brake in time on its own thrust, and this is what turns that
-# into a stop. The extra speed is the sweetener -- a burst of closing or
-# breaking speed in a fight -- and it is deliberately modest, since the whole
-# combat model assumes a ship can be caught.
+# The bank. Everything that draws power in flight draws it from here: the
+# drive's overburn, and every laser a hull is carrying. Nothing else decides how
+# long either can run, which is what makes this the fitting that turns two
+# separate purchases into working hardware -- a hull without it has a motor it
+# cannot overrun and emitters it cannot fire.
 #
-# duration_seconds is a TANK, not a timer: it only drains while the injector is
-# actually feeding a lit engine, so a burst costs what it burns and nothing
-# else, and cooldown_seconds is how long refilling an empty one takes.
-#
-# max_speed_scale is the one number that bounds a boosted hull: 1.2 of the
-# hull's own [physics] max_speed, and levels never move it. They deepen the
-# tank and shorten the refill instead.
+# It is a BANK, not a timer: it only drains while something is actually drawing
+# on it, so a burst costs what it burns and nothing else. recharge_seconds is
+# how long refilling an empty one takes, per rank -- authored rather than scaled
+# so a deeper bank is not forced to be a slower one.
 [[upgrade]]
-key = "overburn"
-# Its own hole, not the engine's: the drive and the injector are two fittings a
-# hull carries at once, and one category per non-mounted fitting is what keeps
-# the board able to tell which of them sits where.
+key = "capacitor"
+# The hole the injector used to sit in: same place on the schematic, and the
+# board still needs one category per non-mounted fitting to tell them apart.
 slots = ["thruster"]
-icon = "ovb"
-name = "OVERBURN"
-description = "Injector overrun: hard thrust, briefly past the redline. Burn it in bursts; it refills when you let off."
-kind = "boost"
+icon = "cap"
+name = "CAPACITOR"
+description = "Charge bank feeding the overburn and the lasers. Spend it in bursts; it fills back up when you let off."
+kind = "capacitor"
 requires = "engine"
 max_level = 3
 weight = 1.0
-thrust_scale = 2.5
-max_speed_scale = 1.2
-duration_seconds = 1.6
-cooldown_seconds = 9.0
-min_cooldown_seconds = 3.0
+# Against the drive's 100/s overburn: 1.6s, 2.8s and 4.2s of held burn.
+charge = [160.0, 280.0, 420.0]
+recharge_seconds = [9.0, 7.0, 5.0]
 tech_cost = [2, 4, 7]
 supply_cost = [10, 22, 38]
 

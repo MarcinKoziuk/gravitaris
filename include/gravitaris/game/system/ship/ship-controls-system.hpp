@@ -74,13 +74,13 @@ public:
     // slingshot still carries a ship past its engine's limit.
     static void ApplyMovement(cpBody* body, const ControlFlags& flags, double thrust, double maxSpeed);
 
-    // Runs the overburn's timers for one tick and reports what it grants.
-    // Both sides of the wire call this off the same input and the same
+    // Draws one tick against the capacitor and reports what the overburn
+    // grants. Both sides of the wire call this off the same input and the same
     // resolved stats -- the sim for every ship, ClientPrediction for the own
     // one -- so a boosted ship is predicted with the force it really got.
-    // Call exactly once per ship per simulated tick: it is what counts the
-    // burn and the cooldown down.
-    static BoostEffect AdvanceBoost(Controls& controls, const ShipStats& stats);
+    // Call exactly once per ship per simulated tick: it is what spends the
+    // bank and refills it.
+    static BoostEffect AdvanceCapacitor(Controls& controls, const ShipStats& stats);
 
     // The same grant without advancing anything, for replaying an already
     // -decided tick (ClientPrediction's reconciliation) where the timers

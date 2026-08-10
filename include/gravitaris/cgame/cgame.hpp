@@ -479,16 +479,16 @@ public:
     };
     [[nodiscard]] ShieldReadout GetShieldReadout();
 
-    // The overburn, for that same unit. `fitted` is false on a ship that has
-    // not collected it, which blanks the row; `fraction` is how much of a
-    // burn is in hand and `cooling` whether the injectors are still recovering
-    // (see UI::SetBoostReadout).
-    struct BoostReadout {
+    // The charge bank, for that same unit. `fitted` is false on a ship that
+    // has not collected it, which blanks the row; `fraction` is how much
+    // charge is in hand and `charging` whether it is filling back up (see
+    // UI::SetCapacitorReadout).
+    struct CapacitorReadout {
         bool fitted = false;
         float fraction = 0.f;
-        bool cooling = false;
+        bool charging = false;
     };
-    [[nodiscard]] BoostReadout GetBoostReadout();
+    [[nodiscard]] CapacitorReadout GetCapacitorReadout();
 
     // What the player can spend, and whether the yard is open to them. Only
     // the own ship's: a spectated unit's purse is not the player's to spend,

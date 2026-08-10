@@ -140,18 +140,18 @@
 				background-color: #fc6;
 			}
 
-			/* The overburn, on the same track: orange while there is a burn
-			   to spend (matching the exhaust it lights), dim while the
-			   injectors cool. Blanked on a ship that hasn't collected the
+			/* The charge bank, on the same track: orange while there is
+			   something to spend (matching the exhaust it lights), dim while
+			   it fills back up. Blanked on a ship that hasn't collected the
 			   upgrade, exactly as the shield bar is. */
-			div#boost_fill
+			div#capacitor_fill
 			{
 				height: 100%;
 				width: 0%;
 				background-color: #f73;
 			}
 
-			div#boost_fill.cooling
+			div#capacitor_fill.charging
 			{
 				background-color: #644;
 			}
@@ -572,11 +572,11 @@
 
 				<div class="stat">
 					<div class="stat_head">
-						<span>Boost</span>
-						<span id="boost_value" class="stat_value readout">--</span>
+						<span>Power</span>
+						<span id="capacitor_value" class="stat_value readout">--</span>
 					</div>
 					<div class="bar_track">
-						<div id="boost_fill"></div>
+						<div id="capacitor_fill"></div>
 					</div>
 				</div>
 

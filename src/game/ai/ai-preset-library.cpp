@@ -172,7 +172,7 @@ static void ReadFit(const toml::table& t, FitWeights& w)
     if (const auto v = t["ammo"].value<float>()) w.ammo = *v;
     if (const auto v = t["engine"].value<float>()) w.engine = *v;
     if (const auto v = t["shield"].value<float>()) w.shield = *v;
-    if (const auto v = t["boost"].value<float>()) w.boost = *v;
+    if (const auto v = t["capacitor"].value<float>()) w.capacitor = *v;
 }
 
 static void ReadGuidance(const toml::table& t, GuidanceParams& g)

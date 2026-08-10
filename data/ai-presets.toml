@@ -33,7 +33,7 @@ flight      = { heading_kp = 7.5, heading_kd = 1.3, turn_deadband = 0.2, aim_tol
 strategy    = { dogfight = 1.3, claim = 0.8, attack_complex = 1.5, intercept_freighter = 1.1, defend = 0.6, rearm = 0.7 }
 # Buys guns and the burn to bring them into range. Shields are for pilots who
 # expect to be hit, and it does not spend the fight expecting that.
-fit         = { cannon = 1.5, weapon = 1.3, boost = 1.4, fire_rate = 1.2, shield = 0.5, missile = 0.8 }
+fit         = { cannon = 1.5, weapon = 1.3, capacitor = 1.4, fire_rate = 1.2, shield = 0.5, missile = 0.8 }
 
 [[preset]]
 key = "cautious"
@@ -46,7 +46,7 @@ flight      = { heading_kp = 5.0, heading_kd = 1.8, turn_deadband = 0.3, aim_tol
 strategy    = { dogfight = 0.7, claim = 1.3, attack_complex = 0.6, intercept_freighter = 0.8, defend = 1.5, rearm = 1.4 }
 # Everything that keeps a hull alive first, and a purse deep enough that it is
 # never caught unable to rearm.
-fit         = { shield = 1.8, engine = 1.3, boost = 1.1, cannon = 0.6, fire_rate = 0.8 }
+fit         = { shield = 1.8, engine = 1.3, capacitor = 1.1, cannon = 0.6, fire_rate = 0.8 }
 
 # Three-round bursts, tight together, with a real cooldown after -- reads as a
 # sniper's controlled burst rather than a steady drip. Picks off soft targets:
@@ -66,7 +66,7 @@ flight      = { aim_tolerance = 0.2, min_burn_ticks = 24, min_coast_ticks = 22 }
 strategy    = { dogfight = 0.9, claim = 1.0, attack_complex = 0.7, intercept_freighter = 1.5, defend = 0.9, rearm = 1.2 }
 # Reach, and the rounds to use it with: the rack outranges the gun, and spare
 # rounds matter to a pilot whose whole method is not missing.
-fit         = { missile = 1.6, weapon = 1.4, ammo = 1.3, fire_rate = 1.1, cannon = 0.7, boost = 0.6 }
+fit         = { missile = 1.6, weapon = 1.4, ammo = 1.3, fire_rate = 1.1, cannon = 0.7, capacitor = 0.6 }
 
 [[preset]]
 key = "reckless"
@@ -84,4 +84,4 @@ flight      = { heading_kp = 8.0, turn_deadband = 0.15, min_burn_ticks = 7, min_
 strategy    = { dogfight = 1.5, claim = 0.7, attack_complex = 1.6, intercept_freighter = 1.2, defend = 0.3, rearm = 0.0 }
 # Spends every last Supply on hitting harder, and buys no shield at all -- the
 # same temperament its flee_health_fraction = 0 already states.
-fit         = { cannon = 1.8, boost = 1.6, weapon = 1.3, fire_rate = 1.3, shield = 0.0, engine = 0.0 }
+fit         = { cannon = 1.8, capacitor = 1.6, weapon = 1.3, fire_rate = 1.3, shield = 0.0, engine = 0.0 }
