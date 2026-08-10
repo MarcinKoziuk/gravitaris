@@ -98,6 +98,36 @@ static constexpr double SHOT_CLEARANCE = 15.0;
 // is still clear on arrival.
 static constexpr double RING_GUARD_FACTOR = 4.0;
 
+// The same widening for the station's *column* -- the bearings under it that
+// nothing can climb through. A ship crosses the ring in a couple of seconds
+// and the station covers about 0.2 rad in that time, well inside twice its
+// own arc; going wider would divert climbs that were never going to meet it.
+static constexpr double RING_COLUMN_FACTOR = 2.0;
+
+// How far outside the ring a descent onto a deck has to start, on top of the
+// station's own extent. The deck is the outward face and LandOnBody closes on
+// the station's centre in a straight line, so the last of an approach has to
+// already be radial: from anywhere else that line ends on an arm.
+static constexpr double DECK_APPROACH_CLEARANCE = 20.0;
+
+// Bearing offset from the station, seen from its planet, within which that
+// descent counts as radial.
+static constexpr double DECK_BEARING_TOLERANCE = 0.05;
+
+// How near the hold altitude counts as being at it -- the leg that climbs or
+// falls to it is done when the ship is this close, since holding a radius
+// exactly against a body that is still pulling is not something to wait for.
+static constexpr double DECK_HOLD_BAND = 60.0;
+
+// Progress watchdog. A Land or Depart that has not closed its objective by
+// WEDGE_PROGRESS units in WEDGE_TICKS is not flying, it is leaning on
+// something -- a real approach covers that in a fraction of the time. The
+// answer is tangential whatever the obstacle is, since everything solid in a
+// gravity well rides a circle around it.
+static constexpr double WEDGE_PROGRESS = 20.0;
+static constexpr std::uint16_t WEDGE_TICKS = 600;   // 10s at the fixed tick
+static constexpr std::uint16_t UNWEDGE_TICKS = 120; // 2s of sliding
+
 static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Vector2d& relVel,
                                                 double projectileSpeed);
 static double DepartureRadius(flecs::entity site);
@@ -207,6 +237,7 @@ void AIPilotSystem::Update(std::uint64_t step)
         flecs::entity entity;
         std::uint32_t planetNetId = 0;
         Vector2d pos;
+        Vector2d vel;
         double orbitRadius = 0.0;
         double radius = 0.0;
         double direction = 1.0;
@@ -216,8 +247,8 @@ void AIPilotSystem::Update(std::uint64_t step)
                         const NetId& netId, const PlanetOrbitAttachment& orbit) {
         sitePlanetOf.emplace(netId.value, orbit.planetNetId);
         if (s.type != StructureType::HighPort) return;
-        rings.push_back(Ring{ent, orbit.planetNetId, transf.pos, orbit.radius, ObstacleRadius(ent),
-                             orbit.direction});
+        rings.push_back(Ring{ent, orbit.planetNetId, transf.pos, transf.vel, orbit.radius,
+                             ObstacleRadius(ent), orbit.direction});
     });
 
     // A descent is radial, and a High Port rides a ring squarely across it.
@@ -255,6 +286,105 @@ void AIPilotSystem::Update(std::uint64_t step)
             const double entryBearing = stationBearing - ring.direction * guard;
             return body->pos
                     + Vector2d{std::cos(entryBearing), std::sin(entryBearing)} * ring.orbitRadius;
+        }
+        return std::nullopt;
+    };
+
+    const auto ringOf = [&rings](std::uint32_t planetNetId) -> const Ring* {
+        for (const Ring& ring : rings) {
+            if (ring.planetNetId == planetNetId) return &ring;
+        }
+        return nullptr;
+    };
+
+    // How far either side of the station its column reaches, as a bearing
+    // from the planet's centre.
+    const auto columnGuard = [](const Ring& ring) {
+        const double halfWidth = std::asin(std::clamp(
+                (ring.radius + SHIP_LANDING_CLEARANCE) / ring.orbitRadius, 0.0, 1.0));
+        return std::min(halfWidth * RING_COLUMN_FACTOR, PI / 2.0);
+    };
+
+    // Bearing of the ship from the planet, measured against the station's.
+    const auto stationOffset = [](const Transform& shipTransf, const Source& planet, const Ring& ring) {
+        const Vector2d toShip = shipTransf.pos - planet.pos;
+        const Vector2d toStation = ring.pos - planet.pos;
+        return WrapToPi(std::atan2(toShip.y(), toShip.x())
+                        - std::atan2(toStation.y(), toStation.x()));
+    };
+
+    // The column a High Port makes unusable: the bearings under it, at any
+    // radius below its ring. A climb started in there ends against the
+    // station's underside -- EvadeBody is radial and knows only gravity
+    // sources, so nothing turns it aside -- and the ship then has neither a
+    // deck to be parked on nor room to leave.
+    //
+    // The way out is sideways at the altitude already held. A straight chord
+    // across the arc cuts back toward the surface, which from low down is the
+    // planet; the tangent cannot. The nearer edge wins, since a fighter
+    // crosses the arc several times faster than the station sweeps it; dead
+    // under it, the side the station is travelling away from.
+    const auto columnEscape = [&](const Transform& shipTransf, const Source& planet, const Ring& ring,
+                                  const GuidanceParams& guidance) -> std::optional<Vector2d> {
+        const Vector2d toShip = shipTransf.pos - planet.pos;
+        const double shipRadius = toShip.length();
+        if (shipRadius > ring.orbitRadius || shipRadius < 1e-6) return std::nullopt;
+        if ((ring.pos - planet.pos).length() < 1e-6) return std::nullopt;
+
+        const double delta = stationOffset(shipTransf, planet, ring);
+        if (std::abs(delta) > columnGuard(ring)) return std::nullopt;
+
+        const double side = std::abs(delta) > 1e-6 ? (delta > 0.0 ? 1.0 : -1.0) : -ring.direction;
+        return OrbitBody(shipTransf, planet.pos, planet.mass, shipRadius, side, guidance) + planet.vel;
+    };
+
+    // Docking with a deck, in the order the geometry demands: out of the
+    // station's column, to an altitude clear of its arms, and round the ring
+    // to sit over it. Only then is LandOnBody's straight closing line the
+    // radial one that ends on the deck rather than on an arm, which is why
+    // this returns nullopt only once the descent is the right thing to fly.
+    //
+    // The legs are stepped through rather than re-derived: each ends
+    // somewhere the next is safe to start from, and a seam tested afresh
+    // every tick is a seam a pilot sits on. Only falling back inside the
+    // station's envelope starts it over.
+    const auto deckApproach = [&](const Transform& shipTransf, const Source& planet, const Ring& ring,
+                                  AIPilot& pilot) -> std::optional<Vector2d> {
+        const Vector2d toShip = shipTransf.pos - planet.pos;
+        const double shipRadius = toShip.length();
+        if (shipRadius < 1e-6 || (ring.pos - planet.pos).length() < 1e-6) return std::nullopt;
+
+        const double clearRadius = ring.orbitRadius + ring.radius;
+        const double holdRadius = clearRadius + DECK_APPROACH_CLEARANCE;
+        const std::optional<Vector2d> escape =
+                columnEscape(shipTransf, planet, ring, pilot.guidance);
+
+        if (pilot.dockSite != ring.entity || escape || shipRadius < clearRadius) {
+            pilot.dockSite = ring.entity;
+            pilot.dockStage = 0;
+        }
+        if (escape) return *escape;
+
+        // Leg 1: to the hold altitude on the bearing it already has, which
+        // is radial, and so the one crossing nothing can be standing in.
+        if (pilot.dockStage == 0 && std::abs(shipRadius - holdRadius) < DECK_HOLD_BAND) {
+            pilot.dockStage = 1;
+        }
+        if (pilot.dockStage == 0) {
+            return GotoPoint(shipTransf, planet.pos + toShip * (holdRadius / shipRadius),
+                             pilot.guidance) + planet.vel;
+        }
+
+        // Leg 2: round to the deck, flown as an arc. A straight line between
+        // two points on the hold circle cuts inside it, and inside it is the
+        // station.
+        const double delta = stationOffset(shipTransf, planet, ring);
+        if (pilot.dockStage == 1 && std::abs(delta) < DECK_BEARING_TOLERANCE) {
+            pilot.dockStage = 2;
+        }
+        if (pilot.dockStage == 1) {
+            return OrbitBody(shipTransf, planet.pos, planet.mass, holdRadius,
+                             delta > 0.0 ? -1.0 : 1.0, pilot.guidance) + planet.vel;
         }
         return std::nullopt;
     };
@@ -410,6 +540,7 @@ void AIPilotSystem::Update(std::uint64_t step)
             double gravity = 0.0;     // pull at the touchdown point, units/s^2
             flecs::entity well;       // the body a descent must not be talked out of
             std::uint32_t planetNetId = 0;
+            bool deck = false;        // a station's deck rather than a surface
         };
 
         LandingTarget landingTarget;
@@ -430,7 +561,8 @@ void AIPilotSystem::Update(std::uint64_t step)
                                         * gravityMultiplier / (pullRadius * pullRadius)
                                          : 0.0,
                         wellEntity,
-                        SitePlanetNetId(subject)};
+                        SitePlanetNetId(subject),
+                        orbit != nullptr};
             }
         }
 
@@ -734,6 +866,37 @@ void AIPilotSystem::Update(std::uint64_t step)
             }
         }
 
+        // How much of this tick's objective is still ahead of the pilot, for
+        // the two behaviors that have one. A stall in that figure is the only
+        // evidence available that a ship is stuck: nothing reports a contact,
+        // and leaning on a station's hull looks like flying from in here.
+        double remaining = -1.0;
+        if (pilot.behavior == AIBehavior::Land && landingTarget.valid) {
+            remaining = (landingTarget.pos - transf.pos).length();
+        }
+        else if (pilot.behavior == AIBehavior::Depart) {
+            if (const Source* site = findSource(pilot.departureSite)) {
+                remaining = DepartureRadius(pilot.departureSite) - (transf.pos - site->pos).length();
+            }
+        }
+
+        // A pilot with nothing to close -- parked, or off doing something
+        // else -- is not stuck, and neither is one that has just taken up a
+        // fresh objective. Either also calls off a slide already underway.
+        if (remaining < 0.0 || pilot.wedgeBest < 0.0 || pilot.behavior != previous) {
+            pilot.wedgeTicks = 0;
+            pilot.wedgeBest = remaining;
+            if (remaining < 0.0) pilot.unwedgeTicks = 0;
+        }
+        else if (remaining < pilot.wedgeBest - WEDGE_PROGRESS) {
+            pilot.wedgeTicks = 0;
+            pilot.wedgeBest = remaining;
+        }
+        else if (pilot.unwedgeTicks == 0 && ++pilot.wedgeTicks > WEDGE_TICKS) {
+            pilot.wedgeTicks = 0;
+            pilot.unwedgeTicks = UNWEDGE_TICKS;
+        }
+
         Vector2d desiredVel = transf.vel; // Idle: no correction
 
         // Attitude to hold once there is no burn left to steer by; unset
@@ -745,7 +908,12 @@ void AIPilotSystem::Update(std::uint64_t step)
         switch (pilot.behavior) {
             case AIBehavior::Evade:
                 if (const Source* site = findSource(pilot.evadeSite)) {
-                    desiredVel = EvadeBody(transf, site->pos, site->vel, pilot.guidance);
+                    const Ring* ring = ringOf(SitePlanetNetId(pilot.evadeSite));
+                    const std::optional<Vector2d> escape =
+                            ring ? columnEscape(transf, *site, *ring, pilot.guidance) : std::nullopt;
+                    desiredVel = escape
+                            ? *escape
+                            : EvadeBody(transf, site->pos, site->vel, pilot.guidance);
                 }
                 break;
             case AIBehavior::Intercept:
@@ -800,22 +968,40 @@ void AIPilotSystem::Update(std::uint64_t step)
                 }
                 break;
             case AIBehavior::Depart:
-                if (pilot.departureSite.is_alive()) {
-                    const Transform& site = pilot.departureSite.get<Transform>();
-                    desiredVel = EvadeBody(transf, site.pos, site.vel, pilot.guidance);
+                if (const Source* site = findSource(pilot.departureSite)) {
+                    const Ring* ring = ringOf(SitePlanetNetId(pilot.departureSite));
+                    const std::optional<Vector2d> escape =
+                            ring ? columnEscape(transf, *site, *ring, pilot.guidance) : std::nullopt;
+                    desiredVel = escape
+                            ? *escape
+                            : EvadeBody(transf, site->pos, site->vel, pilot.guidance);
                 }
                 break;
             case AIBehavior::Land:
                 if (landingTarget.valid) {
+                    // A deck is approached, a surface is descended onto. The
+                    // one has a station squarely in the way of every line to
+                    // it that isn't radial; the other only has to get past
+                    // whatever station happens to be over it.
+                    const Source* well = findSource(landingTarget.well);
+                    const Ring* ring = ringOf(landingTarget.planetNetId);
+                    std::optional<Vector2d> staged;
+                    if (landingTarget.deck && well && ring) {
+                        staged = deckApproach(transf, *well, *ring, pilot);
+                    }
+
                     const std::optional<Vector2d> entry =
-                            ringEntryPoint(transf.pos, landingTarget.well, landingTarget.planetNetId,
-                                           pilot.order.subject);
-                    desiredVel = entry
-                            ? GotoPoint(transf, *entry, pilot.guidance)
-                            : LandOnBody(transf, landingTarget.pos, landingTarget.vel,
-                                         landingTarget.gravity,
-                                         landingTarget.radius + SHIP_LANDING_CLEARANCE,
-                                         pilot.guidance);
+                            landingTarget.deck
+                            ? std::nullopt
+                            : ringEntryPoint(transf.pos, landingTarget.well,
+                                             landingTarget.planetNetId, pilot.order.subject);
+
+                    desiredVel = staged ? *staged
+                            : entry     ? GotoPoint(transf, *entry, pilot.guidance)
+                                        : LandOnBody(transf, landingTarget.pos, landingTarget.vel,
+                                                     landingTarget.gravity,
+                                                     landingTarget.radius + SHIP_LANDING_CLEARANCE,
+                                                     pilot.guidance);
 
                     // On the pad the attitude that matters is up -- legs to
                     // the ground, which is what LandingStateSystem's
@@ -825,9 +1011,11 @@ void AIPilotSystem::Update(std::uint64_t step)
                     // instead: for an orbiting planet a ~80 unit/s vector
                     // along its orbit, i.e. a parked pilot spends the whole
                     // stay chasing an attitude taken from the pad's direction
-                    // of travel rather than settling on its legs.
+                    // of travel rather than settling on its legs. Only on the
+                    // descent itself: the stages before it are crossings, and
+                    // a crossing is flown nose-first.
                     const Vector2d r = transf.pos - landingTarget.pos;
-                    if (r.length() > 1e-6) {
+                    if (!staged && r.length() > 1e-6) {
                         coastFacing = r.normalized();
                         hasCoastFacing = true;
                     }
@@ -846,6 +1034,22 @@ void AIPilotSystem::Update(std::uint64_t step)
                 break;
             case AIBehavior::Idle:
                 break;
+        }
+
+        // Sliding loose, over the top of whatever the behavior asked for --
+        // what it asked for is what has the ship pinned, and asking for it
+        // harder is what it has been doing.
+        if (pilot.unwedgeTicks > 0) {
+            --pilot.unwedgeTicks;
+            if (const Source* body = nearestSource(transf.pos)) {
+                const double radius = (transf.pos - body->pos).length();
+                if (radius > 1e-6) {
+                    desiredVel = OrbitBody(transf, body->pos, body->mass, radius,
+                                           (ent.id() & 1u) != 0u ? 1.0 : -1.0, pilot.guidance)
+                            + body->vel;
+                    hasCoastFacing = false;
+                }
+            }
         }
 
         // The lead solution on this pilot's target, when it has one in range:

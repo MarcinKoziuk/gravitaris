@@ -2334,6 +2334,120 @@ void TestHighPortDeck()
     fs.Shutdown();
 }
 
+// Everything a pilot has to do about the station being solid. Its deck is one
+// face of it, the outward one, and it rides a ring squarely over every radial
+// path on the planet -- so the column beneath it is somewhere no climb can go
+// and no descent can come from.
+void TestHighPortApproach()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    // A Blue home planet with the full complex on it, plus wherever its
+    // station has got to on the first tick.
+    struct Complex {
+        flecs::entity planet;
+        flecs::entity port;
+        Vector2d center;
+        double radius = 0.;
+    };
+    const auto build = [](Game& game) {
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        Complex c;
+        c.planet = spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 1e-9,
+                                               800., 1.0, 0.0);
+        BuildStartingComplex(spawner, c.planet, TeamId::Blue);
+        game.Update();
+        game.GetRegistry().each([&](flecs::entity ent, const Structure& s, const PlanetOrbitAttachment&) {
+            if (s.type == StructureType::HighPort && !c.port.is_alive()) c.port = ent;
+        });
+        c.center = c.planet.get<Transform>().pos;
+        c.radius = c.planet.get<Planet>().radius * c.planet.get<Transform>().scale.x();
+        return c;
+    };
+
+    // Leaving: a pilot standing on the surface directly under the station,
+    // with business elsewhere. The departure climb is radial and the station
+    // is on it, so this used to end with the hull pressed against the deck's
+    // underside burning outward for the rest of the match.
+    {
+        Game game(fs);
+        Complex c = build(game);
+        const Vector2d up = (c.port.get<Transform>().pos - c.center).normalized();
+
+        flecs::entity ship = game.GetEntitySpawner().SpawnAIShip(
+                "models/ships/fighter-1"_id, c.center + up * (c.radius + 13.),
+                game.GetAIPresets().Default(), Vector2d{}, std::atan2(up.x(), -up.y()), TeamId::Blue);
+        game.GetEntitySpawner().SpawnPlayer("models/ships/fighter-1"_id,
+                                            c.center + Vector2d{40000., 0.}, TeamId::Red);
+
+        double best = 0.;
+        for (int tick = 0; tick < 3600 && ship.is_alive(); ++tick) {
+            game.Update();
+            if (!ship.is_alive()) break;
+            best = std::max(best, (ship.get<Transform>().pos - c.center).length());
+        }
+        Require(ship.is_alive(), "highport: a pilot lifting off under the station survives it");
+        Require(best > c.radius + 260.,
+                "highport: ...and climbs clear of the complex instead of pinning itself "
+                "against the station's underside");
+    }
+
+    // Arriving from inside the ring, which is where a pilot that has just
+    // taken off from the surface -- or been pushed there -- starts from. The
+    // deck is above and behind it, and the way to it is out of the column
+    // first.
+    {
+        Game game(fs);
+        Complex c = build(game);
+        const Vector2d up = (c.port.get<Transform>().pos - c.center).normalized();
+
+        flecs::entity ship = game.GetEntitySpawner().SpawnAIShip(
+                "models/ships/fighter-1"_id, c.center + up * (c.radius + 50.),
+                game.GetAIPresets().Default(), Vector2d{}, 0.0, TeamId::Blue);
+        Damageable& hull = ship.get_mut<Damageable>();
+        hull.hp = hull.maxHp * 0.1f; // hurt: home is the nearest yard, and that is the port
+
+        bool served = false;
+        for (int tick = 0; tick < 5400 && ship.is_alive() && !served; ++tick) {
+            game.Update();
+            served = ship.is_alive() && ship.get<ResearchAccess>().atLab;
+        }
+        Require(ship.is_alive(), "highport: a pilot sent to the deck from inside the ring survives");
+        Require(served,
+                "highport: ...and gets its feet on the deck, rather than wedging under the "
+                "station between it and the planet");
+    }
+
+    // The same trip flown from outside, across the ring's own bearing: the
+    // approach that already worked, and has to keep working.
+    {
+        Game game(fs);
+        Complex c = build(game);
+        const Vector2d out = (c.port.get<Transform>().pos - c.center).normalized();
+        const Vector2d across{-out.y(), out.x()};
+
+        flecs::entity ship = game.GetEntitySpawner().SpawnAIShip(
+                "models/ships/fighter-1"_id, c.center + across * 1500., game.GetAIPresets().Default(),
+                Vector2d{}, 0.0, TeamId::Blue);
+        Damageable& hull = ship.get_mut<Damageable>();
+        hull.hp = hull.maxHp * 0.1f;
+
+        bool served = false;
+        for (int tick = 0; tick < 5400 && ship.is_alive() && !served; ++tick) {
+            game.Update();
+            served = ship.is_alive() && ship.get<ResearchAccess>().atLab;
+        }
+        Require(ship.is_alive(), "highport: a pilot crossing to the deck from outside survives");
+        Require(served, "highport: ...and sets down on it");
+    }
+
+    fs.Shutdown();
+}
+
 void TestResearch()
 {
     FilesystemPhysFS fs;
@@ -4798,6 +4912,7 @@ int main()
     TestPhysicsSlotStability();
     TestShields();
     TestHighPortDeck();
+    TestHighPortApproach();
     TestResearch();
     TestResearchQueue();
     TestSunIsLethal();

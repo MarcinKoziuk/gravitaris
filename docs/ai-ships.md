@@ -445,6 +445,62 @@ deck is now the only way to refit at a port — the "hold station alongside and
 it counts" envelope is gone, for players as well as AI — so how matchable
 that deck is has to hold up by hand.
 
+*A station is solid from every side (2026-08-09), fixing "AI ships wedge
+themselves between the planet and the High Port and stay there".* The station
+was an obstacle in exactly one place — `ringEntryPoint`, on a descent onto the
+planet beneath it — and that helper declines the two cases that matter: it
+skips the ring when the ring **is** the destination, and it skips a ship
+already inside the ring. Everything else in the pilot, `EvadeBody` included,
+sees only gravity sources. Two permanent wedges came out of that, both
+reproduced in the harness before anything was changed:
+
+- **Leaving.** A departure climb is radial and a High Port covers about 9% of
+  the ring it rides. A pilot lifting off the surface under one flew into its
+  underside and burned outward against it for the rest of the match —
+  `LandingState` reads deck contact at matched velocity as landed (a deck
+  skips the uprightness test), so it simultaneously believed it was parked and
+  was trying to leave. No hull damage, so nothing ever broke the deadlock.
+- **Arriving.** `SelectHomeSite` prefers the port, `LandOnBody` closes on the
+  station's *centre* in a straight line, and the deck is its outward face nine
+  units out against a hull that reaches seventy. A pilot below the ring
+  therefore drove into the belly and pressed there: never landed, so never
+  `atLab`, so the refit never completed and `Rearm` never released. A 20-minute
+  match with every side fielded had a leader stuck like this for 40575
+  consecutive ticks — 11 minutes, and still there when the run ended.
+
+Both are now expressed in terms of the station's *column* — the bearings under
+it, at any radius below its ring. Nothing may climb through one and no descent
+may come out of one, so `Evade`, `Depart` and a deck approach all slide
+tangentially out first, at the altitude already held: a straight chord across
+the arc cuts back toward the surface, and from low down the surface is the
+planet. The nearer edge wins, since a fighter crosses the arc several times
+faster than the station sweeps it.
+
+Docking is then a sequence of legs — clear the column, radial to a hold
+altitude outside the station's own envelope, arc round to sit over the deck,
+descend — and which leg is being flown is *remembered* (`AIPilot::dockStage`)
+rather than re-derived. Both intermediate versions of this that tested the
+geometry afresh each tick dithered on a seam instead of crossing it: first on
+the hold radius, where the climb's target and the test against it were the same
+number, then on the quarter-turn bearing, where a pilot orbited the ring for
+40 seconds without ever closing on it. The legs only advance; falling back
+inside the station's envelope is the one thing that starts them over.
+
+Behind all of it, a progress watchdog: a `Land` or `Depart` that has not closed
+its objective by `WEDGE_PROGRESS` in `WEDGE_TICKS` is leaning on something, and
+slides tangentially for two seconds before trying again. It is a net, not a
+mechanism — over the same 20-minute match it fired 14 times across six sides —
+but the failure mode it catches is *permanent*, which is the only reason
+either of the bugs above was visible at all.
+
+The same match now tops out at 365 consecutive ticks in the gap (6.1 s, i.e.
+traffic passing through). Still open, and pre-existing: a descent onto a *planet*
+from the far side of it flies a straight line at the site with the well
+-avoidance reflex deliberately exempt, so the line runs through the planet;
+and deck contact from underneath still reads as a landing (`LandingStateSystem`
+asks a deck for velocity match and nothing else), which the column rule now
+prevents rather than corrects.
+
 **Phase 6 — strategy layer.** `AIStrategy` per slice-components (build/attack
 decisions) issuing goals to pilots. Separate cadence (every ~1 s, not every
 tick). Design when slice-one economy exists.

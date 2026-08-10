@@ -238,6 +238,25 @@ struct AIPilot {
     // The planet this pilot is heading home to (hurt, or shopping). Held so
     // the trip survives the decision cadence that started it.
     flecs::entity homeSite;
+
+    // How far through a docking with a High Port this pilot is, and which one
+    // (see AIPilotSystem's deckApproach). A deck is one face of a solid thing
+    // on a ring, so reaching it is a sequence of legs rather than a heading,
+    // and which leg is being flown has to be remembered: re-derived from
+    // geometry every tick, a pilot dithers on the seam between two of them
+    // instead of crossing it.
+    flecs::entity dockSite;
+    std::uint8_t dockStage = 0;
+
+    // Progress watchdog (AIPilotSystem's WEDGE_TICKS). Land and Depart each
+    // have a distance they are meant to be closing; a pilot that stops
+    // closing it is pressed against something no guidance behavior models,
+    // and slides tangentially for unwedgeTicks before trying again. The
+    // guidance layer sees only gravity sources, so a station's hull is the
+    // one that puts a ship here.
+    double wedgeBest = -1.0;
+    std::uint16_t wedgeTicks = 0;
+    std::uint16_t unwedgeTicks = 0;
 };
 
 } // namespace Gravitaris

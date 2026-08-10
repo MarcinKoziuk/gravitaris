@@ -237,22 +237,17 @@ while the pool was in scope and was never explicitly withdrawn — the withdrawa
 was worded as being about AIs. Ask before either building the pool for it or
 quietly dropping it.
 
-## 4. Bug: AI ships get stuck under the High Port
+## 4. Bug: AI ships get stuck under the High Port — DONE 2026-08-09
 
-**Deferred deliberately** — the owner asked for it later, and it wants a fresh
-session rather than being bolted onto UI work.
-
-Reported symptom: AI ships wedge themselves *between the planet and the High
-Port* and stay there. The guess in the report is that they are trying to restock.
-Nothing has been investigated yet; treat that guess as unconfirmed.
-
-Where to start looking: `AIPilotSystem` / `AIStrategySystem`, the `Rearm` goal
-and the `Land` order it issues, and `LandOnBody` guidance. A High Port is a
-station in orbit rather than a surface pad, and `docs/ai-ships.md` records that
-`Rearm` lands a leader at its "nearest home planet" — a station parked above a
-planet is a plausible way for "nearest" and "landable" to disagree. `git log`
-also shows a recent fix titled *"a pad is a place, not a planet"*, which is
-adjacent enough to be worth reading first.
+Reproduced, fixed and covered by `TestHighPortApproach`. The restock guess in
+the original report was half right: there were two independent permanent
+wedges, one on the way in (a descent onto the deck flown from inside the ring,
+which is what a stalled refit looks like) and one on the way out (a radial
+departure climb into the station's underside). Neither was about `Rearm` or
+about "nearest" and "landable" disagreeing — both were the station being an
+obstacle only inside `ringEntryPoint`, which declines exactly the two cases
+that matter. See *"A station is solid from every side"* in `docs/ai-ships.md`
+for the mechanisms, the numbers, and what is still open.
 
 ## 5. Bug: remote structures replicate no maxHp
 
