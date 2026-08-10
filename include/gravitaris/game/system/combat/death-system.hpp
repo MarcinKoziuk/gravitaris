@@ -24,6 +24,7 @@ private:
 
     void Explode(flecs::entity ship, std::uint64_t step);
     void ReportDeath(flecs::entity ship);
+    static void LogStructureDeath(flecs::entity entity, std::uint64_t step);
 
 public:
     DeathSystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue);

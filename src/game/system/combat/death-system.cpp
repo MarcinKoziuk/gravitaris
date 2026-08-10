@@ -5,12 +5,14 @@
 #include <Magnum/Math/Vector2.h>
 
 #include <gravitaris/gravitaris.hpp>
+#include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/util/splitmix.hpp>
+#include <gravitaris/game/event/death-report.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/system/combat/death-system.hpp>
@@ -19,6 +21,9 @@ namespace Gravitaris {
 
 using Magnum::Vector2d;
 
+
+static const char* StructureTypeName(StructureType type);
+static const char* DamageCauseName(DamageCause cause);
 
 static constexpr int FRAG_COUNT = 12;
 static constexpr double FRAG_SPEED_MIN = 120.0;
@@ -52,6 +57,7 @@ void DeathSystem::Update(std::uint64_t step)
     });
 
     for (flecs::entity ship : dead) {
+        LogStructureDeath(ship, step);
         ReportDeath(ship);
         Explode(ship, step);
         ship.destruct();
@@ -104,6 +110,53 @@ void DeathSystem::Explode(flecs::entity ship, std::uint64_t step)
                 "models/bullets/bullet-0"_id, pos, vel, /*sensor=*/true);
         frag.emplace<Bullet>(FRAG_LIFETIME_SECONDS, TeamId::None, FRAG_DAMAGE);
     }
+}
+
+// A structure is absent from the kill feed by design (see ReportDeath), and
+// carries no other trace of having gone: this is the only record that a
+// complex came down, and which of the two silent causes -- the sector or
+// somebody's guns -- took it.
+void DeathSystem::LogStructureDeath(flecs::entity entity, std::uint64_t step)
+{
+    const Structure* structure = entity.try_get<Structure>();
+    if (!structure) return;
+
+    const Team* team = entity.try_get<Team>();
+    const Damageable* dmg = entity.try_get<Damageable>();
+    const Transform* transf = entity.try_get<Transform>();
+
+    LOG(info) << "structure down: " << StructureTypeName(structure->type) << " ("
+              << (team ? TeamDisplayName(team->id) : "unowned") << ") at ("
+              << (transf ? transf->pos.x() : 0.) << ", " << (transf ? transf->pos.y() : 0.)
+              << ") tick " << step << ", cause " << (dmg ? DamageCauseName(dmg->lastDamageCause) : "?")
+              << ", last hit by " << (dmg ? TeamDisplayName(dmg->lastDamageTeam) : "") << " ("
+              << (dmg ? dmg->lastDamagePilotId : 0u) << ")";
+}
+
+static const char* StructureTypeName(StructureType type)
+{
+    switch (type) {
+    case StructureType::Base: return "Base";
+    case StructureType::Colony: return "Colony";
+    case StructureType::Lab: return "Lab";
+    case StructureType::CommCenter: return "CommCenter";
+    case StructureType::HighPort: return "HighPort";
+    }
+    return "?";
+}
+
+static const char* DamageCauseName(DamageCause cause)
+{
+    switch (cause) {
+    case DamageCause::Unknown: return "unknown";
+    case DamageCause::Gunfire: return "gunfire";
+    case DamageCause::Missile: return "missile";
+    case DamageCause::Ram: return "ram";
+    case DamageCause::Crash: return "crash";
+    case DamageCause::Debris: return "debris";
+    case DamageCause::Star: return "star";
+    }
+    return "?";
 }
 
 } // namespace Gravitaris
