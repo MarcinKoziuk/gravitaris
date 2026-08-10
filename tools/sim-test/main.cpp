@@ -2899,6 +2899,14 @@ void TestSectorGeneration()
         game.BuildWorld(sweep);
         game.SpawnCombatants(game.GetRoster().front());
 
+        // Stated separately because the extent check below cannot see it: a
+        // faction with no site spawns at the world origin, whose length is
+        // zero and so inside any extent this could assert.
+        for (const TeamId team : game.GetRoster()) {
+            Require(game.GetFactionSystem().SpawnPosition(team).has_value(),
+                    "sector: every faction has somewhere to launch from");
+        }
+
         const double extent = game.GetSectorExtent();
         game.GetRegistry().each([&](flecs::entity entity, const Transform& t, const Team&, const Damageable&) {
             if (entity.has<Planet>() || entity.has<Structure>()) return;

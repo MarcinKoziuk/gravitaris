@@ -53,6 +53,10 @@ static constexpr int FAIRNESS_ATTEMPTS = 8;
 // instead of failing to place a star at all.
 static constexpr double SEPARATION_RELAXATION = 0.9;
 
+// How far a sun's corona reaches: DamageSystem's STAR_HEAT_REACH radii of the
+// ~300-unit sun model. Kept generous, since nothing here can read the model.
+static constexpr double STAR_CORONA_REACH = 1000.;
+
 namespace {
 
 struct PlannedPlanet {
@@ -84,11 +88,24 @@ Vector2d RandomPointInDisc(std::uint64_t& stream, double radius)
     return Vector2d{std::cos(angle), std::sin(angle)} * r;
 }
 
-void PlaceStars(SectorPlan& plan, std::uint64_t& stream, int starCount)
+// Closer than this and one star's outermost orbit passes through the next
+// star's corona. A planet is exempt from that heat but everything built on
+// it is (DamageSystem::ResolveStarContact), so a home there loses its
+// complex -- and with it the site its faction respawns from.
+double SafeStarSeparation(const SectorParams& params)
 {
-    const double sectorRadius = SECTOR_RADIUS_PER_SQRT_STAR * std::sqrt(static_cast<double>(starCount));
+    const double outermostOrbit = MIN_ORBIT_RADIUS
+                                  + ORBIT_SPACING * static_cast<double>(params.maxPlanetsPerStar - 1)
+                                  + ORBIT_JITTER;
+    return outermostOrbit + STAR_CORONA_REACH;
+}
 
-    for (int i = 0; i < starCount; ++i) {
+void PlaceStars(SectorPlan& plan, std::uint64_t& stream, const SectorParams& params)
+{
+    const double sectorRadius = SECTOR_RADIUS_PER_SQRT_STAR * std::sqrt(static_cast<double>(params.stars));
+    const double safeSeparation = SafeStarSeparation(params);
+
+    for (int i = 0; i < params.stars; ++i) {
         double separation = MIN_STAR_SEPARATION;
         Vector2d best;
         double bestClearance = -1.;
@@ -109,7 +126,23 @@ void PlaceStars(SectorPlan& plan, std::uint64_t& stream, int starCount)
             // Relax on a schedule rather than only at the very end, so the
             // late stars of a crowded sector don't all pile onto the single
             // roomiest spot the budget happened to find.
-            if ((attempt % 16) == 15) separation *= SEPARATION_RELAXATION;
+            if ((attempt % 16) == 15) {
+                separation = std::max(separation * SEPARATION_RELAXATION, safeSeparation);
+            }
+        }
+
+        // The budget can run out with every candidate still crowded, and the
+        // roomiest of a bad set is not good enough to take on trust. Keep its
+        // bearing but park it past the outermost star already placed: the
+        // distance between two points is at least the difference of their
+        // radii, so that one step clears every star at once.
+        if (bestClearance < safeSeparation && !plan.stars.empty()) {
+            double outermost = 0.;
+            for (const Vector2d& placed : plan.stars) {
+                outermost = std::max(outermost, placed.length());
+            }
+            const Vector2d bearing = best.length() > 1e-6 ? best.normalized() : Vector2d{1., 0.};
+            best = bearing * (outermost + safeSeparation);
         }
 
         plan.stars.push_back(best);
@@ -224,7 +257,7 @@ SectorPlan PlanSector(std::uint64_t& stream, const SectorParams& params)
 
     for (int attempt = 0; attempt < FAIRNESS_ATTEMPTS; ++attempt) {
         SectorPlan plan;
-        PlaceStars(plan, stream, params.stars);
+        PlaceStars(plan, stream, params);
         PlacePlanets(plan, stream, params);
         PickHomes(plan, stream, params.factionCount);
         plan.fairness = ScorePlan(plan);
