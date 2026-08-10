@@ -101,9 +101,25 @@ fi
 cmake --build "$BUILD_DIR" --target GravitarisNG -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
 
 OUT_DIR="$BUILD_DIR/$BUILD_TYPE/bin"
-cp "$SCRIPT_DIR/index.html" "$OUT_DIR/index.html"
+
+# index.html appends this to every artifact URL as ?v=, which is what lets the
+# artifacts themselves be cached forever despite keeping stable filenames.
+# The commit is the useful token because it names what you're running, but any
+# value that changes per build would do -- hence the fallbacks: a dirty tree
+# would otherwise reuse one id across genuinely different builds, and git is
+# absent (or refuses the repo, e.g. dubious ownership) in some build sandboxes.
+BUILD_VERSION="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || true)"
+if [[ -n "$BUILD_VERSION" ]] && ! git -C "$REPO_ROOT" diff --quiet HEAD 2>/dev/null; then
+    BUILD_VERSION="$BUILD_VERSION-dirty$(date -u +%H%M%S)"
+fi
+if [[ -z "$BUILD_VERSION" ]]; then
+    BUILD_VERSION="$(date -u +%Y%m%d%H%M%S)"
+fi
+sed "s/__GRAVITARIS_VERSION__/$BUILD_VERSION/g" \
+    "$SCRIPT_DIR/index.html" > "$OUT_DIR/index.html"
 
 echo
 echo "Build type:   $BUILD_TYPE"
+echo "Build id:     $BUILD_VERSION"
 echo "Build output: $OUT_DIR/ (GravitarisNG.js/.wasm/.data, index.html)"
 echo "Serve it with, e.g.: (cd $OUT_DIR && python3 -m http.server 8123)"

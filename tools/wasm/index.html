@@ -31,8 +31,21 @@
     <!-- Magnum's Sdl2Application hardcodes the id "#canvas" on Emscripten. -->
     <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
     <script>
+        // Substituted by tools/wasm/build.sh when it copies this file into the
+        // build output. Left as the literal placeholder when the source tree is
+        // served directly, in which case the query is dropped entirely.
+        var BUILD_VERSION = '__GRAVITARIS_VERSION__';
+        var versionQuery = BUILD_VERSION.indexOf('__') === 0 ? '' : '?v=' + BUILD_VERSION;
+
         var Module = {
             canvas: document.getElementById('canvas'),
+            // The three artifacts keep stable filenames across deploys, so the
+            // build id rides in the query string instead: a new build is a new
+            // cache key, which is what lets them be served immutable. Both the
+            // .wasm and the preloaded .data are resolved through here.
+            locateFile: function (path, prefix) {
+                return prefix + path + versionQuery;
+            },
             setStatus: function (text) {
                 document.getElementById('status').innerText = text;
             },
@@ -65,7 +78,12 @@
             },
         };
         Module.setStatus('Downloading…');
+
+        // Loaded from script rather than a <script src> so the glue carries the
+        // same token as the files it goes on to fetch.
+        var glue = document.createElement('script');
+        glue.src = 'GravitarisNG.js' + versionQuery;
+        document.body.appendChild(glue);
     </script>
-    <script src="GravitarisNG.js"></script>
 </body>
 </html>
