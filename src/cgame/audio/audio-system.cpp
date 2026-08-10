@@ -51,6 +51,9 @@ constexpr std::uint32_t MUZZLE_IDLE_FRAMES = 90;
 constexpr float HIT_GAIN = 0.85f;
 constexpr float SHIELD_HIT_GAIN = 0.35f;
 constexpr float RESEARCH_GAIN = 0.8f;
+// Off until research earns an announcement again; the sidebar countdown and
+// bar it went with are commented out of hud.rml for the same reason.
+constexpr bool RESEARCH_CHIME = false;
 constexpr float CHAT_GAIN = 0.6f;
 constexpr float THRUST_GAIN = 0.55f;
 
@@ -270,7 +273,9 @@ void AudioSystem::Update(const Vector2& cameraPos, flecs::world* mirrorWorld)
                 }
                 break;
             case GameEventType::ResearchComplete:
-                PlayOneShotById(m_researchClip.Id(), event.pos, RESEARCH_GAIN);
+                if (RESEARCH_CHIME) {
+                    PlayOneShotById(m_researchClip.Id(), event.pos, RESEARCH_GAIN);
+                }
                 break;
             case GameEventType::ShieldHit:
                 // Quieter and thinner than a hull hit -- the tell is that the

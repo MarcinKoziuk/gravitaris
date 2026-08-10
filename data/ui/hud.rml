@@ -611,6 +611,9 @@
 				</div>
 
 				<div id="base_info">
+					<!-- Countdown and bar are out until research is worth
+					     watching tick by tick; the rate lives in the row below.
+					     UI::SetResearchReadout no-ops while these are gone.
 					<div class="stat">
 						<div class="stat_head">
 							<span>Research</span>
@@ -620,12 +623,14 @@
 							<div id="research_fill"></div>
 						</div>
 					</div>
-					<!-- The two purses on one line: neither is a thing you watch
-					     the way hull and shield are, so they read as a ledger
-					     rather than as two more gauges. -->
+					-->
+					<!-- The ledger on one line: none of these is a thing you
+					     watch the way hull and shield are, so they read as
+					     numbers rather than as more gauges. -->
 					<div id="purses">
 						<span class="purse"><span class="purse_label">TECH</span><span id="tech_value" class="purse_value readout">0</span></span>
 						<span class="purse"><span class="purse_label">SUPPLIES</span><span id="supplies_value" class="purse_value readout">0</span></span>
+						<span class="purse"><span class="purse_label">RESEARCH</span><span id="research_rate_value" class="purse_value readout">--</span></span>
 					</div>
 					<button id="open_tech_tree">Tech tree &#8212; T</button>
 				</div>

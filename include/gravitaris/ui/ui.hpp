@@ -281,6 +281,8 @@ private:
     Rml::Element* m_researchValue = nullptr;
     float m_researchFraction = -2.f;
     std::string m_researchText;
+    Rml::Element* m_researchRate = nullptr;
+    int m_shownResearchLabs = -1;
 
     // The sidebar's pair and the board's pair are different elements with
     // the same job, so they need handles of their own.
@@ -642,6 +644,10 @@ public:
     // negative fraction blanks the row (no lab). Unchanged values are ignored,
     // so calling it every frame is fine.
     void SetResearchReadout(float fraction, const std::string& text);
+
+    // How fast the faction's labs turn out research, as a multiplier beside
+    // the purses -- one lab is x1. Zero or fewer blanks it (no lab).
+    void SetResearchRate(int labs);
 
     // The chat window's scrollback, oldest first; an empty list clears the
     // log. A rebuild keeps the player's scroll position unless they were

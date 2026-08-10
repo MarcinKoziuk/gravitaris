@@ -149,6 +149,7 @@ bool UI::Init()
         m_boostValue = hud->GetElementById("boost_value");
         m_researchFill = hud->GetElementById("research_fill");
         m_researchValue = hud->GetElementById("research_value");
+        m_researchRate = hud->GetElementById("research_rate_value");
         m_hudTechValue = hud->GetElementById("tech_value");
         m_hudSuppliesValue = hud->GetElementById("supplies_value");
         if (Rml::Element* button = hud->GetElementById("open_tech_tree")) {
@@ -638,6 +639,14 @@ void UI::SetResearchReadout(float fraction, const std::string& text)
     const int percent = static_cast<int>(std::lround(quantised * 100.f));
     m_researchFill->SetProperty("width", std::to_string(percent) + "%");
     m_researchValue->SetInnerRML(text);
+}
+
+void UI::SetResearchRate(int labs)
+{
+    if (!m_researchRate || labs == m_shownResearchLabs) return;
+
+    m_shownResearchLabs = labs;
+    m_researchRate->SetInnerRML(labs > 0 ? "x" + std::to_string(labs) : "--");
 }
 
 static const char* RankNumeral(int rank);
