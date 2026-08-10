@@ -257,6 +257,39 @@ def plating_hit():
     return out
 
 
+def beam():
+    """The laser's held note: a loopable electric hum rather than a pew.
+
+    Two detuned sawtooths beating slowly against each other for the body, a
+    thin band of hiss riding on top for the burn, and a fast tremolo so it
+    reads as energy being spent rather than as a sine tone. Crossfaded
+    head-to-tail exactly as thrust() is -- the same tick at the loop point
+    would be far more obvious on something this bright.
+    """
+    dur = 0.9
+    n = int(RATE * dur)
+    raw = []
+    phase_a = 0.0
+    phase_b = 0.0
+    hiss = 0.0
+    for i in range(n):
+        t = i / n
+        phase_a += 196.0 / RATE
+        phase_b += 197.6 / RATE  # ~1.6 Hz beat against the other
+        saw = ((phase_a % 1.0) - 0.5) + ((phase_b % 1.0) - 0.5)
+        hiss += 0.35 * (random.uniform(-1.0, 1.0) - hiss)  # bandish noise
+        tremolo = 0.85 + 0.15 * math.sin(2 * math.pi * 24.0 * t * dur)
+        raw.append((saw * 0.45 + hiss * 0.18) * tremolo)
+
+    fade = int(RATE * 0.08)
+    m = n - fade
+    out = list(raw[:m])
+    for i in range(fade):
+        t = (i + 1) / fade
+        out[i] = raw[i] * t + raw[m + i] * (1.0 - t)
+    return out
+
+
 def main():
     outdir = sys.argv[1] if len(sys.argv) > 1 else "."
     write_wav(f"{outdir}/laser-1.wav", fade_tail(laser()))
@@ -266,6 +299,9 @@ def main():
     write_wav(f"{outdir}/hit-1.wav", fade_tail(hit()))
     write_wav(f"{outdir}/shield-bubble-1.wav", fade_tail(bubble_shield()))
     write_wav(f"{outdir}/shield-plating-1.wav", fade_tail(plating_hit()))
+    # Written last on purpose: the RNG is seeded once for the whole run, so
+    # appending here leaves every file above byte-identical to its last build.
+    write_wav(f"{outdir}/laser-loop-1.wav", beam())
 
 
 if __name__ == "__main__":

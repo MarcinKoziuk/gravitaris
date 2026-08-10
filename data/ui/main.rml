@@ -206,6 +206,7 @@
 				<div class="binding"><span class="key">LEFT RIGHT</span><span class="action">Turn</span></div>
 				<div class="binding"><span class="key">SHIFT</span><span class="action">Overburn</span></div>
 				<div class="binding"><span class="key">DOWN / F</span><span class="action">Guns</span></div>
+				<div class="binding"><span class="key">MOUSE</span><span class="action">Aim &amp; fire lasers</span></div>
 				<div class="binding"><span class="key">SPACE / D</span><span class="action">Missile</span></div>
 				<div class="binding"><span class="key">T</span><span class="action">Tech tree</span></div>
 			</div>

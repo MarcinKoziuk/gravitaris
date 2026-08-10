@@ -56,6 +56,9 @@ constexpr float RESEARCH_GAIN = 0.8f;
 constexpr bool RESEARCH_CHIME = false;
 constexpr float CHAT_GAIN = 0.6f;
 constexpr float THRUST_GAIN = 0.55f;
+// Under the engine's: a beam is a thin sound and a ship holding one is usually
+// also under thrust, so the two have to sit together.
+constexpr float BEAM_GAIN = 0.35f;
 
 } // namespace
 
@@ -82,6 +85,7 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
     // once (if) one does.
     m_thrustClip = m_resourceLoader.Load<AudioClip>("sounds/thrust-1.wav"_id);
     m_thrustBoostClip = m_resourceLoader.Load<AudioClip>("sounds/thrust-boost-1.wav"_id);
+    m_beamClip = m_resourceLoader.Load<AudioClip>("sounds/laser-loop-1.wav"_id);
     m_hitClip    = m_resourceLoader.Load<AudioClip>("sounds/hit-1.wav"_id);
     // Two clips, not one: a bubble absorbing a round and a metal plate
     // taking one are different events to the player, and the shield type is
@@ -117,6 +121,7 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
 
     HandleClipAdded(*m_thrustClip, m_thrustClip.Id());
     HandleClipAdded(*m_thrustBoostClip, m_thrustBoostClip.Id());
+    HandleClipAdded(*m_beamClip, m_beamClip.Id());
     HandleClipAdded(*m_hitClip, m_hitClip.Id());
     HandleClipAdded(*m_bubbleClip, m_bubbleClip.Id());
     HandleClipAdded(*m_platingClip, m_platingClip.Id());
@@ -217,6 +222,28 @@ void AudioSystem::SweepMuzzles()
     }
 }
 
+void AudioSystem::HoldLoop(flecs::world& world, flecs::entity ent, LoopKind kind, id_t clipId,
+                           const Vector2& pos, float gain)
+{
+    const auto bufferIt = m_buffers.find(clipId);
+
+    auto [it, inserted] = m_loops.try_emplace(LoopKey{world.c_ptr(), ent.id(), kind});
+    HeldLoop& loop = it->second;
+    loop.seen = true;
+    loop.offFrames = 0;
+    loop.gain = gain;
+
+    const bool restart = inserted || loop.clipId != clipId || !m_backend->IsVoicePlaying(loop.voice);
+
+    if (inserted) loop.voice = m_backend->AcquireVoice();
+    else m_backend->SetVoicePosition(loop.voice, pos);
+
+    if (restart && bufferIt != m_buffers.end()) {
+        m_backend->PlayLooping(loop.voice, bufferIt->second, pos, gain);
+        loop.clipId = clipId;
+    }
+}
+
 void AudioSystem::SweepThrusters(flecs::world& world)
 {
     world.each([&](flecs::entity ent, const Transform& transf, const Controls& controls) {
@@ -226,23 +253,22 @@ void AudioSystem::SweepThrusters(flecs::world& world)
         // entity per frame rather than once for the sweep: a wing can have
         // some of its ships boosting and the rest cruising.
         const id_t wanted = controls.boosting ? m_thrustBoostClip.Id() : m_thrustClip.Id();
-        const auto bufferIt = m_buffers.find(wanted);
+        const Vector2 pos{static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())};
 
-        auto [it, inserted] = m_thrusters.try_emplace(ThrusterKey{world.c_ptr(), ent.id()});
-        ThrusterLoop& loop = it->second;
-        loop.seen = true;
-        loop.offFrames = 0;
+        HoldLoop(world, ent, LoopKind::Thruster, wanted, pos, THRUST_GAIN);
+    });
+}
+
+void AudioSystem::SweepBeams(flecs::world& world)
+{
+    world.each([&](flecs::entity ent, const Transform& transf, const Controls& controls) {
+        // What the bank actually granted, not what the trigger asked for -- a
+        // dry capacitor should go quiet, which is most of how a pilot hears
+        // that they have run out.
+        if (!controls.laserFiring) return;
 
         const Vector2 pos{static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())};
-        const bool restart = inserted || loop.clipId != wanted || !m_backend->IsVoicePlaying(loop.voice);
-
-        if (inserted) loop.voice = m_backend->AcquireVoice();
-        else m_backend->SetVoicePosition(loop.voice, pos);
-
-        if (restart && bufferIt != m_buffers.end()) {
-            m_backend->PlayLooping(loop.voice, bufferIt->second, pos, THRUST_GAIN);
-            loop.clipId = wanted;
-        }
+        HoldLoop(world, ent, LoopKind::Beam, m_beamClip.Id(), pos, BEAM_GAIN);
     });
 }
 
@@ -297,21 +323,25 @@ void AudioSystem::Update(const Vector2& cameraPos, flecs::world* mirrorWorld)
 
     SweepMuzzles();
 
-    // Thruster loops: one looping voice per entity holding thrust. A net
-    // client's own ship is the only one in m_registry -- everybody else lives
-    // in the mirror world, so both are swept.
-    for (auto& [key, loop] : m_thrusters) loop.seen = false;
+    // Held loops: one looping voice per entity per held sound. A net client's
+    // own ship is the only one in m_registry -- everybody else lives in the
+    // mirror world, so both are swept.
+    for (auto& [key, loop] : m_loops) loop.seen = false;
 
     SweepThrusters(m_registry);
-    if (mirrorWorld) SweepThrusters(*mirrorWorld);
+    SweepBeams(m_registry);
+    if (mirrorWorld) {
+        SweepThrusters(*mirrorWorld);
+        SweepBeams(*mirrorWorld);
+    }
 
-    // Entities that stopped thrusting (or died) this frame: give the gap a
-    // short grace period (below) before handing the voice to the fade-out
-    // list rather than releasing (= hard-stopping) it here.
-    for (auto it = m_thrusters.begin(); it != m_thrusters.end();) {
+    // Entities that stopped (or died) this frame: give the gap a short grace
+    // period (below) before handing the voice to the fade-out list rather than
+    // releasing (= hard-stopping) it here.
+    for (auto it = m_loops.begin(); it != m_loops.end();) {
         if (!it->second.seen && ++it->second.offFrames >= THRUST_RELEASE_GRACE_FRAMES) {
-            m_fadingVoices.push_back({it->second.voice, THRUST_GAIN});
-            it = m_thrusters.erase(it);
+            m_fadingVoices.push_back({it->second.voice, it->second.gain});
+            it = m_loops.erase(it);
         }
         else {
             ++it;

@@ -37,37 +37,50 @@ using Magnum::Vector2;
 // held -- continuous state, not an event.
 class AudioSystem {
 private:
-    // Thruster loops are keyed by world as well as entity: a net client keeps
-    // its own ship in the real world and everyone else in the mirror one, and
-    // the two number their entities independently.
-    struct ThrusterKey {
-        const flecs::world_t* world = nullptr;
-        flecs::entity_t entity = 0;
-
-        bool operator==(const ThrusterKey& other) const
-        { return world == other.world && entity == other.entity; }
+    // Which held sound a looping voice is: one ship can be running its engine
+    // and burning its beams at the same time, and those are two voices rather
+    // than one interrupting the other.
+    enum class LoopKind : std::uint8_t {
+        Thruster,
+        Beam,
     };
 
-    struct ThrusterKeyHash {
-        std::size_t operator()(const ThrusterKey& key) const
+    // Held loops are keyed by world as well as entity: a net client keeps its
+    // own ship in the real world and everyone else in the mirror one, and the
+    // two number their entities independently.
+    struct LoopKey {
+        const flecs::world_t* world = nullptr;
+        flecs::entity_t entity = 0;
+        LoopKind kind = LoopKind::Thruster;
+
+        bool operator==(const LoopKey& other) const
+        { return world == other.world && entity == other.entity && kind == other.kind; }
+    };
+
+    struct LoopKeyHash {
+        std::size_t operator()(const LoopKey& key) const
         {
             const auto world = reinterpret_cast<std::uintptr_t>(key.world);
             return std::hash<std::uint64_t>{}(static_cast<std::uint64_t>(world)
-                                              ^ (key.entity * 0x9e3779b97f4a7c15ull));
+                                              ^ (key.entity * 0x9e3779b97f4a7c15ull)
+                                              ^ static_cast<std::uint64_t>(key.kind));
         }
     };
 
-    struct ThrusterLoop {
+    struct HeldLoop {
         VoiceHandle voice;
         bool seen = false;
         // Which clip the voice is currently looping. The overburn is a
         // different engine note, so crossing that boundary restarts the loop
         // on the other buffer rather than leaving the stock rumble running.
         id_t clipId = 0;
-        // Consecutive frames not seen thrusting. Kept below the release
-        // grace period, a real stop is distinguished from the on/off
-        // "bang-bang" burn pattern flight control produces while cruising --
-        // see the grace constant in the .cpp.
+        // What it is playing at, so the fade-out ramps from the right place
+        // whichever kind of loop this is.
+        float gain = 0.f;
+        // Consecutive frames not seen running. Kept below the release grace
+        // period, a real stop is distinguished from the on/off "bang-bang"
+        // burn pattern flight control produces while cruising -- see the
+        // grace constant in the .cpp.
         std::uint32_t offFrames = 0;
     };
 
@@ -130,6 +143,8 @@ private:
     // The same loop with the injectors open, played instead of m_thrustClip
     // while a ship is boosting (Controls::boosting).
     ResourcePtr<const AudioClip> m_thrustBoostClip;
+    // The beams' held note, looped for as long as they are burning.
+    ResourcePtr<const AudioClip> m_beamClip;
     ResourcePtr<const AudioClip> m_hitClip;
     // Borrows the stock gun's clip at a lower gain until a shield hit gets
     // its own.
@@ -152,7 +167,7 @@ private:
     std::vector<VoiceHandle> m_oneShotPool;
     std::size_t m_poolCursor = 0;
 
-    std::unordered_map<ThrusterKey, ThrusterLoop, ThrusterKeyHash> m_thrusters;
+    std::unordered_map<LoopKey, HeldLoop, LoopKeyHash> m_loops;
     std::vector<FadingVoice> m_fadingVoices;
     std::unordered_map<MuzzleKey, MuzzleVoice, MuzzleKeyHash> m_muzzles;
 
@@ -176,6 +191,16 @@ private:
     // thrust, and marks it seen. Update() calls this once per world it was
     // given before retiring whatever went unseen.
     void SweepThrusters(flecs::world& world);
+
+    // The same, for every entity whose beams the capacitor is actually feeding
+    // (Controls::laserFiring). Held exactly as thrust is, so it shares the
+    // grace period and the fade rather than clicking on and off with the
+    // trigger.
+    void SweepBeams(flecs::world& world);
+
+    // Starts or re-points one held loop, and reports it seen this frame.
+    void HoldLoop(flecs::world& world, flecs::entity ent, LoopKind kind, id_t clipId,
+                  const Vector2& pos, float gain);
 
 public:
     AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
