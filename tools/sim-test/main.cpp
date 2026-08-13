@@ -28,6 +28,7 @@
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/faction-state.hpp>
 #include <gravitaris/game/system/ship/ship-controls-system.hpp>
+#include <gravitaris/game/system/ship/landing-state-system.hpp>
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
@@ -906,6 +907,68 @@ void TestLandingAndClaiming()
     const float fragileDamage = dropAndMeasure(-60000., 2.f);
     Require(toughDamage > 0.f && std::fabs(fragileDamage - 2.f * toughDamage) < 0.01f * toughDamage,
             "landing: a hull's [landing] fragility scales the damage a hard set-down costs it");
+
+    fs.Shutdown();
+}
+
+// A parked hull chatters -- a dropped contact, a velocity excursion -- and
+// judged raw every such tick is a takeoff and a fresh landing. That restarts
+// the claim counter, and it strobes ResearchAccess::atLab, which the client
+// reads as the whole refit board changing state (rebuilt markup, lost hover,
+// clicks landing on elements that no longer exist).
+void TestLandingChatterGrace()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+
+    EntitySpawner& spawner = game.GetEntitySpawner();
+    flecs::entity planet = spawner.SpawnOrbitingPlanet("models/planets/simple"_id,
+                                                       Vector2d{0., 0.}, 1e-9, 800., 1.0, 0.0);
+    const float planetRadius = planet.get<Planet>().radius
+            * static_cast<float>(planet.get<Transform>().scale.x());
+    flecs::entity ship = spawner.SpawnPlayer("models/ships/fighter-1"_id,
+                                             Vector2d{800., planetRadius + 15.});
+    cpBody* shipBody = game.GetPhysicsSystem().GetBody(ship.get<PhysicsRef>()).cp.body.get();
+    cpBodySetAngle(shipBody, CP_PI);
+    cpBodySetVelocity(shipBody, cpv(0., -8.));
+
+    for (int tick = 0; tick < 900 && ship.is_alive(); ++tick) {
+        game.Update();
+        if (ship.is_alive() && ship.get<LandingState>().landed) break;
+    }
+    Require(ship.is_alive() && ship.get<LandingState>().landed,
+            "chatter: the ship is standing on the planet (setup check)");
+
+    const std::uint32_t netIdBefore = ship.get<LandingState>().landedOnNetId;
+    std::uint32_t ticksBefore = ship.get<LandingState>().landedTicks;
+
+    // Chatter, forced through the speed gate rather than by waiting for a
+    // contact to drop on its own: a handful of ticks over SAFE_LANDING_SPEED,
+    // well inside the grace.
+    const int chatter = LandingStateSystem::LANDING_GRACE_TICKS - 5;
+    for (int tick = 0; tick < chatter && ship.is_alive(); ++tick) {
+        cpBodySetVelocity(shipBody, cpv(0., LandingStateSystem::SAFE_LANDING_SPEED + 5.));
+        game.Update();
+        const LandingState& state = ship.get<LandingState>();
+        Require(state.landed, "chatter: a momentary loss of contact is not a takeoff");
+        Require(state.landedOnNetId == netIdBefore, "chatter: the site is held across the gap");
+        Require(state.landedTicks > ticksBefore,
+                "chatter: the claim counter keeps running instead of restarting");
+        ticksBefore = state.landedTicks;
+    }
+
+    // Held past the grace it is a departure, and the counter does restart.
+    for (int tick = 0; tick <= LandingStateSystem::LANDING_GRACE_TICKS && ship.is_alive(); ++tick) {
+        cpBodySetVelocity(shipBody, cpv(0., LandingStateSystem::SAFE_LANDING_SPEED + 5.));
+        game.Update();
+    }
+    Require(ship.is_alive(), "chatter: the probe survives its hop");
+    Require(!ship.get<LandingState>().landed, "chatter: a hull that stays off the surface has left it");
+    Require(ship.get<LandingState>().landedTicks == 0, "chatter: leaving restarts the claim counter");
 
     fs.Shutdown();
 }
@@ -4965,6 +5028,7 @@ int main()
     TestOrbitReplication();
     TestClientPrediction();
     TestLandingAndClaiming();
+    TestLandingChatterGrace();
     TestShipCollision();
     TestPlayerRespawnAfterDeath();
     TestStructures();

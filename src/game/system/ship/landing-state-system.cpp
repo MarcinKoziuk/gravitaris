@@ -84,6 +84,7 @@ void LandingStateSystem::Update()
         if (landed) {
             state.landed = true;
             state.landedOnNetId = site.get<NetId>().value;
+            state.graceTicks = LANDING_GRACE_TICKS;
             ++state.landedTicks;
 
             const Team* shipTeam = ship.try_get<Team>();
@@ -93,10 +94,18 @@ void LandingStateSystem::Update()
                 friendlyLandings.emplace_back(shipTeam->id, state.landedOnNetId);
             }
         }
+        else if (state.landed && state.graceTicks > 0) {
+            // Still standing on whatever it was standing on: the site is held
+            // rather than looked up again, since what failed this tick is the
+            // very contact that would name it.
+            --state.graceTicks;
+            ++state.landedTicks;
+        }
         else {
             state.landed = false;
             state.landedOnNetId = 0;
             state.landedTicks = 0;
+            state.graceTicks = 0;
         }
     });
 

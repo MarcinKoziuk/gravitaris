@@ -16,6 +16,9 @@ struct LandingState {
     std::uint32_t landedOnNetId = 0;         // planet currently rested on (0 = none)
     std::uint32_t landedTicks = 0;           // consecutive ticks landed (claim gate)
     std::uint32_t lastFriendlySiteNetId = 0; // most recent friendly planet landed on (respawn site)
+    // Ticks of failed contact this landing may still survive; see
+    // LandingStateSystem::LANDING_GRACE_TICKS.
+    std::uint8_t graceTicks = 0;
 };
 
 } // namespace Gravitaris
