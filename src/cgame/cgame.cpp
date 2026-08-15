@@ -269,8 +269,12 @@ std::optional<std::uint16_t> CGame::AimAtPoint(const Magnum::Vector2& worldPoint
     const Transform* transf = player->try_get<Transform>();
     if (!transf) return std::nullopt;
 
-    const Magnum::Vector2d offset{static_cast<double>(worldPoint.x()) - transf->pos.x(),
-                                  static_cast<double>(worldPoint.y()) - transf->pos.y()};
+    // The hull as the pilot last SAW it, not as the sim has since left it. The
+    // cursor was turned into `worldPoint` through the camera of the frame on
+    // screen, and this is that same frame's ship -- see m_aimOrigin.
+    const Magnum::Vector2d from = m_aimOrigin.value_or(transf->pos);
+    const Magnum::Vector2d offset{static_cast<double>(worldPoint.x()) - from.x(),
+                                  static_cast<double>(worldPoint.y()) - from.y()};
     if (offset.dot() < 1e-9) return std::nullopt;
 
     return PackAim(std::atan2(offset.y(), offset.x()));
@@ -1081,6 +1085,11 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
                             SubjectGravity());
     Camera& camera = m_cameraDirector.GetCamera();
 
+    // The hull this frame is being drawn around, kept for the aim: the smoothed
+    // position, since that is where the pilot will see it and where the camera
+    // was just put.
+    m_aimOrigin = Magnum::Vector2d{smoothedPlayerPos};
+
     // Decays HitFlash on both worlds; ApplyRemoteEvents above is what sets
     // it (own ship directly, everyone else via the mirror world), since
     // m_hitFlashSystem's own event consumption never finds a match here --
@@ -1149,6 +1158,12 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
     // the hull was actually drawn rather than where the sim last left it.
     m_beams.clear();
     m_charges.clear();
+    // Targets from BOTH worlds before either world's beams: the own ship is
+    // alone in m_registry and every other hull is in the mirror, so a beam and
+    // what it meets are always on opposite sides of that split here.
+    m_beamTargets.clear();
+    CollectBeamTargets(m_registry);
+    CollectBeamTargets(m_mirrorWorld);
     GatherBeams(m_registry);
     GatherBeams(m_mirrorWorld);
     DrawBeams(camera);
@@ -1187,6 +1202,15 @@ void CGame::Render(double delta)
     const SceneView view = CurrentSceneView();
     m_cameraDirector.Update(view, CameraSubject(), GetDesignViewportSize(), dtSeconds, std::nullopt,
                             SubjectGravity());
+    // The hull the camera was just placed around, kept for the aim -- see
+    // m_aimOrigin. Nothing interpolates a position here (ModelRenderer2 draws
+    // straight off Transform), so this frame's ship is simply where it is right
+    // now; what makes it matter is that the sim steps on before the cursor is
+    // read again.
+    if (const std::optional<flecs::entity> own = GetPlayer(); own && own->is_alive()) {
+        if (const Transform* transf = own->try_get<Transform>()) m_aimOrigin = transf->pos;
+    }
+
     m_hitFlashSystem.Update(dtSeconds);
 
     const Camera& camera = m_cameraDirector.GetCamera();
@@ -1256,7 +1280,12 @@ void CGame::Render(double delta)
     // and still inside the scene target so the glow pass picks it up.
     m_beams.clear();
     m_charges.clear();
-    GatherBeams(m_activeRenderer == RendererKind::Mirror ? m_mirrorWorld : m_registry);
+    {
+        flecs::world& drawn = m_activeRenderer == RendererKind::Mirror ? m_mirrorWorld : m_registry;
+        m_beamTargets.clear();
+        CollectBeamTargets(drawn);
+        GatherBeams(drawn);
+    }
     DrawBeams(camera);
 
     {
@@ -1270,12 +1299,19 @@ void CGame::Render(double delta)
 // replicated beyond the trigger and the angle (see EntityState::aim) -- the
 // geometry is re-derived here off the same rules the sim resolves damage with,
 // which is why a beam looks like it hits what it is actually hurting.
-void CGame::GatherBeams(flecs::world& world)
+void CGame::CollectBeamTargets(flecs::world& world)
 {
-    // Gathered up front, never inside the walk below: a flecs query run inside
-    // another query's callback silently iterates nothing (see CLAUDE.md), so a
-    // per-beam lookup would quietly stop truncating anything at all.
-    m_beamTargets.clear();
+    // Gathered up front, never inside the walk over the beams: a flecs query
+    // run inside another query's callback silently iterates nothing (see
+    // CLAUDE.md), so a per-beam lookup would quietly stop truncating anything.
+    //
+    // Appends rather than replaces, and that is the whole point of it being
+    // separate from GatherBeams: in a networked game this peer's own ship is
+    // the only thing in m_registry and everyone else is in the mirror world, so
+    // collecting targets from the same world as the shooter meant your beam
+    // could never see an enemy, nor theirs see you. It drew straight through
+    // every hull it was burning -- and with nothing to bounce off, never
+    // deflected either.
     world.each([&](flecs::entity ent, const Transform& transf, const Damageable&) {
         const Body* hull = HullOf(ent);
         if (!hull) return;
@@ -1293,7 +1329,12 @@ void CGame::GatherBeams(flecs::world& world)
     world.each([&](flecs::entity ent, const Transform& transf, const Missile&) {
         m_beamTargets.push_back(BeamTarget{ent, transf.pos, DamageSystem::BEAM_INTERCEPT_RADIUS});
     });
+}
 
+// Every beam burning in `world`, drawn against whatever CollectBeamTargets has
+// been given -- which must be every world being drawn, not just this one.
+void CGame::GatherBeams(flecs::world& world)
+{
     world.each([&](flecs::entity ship, const Transform& transf, const Controls& controls,
                    const ShipLoadout& loadout) {
         // A charging emitter is drawn too, and deliberately: the windup is the
@@ -1443,8 +1484,13 @@ CGame::BeamStop CGame::BeamReach(flecs::entity ignoreA, flecs::entity ignoreB,
     BeamStop stop{range, flecs::entity{}, {}};
 
     for (const BeamTarget& target : m_beamTargets) {
-        if ((ignoreA.is_alive() && target.entity == ignoreA)
-            || (ignoreB.is_alive() && target.entity == ignoreB)) {
+        // Compared by id, and never asked whether they are alive: both of these
+        // are empty on the leg that has not bounced yet, and asking flecs about
+        // entity 0 breaks a precondition it only checks in a debug build -- the
+        // same one that crashed a release build once already (see
+        // DamageSystem::QueryFirstHit).
+        if ((ignoreA.id() != 0 && target.entity.id() == ignoreA.id())
+            || (ignoreB.id() != 0 && target.entity.id() == ignoreB.id())) {
             continue;
         }
 

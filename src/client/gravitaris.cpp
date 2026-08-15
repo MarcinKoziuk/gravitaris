@@ -1006,29 +1006,6 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         case KeyEvent::Key::J:
             m_game->SpawnRandomAIShip();
             return;
-        // Every term the cursor passes through on its way to being an aim, in
-        // one line. The mapping crosses three coordinate spaces (platform
-        // pixels, the scene viewport, the world) and two scale factors that are
-        // 1 on a plain desktop and are not in a browser, so an aim that lands
-        // slightly wrong is unfalsifiable by eye -- but obvious the moment the
-        // same key is pressed on both builds and the numbers are compared.
-        case KeyEvent::Key::F10: {
-            const Magnum::Vector2 origin = m_game->GetViewportOrigin();
-            const auto fbHeight = static_cast<float>(framebufferSize().y());
-            const Magnum::Vector2 inViewport{m_pointerPx.x() - origin.x(),
-                                             fbHeight - m_pointerPx.y() - origin.y()};
-            const Magnum::Vector2 world = m_game->ViewportToWorld(inViewport);
-            LOG(info) << "[aim] pointer=(" << m_pointerPx.x() << "," << m_pointerPx.y() << ")"
-                      << " fb=(" << framebufferSize().x() << "," << framebufferSize().y() << ")"
-                      << " window=(" << windowSize().x() << "," << windowSize().y() << ")"
-                      << " dpi=" << dpiScaling().x() << " pixelScale=" << PixelScale().x()
-                      << " contentScale=" << ContentScale()
-                      << " viewportOrigin=(" << origin.x() << "," << origin.y() << ")"
-                      << " inViewport=(" << inViewport.x() << "," << inViewport.y() << ")"
-                      << " world=(" << world.x() << "," << world.y() << ")"
-                      << " aimPoint=(" << m_aimPoint.x() << "," << m_aimPoint.y() << ")";
-            return;
-        }
         default:
             break;
     }

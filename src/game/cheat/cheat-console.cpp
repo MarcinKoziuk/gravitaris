@@ -79,6 +79,7 @@ struct Cheat {
 } // namespace
 
 static void CheatHelp(Cheat& c);
+static void CheatUnlockAll(Cheat& c);
 static void CheatTech(Cheat& c);
 static void CheatSupplies(Cheat& c);
 static void CheatUpgrade(Cheat& c);
@@ -132,6 +133,7 @@ CheatResult RunCheatCommand(Game& game, flecs::entity subject, TeamId team, cons
 
     const std::string& verb = args[0];
     if (verb == "help" || verb == "cheats") CheatHelp(cheat);
+    else if (verb == "unlock" || verb == "unlockall") CheatUnlockAll(cheat);
     else if (verb == "tech") CheatTech(cheat);
     else if (verb == "supply") CheatSupplies(cheat);
     else if (verb == "upgrade") CheatUpgrade(cheat);
@@ -155,6 +157,7 @@ CheatResult RunCheatCommand(Game& game, flecs::entity subject, TeamId team, cons
 static void CheatHelp(Cheat& c)
 {
     c.Say("cheats (everyone, always):");
+    c.Say("/unlock - learn every rank in the tree, and stock the account to buy them");
     c.Say("/tech [n] - n technology points into your faction's pool (100)");
     c.Say("/supply [n] - n supplies into your own account (100)");
     c.Say("/upgrade <key|all|list> [n] - fit one straight onto your ship");
@@ -170,6 +173,48 @@ static void CheatHelp(Cheat& c)
     c.Say("/ff [on|off] - friendly fire, for the whole round");
     c.Say("/notify [on|off] - webhook a line when somebody joins");
     c.Say("add @<player> to any of the above to run it on their ship instead");
+}
+
+// Everything the trees can offer, learned and paid for, in one line. /tech and
+// /supply hand out the currencies and leave the climb; this skips the climb --
+// which is what testing a weapon wants, since the thing under test is usually
+// several ranks up a tree behind a prerequisite that has nothing to do with it.
+//
+// Still has to be FITTED at a lab or high port afterwards (/upgrade puts one
+// straight onto the hull instead, no landing needed). Unlocking is the faction's
+// and the supplies are the pilot's, so an "@name" runs both for them.
+static void CheatUnlockAll(Cheat& c)
+{
+    const UpgradeCatalog& catalog = c.game.GetUpgradeCatalog();
+
+    FactionState* faction = FindFaction(c.game.GetRegistry(), c.team);
+    if (!faction) {
+        c.Say("no faction to research for -- fly something first");
+        return;
+    }
+
+    int learned = 0;
+    for (std::size_t i = 0; i < catalog.Defs().size(); ++i) {
+        const std::uint8_t top = UpgradeCatalog::RankCount(catalog.Defs()[i]);
+        if (faction->unlocked.rank[i] >= top) continue;
+
+        faction->unlocked.rank[i] = top;
+        ++learned;
+    }
+    // The pool as well, so the PERMANENT board still reads as affordable rather
+    // than as a wall of prices nothing can meet.
+    faction->techPoints = AddCapped(faction->techPoints, MAX_GRANT);
+
+    if (PilotAccount* account = FindAccount(c.game.GetRegistry(), c.subject)) {
+        account->supplies = AddCapped(account->supplies, MAX_GRANT);
+        c.Say(Format("unlocked %d lines for %s, and stocked the account: %u supplies",
+                     learned, TeamName(c.team), account->supplies));
+    }
+    else {
+        c.Say(Format("unlocked %d lines for %s (no pilot account to stock -- fly something first)",
+                     learned, TeamName(c.team)));
+    }
+    c.Say("fit them at a lab or high port, or /upgrade <key> to skip the landing");
 }
 
 static void CheatTech(Cheat& c)

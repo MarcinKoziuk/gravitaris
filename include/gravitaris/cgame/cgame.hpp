@@ -126,6 +126,11 @@ protected:
     // knife range bright, one across the sector dim but findable.
     static constexpr double BEAM_BOUNCE_RELIGHT = 0.25;
 
+    // Both are needed, and in this order: every world being drawn contributes
+    // targets before any world's beams are gathered against them. A beam and
+    // what it hits are routinely in different worlds -- in a networked game the
+    // own ship and everybody else always are.
+    void CollectBeamTargets(flecs::world& world);
     void GatherBeams(flecs::world& world);
     void DrawBeams(const Camera& camera);
     [[nodiscard]] const Body* HullOf(flecs::entity ent);
@@ -304,6 +309,15 @@ protected:
     // reads the last computed values rather than recomputing them itself).
     std::uint64_t m_lastEstimatedServerTick = 0;
     double m_lastRenderTick = 0.0;
+
+    // Where the player's own hull was when the camera was last placed, i.e. in
+    // the frame currently on screen. What the aim is taken from, and it has to
+    // be: the cursor is turned into a world point through THAT frame's camera,
+    // while the ship has since stepped on -- mixing the two makes a shot miss by
+    // however far the ship moved in between, which is nothing at rest and grows
+    // with speed. Because the camera follows the hull, taking both from the same
+    // frame very nearly cancels instead. Empty before the first frame.
+    std::optional<Magnum::Vector2d> m_aimOrigin;
 
     // Real Transform::pos of everything RenderNetClient temporarily moves to
     // its sub-tick rendered position, restored right after the draw.
