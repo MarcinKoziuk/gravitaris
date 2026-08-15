@@ -77,11 +77,12 @@ static float LeakRoll(std::uint64_t step, std::uint32_t seq, std::uint8_t elemen
 static float BeamFalloff(double alpha, const WeaponDef::Beam& beam);
 
 DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
-                           const UpgradeCatalog& catalog)
+                           const UpgradeCatalog& catalog, LagCompensation& lagCompensation)
         : m_registry(registry)
         , m_physicsSystem(physicsSystem)
         , m_eventQueue(eventQueue)
         , m_catalog(catalog)
+        , m_lagCompensation(lagCompensation)
 {}
 
 void DamageSystem::Update(std::uint64_t step)
@@ -447,18 +448,40 @@ void DamageSystem::ResolveBeams(std::uint64_t step)
         if (round.hp > 0.f) rounds.push_back(InFlight{ent, transf.pos, fired.team});
     });
 
-    m_registry.each([&](flecs::entity shooter, const Transform& transf, const Controls& controls,
-                        const ShipLoadout& loadout, const PhysicsRef& ref) {
-        if (!controls.laserFiring) return;
+    // Who is burning, gathered before any of it is resolved. Not a style
+    // preference: resolving one shooter's beam means holding the whole world
+    // back to the tick that shooter was looking at (LagCompensation), and that
+    // walks every hull -- a query inside another query's callback silently
+    // iterates nothing here (see CLAUDE.md), so it would rewind precisely
+    // nobody and every networked shot would quietly go back to missing.
+    std::vector<flecs::entity> burning;
+    m_registry.each([&](flecs::entity shooter, const Transform&, const Controls& controls,
+                        const ShipLoadout&, const PhysicsRef&) {
+        if (controls.laserFiring) burning.push_back(shooter);
+    });
 
+    for (flecs::entity shooter : burning) {
+        if (!shooter.is_alive()) continue;
+
+        const Controls& controls = shooter.get<Controls>();
+        const ShipLoadout& loadout = shooter.get<ShipLoadout>();
         const ShipStats stats = m_catalog.ResolveStats(loadout.levels);
-        if (!stats.laser || !stats.laser->IsBeam()) return;
+        if (!stats.laser || !stats.laser->IsBeam()) continue;
 
         const WeaponDef::Beam& beam = stats.laser->beam;
-        const PhysicsBody& phys = m_physicsSystem.GetBody(ref);
+        const PhysicsBody& phys = m_physicsSystem.GetBody(shooter.get<PhysicsRef>());
         cpSpace* space = phys.cp.space.get();
-        if (!space) return;
+        if (!space) continue;
 
+        // Everyone but this shooter, put back where it saw them. Nothing at all
+        // for a shot composed inside the sim, which carries no delay.
+        const LagCompensation::Rewind rewind(
+                m_lagCompensation, LagCompensation::ViewTickOf(step, controls.viewDelay), shooter);
+
+        // Read AFTER the rewind: it moves Transforms as well as bodies, and
+        // although it never moves the shooter, taking the reference first would
+        // be a reference into a table this may have moved the entity out of.
+        const Transform& transf = shooter.get<Transform>();
         const Team* shooterTeam = shooter.try_get<Team>();
         const PilotRef* pilot = shooter.try_get<PilotRef>();
         const float perTick = beam.damagePerSecond * static_cast<float>(Game::PHYSICS_DELTA);
@@ -589,7 +612,7 @@ void DamageSystem::ResolveBeams(std::uint64_t step)
                 deflector = search.target;
             }
         }
-    });
+    }
 
     for (flecs::entity round : intercepted) {
         // Two beams can burn the same round through in one tick.

@@ -25,6 +25,7 @@
 #include <gravitaris/game/system/ship/ship-controls-system.hpp>
 #include <gravitaris/game/system/combat/bullet-lifetime-system.hpp>
 #include <gravitaris/game/system/combat/damage-system.hpp>
+#include <gravitaris/game/system/combat/lag-compensation.hpp>
 #include <gravitaris/game/system/combat/shield-system.hpp>
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/system/combat/missile-system.hpp>
@@ -87,6 +88,11 @@ protected:
     ShipControlsSystem m_shipControlsSystem;
 
     BulletLifetimeSystem m_bulletLifetimeSystem;
+
+    // Declared before DamageSystem: that one takes a reference to it (member
+    // init order), since resolving a networked shot is the only thing that
+    // ever reaches into the past.
+    LagCompensation m_lagCompensation;
 
     DamageSystem m_damageSystem;
 
@@ -324,6 +330,11 @@ public:
 
     DamageSystem& GetDamageSystem()
     { return m_damageSystem; }
+
+    // For the tests: rewinding the world is otherwise something only hit
+    // resolution ever does, and from inside itself.
+    LagCompensation& GetLagCompensation()
+    { return m_lagCompensation; }
 
     // Every ship destroyed, for whoever writes the kill feed -- single-player
     // straight into its own chat log, a server out to its peers.

@@ -36,7 +36,9 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_inputSystem(m_registry)
         , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue, m_upgradeCatalog)
         , m_bulletLifetimeSystem(m_registry)
-        , m_damageSystem(m_registry, m_physicsSystem, m_eventQueue, m_upgradeCatalog)
+        , m_lagCompensation(m_registry, m_physicsSystem)
+        , m_damageSystem(m_registry, m_physicsSystem, m_eventQueue, m_upgradeCatalog,
+                         m_lagCompensation)
         , m_shieldSystem(m_registry, m_upgradeCatalog)
         , m_missileSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_upgradeCatalog)
         , m_factionSystem(m_registry, *m_entitySpawner, m_eventQueue)
@@ -283,6 +285,11 @@ void Game::Update()
 
     {
         ScopedPerfTimer timer(m_perfMonitor, "Game Logic");
+        // Where everything is at the end of this tick's motion, which is what
+        // the snapshot for this tick will carry -- so it is what a client will
+        // have been looking at when it fires, some ticks from now. Recorded
+        // before anything resolves a shot, since a shot may rewind to it.
+        m_lagCompensation.Record(m_step);
         // Before DamageSystem, so this tick's regen is available to this
         // tick's incoming fire.
         m_shieldSystem.Update();

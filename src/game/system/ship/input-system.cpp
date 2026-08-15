@@ -24,6 +24,10 @@ void InputSystem::Update(std::uint64_t step)
         // commits -- a purchase must not be lost to a catch-up burst.
         while (!queue.Empty() && queue.Front().tick <= step) {
             controls.actionFlags = queue.Front().flags;
+            // Carried with the flags rather than beside them: the shot this
+            // tick resolves is the one this command asked for, so it has to be
+            // resolved against the world THAT command was composed against.
+            controls.viewDelay = queue.Front().viewDelay;
             if (queue.Front().techPick.IsSet()) controls.techPick = queue.Front().techPick;
             queue.PopFront();
         }

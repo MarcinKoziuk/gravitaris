@@ -3498,6 +3498,109 @@ void TestLasers()
     fs.Shutdown();
 }
 
+// A shot is resolved in the world the pilot was looking at, not the one the
+// server has moved on to. Everything a networked client sees of everyone else
+// is late -- its own interpolation delay plus however far behind the server it
+// runs -- so a beam held dead on a crossing target misses by exactly that much
+// unless the server puts the world back first.
+//
+// The test flies a target across the beam and fires at where it USED to be,
+// which is the only thing a lagged pilot can do: with a delay declared, the
+// shot lands; with the same aim and no delay, it hits nothing at all.
+void TestLagCompensation()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    // Far enough that the target crosses several hull widths inside the delay,
+    // so a rewind that quietly did nothing cannot pass by luck.
+    constexpr int VIEW_DELAY = 20;
+    constexpr double CROSS_SPEED = 90.;
+
+    // `declareDelay` false is the control: the same pilot, the same aim, and no
+    // claim about how late their picture was.
+    const auto shootAtThePast = [&fs](bool declareDelay) {
+        Game game(fs);
+        const UpgradeCatalog& catalog = game.GetUpgradeCatalog();
+        EntitySpawner& spawner = game.GetEntitySpawner();
+
+        flecs::entity shooter =
+                spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.}, TeamId::Blue);
+        flecs::entity target =
+                spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{500., 0.}, TeamId::Red);
+
+        FitFree(catalog, *catalog.FindKind(UpgradeKind::Capacitor), 1,
+                shooter.get_mut<ShipLoadout>());
+        FitFree(catalog, *catalog.FindKind(UpgradeKind::LaserTier), 1,
+                shooter.get_mut<ShipLoadout>());
+
+        cpBodySetAngle(game.GetPhysicsSystem().GetBody(shooter.get<PhysicsRef>()).cp.body.get(),
+                       CP_PI / 2.);
+        // Crossing the line of fire, and nothing out here to bend its course.
+        cpBodySetVelocity(game.GetPhysicsSystem().GetBody(target.get<PhysicsRef>()).cp.body.get(),
+                          cpv(0., CROSS_SPEED));
+
+        const ShipStats stats = catalog.ResolveStats(shooter.get<ShipLoadout>().levels);
+        const int windup = ShipControlsSystem::BeamWindupTicks(*stats.laser);
+
+        // Let the trail fill and the target get moving, then aim at where it is
+        // NOW and hold that aim while it flies on -- which is what a pilot
+        // whose picture is VIEW_DELAY ticks old is doing, whether they know it
+        // or not.
+        for (int tick = 0; tick < VIEW_DELAY + windup; ++tick) game.Update();
+
+        const Vector2d seenAt = target.get<Transform>().pos;
+        const double aim = std::atan2(seenAt.y() - shooter.get<Transform>().pos.y(),
+                                      seenAt.x() - shooter.get<Transform>().pos.x());
+
+        const float startHp = target.get<Damageable>().hp;
+        for (int tick = 0; tick < VIEW_DELAY + windup + 10 && target.is_alive(); ++tick) {
+            InputCommand cmd;
+            cmd.tick = game.GetStep();
+            cmd.flags.fireLaser = true;
+            cmd.flags.aim = PackAim(aim);
+            cmd.viewDelay = declareDelay ? VIEW_DELAY : 0;
+            shooter.get_mut<InputQueue>().Push(cmd);
+            game.Update();
+        }
+
+        return target.is_alive() ? startHp - target.get<Damageable>().hp : startHp;
+    };
+
+    const float compensated = shootAtThePast(true);
+    const float raw = shootAtThePast(false);
+
+    Require(compensated > 0.f, "lag comp: a shot lands where the pilot saw the target");
+    Require(raw == 0.f, "lag comp: ...and misses it entirely without the rewind");
+
+    // The world has to come back afterwards, or every shot would leave the
+    // sector a tick in the past and the next one would compound it.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity drifter =
+                spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{300., 0.}, TeamId::Red);
+        cpBodySetVelocity(game.GetPhysicsSystem().GetBody(drifter.get<PhysicsRef>()).cp.body.get(),
+                          cpv(0., CROSS_SPEED));
+        for (int tick = 0; tick < 40; ++tick) game.Update();
+
+        const Vector2d before = drifter.get<Transform>().pos;
+        {
+            const LagCompensation::Rewind rewind(game.GetLagCompensation(),
+                                                 LagCompensation::ViewTickOf(game.GetStep(), 20),
+                                                 flecs::entity{});
+            Require(rewind.Moved(), "lag comp: a rewind actually moves what it reaches back for");
+            Require(drifter.get<Transform>().pos != before, "lag comp: ...to where it used to be");
+        }
+        Require(drifter.get<Transform>().pos == before, "lag comp: and puts it back afterwards");
+    }
+
+    fs.Shutdown();
+}
+
 // Field plating is a mirror: it takes its own share of a beam and throws the
 // rest back off the hull as a live beam, which burns whatever it then meets. A
 // bubble does no such thing and swallows a beam whole.
@@ -5551,6 +5654,7 @@ int main()
     TestCapacitor();
     TestLasers();
     TestBeamDeflection();
+    TestLagCompensation();
     TestBeamAimsAtAPlace();
     TestBeamsInterceptMissiles();
     TestFactionDefeatAndWin();

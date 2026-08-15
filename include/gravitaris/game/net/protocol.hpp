@@ -32,7 +32,10 @@ enum class PacketType : std::uint8_t {
 // two bytes (the eight bits were full) and adds the aim angle in both
 // directions -- what a client asks its gimballed mounts for, and where every
 // other ship's are pointing.
-inline constexpr std::uint32_t PROTOCOL_VERSION = 10;
+// v11 adds the view delay to every command: how far behind the sender's picture
+// of everyone else was when it was composed, which is what lets the server
+// resolve a shot in the world the pilot was actually looking at.
+inline constexpr std::uint32_t PROTOCOL_VERSION = 11;
 
 // How many trailing commands ClientInput carries per send -- redundancy
 // instead of reliability (quake3-style): as long as one of the last N sends

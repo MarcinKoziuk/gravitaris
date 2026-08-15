@@ -86,6 +86,7 @@ void WriteClientInput(const ClientInputPacket& packet, ByteWriter& out)
         out.WriteU8(cmd.techPick.mount);
         out.WriteU8(cmd.techPick.strip ? 1 : 0);
         out.WriteU8(cmd.techPick.resupply ? 1 : 0);
+        out.WriteU16(cmd.viewDelay);
     }
 }
 
@@ -113,6 +114,10 @@ bool ReadClientInputBody(ByteReader& in, ClientInputPacket& out)
         cmd.techPick.mount = in.ReadU8();
         cmd.techPick.strip = in.ReadU8() != 0;
         cmd.techPick.resupply = in.ReadU8() != 0;
+        // Clamped where it is resolved rather than here (LagCompensation::
+        // ViewTickOf), so one rule bounds how far back a peer can drag the
+        // world however the number arrived.
+        cmd.viewDelay = in.ReadU16();
         out.commands.push_back(cmd);
     }
     return in.Ok();

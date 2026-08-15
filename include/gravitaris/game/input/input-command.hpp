@@ -14,6 +14,16 @@ struct InputCommand {
     ControlFlags flags{};
     // One tech-tree purchase this tick commits, if any (TechPick::IsSet).
     TechPick techPick;
+    // How many ticks behind this command's own tick the pilot was seeing
+    // everybody else when they composed it -- their interpolation delay, plus
+    // however far behind the server they are running. Zero for anything
+    // composed inside the sim itself (single player, AI, replays), which is why
+    // it is a delay rather than a tick: a number that means "not applicable"
+    // and "no delay" at once needs no special case anywhere downstream.
+    //
+    // The server resolves hitscan against the world this far back, so a shot
+    // that looked dead on lands (LagCompensation).
+    std::uint16_t viewDelay = 0;
 };
 
 // The bits alone, for replay files and the wire. Two bytes since the laser's

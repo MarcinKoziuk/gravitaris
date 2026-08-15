@@ -72,6 +72,7 @@ class ShipControlsSystem;
 class AIPilotSystem;
 class AIStrategySystem;
 class DamageSystem;
+class LagCompensation;
 class DeathSystem;
 class FactionSystem;
 

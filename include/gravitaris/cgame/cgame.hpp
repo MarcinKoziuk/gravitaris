@@ -826,6 +826,13 @@ public:
     }
     [[nodiscard]] std::uint64_t GetLastEstimatedServerTick() const { return m_lastEstimatedServerTick; }
     [[nodiscard]] double GetLastRenderTick() const { return m_lastRenderTick; }
+
+    // Ticks between what this client is aiming AT and the tick it is aiming
+    // FROM: everyone else is drawn at the interpolated render tick, while the
+    // own ship is predicted at `commandTick`. Sent with every command so the
+    // server can put the world back (LagCompensation); clamped there too, since
+    // a peer's number is a peer's number.
+    [[nodiscard]] std::uint16_t ViewDelayTicks(std::uint64_t commandTick) const;
     [[nodiscard]] std::size_t GetClockSnapCount() const
     {
         return m_netClient ? m_netClient->GetClockSnapCount() : 0;

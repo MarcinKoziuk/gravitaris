@@ -731,6 +731,8 @@ if(GRAVITARIS_BUILD_CLIENT)
         src/game/event/death-report.cpp
         include/gravitaris/game/system/combat/damage-system.hpp
         src/game/system/combat/damage-system.cpp
+        include/gravitaris/game/system/combat/lag-compensation.hpp
+        src/game/system/combat/lag-compensation.cpp
         include/gravitaris/game/system/combat/shield-system.hpp
         src/game/system/combat/shield-system.cpp
         include/gravitaris/game/component/missile.hpp
@@ -1068,6 +1070,7 @@ add_executable(gravitaris-sim-test
     src/game/system/combat/bullet-lifetime-system.cpp
     src/game/event/death-report.cpp
     src/game/system/combat/damage-system.cpp
+    src/game/system/combat/lag-compensation.cpp
     src/game/system/combat/shield-system.cpp
     src/game/system/combat/missile-system.cpp
     src/game/system/gwell/faction-system.cpp
@@ -1182,6 +1185,7 @@ if(NOT EMSCRIPTEN)
         src/game/system/combat/bullet-lifetime-system.cpp
         src/game/event/death-report.cpp
         src/game/system/combat/damage-system.cpp
+        src/game/system/combat/lag-compensation.cpp
         src/game/system/combat/shield-system.cpp
         src/game/system/combat/missile-system.cpp
         src/game/system/gwell/faction-system.cpp

@@ -261,6 +261,42 @@ generator writes every sfx procedurally, so there is no art dependency.
 - [x] Leave `laser-1.wav` alone — despite the name it is the autocannon's and
   the missile's pew, not the beam's.
 
+## T6 — Lag-compensated beams (2026-08-15)
+
+A client sees everyone else late — its interpolation delay, plus however far
+behind the server it runs — so a beam held dead on a crossing target missed by
+exactly that much. Fixed the way every hitscan shooter since Quake III fixes it:
+each command now carries **how far behind its own tick the sender's picture was**
+(`InputCommand::viewDelay`, protocol v11), every hull that can be shot leaves a
+trail of where it has been, and resolving one shooter's beam holds the world back
+to the tick that shooter was looking at. Half a second is the ceiling
+(`LagCompensation::MAX_REWIND_TICKS`).
+
+The rewind moves the real bodies rather than resolving against stored numbers,
+so a beam still sweeps the same polygons, shield elements and filters as any
+other shot and none of the hit rules exist twice. The shooter itself is never
+rewound: its own ship is predicted locally, so it is already where its pilot
+thinks it is.
+
+Two things worth remembering:
+
+- **The trail is a side table, not a component.** It was a component first, and
+  giving every damageable entity one more component changed which table it lived
+  in, which changed the order unrelated queries walk the world in — and since
+  float accumulation is not associative, the sim produced *different physics*. A
+  landing test with nothing to do with any of this caught it. With the side
+  table, the determinism hash is byte-identical to before the feature.
+- **A rewind cannot be taken inside a query.** It walks every hull, and a query
+  inside another query's callback silently iterates nothing here — it would have
+  rewound precisely nobody and every networked shot would have gone quietly back
+  to missing. `ResolveBeams` gathers who is firing first, then resolves outside
+  the walk.
+
+**Still to do: bullets and missiles are not rewound.** Only beams are lag
+compensated. A gun round is a moving entity resolved over its own swept segment,
+so it needs the same treatment on its own path — and an intercepted missile is
+found by measuring a corridor against positions gathered before any rewind.
+
 ## T5 — Field plating deflects a beam; a bubble does not (2026-08-14)
 
 The plates' one real advantage over a bubble, and the reason to fit either: a

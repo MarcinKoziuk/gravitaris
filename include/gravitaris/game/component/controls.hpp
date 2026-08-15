@@ -187,6 +187,12 @@ struct Controls {
     // ShipControlsSystem::AdvanceCapacitor.
     std::uint16_t laserWindup = 0;
     std::uint16_t laserBurnOwed = 0;
+
+    // How far behind this pilot's view of everyone else was on the command
+    // being acted on (InputCommand::viewDelay). Sim-side state rather than a
+    // flag: it never travels in a snapshot, and only the server's hit
+    // resolution reads it (LagCompensation).
+    std::uint16_t viewDelay = 0;
 };
 
 } // namespace Gravitaris

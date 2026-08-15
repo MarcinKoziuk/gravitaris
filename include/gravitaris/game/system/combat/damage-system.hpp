@@ -140,6 +140,12 @@ private:
     void QueryFirstHit(cpSpace* space, const Magnum::Vector2d& from, const Magnum::Vector2d& to,
                        double radius, HitSearch& search);
 
+    // Holds the world back to what a networked shooter was looking at, for as
+    // long as its shot takes to resolve. Asked for on every beam and answers
+    // instantly for most of them: a command composed inside the sim carries no
+    // delay, which is every single-player and AI shot.
+    LagCompensation& m_lagCompensation;
+
     // What share of a beam `ent` takes into itself where it was hit, the rest
     // being thrown back off the hull. One -- absorbs everything, deflects
     // nothing -- for a hit on bare hull, on a bubble, and on any hull whose
@@ -155,7 +161,7 @@ private:
 
 public:
     DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
-                 const UpgradeCatalog& catalog);
+                 const UpgradeCatalog& catalog, LagCompensation& lagCompensation);
 
     LandingParams& GetLandingParams() { return m_landingParams; }
 

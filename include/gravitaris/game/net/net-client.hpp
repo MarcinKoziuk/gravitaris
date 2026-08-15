@@ -204,7 +204,12 @@ public:
     // directly felt input lag for the owning client too, since nothing
     // local shows the result any sooner. No-ops before the handshake
     // completes (there's no ship to control yet).
-    void SendInput(std::uint64_t tick, const ControlFlags& flags, const TechPick& techPick = {});
+    // `viewDelay` is how many ticks behind `tick` this client's picture of
+    // everyone else was when the command was composed -- what the server needs
+    // to resolve a hitscan shot against the world the pilot was aiming at
+    // (LagCompensation). Zero asks for no rewind at all.
+    void SendInput(std::uint64_t tick, const ControlFlags& flags, const TechPick& techPick = {},
+                   std::uint16_t viewDelay = 0);
 
     // Sends one composed chat line, reliably. No-op before the handshake
     // completes -- the server can't attribute a line to a peer it hasn't

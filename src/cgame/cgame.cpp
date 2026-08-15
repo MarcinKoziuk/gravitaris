@@ -906,7 +906,13 @@ bool CGame::TickNetClient(const ControlFlags& flags, const TechPick& techPick)
     }
 
     const std::uint64_t tick = advance.tick;
-    m_netClient->SendInput(tick, flags, techPick);
+    // How far behind this command's own tick the pilot's picture of everyone
+    // else is: their ships are drawn at `m_lastRenderTick` (the interpolation
+    // delay, plus however far this client is running behind the server), while
+    // the command is stamped with the tick this client's OWN ship is predicted
+    // at. That difference is the whole of what the server has to undo to
+    // resolve a shot where it was aimed -- see LagCompensation.
+    m_netClient->SendInput(tick, flags, techPick, ViewDelayTicks(tick));
 
     if (const std::optional<SnapshotData>& snapshot = m_netClient->GetLatestSnapshot()) {
         m_clientPrediction.Step(tick, flags, snapshot->entities, snapshot->tick, m_netClient->GetYourShipNetId());
@@ -965,6 +971,18 @@ void CGame::ApplyRemoteEvents()
         return sourceNetId == yourShipNetId ? GetPlayer().value_or(flecs::entity{})
                                             : m_snapshotApplier.EntityForNetId(sourceNetId);
     });
+}
+
+std::uint16_t CGame::ViewDelayTicks(std::uint64_t commandTick) const
+{
+    // Before the first frame has rendered there is no picture to be behind.
+    if (m_lastRenderTick <= 0.0) return 0;
+
+    const double behind = static_cast<double>(commandTick) - m_lastRenderTick;
+    if (behind <= 0.0) return 0;
+
+    return static_cast<std::uint16_t>(
+            std::min(behind, static_cast<double>(LagCompensation::MAX_REWIND_TICKS)));
 }
 
 void CGame::RenderNetClient(float dtSeconds, double tickFraction)
