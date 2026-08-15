@@ -193,6 +193,10 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
             // would otherwise decide it.
             controls->boosting = controls->actionFlags.boost;
             controls->laserFiring = controls->actionFlags.fireLaser;
+            // Both halves of the commitment arrive as one number: what is left
+            // to charge. Nothing owes a burn in this world -- the beam bit
+            // above is the server's answer to that already.
+            controls->laserWindup = state.laserWindup;
         }
         // Ownership changes mid-round (planet claims); creation-time Team
         // alone would leave the mirror stale.

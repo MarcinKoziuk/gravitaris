@@ -99,14 +99,18 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
     // One clip per distinct sound the weapon table names. Deduplicated: the
     // whole gatling line shares a file, and loading it once per tier would
     // upload the same buffer four times.
-    for (const WeaponDef& weapon : m_catalog.Weapons()) {
-        if (weapon.soundId == 0) continue;
+    const auto loadWeaponClip = [&](id_t soundId) {
+        if (soundId == 0) return;
         const auto already = std::find_if(m_weaponClips.begin(), m_weaponClips.end(),
                                           [&](const ResourcePtr<const AudioClip>& clip) {
-                                              return clip.Id() == weapon.soundId;
+                                              return clip.Id() == soundId;
                                           });
-        if (already != m_weaponClips.end()) continue;
-        m_weaponClips.push_back(m_resourceLoader.Load<AudioClip>(weapon.soundId));
+        if (already != m_weaponClips.end()) return;
+        m_weaponClips.push_back(m_resourceLoader.Load<AudioClip>(soundId));
+    };
+    for (const WeaponDef& weapon : m_catalog.Weapons()) {
+        loadWeaponClip(weapon.soundId);
+        loadWeaponClip(weapon.windupSoundId); // beams only; zero everywhere else
     }
 
     auto miniaudio = std::make_unique<MiniaudioBackend>();
@@ -127,6 +131,10 @@ AudioSystem::AudioSystem(flecs::world& registry, ResourceLoader& resourceLoader,
     HandleClipAdded(*m_platingClip, m_platingClip.Id());
     HandleClipAdded(*m_researchClip, m_researchClip.Id());
     HandleClipAdded(*m_chatClip, m_chatClip.Id());
+    // Every clip loaded before the backend existed needs this: the observer that
+    // normally uploads one fired while there was nothing to upload to, so a list
+    // left out here holds valid clips that own no buffer -- and a voice with no
+    // buffer is silence, not an error anybody sees.
     for (const ResourcePtr<const AudioClip>& clip : m_weaponClips) HandleClipAdded(*clip, clip.Id());
 
     AcquireVoicePool();
@@ -265,17 +273,28 @@ void AudioSystem::SweepBeams(flecs::world& world)
                    const ShipLoadout& loadout) {
         // What the bank actually granted, not what the trigger asked for -- a
         // dry capacitor should go quiet, which is most of how a pilot hears
-        // that they have run out.
-        if (!controls.laserFiring) return;
+        // that they have run out. A charging emitter is heard either way: the
+        // windup is a commitment, and it is audible to whoever it is pointed
+        // at as much as to the pilot.
+        const bool charging = controls.laserWindup > 0;
+        if (!controls.laserFiring && !charging) return;
 
         // The emitter's own clip, the way a gun's round carries its own: a
         // rank that sounds heavier is then a data edit. Resolved off the
         // replicated loadout, so a remote ship's beam sounds right here
         // without this side ever seeing its owner's purchases.
         const ShipStats stats = m_catalog.ResolveStats(loadout.levels);
-        if (!stats.laser || !stats.laser->IsBeam() || stats.laser->soundId == 0) return;
+        if (!stats.laser || !stats.laser->IsBeam()) return;
 
         const Vector2 pos{static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())};
+        if (charging) {
+            if (stats.laser->windupSoundId == 0) return;
+            HoldLoop(world, ent, LoopKind::BeamWindup, stats.laser->windupSoundId, pos,
+                     stats.laser->windupSoundGain * BEAM_GAIN_SCALE);
+            return;
+        }
+
+        if (stats.laser->soundId == 0) return;
         HoldLoop(world, ent, LoopKind::Beam, stats.laser->soundId, pos,
                  stats.laser->soundGain * BEAM_GAIN_SCALE);
     });

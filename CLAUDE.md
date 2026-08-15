@@ -56,6 +56,15 @@ Eventually the game should be multiplayer, so the game is split into separate mo
   an hour in `ResearchSystem`: the account lookup nested inside the walk over
   `PilotRef`s found nobody and opened every pilot a fresh account every tick.
 
+- **Chipmunk: a segment query's radius does not widen the broadphase.**
+  `cpSpaceSegmentQuery`'s `radius` only fattens the per-shape test; the spatial
+  index is walked against the *raw* segment first, so a shape whose bbox misses
+  the line is never tested however generous the radius. Small fast things a few
+  units off the line are therefore unfindable this way — anything wanting a real
+  corridor has to measure it itself (see `DamageSystem::BEAM_INTERCEPT_RADIUS`,
+  which is why a beam intercepts missiles with plain geometry rather than a
+  second sweep). Corollary: `BULLET_QUERY_RADIUS`'s forgiveness is thinner than
+  it looks.
 - **macOS DPI**: `Sdl2Application::dpiScaling()` reports `{1, 1}` on macOS
   even on Retina displays where `windowSize()` and `framebufferSize()`
   genuinely differ. Use `framebufferSize() / windowSize()` for the real

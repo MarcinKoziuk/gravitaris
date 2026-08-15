@@ -43,6 +43,11 @@ private:
     enum class LoopKind : std::uint8_t {
         Thruster,
         Beam,
+        // The emitter charging. A held voice rather than a one-shot even though
+        // the clip is a one-shot sweep: held is what makes it play exactly once
+        // per charge with no per-frame edge to track, and the clip is authored
+        // to the length of the windup so it never gets as far as repeating.
+        BeamWindup,
     };
 
     // Held loops are keyed by world as well as entity: a net client keeps its
@@ -158,6 +163,7 @@ private:
     // and a new weapon's sound needs no code here.
     std::vector<ResourcePtr<const AudioClip>> m_weaponClips;
 
+
     // Where Update() last put the listener; PlayChatBlip's own position, so a
     // UI sound doesn't pan or attenuate.
     Vector2 m_listenerPos{0.f, 0.f};
@@ -222,6 +228,7 @@ public:
     // that happened somewhere in the world. Called directly rather than driven
     // off the event queue: chat is not sim state and never replays.
     void PlayChatBlip();
+
 };
 
 } // namespace Gravitaris

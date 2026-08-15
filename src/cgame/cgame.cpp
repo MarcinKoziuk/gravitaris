@@ -17,6 +17,7 @@
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/missile.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/component/research-access.hpp>
 #include <gravitaris/game/component/pilot-account.hpp>
@@ -25,6 +26,7 @@
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/resource/body.hpp>
+#include <gravitaris/game/system/combat/damage-system.hpp>
 #include <gravitaris/game/system/ship/ship-controls-system.hpp>
 #include <gravitaris/game/event/death-report.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
@@ -259,7 +261,7 @@ Magnum::Vector2 CGame::ViewportToWorld(const Magnum::Vector2& viewportPixel)
     return camera.GetPosition() + (viewportPixel - m_viewportSize * 0.5f) / pixelsPerUnit;
 }
 
-std::optional<std::uint16_t> CGame::AimAt(const Magnum::Vector2& viewportPixel)
+std::optional<std::uint16_t> CGame::AimAtPoint(const Magnum::Vector2& worldPoint)
 {
     const std::optional<flecs::entity> player = GetPlayer();
     if (!player || !player->is_alive()) return std::nullopt;
@@ -267,9 +269,8 @@ std::optional<std::uint16_t> CGame::AimAt(const Magnum::Vector2& viewportPixel)
     const Transform* transf = player->try_get<Transform>();
     if (!transf) return std::nullopt;
 
-    const Magnum::Vector2 world = ViewportToWorld(viewportPixel);
-    const Magnum::Vector2d offset{static_cast<double>(world.x()) - transf->pos.x(),
-                                  static_cast<double>(world.y()) - transf->pos.y()};
+    const Magnum::Vector2d offset{static_cast<double>(worldPoint.x()) - transf->pos.x(),
+                                  static_cast<double>(worldPoint.y()) - transf->pos.y()};
     if (offset.dot() < 1e-9) return std::nullopt;
 
     return PackAim(std::atan2(offset.y(), offset.x()));
@@ -1129,6 +1130,7 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
     // interpolation override above is undone, so a beam leaves the hull where
     // the hull was actually drawn rather than where the sim last left it.
     m_beams.clear();
+    m_charges.clear();
     GatherBeams(m_registry);
     GatherBeams(m_mirrorWorld);
     DrawBeams(camera);
@@ -1235,6 +1237,7 @@ void CGame::Render(double delta)
     // After the hulls, so a beam reads as light laid over what it is crossing,
     // and still inside the scene target so the glow pass picks it up.
     m_beams.clear();
+    m_charges.clear();
     GatherBeams(m_activeRenderer == RendererKind::Mirror ? m_mirrorWorld : m_registry);
     DrawBeams(camera);
 
@@ -1263,9 +1266,22 @@ void CGame::GatherBeams(flecs::world& world)
         if (radius > 0.) m_beamTargets.push_back(BeamTarget{ent, transf.pos, radius});
     });
 
+    // Missiles carry no Damageable -- their airframe is Missile::hp -- so the
+    // walk above cannot see the one round a beam is able to stop. Without this
+    // a beam would be drawn straight through a missile it is burning down.
+    //
+    // Against the interception corridor rather than the round's own outline,
+    // because that is what the sim burns it inside of.
+    world.each([&](flecs::entity ent, const Transform& transf, const Missile&) {
+        m_beamTargets.push_back(BeamTarget{ent, transf.pos, DamageSystem::BEAM_INTERCEPT_RADIUS});
+    });
+
     world.each([&](flecs::entity ship, const Transform& transf, const Controls& controls,
                    const ShipLoadout& loadout) {
-        if (!controls.laserFiring) return;
+        // A charging emitter is drawn too, and deliberately: the windup is the
+        // weapon's telegraph, and it has to be visible from the other end of it.
+        const bool charging = controls.laserWindup > 0;
+        if (!controls.laserFiring && !charging) return;
 
         const ShipStats stats = m_upgradeCatalog.ResolveStats(loadout.levels);
         if (!stats.laser || !stats.laser->IsBeam()) return;
@@ -1278,25 +1294,103 @@ void CGame::GatherBeams(flecs::world& world)
         const Magnum::Color3 color = Magnum::Math::lerp(
                 TeamColor(team ? team->id : TeamId::None), Magnum::Color3{1.f}, beam.heat);
 
+        // How far through the charge this mount is. The remaining ticks are what
+        // travels (EntityState::laserWindup), so a remote ship's charge swells
+        // over exactly the same second the shooter's own does.
+        const std::uint16_t windupTicks = ShipControlsSystem::BeamWindupTicks(*stats.laser);
+        const float charged = windupTicks > 0
+                ? 1.f - static_cast<float>(controls.laserWindup) / static_cast<float>(windupTicks)
+                : 1.f;
+
         for (std::size_t mount = 0; mount < MAX_WEAPON_MOUNTS; ++mount) {
             if (loadout.mounts[mount] != MountArm::Laser) continue;
 
             const ShipControlsSystem::BeamOrigin origin = ShipControlsSystem::ComputeBeamOrigin(
                     transf, hull, static_cast<unsigned>(mount), controls.actionFlags.aim);
             const Magnum::Vector2d heading{std::cos(origin.angle), std::sin(origin.angle)};
-            const double reach = BeamReach(ship, origin.pos, heading, static_cast<double>(beam.range));
 
-            const Magnum::Vector2d end = origin.pos + heading * reach;
-            const auto share = static_cast<float>(reach / beam.range);
-            m_beams.push_back(LaserRenderer::Beam{
+            // The emitter itself, lit whether or not the beam has arrived: it
+            // swells out of nothing over the charge and then stays at the root
+            // of the beam for as long as one is burning. Both the telegraph and
+            // the muzzle, and one shape rather than two -- what a pilot sees at
+            // a mount is the same light either way.
+            const float lit = charging ? charged : 1.f;
+            m_charges.push_back(LaserRenderer::Charge{
                     Magnum::Vector2{static_cast<float>(origin.pos.x()),
                                     static_cast<float>(origin.pos.y())},
-                    Magnum::Vector2{static_cast<float>(end.x()), static_cast<float>(end.y())},
-                    color, beam.widthNear,
-                    // A beam stopped short is only as wide as it got, and
-                    // still carries whatever its falloff has left where it
-                    // lands -- so the picture and the damage agree.
-                    beam.widthNear + (beam.widthFar - beam.widthNear) * share, 1.f - share});
+                    // Additive, so dimming the colour is the fade in from
+                    // nothing; it runs hotter as it fills, brightest at the
+                    // moment the beam leaves.
+                    Magnum::Math::lerp(color, Magnum::Color3{1.f}, lit * 0.5f) * lit,
+                    static_cast<float>(BEAM_CHARGE_RADIUS * lit)});
+            if (charging) continue;
+
+            // One segment per leg, following the same rule the sim resolves the
+            // burn with: a mirrored plate throws the beam onward, weaker, from
+            // where it landed. Everything continuous along the beam -- the fade,
+            // the widening, the distance the falloff is measured on -- carries
+            // across the kink, because it is one beam and not several.
+            const auto fadeLength = static_cast<float>(beam.range * BEAM_FADE_SHARE);
+            Magnum::Vector2d from = origin.pos;
+            Magnum::Vector2d along = heading;
+            double travelled = 0.;
+            // Distance for the FADE, which a bounce mostly forgives and
+            // `travelled` does not. The two part company on purpose: the falloff
+            // is measured along the whole path because that is the physics, but
+            // the light dies within a fraction of the reach, so a bounce off
+            // anything further out than that came out at a tenth of an alpha --
+            // in the buffer, invisible on screen, which is exactly how it
+            // looked. A plate throwing a beam back is re-emitting it, so most of
+            // the distance it had already lost is given back; what still says
+            // the beam is spent is `strength`, which carries across in full.
+            double litFrom = 0.;
+            float strength = 1.f;
+            flecs::entity deflector;
+
+            for (unsigned leg = 0; leg <= ShipControlsSystem::MAX_BEAM_BOUNCES; ++leg) {
+                const double reach = beam.range - travelled;
+                if (reach <= 0. || strength <= 0.01f) break;
+
+                // The shooter is only exempt on the first leg. After a bounce the
+                // beam is coming at its own hull from outside, and drawing it
+                // through the ship it is burning would be a lie the sim does not
+                // tell.
+                const BeamStop stop = BeamReach(leg == 0 ? ship : flecs::entity{}, deflector,
+                                                from, along, reach);
+                const float absorb = stop.target.is_alive() ? BeamAbsorbShareOf(stop.target) : 1.f;
+                const bool bounces = stop.target.is_alive() && absorb < 1.f;
+
+                // A beam that got nowhere still has to read as a beam rather
+                // than vanish -- but only where it ends for good, since padding
+                // a leg that bounces would move the kink off the hull.
+                const double length = bounces ? stop.distance
+                                              : std::max(stop.distance,
+                                                         beam.range * MIN_BEAM_SHARE - travelled);
+                if (length <= 0.) break;
+
+                const Magnum::Vector2d end = from + along * length;
+                const auto nearShare = static_cast<float>(travelled / beam.range);
+                const auto farShare = static_cast<float>((travelled + length) / beam.range);
+                const auto width = [&](float share) {
+                    return beam.widthNear + (beam.widthFar - beam.widthNear) * share;
+                };
+                m_beams.push_back(LaserRenderer::Beam{
+                        Magnum::Vector2{static_cast<float>(from.x()), static_cast<float>(from.y())},
+                        Magnum::Vector2{static_cast<float>(end.x()), static_cast<float>(end.y())},
+                        // Additive, so a deflected leg carrying half the beam is
+                        // drawn at half the colour.
+                        color * strength, width(nearShare), width(farShare), fadeLength,
+                        static_cast<float>(litFrom / (beam.range * BEAM_FADE_SHARE))});
+
+                if (!bounces) break;
+
+                strength *= 1.f - absorb;
+                travelled += length;
+                litFrom = travelled * BEAM_BOUNCE_RELIGHT;
+                from = end;
+                along = ShipControlsSystem::ReflectHeading(along, stop.normal);
+                deflector = stop.target;
+            }
         }
     });
 
@@ -1304,11 +1398,11 @@ void CGame::GatherBeams(flecs::world& world)
 
 void CGame::DrawBeams(const Camera& camera)
 {
-    if (m_beams.empty()) return;
+    if (m_beams.empty() && m_charges.empty()) return;
 
     m_laserRenderer.SetZoom(camera.GetZoom());
     m_laserRenderer.SetCameraPosition(camera.GetPosition());
-    m_laserRenderer.Render(m_beams);
+    m_laserRenderer.Render(m_beams, m_charges);
 }
 
 // The hull a beam leaves from, wherever this world keeps it: a simulated ship
@@ -1324,17 +1418,17 @@ const Body* CGame::HullOf(flecs::entity ent)
     return nullptr;
 }
 
-// How far a beam gets before it meets a hull. Bounding circles rather than the
-// collision polygons the sim sweeps: this decides where to stop DRAWING, it
-// runs in both the real world and a mirror one where nothing has physics at
-// all, and being a few units generous at the edge of a silhouette is invisible.
-double CGame::BeamReach(flecs::entity shooter, const Magnum::Vector2d& from,
-                        const Magnum::Vector2d& heading, double range)
+CGame::BeamStop CGame::BeamReach(flecs::entity ignoreA, flecs::entity ignoreB,
+                                 const Magnum::Vector2d& from,
+                                 const Magnum::Vector2d& heading, double range)
 {
-    double nearest = range;
+    BeamStop stop{range, flecs::entity{}, {}};
 
     for (const BeamTarget& target : m_beamTargets) {
-        if (target.entity == shooter) continue;
+        if ((ignoreA.is_alive() && target.entity == ignoreA)
+            || (ignoreB.is_alive() && target.entity == ignoreB)) {
+            continue;
+        }
 
         const Magnum::Vector2d toTarget = target.pos - from;
         const double radiusSq = target.radius * target.radius;
@@ -1349,17 +1443,25 @@ double CGame::BeamReach(flecs::entity shooter, const Magnum::Vector2d& from,
         // Closest approach of the ray to the hull's centre, and the chord it
         // cuts if it comes inside the circle at all.
         const double along = Magnum::Math::dot(toTarget, heading);
-        if (along <= 0. || along > nearest) continue;
+        if (along <= 0. || along > stop.distance) continue;
 
         const double offSq = toTarget.dot() - along * along;
         if (offSq > radiusSq) continue;
 
-        nearest = std::max(0., along - std::sqrt(radiusSq - offSq));
+        stop.distance = std::max(0., along - std::sqrt(radiusSq - offSq));
+        stop.target = target.entity;
+        stop.normal = (from + heading * stop.distance) - target.pos;
     }
 
-    // Never nothing: a beam that got nowhere still has to read as a beam
-    // rather than vanish.
-    return std::max(nearest, range * MIN_BEAM_SHARE);
+    return stop;
+}
+
+float CGame::BeamAbsorbShareOf(flecs::entity ent)
+{
+    const ShipLoadout* loadout = ent.try_get<ShipLoadout>();
+    if (!loadout || loadout->shieldHp <= 0.f) return 1.f;
+
+    return m_upgradeCatalog.ResolveStats(loadout->levels).laserAbsorb;
 }
 
 std::unique_ptr<EntitySpawner> CGame::CreateEntitySpawner()

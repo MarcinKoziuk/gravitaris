@@ -55,6 +55,12 @@ namespace Gravitaris {
 // goes back to talking about whatever is selected.
 static constexpr float TECH_NOTICE_SECONDS = 5.f;
 
+// How lazily the beam mounts follow the cursor, as the time constant of the
+// chase in seconds: they close most of a gap in about three of these. Slow
+// enough to feel like machinery being swung and to be worth leading a target
+// with, fast enough that it never feels like an argument with the mouse.
+static constexpr double AIM_SLEW_TAU = 0.12;
+
 
 using Magnum::Platform::Application;
 
@@ -98,10 +104,14 @@ private:
     bool m_autostart = false;
 
     // Where the cursor last was, in framebuffer pixels with the origin at the
-    // top-left (what the platform reports). The beam's aim is re-derived from
-    // it every tick rather than on movement alone: the ship flies out from
-    // under a resting cursor, and the angle has to follow it.
+    // top-left (what the platform reports). Read every tick rather than on
+    // movement alone: the world slides under a resting cursor as the ship
+    // flies, so the place it is pointing at moves with it.
     Magnum::Vector2 m_pointerPx{};
+    // The place in the world the beams are pointed at. Chases the cursor rather
+    // than tracking it exactly, so a shot is aimed at a spot and the mounts take
+    // a moment to come round to it (see UpdateAim, and CGame::AimAtPoint).
+    Magnum::Vector2 m_aimPoint{};
     // Confirmed tech picks waiting for a tick to carry them: a command holds
     // one, and CONFIRM can approve a whole refit at once, so they go out one
     // per tick in the order they were staged.
@@ -168,8 +178,9 @@ private:
     // shows for it.
     void ApplySectorSeed(std::uint32_t seed);
     void FeedInput();
-    // Re-points the gimballed mounts at wherever the cursor is now.
-    void UpdateAim();
+    // Swings the gimballed mounts toward wherever the cursor is now, over
+    // `dtSeconds` of real time -- they follow it rather than snapping to it.
+    void UpdateAim(double dtSeconds);
     void ToggleRecording();
     void StartReplay();
     void StopReplay();
@@ -420,7 +431,7 @@ void GravitarisApplication::tickEvent()
         m_frameTimeAccumulator += frameTime;
         static constexpr int MAX_STEPS_PER_FRAME = 5;
         int steps = 0;
-        UpdateAim();
+        UpdateAim(frameTime);
         while (m_frameTimeAccumulator >= Game::PHYSICS_DELTA) {
             if (steps >= MAX_STEPS_PER_FRAME) {
                 m_frameTimeAccumulator = 0.0;
@@ -706,7 +717,7 @@ void GravitarisApplication::FeedInput()
     std::optional<flecs::entity> maybePlayer = m_game->GetPlayer();
     if (!maybePlayer) return;
 
-    UpdateAim();
+    UpdateAim(Game::PHYSICS_DELTA);
 
     const std::uint64_t tick = m_game->GetStep();
 
@@ -746,14 +757,27 @@ void GravitarisApplication::FeedInput()
 // The scene viewport's own pixel space, bottom-left origin, from the platform's
 // top-left one -- CGame projects the world in the former and knows nothing
 // about the window the latter is measured in.
-void GravitarisApplication::UpdateAim()
+void GravitarisApplication::UpdateAim(double dtSeconds)
 {
     const Magnum::Vector2 origin = m_game->GetViewportOrigin();
     const auto fbHeight = static_cast<float>(framebufferSize().y());
     const Magnum::Vector2 inViewport{m_pointerPx.x() - origin.x(),
                                      fbHeight - m_pointerPx.y() - origin.y()};
+    const Magnum::Vector2 wanted = m_game->ViewportToWorld(inViewport);
 
-    if (const std::optional<std::uint16_t> aim = m_game->AimAt(inViewport)) {
+    // The mounts follow the cursor rather than snapping to it: gimbals have
+    // mass, and a beam that arrived wherever the mouse was that instant made
+    // the weapon feel like a laser pointer. Chased in WORLD space, so the two
+    // things a pilot can do to a beam both work -- swing the cursor and it
+    // catches up, fly past a spot you are holding and it stays on the spot.
+    //
+    // Exponential, off the real frame time rather than per call: this is called
+    // once a tick with a fixed step in a local game and once a frame in a
+    // networked one, and the drag should feel the same in both.
+    const auto blend = static_cast<float>(1. - std::exp(-dtSeconds / AIM_SLEW_TAU));
+    m_aimPoint += (wanted - m_aimPoint) * blend;
+
+    if (const std::optional<std::uint16_t> aim = m_game->AimAtPoint(m_aimPoint)) {
         m_currentInput.aim = *aim;
     }
 }
@@ -982,6 +1006,29 @@ void GravitarisApplication::keyPressEvent(Magnum::Platform::Sdl2Application::Key
         case KeyEvent::Key::J:
             m_game->SpawnRandomAIShip();
             return;
+        // Every term the cursor passes through on its way to being an aim, in
+        // one line. The mapping crosses three coordinate spaces (platform
+        // pixels, the scene viewport, the world) and two scale factors that are
+        // 1 on a plain desktop and are not in a browser, so an aim that lands
+        // slightly wrong is unfalsifiable by eye -- but obvious the moment the
+        // same key is pressed on both builds and the numbers are compared.
+        case KeyEvent::Key::F10: {
+            const Magnum::Vector2 origin = m_game->GetViewportOrigin();
+            const auto fbHeight = static_cast<float>(framebufferSize().y());
+            const Magnum::Vector2 inViewport{m_pointerPx.x() - origin.x(),
+                                             fbHeight - m_pointerPx.y() - origin.y()};
+            const Magnum::Vector2 world = m_game->ViewportToWorld(inViewport);
+            LOG(info) << "[aim] pointer=(" << m_pointerPx.x() << "," << m_pointerPx.y() << ")"
+                      << " fb=(" << framebufferSize().x() << "," << framebufferSize().y() << ")"
+                      << " window=(" << windowSize().x() << "," << windowSize().y() << ")"
+                      << " dpi=" << dpiScaling().x() << " pixelScale=" << PixelScale().x()
+                      << " contentScale=" << ContentScale()
+                      << " viewportOrigin=(" << origin.x() << "," << origin.y() << ")"
+                      << " inViewport=(" << inViewport.x() << "," << inViewport.y() << ")"
+                      << " world=(" << world.x() << "," << world.y() << ")"
+                      << " aimPoint=(" << m_aimPoint.x() << "," << m_aimPoint.y() << ")";
+            return;
+        }
         default:
             break;
     }

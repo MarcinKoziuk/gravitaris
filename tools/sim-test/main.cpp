@@ -3365,11 +3365,19 @@ void TestLasers()
         bool firing = false;
         bool fitted = false;
         int drawable = 0;
+        // The windup, measured rather than assumed: how long the emitter was
+        // authored to charge for, and the tick the light actually arrived on.
+        int windupTicks = 0;
+        int firstBurnTick = -1;
+        int burnedTicks = 0;
     };
 
-    // One run of the trigger held on a hull `at` units along +X (negative puts
-    // it astern), with the mounts asked for `aimAngle` in world terms.
-    const auto burn = [&fs](double at, double aimAngle, bool fitBank, int ticks) {
+    // One run of the trigger on a hull `at` units along +X (negative puts it
+    // astern), with the mounts asked for `aimAngle` in world terms. Held for
+    // `ticks`, then followed for `coastTicks` more with the button up -- which
+    // is how the half of a shot the pilot no longer controls gets measured.
+    const auto burn = [&fs](double at, double aimAngle, bool fitBank, int ticks,
+                            int coastTicks = 0) {
         Game game(fs);
         const UpgradeCatalog& catalog = game.GetUpgradeCatalog();
         EntitySpawner& spawner = game.GetEntitySpawner();
@@ -3392,16 +3400,26 @@ void TestLasers()
         cpBody* body = game.GetPhysicsSystem().GetBody(shooter.get<PhysicsRef>()).cp.body.get();
         cpBodySetAngle(body, CP_PI / 2.);
 
+        const ShipStats stats = catalog.ResolveStats(shooter.get<ShipLoadout>().levels);
+        const int windupTicks =
+                stats.laser ? ShipControlsSystem::BeamWindupTicks(*stats.laser) : 0;
+
         const float startHp = target.get<Damageable>().hp;
         bool firing = false;
-        for (int tick = 0; tick < ticks && target.is_alive(); ++tick) {
+        int firstBurnTick = -1;
+        int burnedTicks = 0;
+        for (int tick = 0; tick < ticks + coastTicks && target.is_alive(); ++tick) {
             InputCommand cmd;
             cmd.tick = game.GetStep();
-            cmd.flags.fireLaser = true;
+            cmd.flags.fireLaser = tick < ticks;
             cmd.flags.aim = PackAim(aimAngle);
             shooter.get_mut<InputQueue>().Push(cmd);
             game.Update();
-            firing = firing || shooter.get<Controls>().laserFiring;
+            if (shooter.get<Controls>().laserFiring) {
+                if (firstBurnTick < 0) firstBurnTick = tick;
+                ++burnedTicks;
+                firing = true;
+            }
         }
 
         // The renderer finds its beams with exactly this query, and it is the
@@ -3414,14 +3432,24 @@ void TestLasers()
         });
 
         const float lost = target.is_alive() ? startHp - target.get<Damageable>().hp : startHp;
-        return Burn{lost, shooter.get<Controls>().capacitorSpent, firing, fitted, drawable};
+        return Burn{lost,          shooter.get<Controls>().capacitorSpent,
+                    firing,        fitted,
+                    drawable,      windupTicks,
+                    firstBurnTick, burnedTicks};
     };
 
-    // Point blank against half a reach away. laser_1 falls off from the muzzle,
-    // so the near burn is worth strictly more than the far one for exactly the
-    // same charge spent.
-    const Burn near = burn(/*at=*/120., /*aimAngle=*/0., /*fitBank=*/true, 30);
-    const Burn far = burn(/*at=*/330., /*aimAngle=*/0., /*fitBank=*/true, 30);
+    // Every run below holds the trigger past the charge, since a beam that is
+    // still winding up is a beam that has done nothing yet.
+    const int windup = burn(/*at=*/600., /*aimAngle=*/0., /*fitBank=*/true, 1).windupTicks;
+    Require(windup > 0, "lasers: the emitter is authored a charge to run");
+    const int hold = windup + 30;
+
+    // A quarter of laser_1's reach against three quarters of it. It falls off
+    // from the muzzle, so the near burn is worth strictly more than the far one
+    // for exactly the same charge spent. Distances are shares of that reach and
+    // have to move with it -- the ratio is the test, not the numbers.
+    const Burn near = burn(/*at=*/600., /*aimAngle=*/0., /*fitBank=*/true, hold);
+    const Burn far = burn(/*at=*/1650., /*aimAngle=*/0., /*fitBank=*/true, hold);
     Require(near.fitted, "lasers: an emitter goes into a weapon mount");
     Require(near.firing && near.damage > 0.f, "lasers: a held beam burns what it is pointed at");
     Require(near.drawable == 1, "lasers: a burning beam is findable by what draws it");
@@ -3429,24 +3457,373 @@ void TestLasers()
             "lasers: ...and burns it far harder up close than out at range");
     Require(near.spent > 0.f, "lasers: firing spends the bank");
 
+    // The windup: nothing at all leaves the emitter until the charge has run,
+    // and the whole of it is spent charging rather than shooting.
+    Require(near.firstBurnTick == windup, "lasers: no light leaves the emitter until it has charged");
+    const Burn charging = burn(/*at=*/600., /*aimAngle=*/0., /*fitBank=*/true, windup);
+    Require(!charging.firing && charging.damage == 0.f,
+            "lasers: a trigger held only through the charge burns nothing");
+    Require(charging.spent > 0.f, "lasers: ...and charging costs the bank all the same");
+
+    // A tap, and then hands off: the windup cannot be called off, so the shot
+    // arrives anyway and burns its minimum. This is the whole commitment --
+    // press it by mistake and the beam still goes out.
+    const Burn tapped = burn(/*at=*/600., /*aimAngle=*/0., /*fitBank=*/true, /*ticks=*/1,
+                             /*coastTicks=*/windup + 60);
+    Require(tapped.firing && tapped.damage > 0.f,
+            "lasers: a released trigger cannot call the charge off -- the shot still lands");
+    Require(tapped.firstBurnTick == windup, "lasers: ...arriving on the tick it would have anyway");
+    Require(tapped.burnedTicks > 0 && tapped.burnedTicks < near.burnedTicks,
+            "lasers: ...and burns its minimum rather than what a held trigger buys");
+
     // Past the emitter's reach it lands nothing at all -- while still costing
     // exactly as much to hold, which is the mistake the weapon punishes.
-    const Burn beyond = burn(/*at=*/700., /*aimAngle=*/0., /*fitBank=*/true, 30);
+    const Burn beyond = burn(/*at=*/3500., /*aimAngle=*/0., /*fitBank=*/true, hold);
     Require(beyond.damage == 0.f, "lasers: nothing reaches past the emitter's range");
     Require(beyond.firing && beyond.spent > 0.f, "lasers: ...and holding it out there still costs");
 
     // Directly astern is outside fighter-1's 300-degree gimbal, and asking for
     // it pins the beam to the edge of the arc rather than swinging it around --
     // so the hull on its tail is not hit, however precisely the pilot aims.
-    const Burn behind = burn(/*at=*/-150., /*aimAngle=*/CP_PI, /*fitBank=*/true, 30);
+    const Burn behind = burn(/*at=*/-750., /*aimAngle=*/CP_PI, /*fitBank=*/true, hold);
     Require(behind.firing, "lasers: the emitter still burns with the aim on its stop");
     Require(behind.damage == 0.f, "lasers: ...but the gimbal will not swing into the blind cone");
 
     // And none of it without a bank to fire out of: the emitter is not merely
     // quiet, it cannot be fitted at all.
-    const Burn unbanked = burn(/*at=*/120., /*aimAngle=*/0., /*fitBank=*/false, 30);
+    const Burn unbanked = burn(/*at=*/600., /*aimAngle=*/0., /*fitBank=*/false, hold);
     Require(!unbanked.fitted, "lasers: no capacitor, no emitter to fit");
     Require(!unbanked.firing && unbanked.damage == 0.f, "lasers: ...and nothing burns");
+
+    fs.Shutdown();
+}
+
+// Field plating is a mirror: it takes its own share of a beam and throws the
+// rest back off the hull as a live beam, which burns whatever it then meets. A
+// bubble does no such thing and swallows a beam whole.
+//
+// Where the bounce GOES is not asserted here, and deliberately: a plate is a
+// slanted facet of a real hull, so a beam meeting one square on leaves at twice
+// the facet's angle rather than coming back down its own path -- measured at
+// nearly ninety degrees off on fighter-1's plates. What the mirror does is
+// therefore tested two ways that do not care about direction: the share the
+// target keeps, and whether anything standing around it gets burned.
+void TestBeamDeflection()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    // The witnesses stand in a screen ACROSS the beam's own axis, behind the
+    // target, rather than in a ring around it: the bounce off a plate leaves at
+    // roughly forty-five degrees back the way it came, and a ring spaced widely
+    // enough not to overlap is spaced widely enough for the beam to thread
+    // between two of them -- which is what a first attempt did, and it read as
+    // no deflection at all.
+    constexpr double SCREEN_X = 200.;      // between the shooter and the target
+    constexpr double SCREEN_SPAN = 520.;   // either side of the axis
+    constexpr double SCREEN_STEP = 40.;    // closer than a hull is wide
+    constexpr double SCREEN_CLEAR = 70.;   // the doorway the shot leaves through
+
+    struct Exchange {
+        float targetShieldLost = 0.f;
+        float ringLost = 0.f; // hull burned off the ships standing around it
+        bool fitted = false;
+    };
+
+    // `shieldType` None leaves the target bare. Same geometry, same hold, same
+    // everything else in all three runs -- the shield is the only variable.
+    const auto trade = [&fs](ShieldType shieldType) {
+        Game game(fs);
+        const UpgradeCatalog& catalog = game.GetUpgradeCatalog();
+        EntitySpawner& spawner = game.GetEntitySpawner();
+
+        flecs::entity shooter =
+                spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.}, TeamId::Blue);
+        const Vector2d targetAt{500., 0.};
+        flecs::entity target =
+                spawner.SpawnPlayer("models/ships/fighter-1"_id, targetAt, TeamId::Red);
+
+        // A ring of bystanders on the target's own side, so whatever the bounce
+        // does it runs into one of them. Red, so friendly fire (off here) never
+        // enters into it: this is the shooter's beam hitting the enemy team.
+        std::vector<flecs::entity> ring;
+        float ringStartHp = 0.f;
+        for (double y = -SCREEN_SPAN; y <= SCREEN_SPAN; y += SCREEN_STEP) {
+            // Nobody stands in the doorway: a witness on the line between the
+            // shooter and the target is simply what the beam hits first, and the
+            // run then measures a shot that never reached the mirror at all --
+            // which is exactly what an earlier version of this did, and it read
+            // as the plates absorbing nothing.
+            if (std::abs(y) < SCREEN_CLEAR) continue;
+
+            ring.push_back(spawner.SpawnPlayer("models/ships/fighter-1"_id,
+                                               Vector2d{SCREEN_X, y}, TeamId::Red));
+            ringStartHp += ring.back().get<Damageable>().hp;
+        }
+
+        FitFree(catalog, *catalog.FindKind(UpgradeKind::Capacitor), 1,
+                shooter.get_mut<ShipLoadout>());
+        FitFree(catalog, *catalog.FindKind(UpgradeKind::LaserTier), 1,
+                shooter.get_mut<ShipLoadout>());
+        bool fitted = false;
+        if (shieldType != ShieldType::None) {
+            const UpgradeDef* shield = catalog.FindKind(UpgradeKind::Shield, shieldType);
+            Require(shield != nullptr, "deflection: the pool has both emitters");
+            FitFree(catalog, *shield, 1, target.get_mut<ShipLoadout>());
+            fitted = target.get<ShipLoadout>().levels.shield > 0;
+        }
+
+        // Nose at the target. Nothing was built out here, so no well pulls any
+        // of these hulls off its mark.
+        cpBodySetAngle(game.GetPhysicsSystem().GetBody(shooter.get<PhysicsRef>()).cp.body.get(),
+                       CP_PI / 2.);
+
+
+        const ShipStats stats = catalog.ResolveStats(shooter.get<ShipLoadout>().levels);
+        const int hold = ShipControlsSystem::BeamWindupTicks(*stats.laser) + 40;
+
+        // Charge it by hand, as the shield tests above do: a field fitted at a
+        // yard comes up empty and fills at a few points a second, so a run that
+        // merely waited a tick would be measuring an empty emitter -- which is
+        // no mirror at all, and read here as the plates absorbing nothing.
+        // Deep enough that neither emitter runs dry mid-burn, since a spent one
+        // stops deflecting and the ratio below would then measure the gap.
+        if (shieldType != ShieldType::None) {
+            ShipLoadout& shield = target.get_mut<ShipLoadout>();
+            // To its real capacity, not past it: ShieldSystem re-sums the pool
+            // from the plates every tick and clamps each to its own share, so an
+            // overcharged fill shows up as a colossal "loss" on the next tick
+            // and drowns the damage being measured.
+            const float capacity = catalog.ResolveStats(shield.levels).shieldCapacity;
+            const float perPlate = shield.plateCount > 0
+                    ? capacity / static_cast<float>(shield.plateCount) : capacity;
+            shield.plates.fill(perPlate);
+            shield.plateRegenDelay = {};
+            shield.shieldHp = capacity;
+        }
+        const float startShield = target.get<ShipLoadout>().shieldHp;
+        Require(startShield > 0.f || shieldType == ShieldType::None,
+                "deflection: a fitted shield carries charge before the shooting starts");
+
+        for (int tick = 0; tick < hold && target.is_alive(); ++tick) {
+            InputCommand cmd;
+            cmd.tick = game.GetStep();
+            cmd.flags.fireLaser = true;
+            cmd.flags.aim = PackAim(0.);
+            shooter.get_mut<InputQueue>().Push(cmd);
+            game.Update();
+        }
+
+        float ringHp = 0.f;
+        for (flecs::entity witness : ring) {
+            if (witness.is_alive()) ringHp += witness.get<Damageable>().hp;
+        }
+        const float shieldLost = target.is_alive()
+                ? startShield - target.get<ShipLoadout>().shieldHp : startShield;
+        return Exchange{shieldLost, ringStartHp - ringHp, fitted};
+    };
+
+    const Exchange plated = trade(ShieldType::Plating);
+    Require(plated.fitted, "deflection: the plates go onto the target");
+    Require(plated.targetShieldLost > 0.f, "deflection: a beam spends charge off the plates");
+    Require(plated.ringLost > 0.f,
+            "deflection: ...and what they do not absorb leaves the hull and burns something else");
+
+    const Exchange bubbled = trade(ShieldType::Bubble);
+    Require(bubbled.fitted, "deflection: the bubble goes onto the target");
+    Require(bubbled.targetShieldLost > 0.f, "deflection: a bubble spends charge too");
+    Require(bubbled.ringLost == 0.f, "deflection: ...but absorbs the beam whole, deflecting none");
+
+    // The split is exact, so the plated hull keeps only its own share of what
+    // the bubble kept: laser_absorb is 0.5 at rank I, and nothing is lost in the
+    // bounce. Compared as a ratio rather than against a figure, since the beam's
+    // own damage numbers are meant to be tuned without breaking this.
+    const float share = plated.targetShieldLost / bubbled.targetShieldLost;
+    Require(share > 0.4f && share < 0.6f,
+            "deflection: the plates keep half the beam and return the other half");
+
+    const Exchange bare = trade(ShieldType::None);
+    Require(bare.ringLost == 0.f, "deflection: a bare hull is not a mirror");
+
+    fs.Shutdown();
+}
+
+// A beam is aimed at a PLACE, not along a bearing (see CGame::AimAtPoint and
+// GravitarisApplication::UpdateAim, which is where the point is latched). The
+// client owns the latch, but the claim it rests on is the sim's: a shooter
+// re-deriving its aim from one fixed world point holds the beam on what is
+// standing there while it flies, where a shooter holding the bearing it started
+// with walks the beam off into space.
+void TestBeamAimsAtAPlace()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    // `trackPoint` false freezes the aim at the bearing the shot started on --
+    // exactly the old behaviour, as the control.
+    const auto strafe = [&fs](bool trackPoint) {
+        Game game(fs);
+        const UpgradeCatalog& catalog = game.GetUpgradeCatalog();
+        EntitySpawner& spawner = game.GetEntitySpawner();
+
+        flecs::entity shooter =
+                spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.}, TeamId::Blue);
+        flecs::entity target =
+                spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{600., 0.}, TeamId::Red);
+
+        FitFree(catalog, *catalog.FindKind(UpgradeKind::Capacitor), 1, shooter.get_mut<ShipLoadout>());
+        FitFree(catalog, *catalog.FindKind(UpgradeKind::LaserTier), 1, shooter.get_mut<ShipLoadout>());
+
+        // Nose at the target, and crossing its bearing at a fair clip. No wells
+        // out here, so this is the only motion in the run.
+        cpBody* body = game.GetPhysicsSystem().GetBody(shooter.get<PhysicsRef>()).cp.body.get();
+        cpBodySetAngle(body, CP_PI / 2.);
+        cpBodySetVelocity(body, cpv(0., 150.));
+
+        const Vector2d aimPoint = target.get<Transform>().pos;
+        const float startHp = target.get<Damageable>().hp;
+        const ShipStats stats = catalog.ResolveStats(shooter.get<ShipLoadout>().levels);
+        const int windup = ShipControlsSystem::BeamWindupTicks(*stats.laser);
+
+        std::uint16_t held = 0;
+        for (int tick = 0; tick < windup + 60 && target.is_alive(); ++tick) {
+            const Vector2d offset = aimPoint - shooter.get<Transform>().pos;
+            const auto toPoint = PackAim(std::atan2(offset.y(), offset.x()));
+            if (tick == 0) held = toPoint;
+
+            InputCommand cmd;
+            cmd.tick = game.GetStep();
+            cmd.flags.fireLaser = true;
+            cmd.flags.aim = trackPoint ? toPoint : held;
+            shooter.get_mut<InputQueue>().Push(cmd);
+            game.Update();
+        }
+
+        return target.is_alive() ? startHp - target.get<Damageable>().hp : startHp;
+    };
+
+    Require(strafe(/*trackPoint=*/true) > 0.f,
+            "beam aim: a beam re-aimed at one place holds it while the ship flies past");
+    Require(strafe(/*trackPoint=*/false) == 0.f,
+            "beam aim: ...where the bearing it started on walks off into space");
+
+    fs.Shutdown();
+}
+
+// The one thing no gun can do: burn a missile out of the air. A beam is the
+// only line allowed to stop on a round, and the falloff applies to one exactly
+// as it does to a hull -- so this works close in and not at reach.
+void TestBeamsInterceptMissiles()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    struct Intercept {
+        bool sawRound = false;
+        bool defenderHit = false;
+        // How far out the round was when it stopped existing: a whole reach for
+        // one burned out of the sky, nothing at all for one that arrived.
+        double diedAt = 0.;
+    };
+
+    // A round launched at a defender `at` units away, with the defender holding
+    // a beam straight back down the line it is coming in on. `useBeam` false
+    // fires the hull's guns instead, which must NOT bring it down.
+    const auto defend = [&fs](double at, bool useBeam) {
+        Game game(fs);
+        const UpgradeCatalog& catalog = game.GetUpgradeCatalog();
+        EntitySpawner& spawner = game.GetEntitySpawner();
+
+        flecs::entity attacker =
+                spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{at, 0.}, TeamId::Red);
+        flecs::entity defender =
+                spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.}, TeamId::Blue);
+
+        const UpgradeDef* lasers = catalog.FindKind(UpgradeKind::LaserTier);
+        const UpgradeDef* bank = catalog.FindKind(UpgradeKind::Capacitor);
+        const UpgradeDef* bay = catalog.FindKind(UpgradeKind::MissileTier);
+        Require(lasers && bank && bay, "intercept: the pool has an emitter, a bank and a rack");
+
+        FitFree(catalog, *bay, 1, attacker.get_mut<ShipLoadout>());
+        FitFree(catalog, *bank, 1, defender.get_mut<ShipLoadout>());
+        FitFree(catalog, *lasers, 1, defender.get_mut<ShipLoadout>());
+
+        // Both nose-on to each other along the X axis, so the missile flies up
+        // the same line the beam is pointed down.
+        cpBodySetAngle(game.GetPhysicsSystem().GetBody(attacker.get<PhysicsRef>()).cp.body.get(),
+                       -CP_PI / 2.);
+        cpBodySetAngle(game.GetPhysicsSystem().GetBody(defender.get<PhysicsRef>()).cp.body.get(),
+                       CP_PI / 2.);
+
+        // The defender charges its emitter before the round is away: point
+        // defence a full second late would never be point defence.
+        const ShipStats stats = catalog.ResolveStats(defender.get<ShipLoadout>().levels);
+        const int windup = stats.laser ? ShipControlsSystem::BeamWindupTicks(*stats.laser) : 0;
+
+        const float defenderHp = defender.get<Damageable>().hp;
+
+        flecs::entity round;
+        bool sawRound = false;
+        double lastSeenAt = at;
+        double diedAt = 0.;
+        for (int tick = 0; tick < windup + 900 && defender.is_alive(); ++tick) {
+            InputCommand defence;
+            defence.tick = game.GetStep();
+            defence.flags.aim = PackAim(0.);
+            defence.flags.fireLaser = useBeam;
+            defence.flags.firePrimary = !useBeam;
+            defender.get_mut<InputQueue>().Push(defence);
+
+            // One round only: the rack keeps launching while the button is held,
+            // and a stream of them says nothing about whether any single one
+            // was stopped.
+            InputCommand attack;
+            attack.tick = game.GetStep();
+            attack.flags.fireMissile = !sawRound;
+            attacker.get_mut<InputQueue>().Push(attack);
+
+            game.Update();
+
+            if (round.is_alive()) {
+                lastSeenAt = round.get<Transform>().pos.length();
+                continue;
+            }
+            if (sawRound) { // it was here last tick and is not now
+                diedAt = lastSeenAt;
+                break;
+            }
+            game.GetRegistry().each([&](flecs::entity ent, const Missile&) {
+                if (!round.is_alive()) round = ent;
+            });
+            sawRound = round.is_alive();
+        }
+
+        return Intercept{sawRound, defender.is_alive()
+                                           ? defender.get<Damageable>().hp < defenderHp
+                                           : true,
+                         diedAt};
+    };
+
+    const Intercept beamed = defend(/*at=*/700., /*useBeam=*/true);
+    Require(beamed.sawRound, "intercept: a launched round is there to be shot at");
+    Require(!beamed.defenderHit, "intercept: a beam stops a missile before it arrives");
+    Require(beamed.diedAt > 150., "intercept: ...and stops it well out from the hull");
+
+    // Gunfire deliberately passes straight through: a beam is the point-defence
+    // weapon, and a round trading itself for a missile would take that away
+    // from it.
+    const Intercept shot = defend(/*at=*/700., /*useBeam=*/false);
+    Require(shot.sawRound && shot.defenderHit,
+            "intercept: gunfire flies through a missile rather than stopping it");
 
     fs.Shutdown();
 }
@@ -5173,6 +5550,9 @@ int main()
     TestFriendlyFire();
     TestCapacitor();
     TestLasers();
+    TestBeamDeflection();
+    TestBeamAimsAtAPlace();
+    TestBeamsInterceptMissiles();
     TestFactionDefeatAndWin();
     TestSectorGeneration();
     TestOwnBulletSuppression();

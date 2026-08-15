@@ -5,8 +5,7 @@
 # opens it in the default browser already pointed at the local server.
 #
 # Works on Windows (native server via CLion's bundled cmake + vcvars64.bat,
-# same as docs' manual build recipe) and macOS/Linux (native server via
-# system cmake, no toolchain shelling-out needed). Debug-only build type is
+# same as docs' manual build recipe) and macOS/Linux (native server viapac
 # not assumed anymore, but this has mostly only been exercised in Debug.
 #
 # Usage: tools/wasm/run-dev.sh [--release|--relwithdebinfo] [--no-server]

@@ -86,13 +86,25 @@ public:
     // stats -- the sim for every ship, ClientPrediction for the own one -- so a
     // boosted ship is predicted with the force it really got and a firing one
     // with the beams it really lit. Call exactly once per ship per simulated
-    // tick: it is what spends the bank and refills it.
+    // tick: it is what spends the bank and refills it, and what runs the beam's
+    // windup down.
     //
     // The overburn is served before the beams. Something has to go first when
     // there is not enough charge for both, and a pilot who is out of speed is
     // in more trouble than one who is out of guns.
+    //
+    // The beam trigger is a request to START, and nothing more: once a windup
+    // has begun, releasing the button cannot call it off, and the burn it owes
+    // is paid whether the button is still down or not (Controls::laserWindup /
+    // laserBurnOwed). A bank that empties on the way up leaves the shot to
+    // fizzle -- the windup still runs, and lights nothing when it gets there.
     static PowerGrant AdvanceCapacitor(Controls& controls, const ShipStats& stats,
                                        unsigned laserMounts);
+
+    // How long an emitter charges, in ticks. Public because the muzzle glow
+    // ramps over exactly this (CGame::GatherBeams): a windup a client drew
+    // against its own idea of the length would run ahead of the beam.
+    [[nodiscard]] static std::uint16_t BeamWindupTicks(const WeaponDef& weapon);
 
     // What holding the beam trigger costs the bank each tick. Per mount rather
     // than per ship: three emitters burn three times as much as one, and do
@@ -184,6 +196,22 @@ public:
     // the raw aim.
     [[nodiscard]] static BeamOrigin ComputeBeamOrigin(const Transform& transf, const Body* hull,
                                                       unsigned mount, std::uint16_t aim);
+
+    // How many times one beam may be thrown back off a mirrored hull before it
+    // is simply dropped. A compile-time bound rather than a rule: two plated
+    // ships facing each other are a closed optical path, so SOMETHING has to
+    // stop it, and the honest way to say that is a number nobody has to look up.
+    // Both the sim and the renderer walk to exactly this depth, or a beam would
+    // be drawn going somewhere it does not burn.
+    static constexpr unsigned MAX_BEAM_BOUNCES = 8;
+
+    // A heading mirrored about a surface, all three in world space; `normal`
+    // need not be normalised. The plain law of reflection, in one place because
+    // the sim resolves the bounce and the client draws it, and a beam that burns
+    // one way while being drawn another is worse than no bounce at all.
+    [[nodiscard]] static Magnum::Math::Vector2<double> ReflectHeading(
+            const Magnum::Math::Vector2<double>& heading,
+            const Magnum::Math::Vector2<double>& normal);
 
     // An absolute world angle folded into `halfWidth` either side of the
     // hull's nose. Out past the limit it pins to the nearer edge rather than

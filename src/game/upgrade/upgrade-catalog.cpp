@@ -190,6 +190,7 @@ bool UpgradeCatalog::Load(IFilesystem& filesystem, const char* path)
                 def.shield.leakChance = (*entry)["leak_chance"].value_or(0.f);
                 ParseFloats(*entry, "leak_fraction", def.shield.leakFraction);
                 ParseFloats(*entry, "hull_regen_seconds", def.shield.hullRegenSeconds);
+                ParseFloats(*entry, "laser_absorb", def.shield.laserAbsorb);
                 if (def.shield.leakChance > 0.f && def.shield.leakFraction.empty()) {
                     LOG(error) << "upgrades: " << *key
                                << ": a leaking shield needs a `leak_fraction` per level; skipped";
@@ -423,6 +424,11 @@ ShipStats UpgradeCatalog::ResolveStats(const UpgradeLevels& levels) const
             const std::size_t index =
                     std::min<std::size_t>(levels.shield, def->shield.leakFraction.size()) - 1;
             stats.shieldLeakFraction = def->shield.leakFraction[index];
+        }
+        if (!def->shield.laserAbsorb.empty()) {
+            const std::size_t index =
+                    std::min<std::size_t>(levels.shield, def->shield.laserAbsorb.size()) - 1;
+            stats.laserAbsorb = std::clamp(def->shield.laserAbsorb[index], 0.f, 1.f);
         }
         if (!def->shield.hullRegenSeconds.empty()) {
             const std::size_t index =
@@ -1000,11 +1006,16 @@ static WeaponDef ParseWeapon(const toml::table& entry, const std::string& key)
     weapon.name = entry["name"].value_or(key);
     weapon.cooldownTicks = entry["cooldown_ticks"].value_or<std::uint32_t>(1);
     weapon.damage = entry["damage"].value_or(0.f);
+    weapon.hp = entry["hp"].value_or(0.f);
     weapon.speed = entry["speed"].value_or(0.0);
     weapon.lifetimeSeconds = entry["lifetime_seconds"].value_or(0.0);
     if (const auto model = entry["model"].value<std::string>()) weapon.modelId = ID(model->c_str());
     if (const auto sound = entry["sound"].value<std::string>()) weapon.soundId = ID(sound->c_str());
     weapon.soundGain = entry["sound_gain"].value_or(weapon.soundGain);
+    if (const auto windup = entry["windup_sound"].value<std::string>()) {
+        weapon.windupSoundId = ID(windup->c_str());
+    }
+    weapon.windupSoundGain = entry["windup_sound_gain"].value_or(weapon.windupSoundGain);
     weapon.hardpoint = entry["hardpoint"].value_or(weapon.hardpoint);
 
     if (const toml::table* beam = entry["beam"].as_table()) {
@@ -1012,6 +1023,7 @@ static WeaponDef ParseWeapon(const toml::table& entry, const std::string& key)
         weapon.beam.damagePerSecond = (*beam)["damage_per_second"].value_or(0.f);
         weapon.beam.energyPerSecond = (*beam)["energy_per_second"].value_or(0.f);
         weapon.beam.falloffStart = (*beam)["falloff_start"].value_or(0.f);
+        weapon.beam.windupSeconds = (*beam)["windup_seconds"].value_or(0.f);
         weapon.beam.widthNear = (*beam)["width_near"].value_or(weapon.beam.widthNear);
         weapon.beam.widthFar = (*beam)["width_far"].value_or(weapon.beam.widthFar);
         weapon.beam.heat = (*beam)["heat"].value_or(0.f);

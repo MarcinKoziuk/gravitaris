@@ -49,6 +49,12 @@ struct EntityState {
     // where it starts and which way it goes. How far it reaches is re-derived
     // locally, since every client already has the geometry to sweep.
     std::uint16_t aim = 0;
+    // Ticks of emitter charge this ship still has to run (Controls::laserWindup),
+    // saturating -- an emitter that charged for longer than four seconds would
+    // be a weapon nobody could fly. Nonzero is what tells a peer a beam is
+    // coming, and the count is what its muzzle glow ramps over, so a charge
+    // looks the same length everywhere it is drawn.
+    std::uint8_t laserWindup = 0;
     float hp = 0.f;
     // Only meaningful for NetEntityType::Planet (0 otherwise): GravitySource's
     // fields, replicated so client-side prediction (Phase 5) can compute

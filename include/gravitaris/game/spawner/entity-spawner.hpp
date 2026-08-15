@@ -11,6 +11,7 @@
 #include <gravitaris/game/fwd.hpp>
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/component/freighter.hpp>
+#include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/ai/ai-preset-library.hpp>

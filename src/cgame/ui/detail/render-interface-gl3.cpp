@@ -356,7 +356,10 @@ void RenderInterfaceGL3::EndFrame()
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_STENCIL_TEST);
     glDisable(GL_BLEND);
-    glEnable(GL_CULL_FACE);
+    // Off, which is where the scene wants it and where GL starts: nothing the
+    // world draws is wound with a front and a back. RmlUi's own backend
+    // enables it here, for a host renderer that culls.
+    glDisable(GL_CULL_FACE);
     scissoring_state = ScissoringState::Disable;
 }
 

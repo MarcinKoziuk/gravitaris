@@ -27,7 +27,7 @@ namespace Gravitaris {
 
 // Bump on any wire-layout change; ReadSnapshot rejects mismatches outright
 // (no cross-version compatibility until there's a reason to have it).
-static constexpr std::uint8_t SNAPSHOT_VERSION = 15; // v15: per-bay ammo stowage
+static constexpr std::uint8_t SNAPSHOT_VERSION = 16; // v16: beam windup
 
 // Sanity caps so a garbage buffer can't make ReadSnapshot allocate wildly.
 static constexpr std::uint32_t MAX_ENTITIES = 4096;
@@ -77,6 +77,8 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
             shown.fireLaser = controls->laserFiring;
             state.controlsFlags = PackControlFlags(shown);
             state.aim = controls->actionFlags.aim;
+            state.laserWindup = static_cast<std::uint8_t>(std::min<std::uint32_t>(
+                    controls->laserWindup, 255u));
         }
         if (const Damageable* damageable = entity.try_get<Damageable>()) {
             state.hp = damageable->hp;
@@ -256,6 +258,7 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteF32(e.angVel);
         out.WriteU16(e.controlsFlags);
         out.WriteU16(e.aim);
+        out.WriteU8(e.laserWindup);
         out.WriteF32(e.hp);
         out.WriteU16(e.missileAmmo);
         out.WriteU16(e.cannonAmmo);
@@ -360,6 +363,7 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.angVel = in.ReadF32();
         e.controlsFlags = in.ReadU16();
         e.aim = in.ReadU16();
+        e.laserWindup = in.ReadU8();
         e.hp = in.ReadF32();
         e.missileAmmo = in.ReadU16();
         e.cannonAmmo = in.ReadU16();

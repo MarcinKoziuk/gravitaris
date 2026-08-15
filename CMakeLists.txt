@@ -1011,6 +1011,23 @@ if(GRAVITARIS_BUILD_CLIENT)
             # moment signaling actually tried to send anything.
             "-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAPU32,UTF8ToString,stringToUTF8,lengthBytesUTF8"
         )
+
+        # The preload above is packed at LINK time, and nothing about it tells
+        # the generator that the package depends on what is in data/ -- so an
+        # asset that changed, or a whole file that appeared, silently kept
+        # shipping the previous GravitarisNG.data until something else forced a
+        # relink. Symptom: the browser build plays the old sound (or silence for
+        # a clip that is not in the bundle at all) while the native build is
+        # correct, which reads as an audio bug rather than a stale package.
+        #
+        # CONFIGURE_DEPENDS re-runs the glob when the listing changes (a new
+        # asset), and LINK_DEPENDS relinks when any listed file's timestamp does
+        # (an edited one). Both are needed; either alone leaves one of the two
+        # cases broken.
+        file(GLOB_RECURSE GRAVITARIS_DATA_FILES CONFIGURE_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/data/*")
+        set_property(TARGET GravitarisNG APPEND PROPERTY
+            LINK_DEPENDS "${GRAVITARIS_DATA_FILES}")
     endif()
 
     # On macOS the fetched shared libs (Magnum, Corrade, etc.) carry no install

@@ -210,20 +210,28 @@ void DamageSystem::QueryFirstHit(cpSpace* space, const Magnum::Vector2d& from,
             cpShapeFilterNew(PhysicsSystem::BULLET_GROUP, CP_ALL_CATEGORIES, CP_ALL_CATEGORIES);
 
     cpSpaceSegmentQuery(space, cpv(from.x(), from.y()), cpv(to.x(), to.y()), radius, filter,
-                        [](cpShape* shape, cpVect point, cpVect, cpFloat alpha, void* data) {
+                        [](cpShape* shape, cpVect point, cpVect normal, cpFloat alpha, void* data) {
         auto* s = static_cast<HitSearch*>(data);
         const flecs::entity ent = s->self->m_physicsSystem.GetEntityForShape(shape);
         if (!ent.is_alive() || (s->ignore.is_alive() && ent == s->ignore)) return;
         // Nothing ever shoots itself: the round starts inside its own shooter's
         // hull, and a beam leaves from a mount buried in it, so this is the
-        // sweep's first hit every time.
-        if (s->shooter != 0 && ent.id() == s->shooter) return;
+        // sweep's first hit every time. A beam that has been deflected back at
+        // its owner is the one exception, and it skips the team test below too --
+        // a mirror does not check anybody's colours.
+        const bool self = s->shooter != 0 && ent.id() == s->shooter;
+        if (self && !s->selfIsTarget) return;
 
         const Team* entTeam = ent.try_get<Team>();
         // A shot meeting its own side passes through unless the round is being
         // fought with friendly fire on.
-        if (!s->friendlyFire && entTeam && entTeam->id == s->team) return;
+        if (!self && !s->friendlyFire && entTeam && entTeam->id == s->team) return;
 
+        // A missile is not among these: it carries no Damageable (its airframe
+        // is Missile::hp), so nothing in the game mistakes a round for a
+        // target, and gunfire flies straight through one. Only a beam can stop
+        // a missile, and it does it down a corridor of its own rather than on
+        // this line -- see ResolveBeams.
         if (!ent.try_get<Damageable>()) return; // a planet: shots pass through it
 
         // A spent plate or a dropped bubble is ignored outright rather than
@@ -239,6 +247,7 @@ void DamageSystem::QueryFirstHit(cpSpace* space, const Magnum::Vector2d& from,
             s->target = ent;
             s->point = Magnum::Vector2{static_cast<float>(point.x), static_cast<float>(point.y)};
             s->alpha = alpha;
+            s->normal = Magnum::Vector2d{normal.x, normal.y};
             s->element = element;
         }
     }, &search);
@@ -417,6 +426,27 @@ float DamageSystem::AbsorbHeatWithShield(flecs::entity target, float damage)
 
 void DamageSystem::ResolveBeams(std::uint64_t step)
 {
+    // Rounds burned down this tick, destroyed after the walk for the same
+    // reason a spent bullet is: nothing may be destructed mid-iteration.
+    std::vector<flecs::entity> intercepted;
+
+    // Every round in flight that a beam could stop, gathered UP FRONT: a flecs
+    // query run inside another query's callback silently iterates nothing (see
+    // CLAUDE.md), so looking for missiles per beam would quietly intercept
+    // none of them.
+    struct InFlight {
+        flecs::entity entity;
+        Magnum::Vector2d pos;
+        TeamId team = TeamId::None;
+    };
+    std::vector<InFlight> rounds;
+    m_registry.each([&](flecs::entity ent, const Missile& round, const Bullet& fired,
+                        const Transform& transf) {
+        // The side that fired a round is on its Bullet: a missile carries no
+        // Team of its own.
+        if (round.hp > 0.f) rounds.push_back(InFlight{ent, transf.pos, fired.team});
+    });
+
     m_registry.each([&](flecs::entity shooter, const Transform& transf, const Controls& controls,
                         const ShipLoadout& loadout, const PhysicsRef& ref) {
         if (!controls.laserFiring) return;
@@ -436,42 +466,158 @@ void DamageSystem::ResolveBeams(std::uint64_t step)
         for (std::size_t mount = 0; mount < MAX_WEAPON_MOUNTS; ++mount) {
             if (loadout.mounts[mount] != MountArm::Laser) continue;
 
-            const ShipControlsSystem::BeamOrigin origin = ShipControlsSystem::ComputeBeamOrigin(
+            const ShipControlsSystem::BeamOrigin start = ShipControlsSystem::ComputeBeamOrigin(
                     transf, phys.body.Get(), static_cast<unsigned>(mount), controls.actionFlags.aim);
-            const Magnum::Vector2d far = origin.pos
-                    + Magnum::Vector2d{std::cos(origin.angle), std::sin(origin.angle)} * beam.range;
+            const TeamId team = shooterTeam ? shooterTeam->id : TeamId::Blue;
 
-            HitSearch search{this, flecs::entity{}, shooterTeam ? shooterTeam->id : TeamId::Blue,
-                             m_friendlyFire, shooter.id()};
-            QueryFirstHit(space, origin.pos, far, BEAM_QUERY_RADIUS, search);
-            if (!search.target.is_alive()) continue;
+            // One pass per leg of the beam: it leaves the mount, and each time a
+            // mirrored hull throws it back it carries on from there with less of
+            // itself. `travelled` is measured along the WHOLE path, so the
+            // falloff does not start over at a bounce -- what comes back off a
+            // plate is the far, spent end of the same beam, not a fresh one.
+            Magnum::Vector2d from = start.pos;
+            Magnum::Vector2d heading{std::cos(start.angle), std::sin(start.angle)};
+            double travelled = 0.;
+            float strength = 1.f;
+            flecs::entity deflector; // whatever bounced it last, so it cannot re-bounce
 
-            const float damage = perTick * BeamFalloff(search.alpha, beam);
-            if (damage <= 0.f) continue; // reached, but out where it carries nothing
+            for (unsigned leg = 0; leg <= ShipControlsSystem::MAX_BEAM_BOUNCES; ++leg) {
+                const double reach = beam.range - travelled;
+                if (reach <= 0. || strength <= 0.f) break;
 
-            const float toHull =
-                    AbsorbWithShield(step, search.target, damage, search.point, search.element);
-            if (toHull <= 0.f) continue;
+                const Magnum::Vector2d far = from + heading * reach;
+                HitSearch search{this, deflector, team, m_friendlyFire, shooter.id(), leg > 0};
+                QueryFirstHit(space, from, far, BEAM_QUERY_RADIUS, search);
 
-            Damageable& targetDmg = search.target.get_mut<Damageable>();
-            targetDmg.hp -= toHull;
-            targetDmg.lastDamageCause = DamageCause::Gunfire;
-            targetDmg.lastDamageTeam = search.target == shooter ? TeamId::None
-                                                                : (shooterTeam ? shooterTeam->id
-                                                                               : TeamId::None);
-            targetDmg.lastDamagePilotId = pilot ? pilot->pilotId : 0;
+                // The interception corridor, measured rather than swept.
+                // Chipmunk's segment query prunes by the raw line before it ever
+                // applies the query radius, so a shape a few units off the beam
+                // is invisible to one however generous the radius -- and a few
+                // units off is exactly where a missile is.
+                flecs::entity hitRound;
+                double roundAlpha = 0.;
+                Magnum::Vector2d roundPoint;
+                for (const InFlight& live : rounds) {
+                    if (!m_friendlyFire && live.team == team) continue;
+                    // Another mount may have burned this one through already
+                    // this tick; it is not destroyed until the walk ends.
+                    const Missile* airframe = live.entity.try_get<Missile>();
+                    if (!airframe || airframe->hp <= 0.f) continue;
 
-            // Not every tick. A held beam lands sixty times a second, and one
-            // event apiece would spend the whole 256-entry ring on a condition
-            // the wire already describes -- the beam itself replicates, so a
-            // client can see where it ends without being told. What these are
-            // still for is the flash and the noise of being hit.
-            if (step % BEAM_HIT_EVENT_TICKS == 0) {
-                m_eventQueue.Emit(GameEventType::Impact, search.target, search.point,
-                                  static_cast<std::uint32_t>(toHull * BEAM_HIT_EVENT_TICKS * 10.f));
+                    const Magnum::Vector2d toRound = live.pos - from;
+                    const double along = Magnum::Math::dot(toRound, heading);
+                    if (along < 0. || along > reach) continue;
+                    if ((toRound - heading * along).length() > BEAM_INTERCEPT_RADIUS) continue;
+
+                    const double alpha = along / reach;
+                    if (hitRound.is_alive() && alpha >= roundAlpha) continue;
+
+                    hitRound = live.entity;
+                    roundAlpha = alpha;
+                    roundPoint = from + heading * along;
+                }
+
+                // A round in front of whatever hull the line found is what the
+                // beam meets: no shield to spend, nothing to credit, and no hit
+                // event until it comes apart -- what a pilot needs to see is the
+                // interception, not the burn. It stops the leg either way, so a
+                // missile shields whatever is behind it for as long as it lasts.
+                if (hitRound.is_alive() && (!search.target.is_alive() || roundAlpha <= search.alpha)) {
+                    const double at = (travelled + roundAlpha * reach) / beam.range;
+                    const float burn = perTick * BeamFalloff(at, beam) * strength;
+                    Missile& airframe = hitRound.get_mut<Missile>();
+                    airframe.hp -= burn;
+                    if (airframe.hp <= 0.f) {
+                        intercepted.push_back(hitRound);
+                        m_eventQueue.Emit(GameEventType::Explosion, hitRound,
+                                          Magnum::Vector2{static_cast<float>(roundPoint.x()),
+                                                          static_cast<float>(roundPoint.y())});
+                    }
+                    break;
+                }
+                if (!search.target.is_alive()) break; // out into empty space
+
+                const double at = (travelled + search.alpha * reach) / beam.range;
+                const float carried = perTick * BeamFalloff(at, beam) * strength;
+                if (carried <= 0.f) break; // reached, but out where it carries nothing
+
+                // A plate is a mirror: it takes its own share into the shield and
+                // the rest leaves the hull as a live beam. Only a plate, and only
+                // one that still has charge in the element that was hit -- a
+                // spent plate never becomes a hit at all (see QueryFirstHit), so
+                // reaching here with an element means there is something left to
+                // reflect off.
+                const float absorbShare = BeamAbsorbShare(search.target, search.element);
+                const float absorbed = carried * absorbShare;
+
+                if (absorbed > 0.f) {
+                    const float toHull = AbsorbWithShield(step, search.target, absorbed,
+                                                          search.point, search.element);
+                    if (toHull > 0.f) {
+                        Damageable& targetDmg = search.target.get_mut<Damageable>();
+                        targetDmg.hp -= toHull;
+                        targetDmg.lastDamageCause = DamageCause::Gunfire;
+                        targetDmg.lastDamageTeam = search.target == shooter
+                                ? TeamId::None
+                                : (shooterTeam ? shooterTeam->id : TeamId::None);
+                        targetDmg.lastDamagePilotId = pilot ? pilot->pilotId : 0;
+
+                        // Not every tick. A held beam lands sixty times a second,
+                        // and one event apiece would spend the whole 256-entry
+                        // ring on a condition the wire already describes -- the
+                        // beam itself replicates, so a client can see where it
+                        // ends without being told. What these are still for is
+                        // the flash and the noise of being hit.
+                        if (step % BEAM_HIT_EVENT_TICKS == 0) {
+                            m_eventQueue.Emit(GameEventType::Impact, search.target, search.point,
+                                              static_cast<std::uint32_t>(
+                                                      toHull * BEAM_HIT_EVENT_TICKS * 10.f));
+                        }
+                    }
+                }
+
+                if (absorbShare >= 1.f) break; // swallowed whole: a bubble, or bare hull
+
+                // Off it goes, from where it landed. The deflector is excluded
+                // from the next leg so the beam cannot meet the same plate again
+                // at the point it just left -- two mirrored hulls still trade it
+                // back and forth, which is what the bounce cap is for.
+                strength *= 1.f - absorbShare;
+                travelled += search.alpha * reach;
+                from = Magnum::Vector2d{search.point};
+                heading = ShipControlsSystem::ReflectHeading(heading, search.normal);
+                deflector = search.target;
             }
         }
     });
+
+    for (flecs::entity round : intercepted) {
+        // Two beams can burn the same round through in one tick.
+        if (round.is_alive()) round.destruct();
+    }
+}
+
+float DamageSystem::BeamAbsorbShare(flecs::entity ent, std::optional<std::uint8_t> element)
+{
+    const ShipLoadout* loadout = ent.try_get<ShipLoadout>();
+    if (!loadout) return 1.f;
+
+    if (element) {
+        // A spent plate is no mirror; QueryFirstHit already declines to stop a
+        // beam on one, so this is belt and braces rather than the live path.
+        if (!ShieldElementLive(*loadout, *element)) return 1.f;
+    }
+    else {
+        // No element means the beam landed on the hull polygon, and what that
+        // means depends on whether the hull has plates drawn on it at all. With
+        // plates, this is the gap rule -- the beam threaded between them and the
+        // field never touched it. With none, the emitter falls back to one pooled
+        // field wrapping the whole hull (see ShipLoadout::plateCount), so a hull
+        // hit IS a field hit and the mirror is the field.
+        if (loadout->plateCount > 0 || loadout->shieldHp <= 0.f) return 1.f;
+    }
+
+    return m_catalog.ResolveStats(loadout->levels).laserAbsorb;
 }
 
 // What a beam still carries at `alpha` of its reach: everything inside

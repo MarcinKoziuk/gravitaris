@@ -179,6 +179,14 @@ struct Controls {
     // is what the bank actually granted. DamageSystem burns whatever this says
     // is burning, and it is what travels so a peer draws real beams only.
     bool laserFiring = false;
+    // Ticks of emitter charge still to run, and then of burn owed whatever the
+    // trigger does next -- the two halves of one commitment, which is why they
+    // are counters here rather than anything derived from the trigger. Nonzero
+    // `laserWindup` is a charge nothing can call off; nonzero `laserBurnOwed`
+    // is a beam that keeps burning after a released trigger. See
+    // ShipControlsSystem::AdvanceCapacitor.
+    std::uint16_t laserWindup = 0;
+    std::uint16_t laserBurnOwed = 0;
 };
 
 } // namespace Gravitaris

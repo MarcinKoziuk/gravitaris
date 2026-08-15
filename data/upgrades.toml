@@ -79,9 +79,25 @@ sound_gain = 0.7
 # Weaker than the guns and paid for differently: damage is per SECOND rather
 # than per hit, it falls away to nothing across the reach, and every second of
 # it comes out of the capacitor rather than a magazine. Point blank a beam
-# out-damages the autocannon; at half its reach it does not, and at the far end
-# it is a light show. That is the whole weapon -- it rewards being close, which
-# is exactly where a pilot least wants to be.
+# out-damages the autocannon; at half its reach it does not, and long before
+# the far end there is nothing left to see. That is the whole weapon -- it
+# rewards being close, which is exactly where a pilot least wants to be.
+#
+# `range` is how far it BURNS, and the light does not carry nearly that far
+# (see CGame::BEAM_FADE_SHARE): the far reach is a thin, near-spent thing that
+# a pilot has to aim on faith rather than a line drawn across the sector.
+#
+# `windup_seconds` is the commitment the whole weapon turns on: the emitter
+# charges audibly and visibly before any light leaves it, and once it starts it
+# cannot be called off -- the shot is paid for the moment the trigger goes down.
+# What that buys the pilot back is the one thing no gun can do: a beam is the
+# only weapon that kills a missile in flight (see `hp` on the rounds below).
+#
+# A fifth of a second on every rank: long enough to hear, to see at the muzzle,
+# and to be beaten by a pilot who moves the instant they hear it -- but not long
+# enough to feel like the weapon is arguing with the trigger. A faster-charging
+# emitter is the obvious tier reward, but it wants its own clip to charge to, so
+# it is a later edit.
 [[weapon]]
 key = "laser_1"
 hardpoint = "weapon"
@@ -90,18 +106,22 @@ damage = 0.0 # per-hit damage means nothing to a beam; see [beam] below
 # Held for as long as the trigger is, so the clip loops rather than firing.
 sound = "sounds/laser-loop-1.wav"
 sound_gain = 0.5
+# One-shot, and authored to hand over to the loop above on the same pitch.
+windup_sound = "sounds/laser-windup-1.wav"
+windup_sound_gain = 0.45
 
 [weapon.beam]
-range = 450.0
-# Against the autocannon's ~86/s: better in the first third of the reach, worse
+range = 2250.0
+windup_seconds = 0.2
+# Against the autocannon's ~86/s: better in the first tenth of the reach, worse
 # after it.
 damage_per_second = 95.0
 # A rank-I capacitor is 160, so a bank spends itself on about two and a half
 # seconds of held fire -- and none of it is available to the overburn.
 energy_per_second = 65.0
 falloff_start = 0.0
-width_near = 0.8
-width_far = 5.0
+width_near = 0.16
+width_far = 1.0
 heat = 0.15
 
 [[weapon]]
@@ -111,16 +131,19 @@ name = "Laser II"
 damage = 0.0
 sound = "sounds/laser-loop-1.wav"
 sound_gain = 0.6
+windup_sound = "sounds/laser-windup-1.wav"
+windup_sound_gain = 0.5
 
 [weapon.beam]
-range = 560.0
+range = 2800.0
+windup_seconds = 0.2
 damage_per_second = 130.0
 energy_per_second = 72.0
 # Reach is the tier's real reward as much as the damage: the first third of it
 # is now full-strength rather than only the muzzle.
 falloff_start = 0.3
-width_near = 0.9
-width_far = 5.5
+width_near = 0.18
+width_far = 1.1
 heat = 0.3
 
 [[weapon]]
@@ -130,14 +153,17 @@ name = "Laser III"
 damage = 0.0
 sound = "sounds/laser-loop-1.wav"
 sound_gain = 0.7
+windup_sound = "sounds/laser-windup-1.wav"
+windup_sound_gain = 0.55
 
 [weapon.beam]
-range = 680.0
+range = 3400.0
+windup_seconds = 0.2
 damage_per_second = 170.0
 energy_per_second = 80.0
 falloff_start = 0.45
-width_near = 1.0
-width_far = 6.0
+width_near = 0.2
+width_far = 1.2
 heat = 0.45
 
 # The missile line. A hull carries no launcher at all until MISSILE BAY is
@@ -152,6 +178,14 @@ heat = 0.45
 # `wobble` is how badly the seeker hunts around its lead solution, in radians of
 # heading error. A cheap seeker weaves visibly and is worth dodging into; the
 # top tier is zero and flies the solution dead straight.
+#
+# `hp` is what a round can take before it comes apart in flight, and only a beam
+# can spend it (DamageSystem::ResolveBeams -- gunfire passes straight through a
+# missile). Read it as a time to kill rather than as hit points: against a
+# rank-I emitter's 95/s it is a few hundredths of a second at the muzzle, but
+# the beam's falloff applies to a round exactly as it does to a hull, so a
+# missile picked off at the far end of the reach is not a thing that happens.
+# Point defence means letting it come to you.
 # The light-gun line. Rank 1 is the weapon every hull spawns with, so the line
 # starts at what a pilot already has rather than above it; the ranks above are a
 # wider bore on the same mount. No feed, no magazine -- see `light_guns`.
@@ -189,6 +223,7 @@ speed = 140.0
 lifetime_seconds = 4.0
 model = "models/missiles/missile-0"
 sound = "sounds/laser-1.wav"
+hp = 6.0
 guidance = { turn_rate = 1.2, acceleration = 90.0, top_speed = 210.0, wobble = 0.22 }
 
 [[weapon]]
@@ -201,6 +236,7 @@ speed = 150.0
 lifetime_seconds = 5.5
 model = "models/missiles/missile-0"
 sound = "sounds/laser-1.wav"
+hp = 9.0
 guidance = { turn_rate = 1.6, acceleration = 110.0, top_speed = 235.0, wobble = 0.09 }
 
 [[weapon]]
@@ -213,6 +249,7 @@ speed = 160.0
 lifetime_seconds = 7.0
 model = "models/missiles/missile-0"
 sound = "sounds/laser-1.wav"
+hp = 12.0
 guidance = { turn_rate = 2.0, acceleration = 130.0, top_speed = 260.0, wobble = 0.0 }
 
 # ---- fittings --------------------------------------------------------------
@@ -512,5 +549,18 @@ leak_fraction = [0.25, 0.175, 0.10]
 # they let through: the damage is real but it is not permanent, so a plated
 # pilot need not fly home for every leak the way a bubble pilot must.
 hull_regen_seconds = [90.0, 45.0, 30.0]
+# What a plate does to a BEAM, and the plates' one real advantage over a bubble:
+# they are mirrors. This is the share taken into the shield; everything else
+# comes straight back off the hull as a live beam that burns whatever it meets --
+# including the ship that fired it, whatever the friendly-fire setting says. A
+# deflected beam is not a special effect: it is the same beam, pointed somewhere
+# nobody chose.
+#
+# Absorb and deflect are one number because nothing is lost in the bounce, so a
+# better plate is one that swallows less: half of it comes back at rank I and
+# seven tenths at rank III. A bubble has no entry here at all and absorbs beams
+# whole, which is now the reason to fit one -- it is the shield you want when the
+# enemy has lasers and you are flying in a formation.
+laser_absorb = [0.5, 0.4, 0.3]
 tech_cost = [3, 5, 9]
 supply_cost = [15, 32, 55]

@@ -26,6 +26,17 @@ namespace Gravitaris {
 // ResolveShipRams and networking-plan Phase 9).
 class DamageSystem {
 public:
+    // How far off a beam's centreline a missile can be and still be burned out
+    // of the air. A round is barely a couple of units across and a beam leaves
+    // from a mount buried in a wing, so a corridor is what makes point defence
+    // something a pilot can do rather than something the geometry permits in
+    // principle. Hulls are still met on a tight line -- a beam should burn what
+    // it is visibly crossing.
+    //
+    // CGame::GatherBeams truncates the drawn beam against the same corridor, so
+    // a beam stops on the round it is stopping.
+    static constexpr double BEAM_INTERCEPT_RADIUS = 14.0;
+
     // Landing/ram damage tuning. Impact speed (deltaV) below the applicable
     // threshold does nothing; above it, damage scales linearly. A tipped-over
     // landing takes `tippedMultiplier` on top of that.
@@ -69,6 +80,10 @@ private:
     // across the sector is a light show. `step` throttles the hit events, since
     // one per tick per beam would drown the queue describing a condition the
     // wire already carries.
+    //
+    // A beam is also the only thing that can shoot a missile down (Missile::hp,
+    // HitSearch::hitsMissiles), and the falloff applies to a round exactly as
+    // it does to a hull -- so point defence means letting one come to you.
     void ResolveBeams(std::uint64_t step);
 
     // A star cooks whatever comes near it, and destroys outright whatever
@@ -104,16 +119,32 @@ private:
         TeamId team = TeamId::Blue;
         bool friendlyFire = false;
         flecs::entity_t shooter = 0;
+        // Whether the shooter is a legal target on this sweep, team rules and
+        // all. False for everything a ship fires directly -- a round starts
+        // inside its own hull. True only for a beam that has been thrown back
+        // off somebody's plating: it is coming from outside now, it is aimed by
+        // geometry rather than by a pilot, and being burned by your own beam is
+        // the whole risk of shooting a mirror.
+        bool selfIsTarget = false;
 
         flecs::entity target;
         Magnum::Vector2 point{};
         // Fraction along the queried segment, so a caller that cares about
         // range (a beam's falloff does) can recover the distance.
         double alpha = 0.;
+        // The surface the hit landed on, in world space, unnormalised. What a
+        // deflection is turned about (ShipControlsSystem::ReflectHeading).
+        Magnum::Vector2d normal{};
         std::optional<std::uint8_t> element;
     };
     void QueryFirstHit(cpSpace* space, const Magnum::Vector2d& from, const Magnum::Vector2d& to,
                        double radius, HitSearch& search);
+
+    // What share of a beam `ent` takes into itself where it was hit, the rest
+    // being thrown back off the hull. One -- absorbs everything, deflects
+    // nothing -- for a hit on bare hull, on a bubble, and on any hull whose
+    // shield does not deflect, so the caller needs no special cases.
+    [[nodiscard]] float BeamAbsorbShare(flecs::entity ent, std::optional<std::uint8_t> element);
 
     // Which of `ent`'s shield shapes `shape` is, or nullopt for plain hull.
     [[nodiscard]] std::optional<std::uint8_t> ShieldElementFor(flecs::entity ent, const cpShape* shape);

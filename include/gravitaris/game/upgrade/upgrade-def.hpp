@@ -22,9 +22,20 @@ struct WeaponDef {
     double speed = 0.;
     double lifetimeSeconds = 0.;
 
+    // What the round itself can take before it comes apart in flight, held in
+    // Missile::hp once one is away. Zero means nothing can shoot it down, which
+    // is every gun round: only a beam spends this (DamageSystem::ResolveBeams).
+    float hp = 0.f;
+
     id_t modelId = 0; // the projectile's model
     id_t soundId = 0; // played at the muzzle by AudioSystem
     float soundGain = 0.5f;
+
+    // Beam weapons only: the emitter charging, played once as the windup starts
+    // rather than held like `soundId`. Authored to end on the pitch the held
+    // note begins on, so the two run together as one sound.
+    id_t windupSoundId = 0;
+    float windupSoundGain = 0.5f;
 
     // Which family of mounts this leaves from: the model's `<hardpoint>_N`
     // markers (Body::FindMount), falling back to its gun mounts and then to
@@ -46,6 +57,11 @@ struct WeaponDef {
         // muzzle, which is what makes closing the distance the whole skill of
         // the weapon.
         float falloffStart = 0.f;
+        // How long the emitter charges before any light leaves it. A trigger
+        // pull is a commitment rather than a tap: the windup cannot be called
+        // off once it starts, and it draws on the bank the whole way up (see
+        // ShipControlsSystem::AdvanceCapacitor).
+        float windupSeconds = 0.f;
         // The wedge it is drawn as: this wide where it leaves the mount, this
         // wide where it ends, fading out across the difference -- the picture
         // of the falloff rather than a decoration on top of it.
@@ -328,6 +344,13 @@ struct UpgradeDef {
         // which is what makes the plates worth their leak: what gets past them
         // is not permanent the way what gets past a bubble is.
         std::vector<float> hullRegenSeconds;
+        // Share of a BEAM this emitter takes into itself, one entry per level.
+        // Whatever it does not absorb is thrown back off the hull as a live beam
+        // (DamageSystem::ResolveBeams) -- the two shares are one number because
+        // nothing is lost in the bounce, so a plate that swallows less of a beam
+        // returns more of it. Empty on an emitter that does not deflect at all,
+        // which is the bubble: it absorbs a beam whole, as it always did.
+        std::vector<float> laserAbsorb;
     } shield;
 };
 
@@ -443,6 +466,11 @@ struct ShipStats {
     // hull. Both zero on an emitter that stops everything it has charge for.
     float shieldLeakChance = 0.f;
     float shieldLeakFraction = 0.f;
+    // Share of a beam the emitter takes into itself; the rest comes back off the
+    // hull as a live beam. One means absorbs it whole and deflects nothing,
+    // which is both the bubble and a hull carrying no shield at all -- so
+    // nothing downstream needs to ask which case it is looking at.
+    float laserAbsorb = 1.f;
     // Share of the hull the emitter mends every second, wherever the ship is
     // standing -- a fraction rather than hit points, because the plates wrap
     // whatever hull they are fitted to. Zero on an emitter that mends none.

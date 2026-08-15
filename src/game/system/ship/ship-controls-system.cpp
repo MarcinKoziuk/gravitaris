@@ -32,8 +32,14 @@ static constexpr double HALF_PI = 1.5707963267948966;
 // lighting the injector, never a burn already running.
 static constexpr float CAPACITOR_ENGAGE_SHARE = 0.1f;
 
+// Least of a burn a completed windup buys, however briefly the trigger was
+// held. A windup cannot be called off, so the shot has to arrive: without this
+// a tap would spend a full second of charge on a beam nobody ever saw.
+static constexpr float BEAM_MIN_BURST_SECONDS = 0.35f;
+
 static cpVect ThrustWithinSpeedLimit(cpBody* body, double thrust, double maxSpeed);
 static unsigned PhaseSlotOf(MountArm arm);
+static std::uint16_t SecondsToTicks(float seconds);
 
 ShipControlsSystem::ShipControlsSystem(flecs::world& registry, EntitySpawner& entitySpawner,
                                        PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
@@ -82,6 +88,11 @@ float ShipControlsSystem::LaserDrainPerTick(const ShipStats& stats, unsigned las
          * static_cast<float>(laserMounts);
 }
 
+std::uint16_t ShipControlsSystem::BeamWindupTicks(const WeaponDef& weapon)
+{
+    return SecondsToTicks(weapon.beam.windupSeconds);
+}
+
 ShipControlsSystem::PowerGrant ShipControlsSystem::AdvanceCapacitor(Controls& controls,
                                                                     const ShipStats& stats,
                                                                     unsigned laserMounts)
@@ -91,6 +102,8 @@ ShipControlsSystem::PowerGrant ShipControlsSystem::AdvanceCapacitor(Controls& co
         controls.capacitorSpent = 0.f;
         controls.boosting = false;
         controls.laserFiring = false;
+        controls.laserWindup = 0;
+        controls.laserBurnOwed = 0;
         return PowerGrant{};
     }
     if (controls.capacitorSpent > bank) controls.capacitorSpent = bank; // a rank came off mid-flight
@@ -123,8 +136,47 @@ ShipControlsSystem::PowerGrant ShipControlsSystem::AdvanceCapacitor(Controls& co
     remaining -= draw;
 
     const float laserDraw = LaserDrainPerTick(stats, laserMounts);
-    const bool firing = controls.actionFlags.fireLaser && engaged(controls.laserFiring, laserDraw);
-    if (firing) draw += laserDraw;
+    const bool emitter = laserMounts > 0 && stats.laser && stats.laser->IsBeam();
+    if (!emitter) { // an emitter pulled at a yard mid-charge owes nothing
+        controls.laserWindup = 0;
+        controls.laserBurnOwed = 0;
+    }
+
+    // The only thing the trigger can do is start one of these. From here the
+    // two counters decide, and neither of them reads the button again: that is
+    // what makes a beam a commitment rather than a tap.
+    if (emitter && controls.actionFlags.fireLaser && !controls.laserFiring
+            && controls.laserWindup == 0 && controls.laserBurnOwed == 0
+            && engaged(false, laserDraw)) {
+        controls.laserWindup = BeamWindupTicks(*stats.laser);
+        controls.laserBurnOwed = SecondsToTicks(BEAM_MIN_BURST_SECONDS);
+    }
+
+    bool firing = false;
+    if (controls.laserWindup > 0) {
+        --controls.laserWindup;
+        // Charging costs what burning costs, and takes whatever is there: a
+        // bank that runs out on the way up does not stop the windup, it only
+        // leaves nothing for it to light with when it arrives.
+        const float charge = std::min(laserDraw, std::max(0.f, remaining));
+        draw += charge;
+        remaining -= charge;
+    }
+    else if (emitter && (controls.actionFlags.fireLaser || controls.laserBurnOwed > 0)) {
+        // Not `engaged(controls.laserFiring, ...)`: a beam whose windup has
+        // just finished is a draw already running, however little is left in
+        // the bank. The engage floor gates the trigger, and the trigger was
+        // answered a whole windup ago.
+        firing = engaged(controls.laserFiring || controls.laserBurnOwed > 0, laserDraw);
+        if (firing) {
+            draw += laserDraw;
+            remaining -= laserDraw;
+            if (controls.laserBurnOwed > 0) --controls.laserBurnOwed;
+        }
+        else {
+            controls.laserBurnOwed = 0; // the fizzle: a shot that never lit owes nothing
+        }
+    }
 
     if (draw > 0.f) {
         controls.capacitorSpent = std::min(bank, controls.capacitorSpent + draw);
@@ -136,6 +188,15 @@ ShipControlsSystem::PowerGrant ShipControlsSystem::AdvanceCapacitor(Controls& co
     controls.boosting = burning;
     controls.laserFiring = firing;
     return PowerGrant{BoostEffectOf(controls.boosting, stats), firing};
+}
+
+Vector2d ShipControlsSystem::ReflectHeading(const Vector2d& heading, const Vector2d& normal)
+{
+    const double lengthSq = normal.dot();
+    if (lengthSq < 1e-12) return heading; // a surface with no direction cannot turn a beam
+
+    const Vector2d unit = normal / std::sqrt(lengthSq);
+    return heading - unit * (2. * Magnum::Math::dot(heading, unit));
 }
 
 double ShipControlsSystem::ClampAimToArc(double desired, double heading, double halfWidth)
@@ -304,6 +365,15 @@ void ShipControlsSystem::AdvancePrimary(Controls& controls, const ShipStats& sta
 static unsigned PhaseSlotOf(MountArm arm)
 {
     return arm == MountArm::Heavy ? 0u : 1u;
+}
+
+// Rounded up, so an authored duration is never shortened by the tick rate: a
+// windup asked for in seconds should not arrive early.
+static std::uint16_t SecondsToTicks(float seconds)
+{
+    if (seconds <= 0.f) return 0;
+    const double ticks = std::ceil(static_cast<double>(seconds) / Game::PHYSICS_DELTA);
+    return static_cast<std::uint16_t>(std::min(ticks, 65535.0));
 }
 
 unsigned ShipControlsSystem::MountsFor(const Body& body, const char* hardpoint)
@@ -501,8 +571,9 @@ void ShipControlsSystem::Update(std::uint64_t step)
                                     shooterTeam ? shooterTeam->id : TeamId::Blue, round.damage,
                                     /*ownerNetId=*/0u, entity.id());
             // MissileSystem locks a target on its first tick, and steers by
-            // this weapon's own guidance envelope.
-            missile.emplace<Missile>(Missile{0u, round.id});
+            // this weapon's own guidance envelope. The airframe is what a beam
+            // has to spend to bring the round down (Missile::hp).
+            missile.emplace<Missile>(Missile{0u, round.id, 0u, round.hp});
 
             m_eventQueue.Emit(GameEventType::BulletFired, entity,
                               Magnum::Vector2{static_cast<float>(muzzlePos.x()),

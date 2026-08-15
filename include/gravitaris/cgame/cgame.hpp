@@ -84,6 +84,9 @@ protected:
     // mirror) and drawn in one pass, so the scratch outlives a single gather.
     LaserRenderer m_laserRenderer;
     std::vector<LaserRenderer::Beam> m_beams;
+    // Gathered beside them and drawn in the same pass: a charging emitter has
+    // one of these and no beam, a burning one has both.
+    std::vector<LaserRenderer::Charge> m_charges;
 
     // What a beam can be stopped by, flattened to circles ahead of the walk
     // over the beams themselves -- see GatherBeams on why it cannot be a query.
@@ -97,11 +100,67 @@ protected:
     // Shortest a beam may be drawn, as a share of its reach.
     static constexpr double MIN_BEAM_SHARE = 0.05;
 
+    // How far a beam's light carries before it is spent, as a share of the
+    // reach that does its damage. Derived from the range rather than authored
+    // so a tier that shoots further is seen further, and kept under 1 on
+    // purpose: a beam is felt a long way past where it can be seen, and having
+    // to fly in to where you can watch it work is the weapon.
+    //
+    // Three times what it started at -- at a twentieth of the reach the light
+    // died so close to the muzzle that the weapon read as broken rather than as
+    // short-ranged.
+    static constexpr double BEAM_FADE_SHARE = 0.15;
+
+    // The light at a mount at its brightest, in world units of radius: out of
+    // nothing as the emitter charges, and held there while the beam burns.
+    // Small on purpose -- it is a spark at the muzzle, not a ball on the wing --
+    // but it is meant to be read by whoever the beam is pointed at as much as
+    // by the pilot, so the renderer holds it to a pixel floor as well.
+    static constexpr double BEAM_CHARGE_RADIUS = 3.5;
+
+    // Share of the distance a beam has already faded over that survives a
+    // bounce. Near zero would make every deflected leg as bright as a fresh
+    // muzzle however far out it happened; 1 would keep the fade honestly
+    // continuous and leave the whole effect invisible past a few hundred units,
+    // which is what shipping it that way proved. A quarter keeps a bounce at
+    // knife range bright, one across the sector dim but findable.
+    static constexpr double BEAM_BOUNCE_RELIGHT = 0.25;
+
     void GatherBeams(flecs::world& world);
     void DrawBeams(const Camera& camera);
     [[nodiscard]] const Body* HullOf(flecs::entity ent);
-    [[nodiscard]] double BeamReach(flecs::entity shooter, const Magnum::Vector2d& from,
-                                   const Magnum::Vector2d& heading, double range);
+
+    // Where one leg of a beam ends, and on what.
+    struct BeamStop {
+        // How far along the heading it got. The full length asked for when
+        // `target` is empty, meaning it met nothing at all.
+        double distance = 0.;
+        flecs::entity target;
+        // The surface it met, from the bounding circle it was tested against --
+        // which is a real normal for a round hull and an approximation of one
+        // for everything else. Only a deflection reads it.
+        Magnum::Vector2d normal{};
+    };
+
+    // What stops a beam leaving `from`, ignoring up to two entities (the shooter
+    // on the first leg, and whatever deflected it on the ones after). Bounding
+    // circles rather than the collision polygons the sim sweeps: this decides
+    // where to stop DRAWING, it runs in a mirror world where nothing has physics
+    // at all, and being a few units generous at the edge of a silhouette is
+    // invisible.
+    [[nodiscard]] BeamStop BeamReach(flecs::entity ignoreA, flecs::entity ignoreB,
+                                     const Magnum::Vector2d& from,
+                                     const Magnum::Vector2d& heading, double range);
+
+    // Share of a beam `ent` would take into itself rather than throw back, as
+    // the DRAW sees it: one for anything that is not a charged, deflecting
+    // shield. The sim decides this per plate element off the real geometry
+    // (DamageSystem::BeamAbsorbShare) while this can only ask whether the hull
+    // has any charge left at all, so a beam meeting the one spent plate on an
+    // otherwise healthy ship is drawn bouncing where the sim let it through.
+    // Visible only in that corner, and the alternative is replicating per-plate
+    // geometry to the client purely to draw a kink.
+    [[nodiscard]] float BeamAbsorbShareOf(flecs::entity ent);
 
     RendererKind m_activeRenderer = RendererKind::Baked;
 
@@ -464,14 +523,23 @@ public:
     [[nodiscard]] Magnum::Vector2 ViewportToWorld(const Magnum::Vector2& viewportPixel);
 
     // Where the pilot is pointing, packed for the wire (ControlFlags::aim): the
-    // world angle from the player's own hull to whatever is under the cursor.
+    // world angle from the player's own hull to a place in the world.
+    //
+    // A PLACE, not a bearing off the cursor, is what a beam is aimed at: the
+    // camera rides the hull, so a resting cursor holds a constant angle and a
+    // ship flying sideways under one would drag its beam off whatever it was
+    // pointed at. Re-derived from the same point every tick, the mounts swing
+    // to keep it instead (see GravitarisApplication::UpdateAim, which is what
+    // decides when the point stops following the cursor).
+    //
     // The hull's gimbal arc is deliberately NOT folded in here -- clamping is
     // the sim's, applied identically on both sides of the wire, so what travels
     // is the request and not one client's idea of the answer. Empty when there
-    // is nothing to aim from, or when the cursor is sitting on the hull itself
-    // -- in both cases the caller should hold the angle it already had rather
-    // than snap the mounts somewhere arbitrary.
-    [[nodiscard]] std::optional<std::uint16_t> AimAt(const Magnum::Vector2& viewportPixel);
+    // is nothing to aim from, or when the point is the hull itself -- in both
+    // cases the caller should hold the angle it already had rather than snap the
+    // mounts somewhere arbitrary.
+    [[nodiscard]] std::optional<std::uint16_t> AimAtPoint(const Magnum::Vector2& worldPoint);
+
 
     [[nodiscard]] float GetUiScale() const { return m_uiScale; }
     void SetUiScale(float scale) { m_uiScale = std::clamp(scale, MIN_UI_SCALE, MAX_UI_SCALE); }
@@ -654,6 +722,7 @@ public:
 
     [[nodiscard]] const char* GetAudioBackendName() const { return m_audioSystem.GetBackendName(); }
     [[nodiscard]] bool IsAudioEnabled() const { return m_audioSystem.IsEnabled(); }
+
 
     [[nodiscard]] float GetLineWidth() const { return m_lineWidthPixels; }
 

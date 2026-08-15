@@ -14,10 +14,6 @@ using Magnum::Color4;
 using Magnum::Matrix3;
 using Magnum::Vector2;
 
-// How solid a beam is where it leaves the mount. Short of opaque on purpose:
-// it is light, and the hull behind it should still read through the wedge.
-static constexpr float BEAM_NEAR_ALPHA = 0.85f;
-
 // Floors on how thin a beam may get ON SCREEN, in framebuffer pixels. The
 // authored widths are world units, and world units vanish as the camera pulls
 // back: at cruise zoom the wedge was under a pixel across at the muzzle and
@@ -25,8 +21,21 @@ static constexpr float BEAM_NEAR_ALPHA = 0.85f;
 // not drawing at all. Every other line in this renderer is sized in pixels for
 // the same reason (see ModelRenderer2's own line width) -- a vector display
 // draws a beam a beam's width, not a beam's distance.
-static constexpr float MIN_NEAR_PIXELS = 2.f;
-static constexpr float MIN_FAR_PIXELS = 9.f;
+//
+// A hair over a pixel at the muzzle is the real floor here: this shader has no
+// analytic edge AA (unlike line2.f.glsl), so a wedge allowed below one pixel
+// rasterizes as a dotted line rather than a thin one.
+static constexpr float MIN_NEAR_PIXELS = 1.f;
+static constexpr float MIN_FAR_PIXELS = 4.5f;
+
+// The same floor for a charge's radius: a mount lighting up is worth seeing
+// from wherever the camera happens to be sitting.
+static constexpr float MIN_CHARGE_PIXELS = 2.f;
+
+// How spent a charge's light is at the rim of its disc, in the fade lengths
+// laser.f.glsl reads from the alpha channel. Around three is where the
+// exponential has visibly nothing left, so the edge is soft rather than a cut.
+static constexpr float CHARGE_RIM_FADE = 3.f;
 
 LaserRenderer::LaserRenderer(IFilesystem& filesystem)
         : m_shader(filesystem)
@@ -35,16 +44,17 @@ LaserRenderer::LaserRenderer(IFilesystem& filesystem)
           .addVertexBuffer(m_buffer, 0, LaserShader::Position{}, LaserShader::Color{});
 }
 
-void LaserRenderer::Render(const std::vector<Beam>& beams)
+void LaserRenderer::Render(const std::vector<Beam>& beams, const std::vector<Charge>& charges)
 {
-    if (beams.empty()) return;
+    if (beams.empty() && charges.empty()) return;
 
     m_vertices.clear();
-    m_vertices.reserve(beams.size() * 6);
+    m_vertices.reserve(beams.size() * 6 + charges.size() * CHARGE_SEGMENTS * 3);
 
     const float pixelsPerUnit = std::max(m_zoom * m_contentScale, 1e-6f);
     const float minNear = MIN_NEAR_PIXELS / pixelsPerUnit;
     const float minFar = MIN_FAR_PIXELS / pixelsPerUnit;
+    const float minCharge = MIN_CHARGE_PIXELS / pixelsPerUnit;
 
     for (const Beam& beam : beams) {
         const Vector2 along = beam.to - beam.from;
@@ -59,15 +69,44 @@ void LaserRenderer::Render(const std::vector<Beam>& beams)
         const Vector2 nearOffset = normal * (std::max(beam.widthNear, minNear) * 0.5f);
         const Vector2 farOffset = normal * (std::max(beam.widthFar, minFar) * 0.5f);
 
-        const Color4 hot{beam.color, BEAM_NEAR_ALPHA};
-        const Color4 cold{beam.color, BEAM_NEAR_ALPHA * std::clamp(beam.endStrength, 0.f, 1.f)};
+        // The alpha channel is not an opacity: it carries how far this corner
+        // sits from the mount, in fade lengths, and the fragment shader is
+        // what turns that into one. Distance is linear along the wedge, so two
+        // corners describe it exactly -- which a curve fitted through vertex
+        // opacities could not.
+        const Color4 hot{beam.color, beam.fadeStart};
+        const Color4 cold{beam.color,
+                          beam.fadeStart + length / std::max(beam.fadeLength, 1e-3f)};
 
         const Vertex a{beam.from - nearOffset, hot};
         const Vertex b{beam.from + nearOffset, hot};
         const Vertex c{beam.to + farOffset, cold};
         const Vertex d{beam.to - farOffset, cold};
 
-        m_vertices.insert(m_vertices.end(), {a, b, c, a, c, d});
+        // Counter-clockwise, whichever way the beam points: a wedge is built
+        // off one side of its own line, so the naive corner order is wound the
+        // same (wrong) way every time and a culling pass would eat every beam.
+        m_vertices.insert(m_vertices.end(), {a, c, b, a, d, c});
+    }
+
+    for (const Charge& charge : charges) {
+        const float radius = std::max(charge.radius, minCharge);
+        // Solid at the middle and spent at the rim, through the same falloff
+        // the length of a beam uses -- so a charge is lit like the light it is
+        // rather than drawn as a disc with an edge.
+        const Color4 core{charge.color, 0.f};
+        const Color4 rim{charge.color, CHARGE_RIM_FADE};
+
+        Vector2 previous{radius, 0.f};
+        for (int i = 1; i <= CHARGE_SEGMENTS; ++i) {
+            const auto angle = Magnum::Rad{2.f * Magnum::Constants::pi()
+                                           * static_cast<float>(i) / CHARGE_SEGMENTS};
+            const Vector2 next{radius * Magnum::Math::cos(angle), radius * Magnum::Math::sin(angle)};
+            m_vertices.insert(m_vertices.end(), {Vertex{charge.at, core},
+                                                 Vertex{charge.at + previous, rim},
+                                                 Vertex{charge.at + next, rim}});
+            previous = next;
+        }
     }
 
     if (m_vertices.empty()) return;
