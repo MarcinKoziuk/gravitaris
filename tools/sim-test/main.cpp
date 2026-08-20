@@ -52,6 +52,7 @@
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/cheat/cheat-console.hpp>
+#include <gravitaris/game/intercept.hpp>
 #include <gravitaris/game/game.hpp>
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/scenario/starting-complex.hpp>
@@ -5041,6 +5042,179 @@ void TestLoadoutReplication()
 // holding the same model still cannot derive it, and the mirror world used to
 // assume every hull was a fighter's 100. A Base is ten times that, which made
 // every remote structure's bar read as a tenth full whatever its real state.
+// Newton, at the scale of one hull: the heavy line shoves the ship back up its
+// own barrel and the light guns do not. `recoil` is weapon data rather than a
+// rule about which weapon is which, so what is checked here is the behaviour
+// the data exists to produce, never the numbers themselves.
+void TestCannonRecoil()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    // Far from anything with mass, so the only thing that moves either hull is
+    // what it fired.
+    flecs::entity ship = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.});
+    ShipLoadout& loadout = ship.get_mut<ShipLoadout>();
+    loadout.mounts = {};
+    loadout.mounts[0] = MountArm::Heavy;
+    loadout.levels.cannonTier = 1;
+    loadout.levels.gunTier = 0;
+    loadout.cannonAmmo = 20;
+    ship.get_mut<Controls>().activeWeapon = ActiveWeapon::Cannon;
+
+    const ShipStats stats = game.GetUpgradeCatalog().ResolveStats(loadout.levels);
+    Require(stats.cannon && stats.cannon->recoil > 0.0,
+            "recoil: the fitted heavy round authors a kick (setup check)");
+
+    cpBody* body = game.GetPhysicsSystem().GetBody(ship.get<PhysicsRef>()).cp.body.get();
+    cpBodySetVelocity(body, cpvzero);
+    ship.get_mut<Controls>().actionFlags.firePrimary = true;
+    game.Update();
+
+    // The nose is local -Y, so a hull that started at rest and has fired once
+    // is travelling local +Y: backwards.
+    const cpVect v = cpBodyGetVelocity(body);
+    Require(v.y > 0.0, "recoil: firing the cannon moves the hull back up its barrel");
+    Require(std::abs(v.x) < std::abs(v.y), "recoil: ...back, rather than sideways");
+    Require(std::abs(cpBodyGetAngularVelocity(body)) < 1e-9,
+            "recoil: and without spin -- the kick lands on the centre of gravity");
+
+    // The light guns author none, so the same trigger leaves the hull where it
+    // was. A pilot always has something to shoot that does not fly the ship.
+    flecs::entity gunship = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{9000., 0.});
+    ShipLoadout& guns = gunship.get_mut<ShipLoadout>();
+    guns.mounts = {};
+    guns.mounts[0] = MountArm::Light;
+    guns.levels.gunTier = 1;
+    guns.levels.cannonTier = 0;
+    gunship.get_mut<Controls>().activeWeapon = ActiveWeapon::Gun;
+
+    cpBody* gunBody = game.GetPhysicsSystem().GetBody(gunship.get<PhysicsRef>()).cp.body.get();
+    cpBodySetVelocity(gunBody, cpvzero);
+    gunship.get_mut<Controls>().actionFlags.firePrimary = true;
+    game.Update();
+
+    const cpVect gv = cpBodyGetVelocity(gunBody);
+    Require(cpvlength(gv) < 1e-9, "recoil: the light guns kick nothing");
+
+    fs.Shutdown();
+}
+
+// A round has weight. Fired past a planet rather than at one it arrives
+// somewhere other than where it was pointed, which is the whole reason
+// everything that aims has to answer for the drop (SolveBallisticAim).
+void TestBulletsFall()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    // The same shot twice: once with a planet beside its line of flight and
+    // once with the sector empty. Nothing about the shot has any -Y in it, so
+    // every unit of drop at the end is the planet's doing.
+    const Vector2d velocity{300., 0.};
+    const auto flyFrom = [&](bool planet, bool projectileGravity = true) {
+        Game game(fs);
+        game.GetPhysicsSystem().SetProjectileGravity(projectileGravity);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        Vector2d origin{-500., 400.};
+        if (planet) {
+            flecs::entity rock = spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.},
+                                                             1e-9, 1e-6, 1.0, 0.0);
+            origin = rock.get<Transform>().pos + Vector2d{-500., 400.};
+        }
+
+        flecs::entity round = spawner.SpawnBullet("models/bullets/bullet-0"_id, origin, velocity,
+                                                  /*sensor=*/true);
+        round.emplace<Bullet>(6.0, TeamId::Blue, 0.f, /*ownerNetId=*/0u, flecs::entity::null().id());
+
+        for (int tick = 0; tick < 100 && round.is_alive(); ++tick) {
+            game.Update();
+        }
+        Require(round.is_alive(), "bullet drop: the round is still in flight (setup check)");
+        return round.get<Transform>().pos - origin;
+    };
+
+    const Vector2d fell = flyFrom(/*planet=*/true);
+    const Vector2d flat = flyFrom(/*planet=*/false);
+
+    Require(flat.x() > 100. && std::abs(flat.y()) < 1e-6,
+            "bullet drop: with no well in reach a round flies flat (setup check)");
+    Require(fell.y() < -1.0, "bullet drop: past a planet the same round falls toward it");
+    Require(fell.x() > 100., "bullet drop: and still goes downrange");
+
+    // The gameplay option, which is the sim's rule rather than a client's
+    // preference: switched off, the same shot past the same planet flies the
+    // line it used to.
+    const Vector2d exempt = flyFrom(/*planet=*/true, /*projectileGravity=*/false);
+    Require(std::abs(exempt.y()) < 1e-6,
+            "bullet drop: switched off, a round past a planet flies flat again");
+
+    fs.Shutdown();
+}
+
+// The lead solution everything that aims now goes through. Checked against the
+// equation it exists to satisfy -- fly the round for the time it reports, under
+// the acceleration it was told about, and it should be where the target is --
+// rather than against numbers copied out of the implementation.
+void TestBallisticAim()
+{
+    const auto meets = [](const Vector2d& relPos, const Vector2d& relVel, double speed,
+                          const Vector2d& accel, const BallisticSolution& shot) {
+        const double t = shot.flightTime;
+        const Vector2d round = shot.direction * speed * t + accel * (0.5 * t * t);
+        const Vector2d target = relPos + relVel * t;
+        return (round - target).length();
+    };
+
+    // No field: the ballistic answer has to be the straight lead exactly, so
+    // that a shooter far from any well pays nothing for asking.
+    {
+        const Vector2d relPos{800., 0.};
+        const Vector2d relVel{0., 120.};
+        const std::optional<BallisticSolution> shot = SolveBallisticAim(relPos, relVel, 400., Vector2d{});
+        Require(shot.has_value(), "ballistic aim: a reachable target in open space has a solution");
+        Require(meets(relPos, relVel, 400., Vector2d{}, *shot) < 1e-6,
+                "ballistic aim: with no field the round arrives on the target");
+        Require(shot->direction.y() > 0.0,
+                "ballistic aim: and still leads a crossing target the way it is going");
+    }
+
+    // Falling: the barrel has to come up off the straight line, and the round
+    // still has to arrive.
+    {
+        const Vector2d relPos{800., 0.};
+        const Vector2d relVel{};
+        const Vector2d accel{0., -180.};
+        const std::optional<BallisticSolution> shot = SolveBallisticAim(relPos, relVel, 400., accel);
+        Require(shot.has_value(), "ballistic aim: a falling round can still reach a target in range");
+        Require(meets(relPos, relVel, 400., accel, *shot) < 1.0,
+                "ballistic aim: a round fired along it lands on the target it was solved for");
+        Require(shot->direction.y() > 0.0,
+                "ballistic aim: which means shooting above a target the round falls away from");
+
+        const std::optional<BallisticSolution> flat =
+                SolveBallisticAim(relPos, relVel, 400., Vector2d{});
+        Require(flat && shot->flightTime > flat->flightTime,
+                "ballistic aim: the longer way round takes longer to fly");
+    }
+
+    // Fired straight up out of a well it cannot climb: no direction gets there,
+    // and saying so is better than answering with one that does not.
+    {
+        const std::optional<BallisticSolution> hopeless =
+                SolveBallisticAim(Vector2d{0., 4000.}, Vector2d{}, 60., Vector2d{0., -400.});
+        Require(!hopeless, "ballistic aim: a shot the drop puts out of reach has no solution");
+    }
+}
+
 void TestStructureHullCapacityReplicates()
 {
     FilesystemPhysFS fs;
@@ -5709,6 +5883,9 @@ int main()
     TestOwnBulletSuppression();
     TestLoadoutReplication();
     TestStructureHullCapacityReplicates();
+    TestCannonRecoil();
+    TestBulletsFall();
+    TestBallisticAim();
     TestTakeoff();
     TestRepairAndReachability();
     TestAITactics();
