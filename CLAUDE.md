@@ -36,8 +36,9 @@ Eventually the game should be multiplayer, so the game is split into separate mo
   archetype, so each add/remove moves the entity to a new table — cheap once,
   but churny for state that toggles often on many entities per tick (hit
   flashes, transient status effects, per-frame "dirty" marks). Example:
-  `Damageable::flashAmount` is a plain float decremented in place each tick,
-  not a `DamageFlash` tag added on hit and removed when it fades.
+  `HitFlash::amount` is a plain float decremented in place each frame, not a
+  `DamageFlash` tag added on hit and removed when it fades — and `HitFlash`
+  sits on every drawable hull from spawn, so the archetype never moves.
 - Reserve real components for **stable membership** (does this entity have
   physics? is it a bullet? is it damageable?) where the archetype rarely
   changes over the entity's life. Use fields for **frequently-changing
