@@ -9,6 +9,7 @@
 
 #include <gravitaris/gravitaris.hpp>
 #include <gravitaris/game/math-utils.hpp>
+#include <gravitaris/game/intercept.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/bullet.hpp>
@@ -128,8 +129,6 @@ static constexpr double WEDGE_PROGRESS = 20.0;
 static constexpr std::uint16_t WEDGE_TICKS = 600;   // 10s at the fixed tick
 static constexpr std::uint16_t UNWEDGE_TICKS = 120; // 2s of sliding
 
-static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Vector2d& relVel,
-                                                double projectileSpeed);
 static double DepartureRadius(flecs::entity site);
 static bool SegmentHitsCircle(const Vector2d& from, const Vector2d& to, const Vector2d& center,
                               double radius);
@@ -1055,14 +1054,25 @@ void AIPilotSystem::Update(std::uint64_t step)
         // The lead solution on this pilot's target, when it has one in range:
         // both what the gun shoots at and what the nose is flown to.
         std::optional<Vector2d> aimPoint;
+        // Where the target will be when the round gets there, which is not the
+        // same offset as the barrel's once the round is falling. The line of
+        // fire is judged against this one -- whether the target is behind a
+        // planet is a question about the target, not about the barrel.
+        std::optional<Vector2d> shotLead;
         double targetRange = 0.0;
         if (pilot.behavior == AIBehavior::Intercept && targetTransf) {
             const Vector2d relPos = targetTransf->pos - transf.pos;
             targetRange = relPos.length();
             if (targetRange < personality.fireRange) {
                 const Vector2d relVel = targetTransf->vel - transf.vel;
-                if (std::optional<double> t = SolveInterceptTime(relPos, relVel, bulletSpeed)) {
-                    aimPoint = relPos + relVel * (*t);
+                // Rounds fall, so a pilot fighting over a planet has to shoot
+                // above what it is shooting at.
+                const Vector2d drop = m_physicsSystem.MeanGravityAccel(
+                        m_physicsSystem.GetBody(ref).spaceId, transf.pos, targetTransf->pos);
+                if (const std::optional<BallisticSolution> shot =
+                            SolveBallisticAim(relPos, relVel, bulletSpeed, drop)) {
+                    shotLead = relPos + relVel * shot->flightTime;
+                    aimPoint = shot->direction * shotLead->length();
                 }
             }
         }
@@ -1135,15 +1145,16 @@ void AIPilotSystem::Update(std::uint64_t step)
             const double tolerance = personality.fireTolerance
                     + (personality.aimJitter > 0.0 ? pilot.aimBias : 0.0);
 
-            // Weapon discipline: bullets are gravity-immune and fly straight,
-            // so a body across the firing solution eats the shot. Holding fire
-            // costs nothing (the cooldown is only spent on shots actually
-            // taken) and stops a pilot from emptying itself into a planet the
-            // target is hiding behind.
+            // Weapon discipline: a body across the firing solution eats the
+            // shot. Holding fire costs nothing (the cooldown is only spent on
+            // shots actually taken) and stops a pilot from emptying itself
+            // into a planet the target is hiding behind. Judged straight,
+            // though the round arcs: a pilot that lobbed rounds over a rock on
+            // purpose would be a better shot than this one is written to be.
             bool blocked = false;
             for (const Source& src : sources) {
                 if (src.radius <= 0.0) continue;
-                if (SegmentHitsCircle(transf.pos, transf.pos + *aimPoint, src.pos,
+                if (SegmentHitsCircle(transf.pos, transf.pos + *shotLead, src.pos,
                                       src.radius + SHOT_CLEARANCE)) {
                     blocked = true;
                     break;
@@ -1197,34 +1208,6 @@ static double DepartureRadius(flecs::entity site)
         radius = planet->radius * site.get<Transform>().scale.x();
     }
     return radius + DEPARTURE_CLEARANCE;
-}
-
-// Smallest positive time at which a projectile of `projectileSpeed` (relative
-// to the shooter) meets a target at relPos moving at relVel.
-static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Vector2d& relVel,
-                                                double projectileSpeed)
-{
-    const double a = relVel.dot() - projectileSpeed * projectileSpeed;
-    const double b = 2.0 * Magnum::Math::dot(relPos, relVel);
-    const double c = relPos.dot();
-
-    if (std::abs(a) < 1e-9) {
-        if (std::abs(b) < 1e-9) return std::nullopt;
-        const double t = -c / b;
-        return t > 0.0 ? std::optional<double>(t) : std::nullopt;
-    }
-
-    const double disc = b * b - 4.0 * a * c;
-    if (disc < 0.0) return std::nullopt;
-
-    const double sq = std::sqrt(disc);
-    const double t1 = (-b - sq) / (2.0 * a);
-    const double t2 = (-b + sq) / (2.0 * a);
-
-    double t = std::numeric_limits<double>::max();
-    if (t1 > 0.0) t = std::min(t, t1);
-    if (t2 > 0.0) t = std::min(t, t2);
-    return t != std::numeric_limits<double>::max() ? std::optional<double>(t) : std::nullopt;
 }
 
 } // namespace Gravitaris

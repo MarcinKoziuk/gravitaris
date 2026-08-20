@@ -7,6 +7,7 @@
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/gravity-source.hpp>
+#include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/resource/body.hpp>
 #include <gravitaris/game/system/core/physics-system.hpp>
 
@@ -482,43 +483,91 @@ void PhysicsSystem::UnloadSpace(id_t spaceId)
 void PhysicsSystem::ApplyGravity(id_t spaceId)
 {
     // Gravity is sources -> targets, not all-pairs: only GravitySource bodies
-    // (stars/planets) attract, and only dynamic bodies (ships/debris) are
-    // pulled. Kinematic sources report infinite Chipmunk mass, so their
+    // (stars/planets) attract, and only dynamic bodies (ships/debris/rounds)
+    // are pulled. Kinematic sources report infinite Chipmunk mass, so their
     // gravitational mass comes from the component, not cpBodyGetMass.
-    struct Source {
-        cpVect pos;
-        cpFloat mass;
-    };
-    std::vector<Source> sources;
-
-    m_registry.each([&](flecs::entity, const GravitySource& gs, PhysicsRef& ref) {
-        PhysicsBody& slot = GetBody(ref);
-        if (slot.spaceId != spaceId) return;
-        sources.push_back({cpBodyGetPosition(slot.cp.body.get()),
-                           gs.mass * static_cast<cpFloat>(gs.multiplier)});
-    });
-
-    if (sources.empty()) return;
+    //
+    // Rounds included: a shot fired across a well arrives somewhere other than
+    // where it was aimed, and over a planet you lead the target and the drop
+    // both. DamageSystem sweeps prevPos -> pos every tick, so a curved flight
+    // path hits what it passes through rather than what it was pointed at --
+    // and whatever aims has to answer for the drop (SolveBallisticAim).
+    if (m_wells.empty()) return;
 
     m_registry.each([&](flecs::entity ent, PhysicsRef& ref) {
         PhysicsBody& slot = GetBody(ref);
-        if (slot.spaceId != spaceId || ent.has<Bullet>()) return;
+        if (slot.spaceId != spaceId) return;
+        if (!m_projectileGravity && ent.has<Bullet>()) return;
         cpBody* body = slot.cp.body.get();
         if (cpBodyGetType(body) != CP_BODY_TYPE_DYNAMIC) return;
 
         const cpVect tpos = cpBodyGetPosition(body);
-        const cpFloat tmass = cpBodyGetMass(body);
-        cpVect total = cpvzero;
-        for (const Source& src : sources) {
-            const cpVect d = cpvsub(src.pos, tpos);
-            const cpFloat dist2 = cpvlengthsq(d);
-            if (dist2 < 1e-6) continue;
-            const cpFloat f = GRAVITY_CONSTANT * m_gravityMultiplier * (tmass * src.mass) / dist2;
-            total = cpvadd(total, cpvmult(d, f / std::sqrt(dist2)));
-        }
+        const Magnum::Vector2d accel = GravityAccelAt(spaceId, Magnum::Vector2d{tpos.x, tpos.y});
+        const cpVect total = cpvmult(cpv(accel.x(), accel.y()), cpBodyGetMass(body));
 
         cpBodyApplyForceAtWorldPoint(body, total, cpvadd(tpos, cpBodyGetCenterOfGravity(body)));
     });
+}
+
+void PhysicsSystem::RefreshGravityWells()
+{
+    m_wells.clear();
+    m_registry.each([&](flecs::entity ent, const GravitySource& gs, PhysicsRef& ref) {
+        PhysicsBody& slot = GetBody(ref);
+        const cpVect pos = cpBodyGetPosition(slot.cp.body.get());
+
+        // A rock's own size, for the interior field. The Planet's authored
+        // radius where there is one, since that is what everything else in the
+        // game measures a surface by (home-site.cpp), and the collision
+        // outline otherwise.
+        double radius = 0.0;
+        const double scale = ent.has<Transform>() ? ent.get<Transform>().scale.x() : 1.0;
+        if (const Planet* planet = ent.try_get<Planet>()) radius = planet->radius * scale;
+        else if (slot.body) radius = slot.body->GetBoundingRadius() * scale;
+
+        m_wells.push_back(GravityWell{slot.spaceId, Magnum::Vector2d{pos.x, pos.y},
+                                      gs.mass * static_cast<double>(gs.multiplier), radius});
+    });
+}
+
+Magnum::Vector2d PhysicsSystem::MeanGravityAccel(id_t spaceId, const Magnum::Vector2d& from,
+                                                 const Magnum::Vector2d& to) const
+{
+    // Midpoint rule over a handful of samples. Few enough to be free at the
+    // one-shot rate this is asked at, enough that a well the run passes to one
+    // side of is not mistaken for one the run starts inside.
+    constexpr int SAMPLES = 5;
+
+    if (!m_projectileGravity) return {};
+
+    Magnum::Vector2d total;
+    for (int i = 0; i < SAMPLES; ++i) {
+        const double along = (static_cast<double>(i) + 0.5) / SAMPLES;
+        total += GravityAccelAt(spaceId, from + (to - from) * along);
+    }
+    return total / SAMPLES;
+}
+
+Magnum::Vector2d PhysicsSystem::GravityAccelAt(id_t spaceId, const Magnum::Vector2d& pos) const
+{
+    Magnum::Vector2d total;
+    for (const GravityWell& well : m_wells) {
+        if (well.spaceId != spaceId) continue;
+        const Magnum::Vector2d d = well.pos - pos;
+        const double dist2 = d.dot();
+        if (dist2 < 1e-6) continue;
+
+        const double dist = std::sqrt(dist2);
+        const double pull = GRAVITY_CONSTANT * m_gravityMultiplier * well.mass;
+        // Linear to zero at the core inside the body, 1/r^2 outside it, equal
+        // at the surface.
+        const double magnitude = (well.radius > 0.0 && dist < well.radius)
+                ? pull * dist / (well.radius * well.radius * well.radius)
+                : pull / dist2;
+
+        total += d * (magnitude / dist);
+    }
+    return total;
 }
 
 void PhysicsSystem::Simulate(double dt)
@@ -527,6 +576,10 @@ void PhysicsSystem::Simulate(double dt)
     // applied before cpSpaceStep integrates them, and the overlaps aren't
     // known until it has run.
     ApplyShipSeparation();
+
+    // Once, outside every walk: what ApplyGravity sums and what aim asks for
+    // through GravityAccelAt are then the same set of attractors.
+    RefreshGravityWells();
 
     for (const auto& p : m_spaces) {
         cpSpace* space = p.second.get();

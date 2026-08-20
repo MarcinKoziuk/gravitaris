@@ -274,6 +274,13 @@ void ClientPrediction::Step(std::uint64_t tick, const ControlFlags& flags,
                                                            ownPhys, gun.speed,
                                                            ShipControlsSystem::WEAPON_HARDPOINT,
                                                            mount);
+            // Not cosmetic, unlike the round itself: the server shoves its own
+            // copy of this hull back on this same tick, so a client that
+            // skipped it would be reconciled backwards once per shot.
+            if (m_physicsSystem.GetWeaponRecoil()) {
+                ShipControlsSystem::ApplyRecoil(ownPhys.cp.body.get(), gun);
+            }
+
             const flecs::entity bullet =
                     m_entitySpawner.SpawnBullet(gun.modelId, pos, vel, /*sensor=*/true,
                                                 static_cast<double>(m_ownShip.get<Transform>().rot));

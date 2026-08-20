@@ -756,6 +756,11 @@ public:
 
     [[nodiscard]] float GetGravityMultiplier() const { return m_physicsSystem.GetGravityMultiplier(); }
     void SetGravityMultiplier(float multiplier) { m_physicsSystem.SetGravityMultiplier(multiplier); }
+
+    [[nodiscard]] bool GetProjectileGravity() const { return m_physicsSystem.GetProjectileGravity(); }
+    void SetProjectileGravity(bool enabled) { m_physicsSystem.SetProjectileGravity(enabled); }
+    [[nodiscard]] bool GetWeaponRecoil() const { return m_physicsSystem.GetWeaponRecoil(); }
+    void SetWeaponRecoil(bool enabled) { m_physicsSystem.SetWeaponRecoil(enabled); }
     [[nodiscard]] PhysicsSystem::ShipContactParams& GetShipContactParams()
     {
         return m_physicsSystem.GetShipContactParams();

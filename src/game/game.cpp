@@ -29,7 +29,8 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_physicsSystem(m_registry)
         , m_orbitSystem(m_registry, m_physicsSystem)
         , m_structureAttachmentSystem(m_registry, *m_entitySpawner, m_physicsSystem)
-        , m_structureDefenseSystem(m_registry, *m_entitySpawner, m_eventQueue, m_upgradeCatalog)
+        , m_structureDefenseSystem(m_registry, m_physicsSystem, *m_entitySpawner, m_eventQueue,
+                                   m_upgradeCatalog)
         , m_freighterSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue, m_economyConfig)
         , m_economySystem(m_registry, *m_entitySpawner, m_eventQueue, m_economyConfig)
         , m_researchSystem(m_registry, *m_entitySpawner, m_eventQueue, m_upgradeCatalog, m_economyConfig)

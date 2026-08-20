@@ -201,6 +201,23 @@ private:
     flecs::observer m_bodyRemovedObserver;
 
     float m_gravityMultiplier = 3.5f; // this game's tuned default; 1 = GRAVITY_CONSTANT unmodified
+    bool m_projectileGravity = true;
+    bool m_weaponRecoil = true;
+
+    // Every attractor, refreshed once at the top of Simulate. Cached rather
+    // than queried on demand because the systems that ask -- turret and pilot
+    // aim -- ask from inside their own walk over ships, and a flecs query run
+    // inside another one silently iterates nothing (see CLAUDE.md).
+    struct GravityWell {
+        id_t spaceId = 0;
+        Magnum::Vector2d pos;
+        double mass = 0.0;
+        double radius = 0.0; // the body's own, for the interior field below
+    };
+
+    std::vector<GravityWell> m_wells;
+
+    void RefreshGravityWells();
 
     void InitSpace(id_t spaceId);
 
@@ -304,10 +321,46 @@ public:
 
     // --- Debug/tuning knobs (temporary, for calibrating gameplay feel) ---
 
+    // The acceleration a body at `pos` is pulled with this tick -- the same
+    // sum ApplyGravity applies, divided out by the target's own mass, which
+    // cancels. What a shot has to be aimed above to arrive where it was
+    // pointed (SolveBallisticAim). Reads the wells cached by the last
+    // Simulate, so it is safe to call from inside a query.
+    //
+    // Inside a well's own radius the pull falls off linearly to nothing at the
+    // centre (uniform density) rather than running to 1/r^2 -- continuous at
+    // the surface, so nothing outside one notices. Only something that gets
+    // *into* a planet ever did: a ship cannot, but a round fired by the Base
+    // at a planet's core flies out through the middle of it, and the point
+    // source there was worth thousands of g.
+    [[nodiscard]] Magnum::Vector2d GravityAccelAt(id_t spaceId, const Magnum::Vector2d& pos) const;
+
+    // The mean pull along the straight run from `from` to `to`. What a shot
+    // wants rather than the field at either end: a round fired across a
+    // distant planet is tugged forward on the way in and back on the way out,
+    // and those cancel, while one climbing out of the well it was fired inside
+    // is pulled back the whole way. Sampling one point in the middle cannot
+    // tell those apart and reads the second answer for both.
+    [[nodiscard]] Magnum::Vector2d MeanGravityAccel(id_t spaceId, const Magnum::Vector2d& from,
+                                                    const Magnum::Vector2d& to) const;
+
     // Scales the force ApplyGravity computes for every source/target pair.
     // 1 = unmodified (GRAVITY_CONSTANT as authored).
     void SetGravityMultiplier(float multiplier) { m_gravityMultiplier = multiplier; }
     [[nodiscard]] float GetGravityMultiplier() const { return m_gravityMultiplier; }
+
+    // Whether a round has weight. Off, shots fly the straight lines they used
+    // to and MeanGravityAccel answers zero, so everything that leads a target
+    // stops correcting for a drop that is no longer there -- one switch rather
+    // than one per gun crew.
+    void SetProjectileGravity(bool enabled) { m_projectileGravity = enabled; }
+    [[nodiscard]] bool GetProjectileGravity() const { return m_projectileGravity; }
+
+    // Whether firing shoves the hull back (WeaponDef::recoil). A rule of the
+    // sim rather than a client setting: the predicting client has to hold the
+    // same one the server does or it is reconciled backwards once per shot.
+    void SetWeaponRecoil(bool enabled) { m_weaponRecoil = enabled; }
+    [[nodiscard]] bool GetWeaponRecoil() const { return m_weaponRecoil; }
 
     // Sets a body's live Chipmunk mass to its resource-authored base mass
     // (captured at spawn) times `multiplier`. 1 = unmodified. Safe to call

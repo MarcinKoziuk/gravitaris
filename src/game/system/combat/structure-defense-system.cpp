@@ -8,6 +8,9 @@
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/structure.hpp>
+#include <gravitaris/game/component/physics.hpp>
+#include <gravitaris/game/intercept.hpp>
+#include <gravitaris/game/system/core/physics-system.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
@@ -17,41 +20,11 @@ namespace Gravitaris {
 
 using Magnum::Vector2d;
 
-    // Claude: how can we best share code? I think small generic math units can go into math-fns
-    // maybe intercept there too (but in a related .cpp unit)
-// Smallest positive time at which a projectile of `projectileSpeed`
-// (relative to the shooter) meets a target at relPos moving at relVel. Same
-// formula as AIPilotSystem's own (ai-pilot-system.cpp) -- not shared since
-// that one is file-local there too.
-static std::optional<double> SolveInterceptTime(const Vector2d& relPos, const Vector2d& relVel,
-                                                double projectileSpeed)
-{
-    const double a = relVel.dot() - projectileSpeed * projectileSpeed;
-    const double b = 2.0 * Magnum::Math::dot(relPos, relVel);
-    const double c = relPos.dot();
-
-    if (std::abs(a) < 1e-9) {
-        if (std::abs(b) < 1e-9) return std::nullopt;
-        const double t = -c / b;
-        return t > 0.0 ? std::optional<double>(t) : std::nullopt;
-    }
-
-    const double disc = b * b - 4.0 * a * c;
-    if (disc < 0.0) return std::nullopt;
-
-    const double sq = std::sqrt(disc);
-    const double t1 = (-b - sq) / (2.0 * a);
-    const double t2 = (-b + sq) / (2.0 * a);
-
-    double t = std::numeric_limits<double>::max();
-    if (t1 > 0.0) t = std::min(t, t1);
-    if (t2 > 0.0) t = std::min(t, t2);
-    return t != std::numeric_limits<double>::max() ? std::optional<double>(t) : std::nullopt;
-}
-
-StructureDefenseSystem::StructureDefenseSystem(flecs::world& registry, EntitySpawner& entitySpawner,
-                                               GameEventQueue& eventQueue, const UpgradeCatalog& catalog)
+StructureDefenseSystem::StructureDefenseSystem(flecs::world& registry, PhysicsSystem& physicsSystem,
+                                               EntitySpawner& entitySpawner, GameEventQueue& eventQueue,
+                                               const UpgradeCatalog& catalog)
         : m_registry(registry)
+        , m_physicsSystem(physicsSystem)
         , m_entitySpawner(entitySpawner)
         , m_eventQueue(eventQueue)
         , m_catalog(catalog)
@@ -73,7 +46,8 @@ void StructureDefenseSystem::Update()
         if (team.id != TeamId::None) targets.push_back({t.pos, t.vel, team.id});
     });
 
-    m_registry.each([&](flecs::entity turret, const Transform& transf, const Team& turretTeam, StructureDefense& defense) {
+    m_registry.each([&](flecs::entity turret, const Transform& transf, const Team& turretTeam,
+                        const PhysicsRef& ref, StructureDefense& defense) {
         if (defense.fireCooldown > 0) {
             --defense.fireCooldown;
             return;
@@ -97,10 +71,18 @@ void StructureDefenseSystem::Update()
 
         const Vector2d relPos = chosen->pos - transf.pos;
         const Vector2d relVel = chosen->vel - transf.vel;
-        const std::optional<double> t = SolveInterceptTime(relPos, relVel, round->speed);
-        if (!t) return;
 
-        const Vector2d aim = (relPos + relVel * (*t)).normalized();
+        // An emplacement sits at the bottom of the well it is defending -- a
+        // Base is at its planet's core -- so its rounds climb the whole way
+        // out and drop harder than anything else that shoots.
+        const id_t spaceId = m_physicsSystem.GetBody(ref).spaceId;
+        const Vector2d drop = m_physicsSystem.MeanGravityAccel(spaceId, transf.pos, chosen->pos);
+
+        const std::optional<BallisticSolution> solution =
+                SolveBallisticAim(relPos, relVel, round->speed, drop);
+        if (!solution) return;
+
+        const Vector2d aim = solution->direction;
         const Vector2d vel = aim * round->speed + transf.vel;
 
         // Along the firing solution, not along the turret's own facing:

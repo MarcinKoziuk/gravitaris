@@ -22,6 +22,24 @@ void DrawPhysicsPanel(CGame& game)
         game.SetGravityMultiplier(3.3f);
     }
 
+    ImGui::SeparatorText("Gunnery");
+    bool projectileGravity = game.GetProjectileGravity();
+    if (ImGui::Checkbox("Projectiles fall", &projectileGravity)) {
+        game.SetProjectileGravity(projectileGravity);
+    }
+    ImGui::SetItemTooltip("Rounds are pulled by planets like anything else, so a shot across a well "
+                          "arrives somewhere other than where it was pointed. Turrets and AI pilots "
+                          "lead for the drop while this is on, and stop when it is off. Missiles fly "
+                          "under power and barely notice either way. On by default.");
+
+    bool recoil = game.GetWeaponRecoil();
+    if (ImGui::Checkbox("Cannon recoil", &recoil)) {
+        game.SetWeaponRecoil(recoil);
+    }
+    ImGui::SetItemTooltip("Firing shoves the hull back up its own barrel, by the impulse the weapon "
+                          "authors (data/upgrades.toml `recoil`). Only the heavy line authors one; "
+                          "the light guns never push you around. On by default.");
+
     ImGui::SeparatorText("Ship weight");
     float weight = game.GetShipWeightMultiplier();
     ImGui::SetNextItemWidth(220.f);

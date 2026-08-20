@@ -463,6 +463,14 @@ static cpVect ThrustWithinSpeedLimit(cpBody* body, double thrust, double maxSpee
     return cpvunrotate(cpvsub(world, cpvmult(travel, along)), heading);
 }
 
+// Local +Y: the nose is local -Y (see ApplyMovement), so this is straight
+// back down the barrel whatever the hull is doing.
+void ShipControlsSystem::ApplyRecoil(cpBody* body, const WeaponDef& weapon)
+{
+    if (weapon.recoil <= 0.0) return;
+    cpBodyApplyImpulseAtLocalPoint(body, cpv(0, weapon.recoil), cpBodyGetCenterOfGravity(body));
+}
+
 void ShipControlsSystem::Update(std::uint64_t step)
 {
     m_registry.each([&](flecs::entity entity, Transform& transf, PhysicsRef& ref, Controls& scontrols) {
@@ -496,6 +504,8 @@ void ShipControlsSystem::Update(std::uint64_t step)
             const std::pair<Vector2d, Vector2d> ret =
                     ShipControlsSystem::ComputeBulletSpawn(transf, phys, gun.speed,
                                                            WEAPON_HARDPOINT, mount);
+
+            if (m_physicsSystem.GetWeaponRecoil()) ApplyRecoil(body, gun);
 
             const Team* shooterTeam = entity.try_get<Team>();
             const NetId* shooterNetId = entity.try_get<NetId>();

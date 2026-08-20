@@ -1009,6 +1009,7 @@ static WeaponDef ParseWeapon(const toml::table& entry, const std::string& key)
     weapon.hp = entry["hp"].value_or(0.f);
     weapon.speed = entry["speed"].value_or(0.0);
     weapon.lifetimeSeconds = entry["lifetime_seconds"].value_or(0.0);
+    weapon.recoil = entry["recoil"].value_or(0.0);
     if (const auto model = entry["model"].value<std::string>()) weapon.modelId = ID(model->c_str());
     if (const auto sound = entry["sound"].value<std::string>()) weapon.soundId = ID(sound->c_str());
     weapon.soundGain = entry["sound_gain"].value_or(weapon.soundGain);

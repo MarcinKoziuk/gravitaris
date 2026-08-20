@@ -30,6 +30,15 @@ sound_gain = 0.5
 # (speed * lifetime_seconds is the reach): the magazine is what a heavy mount
 # pays for that, and the light guns' case against it is that they never run dry.
 #
+# And the heavy line is the only one that shoves the hull back (`recoil`, an
+# impulse divided by the ship's mass, so a fighter feels what a freighter
+# doesn't). A fighter masses about 15 -- these hulls are mostly empty outline
+# at their authored scale -- so a couple of units of impulse is the ~0.2
+# units/s a shot that reads as the gun having weight. An order above this and
+# a held trigger out-pushes the drive, which flies the ship rather than
+# flavouring it. The light guns author no recoil at all: they never run dry,
+# and having them push you around too would leave nothing to fall back on.
+#
 # A heavy round is a tracer, not a dot: the tiers fire bullet-heavy rather
 # than the stock bullet-0, and the top one its own cyan streak, so what a ship
 # is shooting is readable from the rounds alone.
@@ -41,6 +50,7 @@ cooldown_ticks = 5
 damage = 15.0
 speed = 224.0
 lifetime_seconds = 3.6
+recoil = 2.5
 model = "models/bullets/bullet-heavy"
 sound = "sounds/gatling-1.wav"
 sound_gain = 0.7
@@ -53,6 +63,7 @@ cooldown_ticks = 4
 damage = 21.0
 speed = 320.0
 lifetime_seconds = 3.8
+recoil = 3.0
 model = "models/bullets/bullet-heavy"
 sound = "sounds/gatling-1.wav"
 sound_gain = 0.7
@@ -67,6 +78,7 @@ cooldown_ticks = 3
 damage = 30.0
 speed = 420.0
 lifetime_seconds = 4.2
+recoil = 3.5
 model = "models/bullets/bullet-heavy-cyan"
 sound = "sounds/gatling-1.wav"
 sound_gain = 0.7
@@ -259,13 +271,31 @@ guidance = { turn_rate = 2.0, acceleration = 130.0, top_speed = 260.0, wobble = 
 [ship]
 gun = "autocannon"
 
-# Base/High Port turrets (StructureDefenseSystem) fire the same round a stock
-# ship does. An emplacement has no magazine to run dry and nothing to do but
-# shoot, so it holds a steady stream on whatever comes inside its range rather
-# than taking the occasional pot shot -- getting close to a defended complex is
-# meant to be the hard part of taking one.
+# The emplacement round. Its own entry rather than the stock ship's, and the
+# whole difference is muzzle velocity: a Base sits at its planet's CORE
+# (StructureLayout::SurfaceOffset), and rounds have weight now, so anything
+# leaving one has to climb the entire well before it reaches open space. A
+# standard planet asks ~265 units/s from the core to escape at all -- the
+# autocannon's 200 tops out 186 units up and falls back in, which is a
+# planetary defense battery that cannot clear its own planet.
+[[weapon]]
+key = "defense_battery"
+hardpoint = "weapon"
+name = "Defense Battery"
+damage = 10.0
+speed = 340.0
+lifetime_seconds = 3.0
+model = "models/bullets/bullet-0"
+sound = "sounds/laser-1.wav"
+sound_gain = 0.5
+
+# Base/High Port turrets (StructureDefenseSystem). An emplacement has no
+# magazine to run dry and nothing to do but shoot, so it holds a steady stream
+# on whatever comes inside its range rather than taking the occasional pot
+# shot -- getting close to a defended complex is meant to be the hard part of
+# taking one.
 [turret]
-weapon = "autocannon"
+weapon = "defense_battery"
 fire_range = 600.0
 fire_cooldown_ticks = 9
 

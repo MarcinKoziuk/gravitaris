@@ -641,6 +641,8 @@ if(GRAVITARIS_BUILD_CLIENT)
         include/gravitaris/game/resource/common/resource-loader.hpp
         include/gravitaris/game/resource/common/resource-ptr.hpp
         src/game/id.cpp
+        include/gravitaris/game/intercept.hpp
+        src/game/intercept.cpp
         include/gravitaris/game/resource/body.hpp
         src/game/resource/detail/shape-common.hpp
         src/game/resource/detail/shape-common.cpp
@@ -1060,6 +1062,7 @@ add_executable(gravitaris-sim-test
     extlibs/physfs/physfs.cpp
     src/game/fs/filesystem-phys-fs.cpp
     src/game/id.cpp
+    src/game/intercept.cpp
     src/game/logging.cpp
     src/game/perf-monitor.cpp
     src/game/resource/detail/shape-common.cpp
@@ -1175,6 +1178,7 @@ if(NOT EMSCRIPTEN)
         extlibs/physfs/physfs.cpp
         src/game/fs/filesystem-phys-fs.cpp
         src/game/id.cpp
+        src/game/intercept.cpp
         src/game/logging.cpp
         src/game/perf-monitor.cpp
         src/game/resource/detail/shape-common.cpp

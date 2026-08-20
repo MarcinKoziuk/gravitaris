@@ -74,6 +74,17 @@ public:
     // slingshot still carries a ship past its engine's limit.
     static void ApplyMovement(cpBody* body, const ControlFlags& flags, double thrust, double maxSpeed);
 
+    // The kick of one round leaving one barrel (WeaponDef::recoil), straight
+    // back up the hull's own axis. At the centre of gravity rather than at the
+    // mount that fired: a wing gun would otherwise spin the ship, and a hull
+    // whose barrels don't pair off would yaw a little with every burst -- an
+    // interesting weapon, but not the one anybody asked for.
+    //
+    // Shared with client-side prediction for the same reason ApplyMovement is:
+    // a shove the predicting client doesn't apply is a shove it has to be
+    // snapped back for on the next reconcile, once per shot.
+    static void ApplyRecoil(cpBody* body, const WeaponDef& weapon);
+
     // What the bank granted this tick. Both consumers in one answer because
     // they come out of one pool and have to be decided together.
     struct PowerGrant {

@@ -27,6 +27,13 @@ struct WeaponDef {
     // is every gun round: only a beam spends this (DamageSystem::ResolveBeams).
     float hp = 0.f;
 
+    // Impulse the hull takes back up its own barrel as this fires, in the
+    // kg*units/s the physics runs in -- so the shove a shot delivers is
+    // divided by the hull's mass, and a freighter barely notices what staggers
+    // a fighter. Zero is a weapon whose kick isn't worth modelling: every
+    // light gun, and every beam (nothing leaves the mount to push back).
+    double recoil = 0.;
+
     id_t modelId = 0; // the projectile's model
     id_t soundId = 0; // played at the muzzle by AudioSystem
     float soundGain = 0.5f;
