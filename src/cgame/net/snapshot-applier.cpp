@@ -89,7 +89,7 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
                 // structures aren't part of yet -- only Damageable matters
                 // here) -- bullets can carry Team too (friendly-fire check)
                 // but never Damageable, so gating like this matches that.
-                entity.emplace<Damageable>(state.hp, 100.f);
+                entity.emplace<Damageable>(state.hp, state.maxHp);
                 entity.emplace<ShipLoadout>();
                 entity.emplace<ResearchAccess>();
                 // Presence-only marker, same idiom as Orbit below: nothing in
@@ -101,7 +101,7 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
                 ApplyEntityShipState(entity, state);
             }
             if (state.type == NetEntityType::Structure) {
-                entity.emplace<Damageable>(state.hp, 100.f);
+                entity.emplace<Damageable>(state.hp, state.maxHp);
                 entity.emplace<HitOutline>(m_resourceLoader.Load<Body>(state.modelId));
                 entity.emplace<Structure>(Structure{state.structureType, state.rawMaterials,
                                                     state.finishedMaterials, state.researchProgress});

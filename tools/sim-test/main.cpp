@@ -4993,6 +4993,8 @@ void TestLoadoutReplication()
 
     Require(client.get<Damageable>().hp == server.get<Damageable>().hp,
             "loadout replication: hull damage, which nothing on a client predicts");
+    Require(client.get<Damageable>().maxHp == server.get<Damageable>().maxHp,
+            "loadout replication: hull capacity, without which a bar is a fraction of the wrong thing");
 
     const ShipLoadout& applied = client.get<ShipLoadout>();
     Require(applied.mounts == refit.mounts, "loadout replication: what each mount is armed with");
@@ -5030,6 +5032,51 @@ void TestLoadoutReplication()
                     && got.missileCapacity == expected.missileCapacity
                     && got.capacitorCharge == expected.capacitorCharge,
             "loadout replication: a client resolves the same weapons, magazines and bank");
+
+    fs.Shutdown();
+}
+
+// A building's hull capacity is its model's scaled by STRUCTURE_HP_SCALE, and
+// that factor lives in the spawner rather than in the Body -- so a client
+// holding the same model still cannot derive it, and the mirror world used to
+// assume every hull was a fighter's 100. A Base is ten times that, which made
+// every remote structure's bar read as a tenth full whatever its real state.
+void TestStructureHullCapacityReplicates()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    flecs::entity planet =
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 1e-9, 2000., 1.0, 0.0);
+    planet.set<Team>(Team{TeamId::Blue});
+    flecs::entity base = spawner.SpawnStructure(StructureType::Base, "models/structures/base"_id, planet,
+                                                TeamId::Blue);
+
+    const float maxHp = base.get<Damageable>().maxHp;
+    Require(maxHp > 100.f, "structure capacity: a Base is built tougher than a fighter");
+    base.get_mut<Damageable>().hp = maxHp * 0.5f;
+
+    SnapshotData gathered;
+    GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), game.GetStep(), 0, gathered);
+
+    ByteWriter wire;
+    SerializeSnapshot(gathered, wire);
+    ByteReader reader(wire.Data(), wire.Size());
+    SnapshotData parsed;
+    Require(ReadSnapshot(reader, parsed), "structure capacity: the snapshot parses");
+
+    const std::uint32_t netId = base.get<NetId>().value;
+    const auto it = std::find_if(parsed.entities.begin(), parsed.entities.end(),
+                                 [&](const EntityState& e) { return e.netId == netId; });
+    Require(it != parsed.entities.end(), "structure capacity: the Base is in the snapshot");
+    Require(it->maxHp == maxHp, "structure capacity: capacity survives the wire");
+    Require(std::abs(it->hp / it->maxHp - 0.5f) < 1e-4f,
+            "structure capacity: a half-wrecked Base reads as half wrecked");
 
     fs.Shutdown();
 }
@@ -5661,6 +5708,7 @@ int main()
     TestSectorGeneration();
     TestOwnBulletSuppression();
     TestLoadoutReplication();
+    TestStructureHullCapacityReplicates();
     TestTakeoff();
     TestRepairAndReachability();
     TestAITactics();

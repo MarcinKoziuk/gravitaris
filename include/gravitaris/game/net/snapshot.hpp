@@ -56,6 +56,11 @@ struct EntityState {
     // looks the same length everywhere it is drawn.
     std::uint8_t laserWindup = 0;
     float hp = 0.f;
+    // Sent rather than derived: a structure's is its model's scaled by
+    // STRUCTURE_HP_SCALE, which lives in the spawner and not in the Body the
+    // client loads -- so a client with the same model still cannot work it
+    // out. Without it every remote structure reads as a tenth full.
+    float maxHp = 0.f;
     // Only meaningful for NetEntityType::Planet (0 otherwise): GravitySource's
     // fields, replicated so client-side prediction (Phase 5) can compute
     // gravity from known planet positions/masses without running a second,

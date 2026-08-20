@@ -27,7 +27,7 @@ namespace Gravitaris {
 
 // Bump on any wire-layout change; ReadSnapshot rejects mismatches outright
 // (no cross-version compatibility until there's a reason to have it).
-static constexpr std::uint8_t SNAPSHOT_VERSION = 16; // v16: beam windup
+static constexpr std::uint8_t SNAPSHOT_VERSION = 17; // v17: maxHp
 
 // Sanity caps so a garbage buffer can't make ReadSnapshot allocate wildly.
 static constexpr std::uint32_t MAX_ENTITIES = 4096;
@@ -82,6 +82,7 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
         }
         if (const Damageable* damageable = entity.try_get<Damageable>()) {
             state.hp = damageable->hp;
+            state.maxHp = damageable->maxHp;
         }
         if (const ShipLoadout* loadout = entity.try_get<ShipLoadout>()) {
             state.missileAmmo = loadout->missileAmmo;
@@ -195,10 +196,12 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
 
 void ApplyEntityShipState(flecs::entity entity, const EntityState& state)
 {
-    // maxHp is never sent: a hull's is decided by the model it was spawned
-    // from, which both sides already have.
     if (Damageable* damageable = entity.try_get_mut<Damageable>()) {
         damageable->hp = state.hp;
+        // A snapshot written before the sender had a Damageable for this
+        // entity carries 0, which would read as a hull with no capacity at
+        // all; keep whatever the applier spawned it with instead.
+        if (state.maxHp > 0.f) damageable->maxHp = state.maxHp;
     }
     if (ShipLoadout* loadout = entity.try_get_mut<ShipLoadout>()) {
         loadout->missileAmmo = state.missileAmmo;
@@ -260,6 +263,7 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteU16(e.aim);
         out.WriteU8(e.laserWindup);
         out.WriteF32(e.hp);
+        out.WriteF32(e.maxHp);
         out.WriteU16(e.missileAmmo);
         out.WriteU16(e.cannonAmmo);
         for (const std::uint8_t mount : e.mounts) out.WriteU8(mount);
@@ -365,6 +369,7 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         e.aim = in.ReadU16();
         e.laserWindup = in.ReadU8();
         e.hp = in.ReadF32();
+        e.maxHp = in.ReadF32();
         e.missileAmmo = in.ReadU16();
         e.cannonAmmo = in.ReadU16();
         for (std::uint8_t& mount : e.mounts) mount = in.ReadU8();

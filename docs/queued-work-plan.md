@@ -249,7 +249,13 @@ obstacle only inside `ringEntryPoint`, which declines exactly the two cases
 that matter. See *"A station is solid from every side"* in `docs/ai-ships.md`
 for the mechanisms, the numbers, and what is still open.
 
-## 5. Bug: remote structures replicate no maxHp
+## 5. Bug: remote structures replicate no maxHp -- FIXED
+
+Fixed 2026-08-16, when the in-world health bars made it visible on every
+structure at once rather than only in a spectate. `EntityState` carries
+`maxHp` (snapshot v17), the applier spawns `Damageable{hp, maxHp}`, and
+`TestStructureHullCapacityReplicates` in the sim-test holds the line -- it
+fails on a Base if the field stops being sent. The original report follows.
 
 Found while fixing the own-ship hull bar, reported, not fixed, not scheduled.
 
