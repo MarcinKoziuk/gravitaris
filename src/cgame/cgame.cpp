@@ -86,6 +86,7 @@ CGame::CGame(IFilesystem &filesystem, float contentScale)
     , m_hitFlashSystem(m_registry, m_eventQueue, *m_entitySpawner)
     , m_cameraDirector(Defaults::cameraZoom)
     , m_indicatorRenderer(m_resourceLoader)
+    , m_healthBarRenderer(filesystem, m_resourceLoader, m_upgradeCatalog)
     , m_laserRenderer(filesystem)
     , m_clientPrediction(m_registry, m_physicsSystem, *m_entitySpawner, m_eventQueue, m_resourceLoader,
                          m_upgradeCatalog)
@@ -1168,6 +1169,10 @@ void CGame::RenderNetClient(float dtSeconds, double tickFraction)
     GatherBeams(m_mirrorWorld);
     DrawBeams(camera);
 
+    // Before the interpolation override is undone, same as the beams: a bar
+    // belongs over the hull where the hull was actually drawn.
+    DrawHealthBars(view, camera);
+
     for (const auto& [entity, pos] : m_renderPosRestore) {
         if (entity.is_alive()) entity.get_mut<Transform>().pos = pos;
     }
@@ -1287,6 +1292,8 @@ void CGame::Render(double delta)
         GatherBeams(drawn);
     }
     DrawBeams(camera);
+
+    DrawHealthBars(view, camera);
 
     {
         ScopedPerfTimer timer(m_perfMonitor, "Audio");
@@ -1462,6 +1469,12 @@ void CGame::DrawBeams(const Camera& camera)
     m_laserRenderer.SetZoom(camera.GetZoom());
     m_laserRenderer.SetCameraPosition(camera.GetPosition());
     m_laserRenderer.Render(m_beams, m_charges);
+}
+
+void CGame::DrawHealthBars(const SceneView& view, const Camera& camera)
+{
+    m_healthBarRenderer.Render(view, CameraSubject(), camera.GetPosition(), camera.GetZoom(),
+                               GetDesignViewportSize(), m_viewportSize);
 }
 
 // The hull a beam leaves from, wherever this world keeps it: a simulated ship

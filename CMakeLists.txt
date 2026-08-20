@@ -842,6 +842,8 @@ if(GRAVITARIS_BUILD_CLIENT)
         src/game/gnc/autopilot.cpp
         include/gravitaris/cgame/hud/indicator-renderer.hpp
         src/cgame/hud/indicator-renderer.cpp
+        include/gravitaris/cgame/hud/health-bar-renderer.hpp
+        src/cgame/hud/health-bar-renderer.cpp
         include/gravitaris/cgame/renderer/shader/glow-threshold-shader.hpp
         src/cgame/renderer/shader/glow-threshold-shader.cpp
         include/gravitaris/cgame/renderer/shader/glow-blur-shader.hpp

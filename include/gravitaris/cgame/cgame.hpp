@@ -41,6 +41,7 @@
 #include <gravitaris/cgame/audio/audio-system.hpp>
 #include <gravitaris/cgame/fx/hit-flash-system.hpp>
 #include <gravitaris/cgame/hud/indicator-renderer.hpp>
+#include <gravitaris/cgame/hud/health-bar-renderer.hpp>
 
 namespace Gravitaris {
 
@@ -78,6 +79,7 @@ protected:
     HitFlashSystem m_hitFlashSystem;
     CameraDirector m_cameraDirector;
     IndicatorRenderer m_indicatorRenderer;
+    HealthBarRenderer m_healthBarRenderer;
 
     // Beams are gathered from whichever worlds are being drawn this frame (in
     // MP that is both: the own predicted ship here, everyone else in the
@@ -133,6 +135,7 @@ protected:
     void CollectBeamTargets(flecs::world& world);
     void GatherBeams(flecs::world& world);
     void DrawBeams(const Camera& camera);
+    void DrawHealthBars(const SceneView& view, const Camera& camera);
     [[nodiscard]] const Body* HullOf(flecs::entity ent);
 
     // Where one leg of a beam ends, and on what.
@@ -509,6 +512,7 @@ public:
 
     IndicatorRenderer& GetIndicatorRenderer() { return m_indicatorRenderer; }
     IndicatorRenderer::Params& GetIndicatorParams() { return m_indicatorRenderer.GetParams(); }
+    HealthBarRenderer::Params& GetHealthBarParams() { return m_healthBarRenderer.GetParams(); }
 
     // Mouse-wheel zoom: multiplicatively nudges a manual zoom target that
     // overrides the dynamic zoom until the player next thrusts/rotates (after

@@ -2,6 +2,7 @@
 #include <cstring>
 #include <optional>
 
+#include <Magnum/Math/Functions.h>
 #include <Magnum/Math/Matrix4.h>
 #include <Magnum/Math/Vector4.h>
 
@@ -252,6 +253,8 @@ void Body::AddShape(const NSVGshape* shape, const Matrix4d& transform)
     if (IsCircle(shape)) {
         const CircleShape circle = ShapeToCircle(shape, transform);
         m_boundingRadius = std::max(m_boundingRadius, circle.pos.length() + circle.radius);
+        ExtendBounds(circle.pos - cpvec2{circle.radius});
+        ExtendBounds(circle.pos + cpvec2{circle.radius});
         m_circleShapes.push_back(circle);
     }
     else {
@@ -260,10 +263,17 @@ void Body::AddShape(const NSVGshape* shape, const Matrix4d& transform)
         for (const std::vector<cpvec2>& polygon : polygons) {
             for (const cpvec2& point : polygon) {
                 m_boundingRadius = std::max(m_boundingRadius, point.length());
+                ExtendBounds(point);
             }
             m_polygonShapes.push_back(polygon);
         }
     }
+}
+
+void Body::ExtendBounds(const cpvec2& point)
+{
+    m_bounds.min = Magnum::Math::min(m_bounds.min, point);
+    m_bounds.max = Magnum::Math::max(m_bounds.max, point);
 }
 
 static Body::CircleShape ShapeToCircle(const NSVGshape* shape, const Matrix4d& transform)

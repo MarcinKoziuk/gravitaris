@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <unordered_map>
@@ -63,6 +64,22 @@ public:
     // index means the same thing to the sim and to the shader.
     using Plate = std::vector<TVector2<cpFloat>>;
 
+    // Axis-aligned extent of the collision shapes in the model's own frame
+    // (post-@origin, post-scale). Empty for a body that authors no shapes.
+    struct Bounds {
+        TVector2<cpFloat> min{std::numeric_limits<cpFloat>::max()};
+        TVector2<cpFloat> max{std::numeric_limits<cpFloat>::lowest()};
+
+        [[nodiscard]] bool IsEmpty() const
+        { return max.x() < min.x() || max.y() < min.y(); }
+
+        [[nodiscard]] TVector2<cpFloat> Center() const
+        { return IsEmpty() ? TVector2<cpFloat>{} : (min + max) * cpFloat(0.5); }
+
+        [[nodiscard]] TVector2<cpFloat> HalfExtent() const
+        { return IsEmpty() ? TVector2<cpFloat>{} : (max - min) * cpFloat(0.5); }
+    };
+
     struct CircleShape {
         TVector2<cpFloat> pos;
         cpFloat radius;
@@ -95,6 +112,7 @@ private:
     cpFloat m_thrust = DEFAULT_THRUST;
     cpFloat m_maxSpeed = DEFAULT_MAX_SPEED;
     cpFloat m_boundingRadius = 0.0;
+    Bounds m_bounds;
     float m_landingFragility = 1.f;
     double m_aimArcDegrees = DEFAULT_AIM_ARC_DEGREES;
     bool m_kinematic = false;
@@ -109,6 +127,7 @@ private:
     static ResourcePtr<const Body> placeholder;
 
     void AddShape(const NSVGshape* shape, const Matrix4d& transform);
+    void ExtendBounds(const TVector2<cpFloat>& point);
     void AddHardpoint(const NSVGshape* shape, const Matrix4d& transform);
     void AddShieldOutline(const NSVGshape* shape, const Matrix4d& transform);
     void AddPlates(const NSVGshape* shape, const Matrix4d& transform);
@@ -170,6 +189,12 @@ public:
     // surface radius of its own.
     [[nodiscard]] cpFloat GetBoundingRadius() const
     { return m_boundingRadius; }
+
+    // The same reach as a rectangle rather than a circle. A wide, flat hull's
+    // corner is half again as far out as its roof, so anything hanging off the
+    // top of the drawing (the HUD's health bars) wants this, not the radius.
+    [[nodiscard]] const Bounds& GetLocalBounds() const
+    { return m_bounds; }
 
     [[nodiscard]] const std::vector<CircleShape>& GetCircleShapes() const
     { return m_circleShapes; }

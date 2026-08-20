@@ -54,6 +54,66 @@ void DrawHudPanel(CGame& game)
 
     ImGui::EndDisabled();
 
+    HealthBarRenderer::Params& bars = game.GetHealthBarParams();
+
+    ImGui::SeparatorText("Health bars");
+    ImGui::Checkbox("Bars enabled", &bars.enabled);
+    ImGui::SetItemTooltip("Hull and shield bars over every damageable hull but the one the camera is "
+                          "riding, shown only once something is missing.");
+
+    ImGui::BeginDisabled(!bars.enabled);
+
+    ImGui::Checkbox("Include own ship", &bars.includeSelf);
+    ImGui::SetItemTooltip("Testing aid: bar the hull the camera is riding too, which is normally left "
+                          "to the sidebar. Off by default.");
+
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Bar width (px)", &bars.widthPx, 0.5f, 6.f, 200.f, "%.0f");
+    ImGui::SetItemTooltip("Design pixels, constant at any zoom. Default 26.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Hull height (px)", &bars.hullHeightPx, 0.1f, 1.f, 20.f, "%.1f");
+    ImGui::SetItemTooltip("Default 3.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Shield height (px)", &bars.shieldHeightPx, 0.1f, 1.f, 20.f, "%.1f");
+    ImGui::SetItemTooltip("The upper of the two bars. Default 2.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Bar gap (px)", &bars.gapPx, 0.1f, 0.f, 12.f, "%.1f");
+    ImGui::SetItemTooltip("Between the hull bar and the shield bar. Default 1.5.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Clearance (px)", &bars.clearancePx, 0.5f, 0.f, 120.f, "%.0f");
+    ImGui::SetItemTooltip("Air above the hull's own bounding box, so a fighter and a High Port carry "
+                          "their bars the same distance clear. Default 9.");
+
+    ImGui::SeparatorText("Bar brightness (bloom threshold is 0.35)");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Brightness", &bars.brightness, 0.02f, 1.5f, "%.2f");
+    ImGui::SetItemTooltip("Under 0.35 the bars stay crisp; over it they bloom like every other bright "
+                          "thing in the world. Default 0.30.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Critical brightness", &bars.criticalBrightness, 0.02f, 1.5f, "%.2f");
+    ImGui::SetItemTooltip("The same knob for a hull at or below the critical fraction. Set this over 0.35 "
+                          "and the other under it to make only a dying hull glow. Default 0.30.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Track brightness", &bars.trackBrightness, 0.f, 0.5f, "%.2f");
+    ImGui::SetItemTooltip("The spent part of each bar, in its fill's own hue. Default 0.07.");
+
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Warn below", &bars.warnFraction, 0.f, 1.f, "%.2f");
+    ImGui::SetItemTooltip("Hull fraction the bar turns amber at, as in the sidebar. Default 0.5.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::SliderFloat("Critical below", &bars.criticalFraction, 0.f, 1.f, "%.2f");
+    ImGui::SetItemTooltip("Hull fraction the bar turns red at, and the critical brightness takes over. "
+                          "Default 0.25.");
+
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragInt("Max bars", &bars.maxBars, 0.2f, 0, 256);
+    ImGui::SetItemTooltip("Cap on bars drawn; the nearest win. One draw call either way. Default 48.");
+    ImGui::SetNextItemWidth(220.f);
+    ImGui::DragFloat("Min zoom", &bars.minZoom, 0.005f, 0.f, 4.f, "%.3f");
+    ImGui::SetItemTooltip("Below this camera zoom nothing is drawn. 0 disables the cut. Default 0.");
+
+    ImGui::EndDisabled();
+
     MinimapRenderer::Params& minimap = game.GetMinimapRenderer().GetParams();
 
     ImGui::SeparatorText("Minimap");
