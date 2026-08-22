@@ -5711,6 +5711,42 @@ void TestNetRoundtrip(Game& game)
                                     static_cast<float>(serverTransform.pos.y())};
     Require((it->pos - serverPos).length() < 0.5f, "net: replicated position matches server truth");
 
+    // Rounds reach a peer as spawn instructions rather than as entities, and
+    // its own are left out -- it drew those the moment its own trigger went
+    // down (ClientPrediction::Step), so sending them too would put two tracers
+    // on screen a dozen ticks apart.
+    {
+        const std::uint32_t yours = client.GetYourShipNetId();
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        spawner.SpawnRound("models/bullets/bullet-0"_id, Vector2d{500., 500.}, Vector2d{80., 0.},
+                           /*rot=*/0.0, Bullet{3.0, TeamId::Red, 10.f, /*ownerNetId=*/0u});
+        spawner.SpawnRound("models/bullets/bullet-0"_id, Vector2d{520., 500.}, Vector2d{80., 0.},
+                           /*rot=*/0.0, Bullet{3.0, TeamId::Blue, 10.f, yours});
+
+        std::size_t theirs = 0, mine = 0;
+        std::size_t roundEntities = 0;
+        for (int i = 0; i < 4; ++i) {
+            server.IngestInput(game.GetStep());
+            game.Update();
+            server.BroadcastSnapshot(game.GetStep());
+            client.Update();
+
+            if (const std::optional<SnapshotData>& seen = client.GetLatestSnapshot()) {
+                for (const Shot& shot : seen->shots) {
+                    if (shot.ownerNetId == yours) ++mine;
+                    else ++theirs;
+                }
+                for (const EntityState& e : seen->entities) {
+                    if (e.type == NetEntityType::Bullet) ++roundEntities;
+                }
+            }
+        }
+
+        Require(theirs > 0, "net: a round somebody else fired arrives as a shot");
+        Require(mine == 0, "net: a peer is never told to fly the rounds it fired itself");
+        Require(roundEntities == 0, "net: and no round travels as an entity at all");
+    }
+
     // Dead-man switch (NetServer::INPUT_TIMEOUT_TICKS): stop sending input
     // entirely -- as if the client's tab got throttled and its input ticks
     // went permanently stale -- and the server must zero the ship's controls
