@@ -51,6 +51,7 @@ private:
     flecs::world& m_registry;
     PhysicsSystem& m_physicsSystem;
     GameEventQueue& m_eventQueue;
+    EntitySpawner& m_entitySpawner;
     const UpgradeCatalog& m_catalog;
 
     LandingParams m_landingParams;
@@ -161,7 +162,8 @@ private:
 
 public:
     DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
-                 const UpgradeCatalog& catalog, LagCompensation& lagCompensation);
+                 EntitySpawner& entitySpawner, const UpgradeCatalog& catalog,
+                 LagCompensation& lagCompensation);
 
     LandingParams& GetLandingParams() { return m_landingParams; }
 

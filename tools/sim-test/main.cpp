@@ -3975,6 +3975,9 @@ void TestBeamsInterceptMissiles()
         // How far out the round was when it stopped existing: a whole reach for
         // one burned out of the sky, nothing at all for one that arrived.
         double diedAt = 0.;
+        // What the airframe left behind, counted on the tick it came apart.
+        int frags = 0;
+        float fragDamage = 0.f;
     };
 
     // A round launched at a defender `at` units away, with the defender holding
@@ -4017,6 +4020,8 @@ void TestBeamsInterceptMissiles()
         bool sawRound = false;
         double lastSeenAt = at;
         double diedAt = 0.;
+        int frags = 0;
+        float fragDamage = 0.f;
         for (int tick = 0; tick < windup + 900 && defender.is_alive(); ++tick) {
             InputCommand defence;
             defence.tick = game.GetStep();
@@ -4041,6 +4046,15 @@ void TestBeamsInterceptMissiles()
             }
             if (sawRound) { // it was here last tick and is not now
                 diedAt = lastSeenAt;
+                // The airframe comes apart on the tick it is burned through,
+                // so whatever it left behind is in the world right now. The
+                // round itself carried a Bullet; it is gone, so anything
+                // ownerless still here is shrapnel.
+                game.GetRegistry().each([&](const Bullet& frag) {
+                    if (frag.team != TeamId::None) return;
+                    ++frags;
+                    fragDamage = frag.damage;
+                });
                 break;
             }
             game.GetRegistry().each([&](flecs::entity ent, const Missile&) {
@@ -4052,7 +4066,7 @@ void TestBeamsInterceptMissiles()
         return Intercept{sawRound, defender.is_alive()
                                            ? defender.get<Damageable>().hp < defenderHp
                                            : true,
-                         diedAt};
+                         diedAt, frags, fragDamage};
     };
 
     const Intercept beamed = defend(/*at=*/700., /*useBeam=*/true);
@@ -4060,12 +4074,42 @@ void TestBeamsInterceptMissiles()
     Require(!beamed.defenderHit, "intercept: a beam stops a missile before it arrives");
     Require(beamed.diedAt > 150., "intercept: ...and stops it well out from the hull");
 
+    // Killing a round leaves wreckage, so point defence is a decision rather
+    // than a free press: burn one in your own face and you fly through what is
+    // left of it.
+    Require(beamed.frags > 0, "intercept: a round burned out of the air comes apart into shrapnel");
+
     // Gunfire deliberately passes straight through: a beam is the point-defence
     // weapon, and a round trading itself for a missile would take that away
     // from it.
     const Intercept shot = defend(/*at=*/700., /*useBeam=*/false);
     Require(shot.sawRound && shot.defenderHit,
             "intercept: gunfire flies through a missile rather than stopping it");
+
+    // ...but a round is a fuel tube, not a magazine and a reactor. Measured
+    // against a hull coming apart in the same world rather than against a
+    // number copied out of the implementation.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        flecs::entity ship = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.});
+        ship.get_mut<Damageable>().hp = 0.f;
+        game.Update();
+
+        int hullFrags = 0;
+        float hullFragDamage = 0.f;
+        game.GetRegistry().each([&](const Bullet& frag) {
+            if (frag.team != TeamId::None) return;
+            ++hullFrags;
+            hullFragDamage = frag.damage;
+        });
+
+        Require(hullFrags > 0, "intercept: a hull leaves shrapnel too (setup check)");
+        Require(beamed.frags < hullFrags,
+                "intercept: a missile leaves less of itself behind than a ship does");
+        Require(beamed.fragDamage > 0.f && beamed.fragDamage < hullFragDamage,
+                "intercept: and what it leaves hurts less");
+    }
 
     fs.Shutdown();
 }

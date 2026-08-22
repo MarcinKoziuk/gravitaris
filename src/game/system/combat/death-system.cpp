@@ -8,13 +8,11 @@
 #include <gravitaris/gravitaris.hpp>
 #include <gravitaris/game/logging.hpp>
 #include <gravitaris/game/component/transform.hpp>
-#include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/component/rebuild-lockout.hpp>
 #include <gravitaris/game/component/structure.hpp>
-#include <gravitaris/game/util/splitmix.hpp>
 #include <gravitaris/game/event/death-report.hpp>
 #include <gravitaris/game/event/game-event.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
@@ -28,14 +26,16 @@ using Magnum::Vector2d;
 static const char* StructureTypeName(StructureType type);
 static const char* DamageCauseName(DamageCause cause);
 
-static constexpr int FRAG_COUNT = 12;
-static constexpr double FRAG_SPEED_MIN = 120.0;
-static constexpr double FRAG_SPEED_MAX = 240.0;
-// Matches ShipControlsSystem::BULLET_LIFETIME_SECONDS -- frags should linger
-// exactly as long as a fired bullet, not vanish early.
-static constexpr double FRAG_LIFETIME_SECONDS = 3.0;
-static constexpr float FRAG_DAMAGE = 8.f;
-static constexpr double FRAG_SPAWN_OFFSET = 6.0; // start just off-centre so frags don't share one point
+// What a hull throws off when it comes apart. The lifetime matches
+// ShipControlsSystem::BULLET_LIFETIME_SECONDS -- frags should linger exactly
+// as long as a fired round, not vanish early.
+static constexpr ShrapnelBurst HULL_SHRAPNEL{
+        /*count=*/12,
+        /*speedMin=*/120.0,
+        /*speedMax=*/240.0,
+        /*lifetimeSeconds=*/3.0,
+        /*damage=*/8.f,
+};
 
 DeathSystem::DeathSystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue,
                          const EconomyConfig& config)
@@ -119,28 +119,13 @@ void DeathSystem::Explode(flecs::entity ship, std::uint64_t step)
     const Transform* transf = ship.try_get<Transform>();
     if (!transf) return;
 
-    // Emitted before the frag loop (and before the caller destructs the ship)
-    // so the event still resolves the ship's NetId.
+    // Emitted before the caller destructs the ship, so the event can still
+    // resolve its NetId.
     m_eventQueue.Emit(GameEventType::Explosion, ship,
                       Magnum::Vector2{static_cast<float>(transf->pos.x()),
                                       static_cast<float>(transf->pos.y())});
 
-    // Deterministic per-(tick, entity) seed so record/replay stays identical.
-    std::uint64_t rng = SplitMix64Seed(step, ship.id());
-
-    for (int i = 0; i < FRAG_COUNT; ++i) {
-        const double jitter = (SplitMix64NextUnit(rng) - 0.5) * (2.0 * PI / FRAG_COUNT);
-        const double angle = (2.0 * PI * i) / FRAG_COUNT + jitter;
-        const Vector2d dir{std::cos(angle), std::sin(angle)};
-
-        const double speed = FRAG_SPEED_MIN + SplitMix64NextUnit(rng) * (FRAG_SPEED_MAX - FRAG_SPEED_MIN);
-        const Vector2d pos = transf->pos + dir * FRAG_SPAWN_OFFSET;
-        const Vector2d vel = transf->vel + dir * speed;
-
-        flecs::entity frag = m_entitySpawner.SpawnBullet(
-                "models/bullets/bullet-0"_id, pos, vel, /*sensor=*/true);
-        frag.emplace<Bullet>(FRAG_LIFETIME_SECONDS, TeamId::None, FRAG_DAMAGE);
-    }
+    m_entitySpawner.SpawnShrapnel(transf->pos, transf->vel, step, ship.id(), HULL_SHRAPNEL);
 }
 
 // A structure is absent from the kill feed by design (see ReportDeath), and

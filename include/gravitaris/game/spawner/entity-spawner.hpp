@@ -21,6 +21,20 @@ namespace Gravitaris {
 
 using Magnum::Vector2d;
 
+// One burst of shrapnel: what a thing coming apart throws off. Ownerless
+// (TeamId::None), so it is hostile to everyone including whoever caused it --
+// a hull's own frags can kill its killer. The tuning is the caller's, since
+// what a burst is worth is a property of the thing that came apart rather
+// than of the spawner: a fighter's magazine going up is not a missile's fuel
+// tube.
+struct ShrapnelBurst {
+    int count = 12;
+    double speedMin = 120.0;
+    double speedMax = 240.0;
+    double lifetimeSeconds = 3.0;
+    float damage = 8.f;
+};
+
 // Owns entity creation and the authoritative NetId <-> entity registry (ADR
 // 0001 constraint 3). Every spawned entity gets a monotonic NetId here; a
 // NetId OnRemove observer keeps the reverse map current as entities die. The
@@ -154,6 +168,12 @@ public:
     // from ShipControlsSystem are ignored on a kinematic body).
     flecs::entity SpawnFreighter(id_t modelId, Vector2d position, TeamId team, flecs::entity targetPlanet,
                                  BuildOrder buildOrder);
+
+    // Throws `burst` off `pos`, on top of `vel`. The spread is seeded from
+    // (step, source) rather than drawn from anywhere global, so a replay
+    // throws the same fragments in the same directions (ADR 0001 point 5).
+    void SpawnShrapnel(Vector2d pos, Vector2d vel, std::uint64_t step, std::uint64_t source,
+                       const ShrapnelBurst& burst);
 
     // Resolves a NetId to its live entity, or a default (invalid) entity if no
     // entity currently holds that NetId.

@@ -13,6 +13,7 @@
 #include <gravitaris/game/component/pilot-account.hpp>
 #include <gravitaris/game/component/damageable.hpp>
 #include <gravitaris/game/component/missile.hpp>
+#include <gravitaris/game/spawner/entity-spawner.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/event/game-event.hpp>
@@ -23,6 +24,19 @@
 #include <gravitaris/game/system/combat/damage-system.hpp>
 
 namespace Gravitaris {
+
+// What an intercepted missile leaves behind. Softer and shorter-lived than a
+// hull's (see DeathSystem's HULL_SHRAPNEL): a round is a fuel tube and a
+// warhead, not a magazine and a reactor, and burning one out of the air ought
+// to be worth doing rather than trading one danger for another. Enough that a
+// pilot who kills a missile in its own face still feels it.
+static constexpr ShrapnelBurst MISSILE_SHRAPNEL{
+        /*count=*/5,
+        /*speedMin=*/90.0,
+        /*speedMax=*/170.0,
+        /*lifetimeSeconds=*/1.2,
+        /*damage=*/3.f,
+};
 
 // Forgiveness radius around the swept segment, so a fast bullet's exact
 // centerline doesn't have to intersect the target polygon precisely.
@@ -77,10 +91,12 @@ static float LeakRoll(std::uint64_t step, std::uint32_t seq, std::uint8_t elemen
 static float BeamFalloff(double alpha, const WeaponDef::Beam& beam);
 
 DamageSystem::DamageSystem(flecs::world& registry, PhysicsSystem& physicsSystem, GameEventQueue& eventQueue,
-                           const UpgradeCatalog& catalog, LagCompensation& lagCompensation)
+                           EntitySpawner& entitySpawner, const UpgradeCatalog& catalog,
+                           LagCompensation& lagCompensation)
         : m_registry(registry)
         , m_physicsSystem(physicsSystem)
         , m_eventQueue(eventQueue)
+        , m_entitySpawner(entitySpawner)
         , m_catalog(catalog)
         , m_lagCompensation(lagCompensation)
 {}
@@ -616,7 +632,16 @@ void DamageSystem::ResolveBeams(std::uint64_t step)
 
     for (flecs::entity round : intercepted) {
         // Two beams can burn the same round through in one tick.
-        if (round.is_alive()) round.destruct();
+        if (!round.is_alive()) continue;
+
+        // Thrown off the round itself rather than off the point on the beam
+        // that killed it: the two are within BEAM_INTERCEPT_RADIUS of each
+        // other, and it is the airframe that comes apart.
+        if (const Transform* transf = round.try_get<Transform>()) {
+            m_entitySpawner.SpawnShrapnel(transf->pos, transf->vel, step, round.id(),
+                                          MISSILE_SHRAPNEL);
+        }
+        round.destruct();
     }
 }
 

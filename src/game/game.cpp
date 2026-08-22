@@ -38,8 +38,8 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_shipControlsSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_eventQueue, m_upgradeCatalog)
         , m_bulletLifetimeSystem(m_registry)
         , m_lagCompensation(m_registry, m_physicsSystem)
-        , m_damageSystem(m_registry, m_physicsSystem, m_eventQueue, m_upgradeCatalog,
-                         m_lagCompensation)
+        , m_damageSystem(m_registry, m_physicsSystem, m_eventQueue, *m_entitySpawner,
+                         m_upgradeCatalog, m_lagCompensation)
         , m_shieldSystem(m_registry, m_upgradeCatalog)
         , m_missileSystem(m_registry, *m_entitySpawner, m_physicsSystem, m_upgradeCatalog)
         , m_factionSystem(m_registry, *m_entitySpawner, m_eventQueue)

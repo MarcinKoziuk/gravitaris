@@ -1,6 +1,8 @@
 #include <cmath>
 #include <string>
 
+#include <gravitaris/gravitaris.hpp>
+
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/resource/body.hpp>
 #include <gravitaris/game/component/transform.hpp>
@@ -9,6 +11,7 @@
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/component/ai-pilot.hpp>
 #include <gravitaris/game/component/ai-strategy.hpp>
+#include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/callsign.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
@@ -22,6 +25,7 @@
 #include <gravitaris/game/component/planet-attachment.hpp>
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/logging.hpp>
+#include <gravitaris/game/util/splitmix.hpp>
 #include <gravitaris/game/scenario/structure-layout.hpp>
 #include <gravitaris/game/spawner/entity-spawner.hpp>
 
@@ -214,6 +218,31 @@ flecs::entity EntitySpawner::SpawnBullet(id_t modelId, Vector2d position, Vector
     AddRenderable(entity, modelId);
 
     return entity;
+}
+
+// Start just off-centre so the fragments don't all share one point, which
+// would have them resolve against each other before they have separated.
+static constexpr double FRAG_SPAWN_OFFSET = 6.0;
+
+void EntitySpawner::SpawnShrapnel(Vector2d pos, Vector2d vel, std::uint64_t step,
+                                  std::uint64_t source, const ShrapnelBurst& burst)
+{
+    if (burst.count <= 0) return;
+
+    std::uint64_t rng = SplitMix64Seed(step, source);
+
+    for (int i = 0; i < burst.count; ++i) {
+        const double jitter = (SplitMix64NextUnit(rng) - 0.5) * (2.0 * PI / burst.count);
+        const double angle = (2.0 * PI * i) / burst.count + jitter;
+        const Vector2d dir{std::cos(angle), std::sin(angle)};
+
+        const double speed =
+                burst.speedMin + SplitMix64NextUnit(rng) * (burst.speedMax - burst.speedMin);
+
+        flecs::entity frag = SpawnBullet("models/bullets/bullet-0"_id, pos + dir * FRAG_SPAWN_OFFSET,
+                                         vel + dir * speed, /*sensor=*/true);
+        frag.emplace<Bullet>(burst.lifetimeSeconds, TeamId::None, burst.damage);
+    }
 }
 
 flecs::entity EntitySpawner::SpawnStructureBase(StructureType type, id_t modelId, Vector2d initialPos, TeamId team)
