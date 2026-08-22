@@ -563,8 +563,14 @@ against the flat angle it was noise — +19% damage per round at 300 units,
 −8% at 500 — which does not pay for a personality knob and a toml key. The
 two fixes above are where the difference actually lives.
 
-*A faction is a wing (2026-08-22).* `AddAIFaction` now sizes a wing behind
-each leader (`[ai] wing_size` in `data/economy.toml`, default 2). Wingmen
+*A faction is a wing (2026-08-22).* `AddAIFaction` sizes a wing behind each
+leader (`[ai] wing_size` in `data/economy.toml`), and `/ai` grows it: the
+first one fields a leader on every unflown side, and every one after that puts
+another fighter behind each leader already out there
+(`Game::ReinforceAIFactions` / `AddAIWingman`). `wing_size` is therefore what
+a side is *fielded with* rather than what it ends up flying, and it ships as
+**0** -- a round opens one ship a side and thickens on request, rather than
+guessing a number that suits every session. Wingmen
 carry no `AIStrategy`, so they fly the leader's objective through the wing
 orders that already existed, and each holds its own respawn slot funded by
 `FactionSystem::TryRespawn` — a side that has lost its production flies fewer
