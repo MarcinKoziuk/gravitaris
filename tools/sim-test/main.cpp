@@ -438,6 +438,43 @@ void TestOrbitReplication()
     Require((pos0 - Vector2d{1200., 0.}).length() < 0.01,
             "orbit: EvaluateOrbit at baseTick itself reproduces orbitCenter+orbitRadius exactly");
 
+    // A planet's orbit PARAMETERS have to survive the wire, not just its
+    // position: the mirror world builds its Orbit out of them, and the
+    // minimap's fit asks how far a planet swings rather than where it is this
+    // tick. Sent empty, the fit read every replicated planet as a body sitting
+    // on the origin and framed a multiplayer sector to its suns alone -- a
+    // quarter of this seed's reach missing off the edge of the map.
+    {
+        FilesystemPhysFS fs;
+        if (!fs.Init()) {
+            std::fprintf(stderr, "sim-test: filesystem init failed\n");
+            std::exit(1);
+        }
+        Game game(fs);
+        flecs::entity orbiting = game.GetEntitySpawner().SpawnOrbitingPlanet(
+                "models/planets/simple"_id, Vector2d{4000., -2000.}, 5.0e7, 900., 1.0, 0.4);
+        game.SettleScenario();
+
+        SnapshotData gathered;
+        GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), game.GetStep(), 0, gathered);
+        ByteWriter wire;
+        SerializeSnapshot(gathered, wire);
+        ByteReader reader(wire.Data(), wire.Size());
+        SnapshotData parsed;
+        Require(ReadSnapshot(reader, parsed), "orbit: the snapshot parses");
+
+        const std::uint32_t netId = orbiting.get<NetId>().value;
+        const auto it = std::find_if(parsed.entities.begin(), parsed.entities.end(),
+                                     [&](const EntityState& e) { return e.netId == netId; });
+        Require(it != parsed.entities.end(), "orbit: the planet is in the snapshot");
+        Require((Vector2d{it->orbitCenter.x(), it->orbitCenter.y()} - Vector2d{4000., -2000.}).length() < 1.0,
+                "orbit: a planet's orbit centre survives the wire");
+        Require(std::abs(it->orbitRadius - 900.f) < 1.f,
+                "orbit: ...and so does how far out it swings");
+
+        fs.Shutdown();
+    }
+
     // SnapshotInterpolator's own planet-override path: a straddled render
     // tick must use this analytic evaluation (based on the newest known
     // snapshot), not freeze to that snapshot's raw (pre-evaluated) pos --
@@ -6113,6 +6150,7 @@ void TestPlayerRespawnAfterDeath()
 
     fs.Shutdown();
 }
+
 
 } // namespace
 

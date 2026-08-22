@@ -118,14 +118,24 @@ void SnapshotApplier::Apply(const SnapshotData& snapshot, float dtSeconds)
                 const float radius = body->GetCircleShapes().empty()
                         ? 0.f : static_cast<float>(body->GetCircleShapes().front().radius);
                 entity.emplace<Planet>(radius, state.isStar);
-                // Presence-only marker (never read for its own field values --
-                // OrbitSystem never runs against this world): camera/minimap's
-                // star-vs-planet check is `!entity.has<Orbit>()` for the real
-                // sim too, so mirroring just the presence bit (state.isStar,
-                // see its own doc comment) keeps that one check working
-                // identically in both worlds, no separate mirror-only path.
+                // Its presence is the star-vs-planet check that camera and
+                // minimap make in both worlds (`!entity.has<Orbit>()`), and
+                // its PARAMETERS are how the minimap knows how far out a
+                // planet swings -- fitting to live positions instead would
+                // have the map breathe as the sector turns. Left empty here,
+                // the fit saw every replicated planet as a body sitting on the
+                // origin and framed a multiplayer sector to its suns alone.
+                // centerMass is the one field the wire does not carry and
+                // nothing here wants: OrbitSystem never runs against this
+                // world, so nothing re-derives an angular speed it already has.
                 if (!state.isStar) {
-                    entity.emplace<Orbit>();
+                    entity.emplace<Orbit>(Orbit{
+                            Vector2d{state.orbitCenter.x(), state.orbitCenter.y()},
+                            /*centerMass=*/0.0,
+                            state.orbitRadius,
+                            state.orbitTheta,
+                            /*direction=*/state.orbitAngularSpeed < 0.f ? -1.0 : 1.0,
+                            state.orbitAngularSpeed});
                 }
             }
             entity.emplace<Renderable>(m_resourceLoader.Load<Model>(state.modelId));
