@@ -154,12 +154,19 @@ void HandleCommand(const std::string& line, Game& game, NetServer& server, bool&
                 return;
             }
             const std::vector<TeamId> filled = game.FillEmptyTeamsWithAI(preset->id);
-            if (filled.empty()) {
-                std::printf("ai: every side is already taken\n");
+            if (!filled.empty()) {
+                std::printf("ai: %zu unfilled side(s) now field a %s leader\n",
+                            filled.size(), presetName.c_str());
                 return;
             }
-            std::printf("ai: %zu unfilled side(s) now field a %s leader and a wing of %u\n",
-                        filled.size(), presetName.c_str(), game.GetEconomyConfig().ai.wingSize);
+            // Nothing left to fill, so this is a call for more of what is
+            // already out there: one more fighter behind every leader.
+            const std::vector<TeamId> reinforced = game.ReinforceAIFactions();
+            if (reinforced.empty()) {
+                std::printf("ai: every side is flown -- nothing to field or reinforce\n");
+                return;
+            }
+            std::printf("ai: a wingman joins %zu side(s)\n", reinforced.size());
             return;
         }
 
@@ -173,9 +180,15 @@ void HandleCommand(const std::string& line, Game& game, NetServer& server, bool&
             return;
         }
 
+        if (game.HasAIFaction(*team)) {
+            const std::optional<std::size_t> wing = game.AddAIWingman(*team);
+            std::printf("%s: a wingman joins -- wing of %zu now\n", colorName.c_str(),
+                        wing.value_or(0));
+            return;
+        }
         game.AddAIFaction(*team, preset->id);
-        std::printf("%s now fields a %s AI leader and a wing of %u\n", colorName.c_str(),
-                    presetName.c_str(), game.GetEconomyConfig().ai.wingSize);
+        std::printf("%s now fields a %s AI leader\n", colorName.c_str(),
+                    presetName.c_str());
     }
     else if (verb == "list") {
         std::printf("peers: %zu\n", server.PeerCount());

@@ -248,6 +248,24 @@ public:
     // the round out once it is clear nobody else is coming (the /ai cheat).
     std::vector<TeamId> FillEmptyTeamsWithAI(id_t preset = 0);
 
+    // One more fighter behind `team`'s leader, launched as soon as that side
+    // can pay for it (the same funded respawn every other hull goes through).
+    // Returns the wing's new size, or nullopt if that side fields no AI at
+    // all. This is how a wing grows after the round has started: `[ai]
+    // wing_size` is only what a side is fielded WITH.
+    std::optional<std::size_t> AddAIWingman(TeamId team);
+
+    // A wingman for every leader currently fielded, in the order the factions
+    // were taken, and the sides that got one. What a second /ai does: the
+    // first fills the empty colours, and every one after that thickens what
+    // is already out there rather than reporting that there is nothing to do.
+    std::vector<TeamId> ReinforceAIFactions();
+
+    // How many fighters fly behind `team`'s leader right now -- which is not
+    // the configured wing size once anybody has reinforced. 0 for a side
+    // fielding no AI, same as for one whose leader flies alone.
+    [[nodiscard]] std::size_t AIWingSize(TeamId team) const;
+
     // BuildClassicWorld() + SpawnCombatants(TeamId::Blue).
     void Start();
 

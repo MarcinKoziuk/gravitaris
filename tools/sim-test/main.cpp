@@ -1485,7 +1485,6 @@ void TestAIWing()
     game.SettleScenario();
 
     const std::uint32_t wingSize = game.GetEconomyConfig().ai.wingSize;
-    Require(wingSize > 0, "ai wing: the configuration fields a wing at all (setup check)");
 
     const auto redFighters = [&] {
         std::vector<std::string> names;
@@ -1500,14 +1499,30 @@ void TestAIWing()
 
     Require(redFighters().size() == 1, "ai wing: the leader launches first, free (setup check)");
 
-    // The wing waits on the complex's own production rather than appearing
+    // A wing waits on the complex's own production rather than appearing
     // alongside the leader, so this is a few seconds of materials, not a tick.
-    std::size_t peak = 0;
-    for (int tick = 0; tick < 3000; ++tick) {
-        game.Update();
-        peak = std::max(peak, redFighters().size());
-    }
-    Require(peak == wingSize + 1, "ai wing: the side fields its leader and a full wing behind it");
+    const auto flyUntilSettled = [&] {
+        std::size_t peak = 0;
+        for (int tick = 0; tick < 3000; ++tick) {
+            game.Update();
+            peak = std::max(peak, redFighters().size());
+        }
+        return peak;
+    };
+    Require(flyUntilSettled() == wingSize + 1,
+            "ai wing: a side is fielded with its leader and the configured wing");
+
+    // And grows from there when asked. This is what a second /ai does, and it
+    // is the reason the configured size is only a starting point: the wing a
+    // side ends up flying is whoever kept typing it.
+    Require(game.AddAIWingman(TeamId::Red) == wingSize + 1,
+            "ai wing: reinforcing a side adds one to its wing");
+    Require(!game.AddAIWingman(TeamId::Violet).has_value(),
+            "ai wing: a side fielding no AI cannot be reinforced");
+    Require(game.AIWingSize(TeamId::Red) == wingSize + 1,
+            "ai wing: and the side reports what it is actually flying");
+    Require(flyUntilSettled() == wingSize + 2,
+            "ai wing: the extra fighter actually launches, funded like any other");
 
     // Every one of them answers to a name, and no two answer to the same one.
     // Fodder used to carry no Callsign at all, so a wing was several things
@@ -3466,6 +3481,22 @@ void TestCheats()
     Require(IsCheatCommand("/god"), "cheat: a leading slash addresses the console");
     Require(!IsCheatCommand("god"), "cheat: ordinary chat is not a command");
     Require(!run("/nonsense").reply.empty(), "cheat: an unknown command still answers");
+
+    // /ai is incremental. SpawnCombatants has already fielded Red's leader and
+    // Blue is flown, so there is nothing left to fill -- which used to be a
+    // dead end ("every side is already flown") and is now the call for more of
+    // what is already out there.
+    {
+        const std::size_t before = game.AIWingSize(TeamId::Red);
+        run("/ai");
+        Require(game.AIWingSize(TeamId::Red) == before + 1,
+                "cheat: /ai with nothing left to fill reinforces the leaders already flying");
+        run("/ai red");
+        Require(game.AIWingSize(TeamId::Red) == before + 2,
+                "cheat: /ai <side> thickens that side rather than refusing it a second leader");
+        Require(!run("/ai violet").reply.empty(),
+                "cheat: /ai on a side nobody holds still answers");
+    }
 
     // Tech: straight into the faction's pool, which is what a lab would have
     // paid in.

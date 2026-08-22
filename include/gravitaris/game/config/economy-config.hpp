@@ -82,9 +82,15 @@ struct EconomyConfig {
     // Round composition rather than economy, but funded out of it: a wing
     // costs FactionSystem::FIGHTER_COST a hull, same as a respawn.
     struct AI {
-        // Fighters an AI faction fields behind its leader. They fly the
-        // leader's orders (AIPilotSystem's wing orders); 0 is the single
-        // leader the mode used to field.
+        // Fighters an AI faction is fielded with behind its leader. They fly
+        // the leader's orders (AIPilotSystem's wing orders); 0 is a side that
+        // starts as one ship, which is what economy.toml asks for. A wing
+        // grows from there through Game::AddAIWingman, not from here.
+        //
+        // This default deliberately disagrees with the shipped file: the two
+        // matching would make a parse that never happened look exactly like
+        // one that did, and this knob has already been mistaken for a bug
+        // once on precisely that ambiguity.
         std::uint32_t wingSize = 2;
     } ai;
 

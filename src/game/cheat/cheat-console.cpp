@@ -91,7 +91,7 @@ static void CheatTeleport(Cheat& c);
 static void CheatWhere(Cheat& c);
 static void CheatSpawn(Cheat& c);
 static void CheatAI(Cheat& c);
-static std::string WingPhrase(const Game& game);
+static std::string WingPhrase(const Game& game, TeamId team);
 static void CheatFriendlyFire(Cheat& c);
 static void CheatPlayers(Cheat& c);
 static void CheatNotify(Cheat& c);
@@ -170,7 +170,7 @@ static void CheatHelp(Cheat& c)
     c.Say("/where - where you are now");
     c.Say("/players - who is flying, and what they are called");
     c.Say("/spawn [n] [team] - n AI fighters at that team's home");
-    c.Say("/ai [team] - field an AI leader and its wing for every side nobody is flying");
+    c.Say("/ai [team] - field an AI leader for every unflown side; again for a wingman each");
     c.Say("/ff [on|off] - friendly fire, for the whole round");
     c.Say("/notify [on|off] - webhook a line when somebody joins");
     c.Say("add @<player> to any of the above to run it on their ship instead");
@@ -480,15 +480,14 @@ static void CheatSpawn(Cheat& c)
 
 // The other half of a dedicated server fielding nobody by default: a side left
 // empty is a slot waiting for a player, and this is what says the wait is over.
-// What a side gets fielded, in words. A leader has flown with a wing behind it
-// since wings landed, and every one of these messages still said "a leader" --
-// which is how three ships a side reads as a bug rather than as the setting it
-// is (`[ai] wing_size` in data/economy.toml).
-static std::string WingPhrase(const Game& game)
+// What a side is flying, in words -- read off the faction rather than off the
+// configuration, since `[ai] wing_size` is only what a side is fielded WITH
+// and every /ai after the first thickens it.
+static std::string WingPhrase(const Game& game, TeamId team)
 {
-    const std::uint32_t wing = game.GetEconomyConfig().ai.wingSize;
+    const std::size_t wing = game.AIWingSize(team);
     if (wing == 0) return "a leader";
-    return Format("a leader and a wing of %u", wing);
+    return Format("a leader and a wing of %zu", wing);
 }
 
 static void CheatAI(Cheat& c)
@@ -499,28 +498,45 @@ static void CheatAI(Cheat& c)
             c.Say("ai: no such side -- blue, red, violet, yellow, magenta, cyan");
             return;
         }
+        // A side that already flies gets thickened rather than refused: a
+        // second /ai is somebody asking for more opposition, not somebody who
+        // has forgotten they typed it once.
         if (c.game.HasAIFaction(*named)) {
-            c.Say(Format("ai: %s already fields a leader", TeamName(*named)));
+            const std::optional<std::size_t> wing = c.game.AddAIWingman(*named);
+            c.result.announce = true;
+            c.Say(Format("ai: a wingman joins %s -- %s now", TeamName(*named),
+                         WingPhrase(c.game, *named).c_str()));
             return;
         }
         c.game.AddAIFaction(*named);
         c.result.announce = true;
-        c.Say(Format("ai: %s now fields %s", TeamName(*named), WingPhrase(c.game).c_str()));
+        c.Say(Format("ai: %s now fields %s", TeamName(*named), WingPhrase(c.game, *named).c_str()));
         return;
     }
 
-    const std::vector<TeamId> filled = c.game.FillEmptyTeamsWithAI();
-    if (filled.empty()) {
-        c.Say("ai: every side is already flown or already has a leader");
+    const auto listOf = [](const std::vector<TeamId>& teams) {
+        std::string names;
+        for (const TeamId team : teams) {
+            names += (names.empty() ? "" : ", ") + std::string(TeamName(team));
+        }
+        return names;
+    };
+
+    if (const std::vector<TeamId> filled = c.game.FillEmptyTeamsWithAI(); !filled.empty()) {
+        c.result.announce = true;
+        c.Say("ai: leaders fielded for " + listOf(filled));
         return;
     }
 
-    std::string names;
-    for (const TeamId team : filled) {
-        names += (names.empty() ? "" : ", ") + std::string(TeamName(team));
+    // Nothing left to fill, so this is a call for more of what is already
+    // there -- one more fighter behind every leader flying.
+    const std::vector<TeamId> reinforced = c.game.ReinforceAIFactions();
+    if (reinforced.empty()) {
+        c.Say("ai: every side is flown by somebody -- nothing to field or reinforce");
+        return;
     }
     c.result.announce = true;
-    c.Say("ai: " + names + " each field " + WingPhrase(c.game));
+    c.Say("ai: a wingman joins " + listOf(reinforced));
 }
 
 static void CheatPlayers(Cheat& c)

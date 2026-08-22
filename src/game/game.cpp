@@ -379,6 +379,37 @@ const AIPreset& Game::PickWingPreset()
     return m_aiPresets.PickRandom(static_cast<std::uint32_t>(SplitMix64Next(rng)));
 }
 
+std::optional<std::size_t> Game::AddAIWingman(TeamId team)
+{
+    for (AIFaction& faction : m_aiFactions) {
+        if (faction.team != team) continue;
+        // Timer 0, like every wingman fielded at setup: it launches on the
+        // first tick its side can afford it rather than after a death that
+        // has not happened.
+        faction.wing.push_back(AIFaction::Wingman{});
+        return faction.wing.size();
+    }
+    return std::nullopt;
+}
+
+std::vector<TeamId> Game::ReinforceAIFactions()
+{
+    std::vector<TeamId> reinforced;
+    for (AIFaction& faction : m_aiFactions) {
+        faction.wing.push_back(AIFaction::Wingman{});
+        reinforced.push_back(faction.team);
+    }
+    return reinforced;
+}
+
+std::size_t Game::AIWingSize(TeamId team) const
+{
+    for (const AIFaction& faction : m_aiFactions) {
+        if (faction.team == team) return faction.wing.size();
+    }
+    return 0;
+}
+
 const AIPreset& Game::ResolveAIPreset(id_t id) const
 {
     if (const AIPreset* preset = m_aiPresets.Find(id)) return *preset;

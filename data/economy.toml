@@ -31,12 +31,19 @@ arrival_radius = 440.0
 cargo_unload_interval_ticks = 300
 cargo_one_raw_materials = 25.0
 
-# How many fighters an AI faction fields behind its leader. Each one is
-# funded and respawned exactly like a player's, so a side that has lost its
-# production flies fewer of them -- and one enemy ship in a whole star system
-# is not an opposing side, it is a target.
+# How many fighters an AI faction is FIELDED with behind its leader -- not how
+# many it ends up with. A side starts as one ship, and every /ai after the one
+# that fielded it puts another fighter behind each leader, so the opposition is
+# dialled up by asking for it rather than decided here.
+#
+# Each wingman is funded and respawned exactly like a player's, so a side that
+# has lost its production flies fewer of them than were asked for.
+#
+# Deliberately NOT the built-in default in EconomyConfig: if this file ever
+# stops being read, wingmen nobody asked for are the symptom, which is a good
+# deal more visible than a value that silently agreed with the fallback.
 [ai]
-wing_size = 2
+wing_size = 0
 
 # How long a build site stays shut after something on it came down, per
 # structure type and per planet. Levelling a Colony should cost the side that
