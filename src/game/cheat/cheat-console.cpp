@@ -91,6 +91,7 @@ static void CheatTeleport(Cheat& c);
 static void CheatWhere(Cheat& c);
 static void CheatSpawn(Cheat& c);
 static void CheatAI(Cheat& c);
+static std::string WingPhrase(const Game& game);
 static void CheatFriendlyFire(Cheat& c);
 static void CheatPlayers(Cheat& c);
 static void CheatNotify(Cheat& c);
@@ -169,7 +170,7 @@ static void CheatHelp(Cheat& c)
     c.Say("/where - where you are now");
     c.Say("/players - who is flying, and what they are called");
     c.Say("/spawn [n] [team] - n AI fighters at that team's home");
-    c.Say("/ai [team] - field an AI leader for every side nobody is flying");
+    c.Say("/ai [team] - field an AI leader and its wing for every side nobody is flying");
     c.Say("/ff [on|off] - friendly fire, for the whole round");
     c.Say("/notify [on|off] - webhook a line when somebody joins");
     c.Say("add @<player> to any of the above to run it on their ship instead");
@@ -479,6 +480,17 @@ static void CheatSpawn(Cheat& c)
 
 // The other half of a dedicated server fielding nobody by default: a side left
 // empty is a slot waiting for a player, and this is what says the wait is over.
+// What a side gets fielded, in words. A leader has flown with a wing behind it
+// since wings landed, and every one of these messages still said "a leader" --
+// which is how three ships a side reads as a bug rather than as the setting it
+// is (`[ai] wing_size` in data/economy.toml).
+static std::string WingPhrase(const Game& game)
+{
+    const std::uint32_t wing = game.GetEconomyConfig().ai.wingSize;
+    if (wing == 0) return "a leader";
+    return Format("a leader and a wing of %u", wing);
+}
+
 static void CheatAI(Cheat& c)
 {
     if (c.args.size() > 1 && c.args[1] != "fill") {
@@ -493,7 +505,7 @@ static void CheatAI(Cheat& c)
         }
         c.game.AddAIFaction(*named);
         c.result.announce = true;
-        c.Say(Format("ai: %s now fields a leader", TeamName(*named)));
+        c.Say(Format("ai: %s now fields %s", TeamName(*named), WingPhrase(c.game).c_str()));
         return;
     }
 
@@ -508,7 +520,7 @@ static void CheatAI(Cheat& c)
         names += (names.empty() ? "" : ", ") + std::string(TeamName(team));
     }
     c.result.announce = true;
-    c.Say("ai: leaders fielded for " + names);
+    c.Say("ai: " + names + " each field " + WingPhrase(c.game));
 }
 
 static void CheatPlayers(Cheat& c)

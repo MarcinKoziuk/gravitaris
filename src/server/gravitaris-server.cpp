@@ -158,8 +158,8 @@ void HandleCommand(const std::string& line, Game& game, NetServer& server, bool&
                 std::printf("ai: every side is already taken\n");
                 return;
             }
-            std::printf("ai: %zu unfilled side(s) now field a %s leader\n", filled.size(),
-                        presetName.c_str());
+            std::printf("ai: %zu unfilled side(s) now field a %s leader and a wing of %u\n",
+                        filled.size(), presetName.c_str(), game.GetEconomyConfig().ai.wingSize);
             return;
         }
 
@@ -174,7 +174,8 @@ void HandleCommand(const std::string& line, Game& game, NetServer& server, bool&
         }
 
         game.AddAIFaction(*team, preset->id);
-        std::printf("%s now fields a %s AI leader\n", colorName.c_str(), presetName.c_str());
+        std::printf("%s now fields a %s AI leader and a wing of %u\n", colorName.c_str(),
+                    presetName.c_str(), game.GetEconomyConfig().ai.wingSize);
     }
     else if (verb == "list") {
         std::printf("peers: %zu\n", server.PeerCount());
