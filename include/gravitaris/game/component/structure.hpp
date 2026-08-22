@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace Gravitaris {
@@ -21,6 +22,9 @@ enum class StructureType : std::uint8_t {
     CommCenter,
     HighPort,
 };
+
+// How many there are, for anything keeping one slot per type (RebuildLockout).
+inline constexpr std::size_t STRUCTURE_TYPE_COUNT = 5;
 
 // Stable membership (a structure's type never changes), so a real component.
 //

@@ -156,11 +156,14 @@ static void ReadPersonality(const toml::table& t, AIPersonality& p)
     if (const auto v = t["decision_interval"].value<std::uint32_t>()) p.decisionInterval = *v;
     if (const auto v = t["fire_interval"].value<std::uint32_t>()) p.fireInterval = *v;
     if (const auto v = t["burst_count"].value<std::uint32_t>()) p.burstCount = *v;
-    if (const auto v = t["burst_shot_interval"].value<std::uint32_t>()) p.burstShotInterval = *v;
     if (const auto v = t["reaction_jitter"].value<double>()) p.reactionJitter = *v;
     if (const auto v = t["aim_jitter"].value<double>()) p.aimJitter = *v;
     if (const auto v = t["danger_ignore_chance"].value<double>()) p.dangerIgnoreChance = *v;
     if (const auto v = t["supply_reserve"].value<std::uint32_t>()) p.supplyReserve = *v;
+    if (const auto v = t["missile_range"].value<double>()) p.missileRange = *v;
+    if (const auto v = t["missile_tolerance"].value<double>()) p.missileTolerance = *v;
+    if (const auto v = t["missile_interval"].value<std::uint32_t>()) p.missileInterval = *v;
+    if (const auto v = t["boost_vel_error"].value<double>()) p.boostVelError = *v;
 }
 
 static void ReadFit(const toml::table& t, FitWeights& w)

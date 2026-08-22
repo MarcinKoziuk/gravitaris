@@ -51,7 +51,7 @@ struct AIPersonality {
     // cutoff -- a named target is always flown to.
     double engageRange = 6000.0;
     double standoffDistance = 50.0;  // desired range to hold during Intercept
-    double fireRange = 350.0;        // opens fire this far out (was 250)
+    double fireRange = 400.0;        // opens fire this far out
     double fireTolerance = 0.10;     // rad off the lead solution, still fires
 
     // Dogfight heading priority (units/s). Inside fireRange the nose tracks
@@ -59,8 +59,12 @@ struct AIPersonality {
     // velocity correction, for as long as that correction stays under this;
     // past it the burn takes the heading back, so an arrival still flips and
     // brakes. A pilot whose attitude is only ever a byproduct of
-    // station-keeping lands a shot inside fireTolerance by accident at best.
-    double aimPriorityError = 45.0;
+    // station-keeping lands a shot inside fireTolerance by accident at best,
+    // which at the 45 this was first written to is what it was: over a fixed
+    // duel its guns bore on the target for 15% of the fight and did 230
+    // damage, against 84% and 930 at 180. Deliberately just under boostVelError -- a correction worth
+    // breaking the aim for is worth burning the capacitor on.
+    double aimPriorityError = 180.0;
 
     // Gravity-well danger avoidance. A predicted approach inside evadeRadius
     // triggers Evade; once evading, the ship must clear evadeRadius*evadeMargin
@@ -78,7 +82,7 @@ struct AIPersonality {
     // then it patrols instead of re-engaging. There is no repair, so the
     // hull fraction never recovers: range is the only way back out of Flee.
     // 0 disables breaking off entirely (fights to the death).
-    double fleeHealthFraction = 0.3;
+    double fleeHealthFraction = 0.22;
     double fleeRange = 700.0;
     double fleeMargin = 1.6;
 
@@ -120,7 +124,7 @@ struct AIPersonality {
     // to zero flies home rearmed and dry.
     std::uint32_t supplyReserve = 0;
 
-    std::uint32_t decisionInterval = 15; // ticks between tactical re-evaluations
+    std::uint32_t decisionInterval = 12; // ticks between tactical re-evaluations
 
     // Missiles. A rack is only worth collecting if it gets used, so a pilot
     // launches whenever it has rounds, a target inside missileRange, and a
@@ -130,7 +134,7 @@ struct AIPersonality {
     // autocannon cannot is the rack's whole argument. 0 range disables.
     double missileRange = 1100.0;
     double missileTolerance = 0.35;
-    std::uint32_t missileInterval = 150; // ticks between launches (2.5s)
+    std::uint32_t missileInterval = 110; // ticks between launches (~1.8s)
 
     // Overburn (nothing happens on a pilot carrying no CAPACITOR to burn out
     // of). Spent when the velocity correction the pilot is flying
@@ -139,18 +143,23 @@ struct AIPersonality {
     // 0 disables.
     double boostVelError = 220.0;
 
-    // Firing cadence: burstCount shots fired burstShotInterval ticks apart,
-    // then fireInterval ticks of cooldown before the next burst starts.
-    // burstCount = 1 is a plain single-shot cadence (burstShotInterval
-    // unused); fireInterval is what gates the wait between shots either way.
-    std::uint32_t fireInterval = 8;       // ticks of cooldown after a burst completes
-    std::uint32_t burstCount = 1;         // shots fired back-to-back per opportunity
-    std::uint32_t burstShotInterval = 6;  // ticks between shots within a burst
+    // Firing cadence. The trigger is HELD, not tapped: a hull's gun mounts
+    // are staggered across the weapon's own cooldown and only the first of
+    // them fires on the tick a fresh pull lands
+    // (ShipControlsSystem::AdvancePrimary), so a pilot that pulses for one
+    // tick at a time shoots a third of what the same fighter does in a
+    // player's hands. burstCount is therefore how many rounds each barrel
+    // gets through before the trigger comes off, and fireInterval the ticks
+    // it stays off -- which is also what a lost firing solution costs, so a
+    // wavering aim cannot be tapped into a higher rate of fire than the gun
+    // has.
+    std::uint32_t fireInterval = 5; // ticks of silence after a burst
+    std::uint32_t burstCount = 1;   // rounds per barrel per burst
 
     // "Fuzzy"/character knobs -- 0 disables each. Deterministic per (entity,
     // tick) seed (see AIPilotSystem), so replays stay bit-exact.
     double reactionJitter = 0.0;     // +/- fraction of decisionInterval
-    double aimJitter = 0.04;         // +/- rad added to fireTolerance per shot
+    double aimJitter = 0.02;         // +/- rad added to fireTolerance per burst
     double dangerIgnoreChance = 0.0; // odds [0,1) of shrugging off a fresh
                                      // danger episode entirely (Reckless) --
                                      // rolled once per episode, not every
@@ -224,9 +233,10 @@ struct AIPilot {
     double aimBias = 0.0;
     bool aimBiasRolled = false;
 
-    // Shots left in the burst currently underway; 0 = between bursts (the
-    // next successful shot starts a fresh one of personality.burstCount).
-    std::uint32_t burstShotsRemaining = 0;
+    // Ticks the trigger is still to be held for the burst underway; 0 =
+    // between bursts (the next good solution starts a fresh one, long enough
+    // for every barrel to fire personality.burstCount rounds).
+    std::uint32_t burstTicksRemaining = 0;
 
     // Upgrades this pilot still means to collect on this visit, and the ticks
     // it will wait around for them. Spent by ResearchSystem as it actually

@@ -45,6 +45,12 @@ bool EconomyConfig::Load(IFilesystem& filesystem, const char* path)
         }
         if (const auto v = (*t)["cargo_one_raw_materials"].value<float>()) freighter.cargoOneRawMaterials = *v;
     }
+    if (const toml::table* t = root["ai"].as_table()) {
+        if (const auto v = (*t)["wing_size"].value<std::uint32_t>()) ai.wingSize = *v;
+    }
+    if (const toml::table* t = root["rebuild"].as_table()) {
+        if (const auto v = (*t)["lockout_ticks"].value<std::uint32_t>()) rebuild.lockoutTicks = *v;
+    }
     if (const toml::table* t = root["conquest"].as_table()) {
         if (const auto v = (*t)["claim_ticks"].value<std::uint32_t>()) conquest.claimTicks = *v;
     }

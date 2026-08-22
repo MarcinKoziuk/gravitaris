@@ -522,6 +522,62 @@ idempotent per team, which is what lets both entry points be typed twice.
 Single-player is unchanged: `SpawnCombatants` still fields a leader on every
 side the player is not flying, because there nobody else is coming.
 
+*An AI could not shoot (2026-08-22), fixing "they are too stupid to kill me".*
+Three separate reasons a pilot's guns were nearly ornamental, none of them
+about aim:
+
+- **The trigger was tapped, not held.** `firePrimary` is a held control: a
+  hull's gun mounts are phased across the weapon's own cooldown and only the
+  first of them answers a fresh pull (`ShipControlsSystem::AdvancePrimary`,
+  `SeedPhasesAt`). A pilot pulsing the flag for one tick every `fireInterval`
+  therefore fired one barrel of `fighter-1`'s three. The AI now holds a burst
+  long enough for every barrel to get `burstCount` rounds out, and
+  `burstShotInterval` is gone — the weapon's own cadence does that spacing.
+  Losing the solution mid-burst releases the trigger and costs the same
+  silence as finishing it, so a wavering aim cannot be tapped into a rate of
+  fire the gun does not have (a re-pull re-seeds the phases, and tapping every
+  tick would otherwise fire mount 0 every tick).
+- **The nose was never the gun's.** `aimPriorityError` — the velocity
+  correction above which the burn takes the heading back from the firing
+  solution — was 45 units/s, which routine station-keeping exceeds. Measured
+  over a fixed duel, a pilot's guns bore on its target for **15%** of the
+  fight. At 180 it is **84%**, and that duel -- everything else held, only
+  this threshold moved -- goes from 230 points of damage to 930. It sits just under `boostVelError` on purpose: anything worth
+  breaking the aim for is worth burning the capacitor on.
+  `STANDOFF_AIM_SHARE` is the second half of that — the old test was
+  `range > standoffDistance`, so a pilot holding station sat exactly on the
+  boundary and gave the nose up half the time, which is most of a sniper's
+  fight.
+- **Gunnery was wired to `AIBehavior::Intercept`.** The lead solution was only
+  computed while intercepting, so a pilot climbing out of a well, holding a
+  patrol ring or breaking off flew past an enemy inside its own firing range
+  without loosing a round. Firing is now unconditional; which way the ship is
+  *pointed* stays the manoeuvre's business (the nose contest above only opens
+  for `Intercept`/`Orbit`/`Idle`), which is what keeps this from turning a
+  climb or a descent into a gunfight.
+
+**Tried and dropped:** a range-aware firing aperture (fire when the round is
+predicted to pass within a hull's width, rather than within a fixed angle).
+It reads better than a flat tolerance and is the right *model*, but measured
+against the flat angle it was noise — +19% damage per round at 300 units,
+−8% at 500 — which does not pay for a personality knob and a toml key. The
+two fixes above are where the difference actually lives.
+
+*A faction is a wing (2026-08-22).* `AddAIFaction` now sizes a wing behind
+each leader (`[ai] wing_size` in `data/economy.toml`, default 2). Wingmen
+carry no `AIStrategy`, so they fly the leader's objective through the wing
+orders that already existed, and each holds its own respawn slot funded by
+`FactionSystem::TryRespawn` — a side that has lost its production flies fewer
+of them rather than the same three for free. Their presets are picked from
+the library rather than inherited, so a wing is a mix of temperaments.
+
+Every AI ship is named in the same pass (queued-work item 3): `SpawnAIShip`
+gives one `<colour>-<n>` off a per-side ordinal that only ever increments, and
+`SpawnAILeader` gives its one `<colour>-leader` without spending an ordinal, so
+`red-1` is always the first wingman. A wing of ships nobody can name is, from
+the console, several things that cannot be listed or flown to. `TestAIWing`
+covers both halves.
+
 ## Risks
 
 - **Guidance in strong wells is the hard part** (Lunar Lander with a

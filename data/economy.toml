@@ -31,6 +31,21 @@ arrival_radius = 440.0
 cargo_unload_interval_ticks = 300
 cargo_one_raw_materials = 25.0
 
+# How many fighters an AI faction fields behind its leader. Each one is
+# funded and respawned exactly like a player's, so a side that has lost its
+# production flies fewer of them -- and one enemy ship in a whole star system
+# is not an opposing side, it is a target.
+[ai]
+wing_size = 2
+
+# How long a build site stays shut after something on it came down, per
+# structure type and per planet. Levelling a Colony should cost the side that
+# owned it a real stretch of production, not one freighter run -- without this
+# the replacement is dispatched on the tick after the wreck clears, and a
+# structure a defender never has to protect is not worth attacking.
+[rebuild]
+lockout_ticks = 1800
+
 # Consecutive landed ticks before a claim fires: long enough that a bounce or
 # a graze never claims, short enough to feel immediate after a real touchdown.
 [conquest]

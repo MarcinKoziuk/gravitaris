@@ -140,14 +140,27 @@ protected:
     int m_playerRespawnTimer = -1;
     static constexpr int RESPAWN_DELAY_TICKS = 90; // 1.5 s at the fixed tick
 
-    // An AI faction fielding a leader fighter (docs/gravity-well-mode-plan.md
-    // Phase 5). Populated through AddAIFaction, by Start() in single-player
-    // and by the server itself in multiplayer.
+    // An AI faction fielding a leader fighter and the wing behind it
+    // (docs/gravity-well-mode-plan.md Phase 5). Populated through
+    // AddAIFaction, by Start() in single-player and by the server itself in
+    // multiplayer.
     struct AIFaction {
         TeamId team = TeamId::Red;
         id_t preset = 0; // an AIPresetLibrary key; 0 means the library's default
         std::optional<flecs::entity> leader;
         int respawnTimer = -1;
+
+        // The fighters that fly the leader's orders rather than their own
+        // (AIPilotSystem's wing orders). Each holds its own respawn slot and
+        // is funded like any other hull, so a side that can no longer pay
+        // fields a thinner wing rather than a free one -- and a wingman starts
+        // at timer 0, i.e. it launches on the first tick its side can afford
+        // it rather than after a death that has not happened yet.
+        struct Wingman {
+            std::optional<flecs::entity> ship;
+            int respawnTimer = 0;
+        };
+        std::vector<Wingman> wing;
     };
     std::vector<AIFaction> m_aiFactions;
 
@@ -155,10 +168,10 @@ protected:
 
     double m_sectorExtent = 0.;
 
-    // Deterministic per-(tick, spawn) seed for SpawnRandomAIShip's preset pick
-    // (ADR 0001: no std::rand -- it mutates sim state, so it must be
-    // reproducible under replay). Incremented per call so repeated presses
-    // within one tick still diverge.
+    // Deterministic per-(tick, spawn) seed for every preset pick -- the debug
+    // spawner's and a wingman's (ADR 0001: no std::rand -- it mutates sim
+    // state, so it must be reproducible under replay). Incremented per call so
+    // several spawns within one tick still diverge.
     std::uint32_t m_randomAIShipSpawnCount = 0;
 
     // Debug/tuning knob (see the Physics debug tab): scales the player's live
@@ -185,11 +198,12 @@ protected:
 
     void HandlePlayerRespawn();
 
-    void HandleAILeaderRespawns();
+    // One tick of every AI faction's leader slot and each of its wing slots.
+    void HandleAIRespawns();
 
-    // The Callsign an AI faction's leader flies under, so it can be addressed
-    // by name the same way a human can.
-    [[nodiscard]] static std::string LeaderCallsign(TeamId team);
+    // Deterministic per-(tick, spawn) preset pick for a wingman, so a wing is
+    // a mix of temperaments rather than three copies of its leader.
+    const AIPreset& PickWingPreset();
 
     virtual std::unique_ptr<EntitySpawner> CreateEntitySpawner();
 

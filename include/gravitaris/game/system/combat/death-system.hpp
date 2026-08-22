@@ -6,6 +6,7 @@
 
 #include <sigslot/signal.hpp>
 
+#include <gravitaris/game/config/economy-config.hpp>
 #include <gravitaris/game/event/death-report.hpp>
 #include <gravitaris/game/fwd.hpp>
 
@@ -19,15 +20,21 @@ private:
     flecs::world& m_registry;
     EntitySpawner& m_entitySpawner;
     GameEventQueue& m_eventQueue;
+    const EconomyConfig& m_config;
 
     sigslot::signal<const DeathReport&> m_onDeath;
 
     void Explode(flecs::entity ship, std::uint64_t step);
+    // Shuts the planet's build site of this structure's type for
+    // EconomyConfig::Rebuild::lockoutTicks, so the complex has to be rebuilt
+    // rather than merely re-dispatched (see RebuildLockout).
+    void StartRebuildLockout(flecs::entity structure);
     void ReportDeath(flecs::entity ship);
     static void LogStructureDeath(flecs::entity entity, std::uint64_t step);
 
 public:
-    DeathSystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue);
+    DeathSystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue,
+                const EconomyConfig& config);
 
     void Update(std::uint64_t step);
 

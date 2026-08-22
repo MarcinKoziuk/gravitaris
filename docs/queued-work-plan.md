@@ -5,8 +5,8 @@ pick any of them up without re-deriving the context. Decisions here are the
 project owner's and are settled unless this document says otherwise; the open
 questions are marked as such and are worth asking before writing code.
 
-Item 1's hull regen is done and 1a is withdrawn (see there). Everything else is
-unstarted. The work that preceded all of it shipped in `155a876`, which the last
+Item 1's hull regen is done and 1a is withdrawn (see there); item 3 is done.
+Everything else is unstarted. The work that preceded all of it shipped in `155a876`, which the last
 section summarises.
 
 ## How to build and check
@@ -153,7 +153,26 @@ that information survives the bar being switched off. See
 `RefreshResearchReadout`, which builds `" x" + std::to_string(research->labs)`.
 The TECH and SUPPLIES counters themselves stay exactly as they are.
 
-## 3. Make every AI ship addressable
+## 3. Make every AI ship addressable — DONE 2026-08-22
+
+Done as the inference below described, and worth doing the same day AI
+factions started fielding wings: `EntitySpawner::SpawnAIShip` names every
+fighter `<colour>-<n>` from a per-side ordinal that only ever increments (so
+numbers are identifiers, not a count — a side that has lost ships shows gaps),
+and `SpawnAILeader` names its one `<colour>-leader` without spending an
+ordinal, so the first wingman is always `red-1`. `Game::LeaderCallsign` is
+gone: all AI naming lives in the spawner now, which is why a `/spawn` wave and
+a faction's wing are numbered by the same counter and cannot collide.
+`TeamCallsignPrefix` in `component/team.hpp` is the single source for the
+lowercase colour (distinct from `TeamDisplayName`, which is the same colours
+written for prose). `TestAIWing` covers it: every AI ship named, no duplicates,
+`/players` lists the wing, `/tp red-1` reaches one.
+
+**Still not done, and still not agreed** — the offer at the end of this item:
+`/players` cannot tell a human from an AI, and the listing is now as long as
+this predicted. `ship.has<AIPilot>()` is the test if it is wanted.
+
+The original item follows.
 
 **Scope was cut on 2026-08-09. Read this before reaching for the bird list at
 the bottom of this file — the naming idea is shelved, not queued.**

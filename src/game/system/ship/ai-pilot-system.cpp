@@ -89,6 +89,12 @@ static constexpr double DEPARTURE_CLEARANCE = 260.0;
 // through, which is the only way a slow climb clears it at all.
 static constexpr double DEPARTURE_MARGIN = 1.25;
 
+// How far inside its standoff a pilot has to be pushed before turning to open
+// the range outranks keeping the guns on the target. Tested against the
+// standoff itself, a pilot holding station sat exactly on the boundary and
+// gave the nose up half the time -- which is most of a sniper's fight.
+static constexpr double STANDOFF_AIM_SHARE = 0.6;
+
 // Padding on a body's radius when testing whether a shot would hit it, so a
 // pilot doesn't graze the surface trying to shoot past a limb.
 static constexpr double SHOT_CLEARANCE = 15.0;
@@ -1060,7 +1066,14 @@ void AIPilotSystem::Update(std::uint64_t step)
         // planet is a question about the target, not about the barrel.
         std::optional<Vector2d> shotLead;
         double targetRange = 0.0;
-        if (pilot.behavior == AIBehavior::Intercept && targetTransf) {
+        // Gunnery is not a behavior. A pilot climbing out of a well, holding a
+        // patrol ring or breaking off still has a gun and still has an enemy
+        // in front of it, and tying the trigger to Intercept meant every one
+        // of those flew past the player without firing a round. Which way the
+        // ship is *pointed* is still the manoeuvre's business -- that is the
+        // nose contest below, and it is what keeps this from turning a climb
+        // or a descent into a gunfight.
+        if (targetTransf) {
             const Vector2d relPos = targetTransf->pos - transf.pos;
             targetRange = relPos.length();
             if (targetRange < personality.fireRange) {
@@ -1086,9 +1099,18 @@ void AIPilotSystem::Update(std::uint64_t step)
         // up to a correction worth breaking the aim for, so an arrival still
         // flips and brakes, and a pilot pushed inside its standoff still
         // turns to open the range rather than boring in.
+        //
+        // Only where nothing else needs the nose, though. TrackBearing gives
+        // up every burn it is not already pointed at, so a pilot climbing out
+        // of a well, running from a threat or setting down would trade the
+        // manoeuvre it is flying for a shot -- and those three exist precisely
+        // because the shot is not the thing that matters this second. Such a
+        // pilot still fires whenever its nose happens to come round.
+        const bool noseIsFree = pilot.behavior == AIBehavior::Intercept
+                || pilot.behavior == AIBehavior::Orbit || pilot.behavior == AIBehavior::Idle;
         const Vector2d velError = desiredVel - transf.vel;
-        const bool gunHasTheNose = aimPoint.has_value()
-                && targetRange > personality.standoffDistance
+        const bool gunHasTheNose = aimPoint.has_value() && noseIsFree
+                && targetRange > personality.standoffDistance * STANDOFF_AIM_SHARE
                 && velError.length() < personality.aimPriorityError;
 
         ControlFlags flags = gunHasTheNose
@@ -1126,10 +1148,8 @@ void AIPilotSystem::Update(std::uint64_t step)
             }
         }
 
-        if (pilot.fireCooldown > 0) {
-            --pilot.fireCooldown;
-        }
-        else if (aimPoint) {
+        bool solutionGood = false;
+        if (aimPoint) {
             const double aimHeading = std::atan2(aimPoint->y(), aimPoint->x());
             const double heading = static_cast<double>(transf.rot) - PI / 2.0;
 
@@ -1146,8 +1166,7 @@ void AIPilotSystem::Update(std::uint64_t step)
                     + (personality.aimJitter > 0.0 ? pilot.aimBias : 0.0);
 
             // Weapon discipline: a body across the firing solution eats the
-            // shot. Holding fire costs nothing (the cooldown is only spent on
-            // shots actually taken) and stops a pilot from emptying itself
+            // shot, so the trigger stays off rather than emptying the pilot
             // into a planet the target is hiding behind. Judged straight,
             // though the round arcs: a pilot that lobbed rounds over a rock on
             // purpose would be a better shot than this one is written to be.
@@ -1161,26 +1180,38 @@ void AIPilotSystem::Update(std::uint64_t step)
                 }
             }
 
-            if (!blocked && std::abs(WrapToPi(aimHeading - heading)) < tolerance) {
-                flags.firePrimary = true;
-                pilot.aimBiasRolled = false; // roll fresh for the next shot
-
-                if (personality.burstCount > 1) {
-                    if (pilot.burstShotsRemaining == 0) {
-                        pilot.burstShotsRemaining = personality.burstCount;
-                    }
-                    --pilot.burstShotsRemaining;
-                    pilot.fireCooldown = pilot.burstShotsRemaining > 0
-                            ? personality.burstShotInterval
-                            : personality.fireInterval;
-                }
-                else {
-                    pilot.fireCooldown = personality.fireInterval;
-                }
-            }
+            solutionGood = !blocked && std::abs(WrapToPi(aimHeading - heading)) < tolerance;
         }
         else {
             pilot.aimBiasRolled = false; // no live shot attempt -- clear for next time
+        }
+
+        // The trigger is held for a burst rather than tapped once, because a
+        // fresh pull only fires the first of a hull's mounts -- the rest are
+        // phased across the weapon's own cooldown and need the trigger still
+        // down when their turn comes (ShipControlsSystem::AdvancePrimary). A
+        // burst runs long enough for every barrel to get burstCount rounds
+        // out; losing the solution ends it at once and costs the same silence
+        // as finishing it, so a wavering aim cannot be tapped into a rate of
+        // fire the gun does not have.
+        if (pilot.fireCooldown > 0) {
+            --pilot.fireCooldown;
+        }
+        else if (solutionGood) {
+            flags.firePrimary = true;
+            if (pilot.burstTicksRemaining == 0) {
+                pilot.burstTicksRemaining =
+                        std::max(1u, personality.burstCount) * std::max(1u, stats.fireCooldownTicks);
+            }
+            if (--pilot.burstTicksRemaining == 0) {
+                pilot.fireCooldown = personality.fireInterval;
+                pilot.aimBiasRolled = false; // roll fresh for the next burst
+            }
+        }
+        else if (pilot.burstTicksRemaining > 0) {
+            pilot.burstTicksRemaining = 0;
+            pilot.fireCooldown = personality.fireInterval;
+            pilot.aimBiasRolled = false;
         }
 
         queue.Push(InputCommand{step, flags});

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -10,6 +11,8 @@
 #include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/damageable.hpp>
+#include <gravitaris/game/component/planet-attachment.hpp>
+#include <gravitaris/game/component/rebuild-lockout.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/util/splitmix.hpp>
 #include <gravitaris/game/event/death-report.hpp>
@@ -34,10 +37,12 @@ static constexpr double FRAG_LIFETIME_SECONDS = 3.0;
 static constexpr float FRAG_DAMAGE = 8.f;
 static constexpr double FRAG_SPAWN_OFFSET = 6.0; // start just off-centre so frags don't share one point
 
-DeathSystem::DeathSystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue)
+DeathSystem::DeathSystem(flecs::world& registry, EntitySpawner& entitySpawner, GameEventQueue& eventQueue,
+                         const EconomyConfig& config)
         : m_registry(registry)
         , m_entitySpawner(entitySpawner)
         , m_eventQueue(eventQueue)
+        , m_config(config)
 {}
 
 void DeathSystem::Update(std::uint64_t step)
@@ -58,6 +63,7 @@ void DeathSystem::Update(std::uint64_t step)
 
     for (flecs::entity ship : dead) {
         LogStructureDeath(ship, step);
+        StartRebuildLockout(ship);
         ReportDeath(ship);
         Explode(ship, step);
         ship.destruct();
@@ -81,6 +87,31 @@ void DeathSystem::ReportDeath(flecs::entity ship)
     report.killerPilotId = dmg.lastDamagePilotId;
     report.cause = dmg.lastDamageCause;
     m_onDeath(report);
+}
+
+// The wreck is about to be destructed, so what it was and where it stood has
+// to be copied onto the planet now -- afterwards nothing can answer either.
+void DeathSystem::StartRebuildLockout(flecs::entity structure)
+{
+    const Structure* what = structure.try_get<Structure>();
+    if (!what || m_config.rebuild.lockoutTicks == 0) return;
+
+    std::uint32_t planetNetId = 0;
+    if (const PlanetSurfaceAttachment* surface = structure.try_get<PlanetSurfaceAttachment>()) {
+        planetNetId = surface->planetNetId;
+    }
+    else if (const PlanetOrbitAttachment* orbit = structure.try_get<PlanetOrbitAttachment>()) {
+        planetNetId = orbit->planetNetId;
+    }
+    if (planetNetId == 0) return;
+
+    flecs::entity planet = m_entitySpawner.EntityForNetId(planetNetId);
+    if (!planet.is_alive()) return;
+
+    if (!planet.has<RebuildLockout>()) planet.emplace<RebuildLockout>();
+    RebuildLockout& lockout = planet.get_mut<RebuildLockout>();
+    std::uint32_t& ticks = lockout.ticks[static_cast<std::size_t>(what->type)];
+    ticks = std::max(ticks, m_config.rebuild.lockoutTicks);
 }
 
 void DeathSystem::Explode(flecs::entity ship, std::uint64_t step)

@@ -43,6 +43,14 @@ struct EconomyConfig {
         float cargoOneRawMaterials = 25.f;
     } freighter;
 
+    // How long a build site stays shut after something on it came down
+    // (RebuildLockout). Without it a complex that loses a structure has a
+    // replacement dispatched on the very next tick, so levelling one is a
+    // detour rather than a blow.
+    struct Rebuild {
+        std::uint32_t lockoutTicks = 1800; // 30s at the fixed tick
+    } rebuild;
+
     struct Conquest {
         // Consecutive landed ticks before a claim fires: long enough that a
         // bounce or a graze never claims, short enough to feel immediate
@@ -70,6 +78,15 @@ struct EconomyConfig {
     struct Repair {
         float hullPerSecond = 10.f;
     } repair;
+
+    // Round composition rather than economy, but funded out of it: a wing
+    // costs FactionSystem::FIGHTER_COST a hull, same as a respawn.
+    struct AI {
+        // Fighters an AI faction fields behind its leader. They fly the
+        // leader's orders (AIPilotSystem's wing orders); 0 is the single
+        // leader the mode used to field.
+        std::uint32_t wingSize = 2;
+    } ai;
 
     // Reads `path` (default "economy.toml"). Returns false and keeps the
     // defaults above if it can't be read or parsed.

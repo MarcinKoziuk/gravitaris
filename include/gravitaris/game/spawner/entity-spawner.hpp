@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 #include <flecs.h>
@@ -57,9 +58,21 @@ protected:
     // one tick at the origin).
     flecs::entity SpawnStructureBase(StructureType type, id_t modelId, Vector2d initialPos, TeamId team);
 
+    // Shared setup for both AI flavors below: everything a fighter needs
+    // except a name, which is the one thing that tells the two apart.
+    flecs::entity SpawnAIHull(id_t modelId, Vector2d position, const AIPreset& preset,
+                              Vector2d velocity, double rot, TeamId team);
+
 private:
     std::uint32_t m_nextNetId = 1; // 0 stays reserved as "invalid" (see NetId)
     std::uint32_t m_nextPilotId = 1; // 0 stays reserved as "nobody" (see PilotRef)
+    // Per-side ordinal behind an AI wingman's callsign ("red-1", "red-2").
+    // Only ever increments, which is both collision-free and deterministic --
+    // reusing a dead ship's number would mean consulting what is currently
+    // flying, and a query run inside another query's callback yields nothing
+    // (see CLAUDE.md). Numbers are therefore identifiers, not a count: a side
+    // that has lost ships shows gaps.
+    std::array<std::uint32_t, 7> m_aiCallsignOrdinal{}; // TeamId::Blue..None
     ankerl::unordered_dense::map<std::uint32_t, flecs::entity> m_netIdToEntity;
     flecs::observer m_netIdRemovedObserver;
 
@@ -86,13 +99,19 @@ public:
     flecs::entity SpawnPlayer(id_t modelId, Vector2d position, TeamId team = TeamId::Blue,
                               Vector2d velocity = {}, double rot = 0.0);
 
+    // Flies as "<colour>-<n>", numbered per side. Every AI ship is named,
+    // because a ship nobody can name is a ship nobody can list in /players or
+    // reach with /tp -- and a wing of them is, from the console, several
+    // things you cannot point at.
     flecs::entity SpawnAIShip(id_t modelId, Vector2d position, const AIPreset& preset,
                               Vector2d velocity = {}, double rot = 0.0, TeamId team = TeamId::Red);
 
     // An AI ship that plays the mode rather than only fighting in it: the
     // same fighter plus an AIStrategy weighted by `preset` (see
     // AIStrategySystem). One per AI faction, respawned by whoever owns the
-    // faction's slot.
+    // faction's slot, and flying as "<colour>-leader" -- the one AI name that
+    // is a rank rather than a number, so it survives every respawn and stays
+    // the thing to type at a side.
     flecs::entity SpawnAILeader(id_t modelId, Vector2d position, TeamId team, const AIPreset& preset,
                                 Vector2d velocity = {}, double rot = 0.0);
 

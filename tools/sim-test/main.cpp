@@ -40,6 +40,7 @@
 #include <gravitaris/game/component/gravity-source.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/planet-attachment.hpp>
+#include <gravitaris/game/component/rebuild-lockout.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/transform.hpp>
@@ -1361,6 +1362,143 @@ void TestSelfDevelopment()
     }
     Require(labBuilt, "self-development: Base grew a Lab");
     Require(commCenterBuilt, "self-development: Base grew a Comm Center");
+
+    fs.Shutdown();
+}
+
+// Levelling a structure has to cost the side that owned it something. Without
+// RebuildLockout, EconomySystem sees the gap on the tick after the wreck
+// clears and dispatches a replacement immediately -- a Colony shot off a rock
+// was back inside ten seconds, which makes attacking one pointless.
+void TestRebuildLockout()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    flecs::entity planet =
+            spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 1e-9, 2000., 1.0, 0.0);
+    BuildStartingComplex(spawner, planet, TeamId::Blue);
+
+    const std::uint32_t planetNetId = planet.get<NetId>().value;
+    const auto find = [&](StructureType type) {
+        flecs::entity found;
+        game.GetRegistry().each([&](flecs::entity e, const Structure& s, const PlanetSurfaceAttachment& attach) {
+            if (attach.planetNetId == planetNetId && s.type == type) found = e;
+        });
+        return found;
+    };
+
+    // Funded well past a freighter, so nothing here is waiting on production:
+    // the only thing that can hold the rebuild up is the lockout.
+    find(StructureType::Base).get_mut<Structure>().finishedMaterials = 1000.f;
+
+    flecs::entity colony = find(StructureType::Colony);
+    Require(colony.is_alive(), "rebuild lockout: the complex starts with a Colony (setup check)");
+    colony.get_mut<Damageable>().hp = 0.f;
+    game.Update(); // DeathSystem takes it down and shuts the site
+
+    const RebuildLockout* lockout = planet.try_get<RebuildLockout>();
+    Require(lockout && lockout->Blocks(StructureType::Colony),
+            "rebuild lockout: losing a structure shuts that build site");
+    Require(!lockout->Blocks(StructureType::Base),
+            "rebuild lockout: and only that one -- the Base beside it is untouched");
+
+    const std::uint32_t lockoutTicks = game.GetEconomyConfig().rebuild.lockoutTicks;
+    Require(lockoutTicks > 600, "rebuild lockout: the configured delay outlasts a freighter run (setup check)");
+
+    for (std::uint32_t tick = 0; tick + 1 < lockoutTicks; ++tick) {
+        game.Update();
+        Require(!find(StructureType::Colony).is_alive(),
+                "rebuild lockout: nothing rebuilds the Colony while the site is shut");
+    }
+
+    // ...and then it does come back, once the site reopens and a run has been
+    // flown. A freighter dispatched from this same complex starts inside the
+    // arrival radius, so what is left is the two unload intervals.
+    bool rebuilt = false;
+    for (int tick = 0; tick < 2000 && !rebuilt; ++tick) {
+        game.Update();
+        rebuilt = find(StructureType::Colony).is_alive();
+    }
+    Require(rebuilt, "rebuild lockout: the Colony is rebuilt once the site reopens");
+
+    fs.Shutdown();
+}
+
+// An AI faction is a wing, not a lone leader: one ship in a whole star system
+// is a target rather than an opposing side. Each wingman is funded like any
+// other hull, so this also covers a side paying for them -- and every one of
+// them is addressable, which is the other half of fielding more than one.
+void TestAIWing()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    game.BuildClassicWorld();
+    game.SpawnCombatants(TeamId::Blue); // player Blue, an AI faction on Red
+    game.SettleScenario();
+
+    const std::uint32_t wingSize = game.GetEconomyConfig().ai.wingSize;
+    Require(wingSize > 0, "ai wing: the configuration fields a wing at all (setup check)");
+
+    const auto redFighters = [&] {
+        std::vector<std::string> names;
+        game.GetRegistry().each([&](flecs::entity ship, const AIPilot&, const Team& team) {
+            if (team.id != TeamId::Red) return;
+            const Callsign* callsign = ship.try_get<Callsign>();
+            names.push_back(callsign ? callsign->name : std::string());
+        });
+        std::sort(names.begin(), names.end());
+        return names;
+    };
+
+    Require(redFighters().size() == 1, "ai wing: the leader launches first, free (setup check)");
+
+    // The wing waits on the complex's own production rather than appearing
+    // alongside the leader, so this is a few seconds of materials, not a tick.
+    std::size_t peak = 0;
+    for (int tick = 0; tick < 3000; ++tick) {
+        game.Update();
+        peak = std::max(peak, redFighters().size());
+    }
+    Require(peak == wingSize + 1, "ai wing: the side fields its leader and a full wing behind it");
+
+    // Every one of them answers to a name, and no two answer to the same one.
+    // Fodder used to carry no Callsign at all, so a wing was several things
+    // /players could not list and /tp could not resolve.
+    const std::vector<std::string> names = redFighters();
+    Require(std::find(names.begin(), names.end(), std::string()) == names.end(),
+            "ai wing: every AI ship carries a callsign, not just the leader");
+    Require(std::adjacent_find(names.begin(), names.end()) == names.end(),
+            "ai wing: and no two of them share one");
+    Require(std::find(names.begin(), names.end(), std::string("red-leader")) != names.end(),
+            "ai wing: the leader keeps the rank it is addressed by");
+    Require(std::find(names.begin(), names.end(), std::string("red-1")) != names.end(),
+            "ai wing: the wing numbers from 1 -- a leader spends no ordinal");
+
+    // Reachable, not merely named: /players lists them and /tp resolves one.
+    const flecs::entity player = *game.GetPlayer();
+    const CheatResult listing = RunCheatCommand(game, player, TeamId::Blue, "/players");
+    Require(listing.reply.size() >= names.size() + 1,
+            "ai wing: /players lists the whole wing beside whoever is flying");
+
+    flecs::entity wingman;
+    game.GetRegistry().each([&](flecs::entity ship, const Callsign& callsign) {
+        if (callsign.name == "red-1") wingman = ship;
+    });
+    Require(wingman.is_alive(), "ai wing: red-1 is somebody (setup check)");
+
+    RunCheatCommand(game, player, TeamId::Blue, "/tp red-1");
+    const double gap = (player.get<Transform>().pos - wingman.get<Transform>().pos).length();
+    Require(gap < 200.0, "ai wing: /tp reaches a wingman by name");
 
     fs.Shutdown();
 }
@@ -4847,6 +4985,98 @@ void TestAITactics()
     fs.Shutdown();
 }
 
+// Gunnery, which is what an AI is for. Both halves cover a place a pilot
+// simply did not shoot: the trigger being tapped for a tick at a time when a
+// hull's mounts are phased across the weapon's cooldown and only the first of
+// them answers a fresh pull, and the gun being wired to AIBehavior::Intercept
+// as though aiming were a way of flying rather than a thing a pilot does.
+void TestAIGunnery()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+
+    // A fixed duel: what a stock pilot takes off a stationary, heavily
+    // armoured target in thirty seconds. The floor is a regression guard with
+    // a lot of room under it -- this scene scored 230 while the nose was
+    // handed to every station-keeping correction, and under 100 while the
+    // trigger was tapped a tick at a time on top of that.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+
+        flecs::entity shooter = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{-900., 0.},
+                                                    game.GetAIPresets().Default());
+        AIPersonality& p = shooter.get_mut<AIPilot>().personality;
+        p.engageRange = 1e6;
+        p.aimJitter = 0.0;
+        p.reactionJitter = 0.0;
+        p.dangerLookaheadSteps = 0;
+        p.fleeHealthFraction = 0.0;
+
+        flecs::entity target = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.});
+        Damageable& hull = target.get_mut<Damageable>();
+        hull.maxHp = 1e6f;
+        hull.hp = hull.maxHp;
+
+        for (int tick = 0; tick < 1800; ++tick) game.Update();
+
+        const float damage = hull.maxHp - target.get<Damageable>().hp;
+        Require(damage > 400.f, "ai gunnery: a stock pilot does real damage over a fixed duel");
+    }
+
+    // The trigger is not a behavior. A pilot too hurt to pursue holds a patrol
+    // ring instead -- and used to fly it past an enemy well inside its own
+    // firing range without loosing a round, because the aim solution was only
+    // ever computed while intercepting.
+    {
+        Game game(fs);
+        EntitySpawner& spawner = game.GetEntitySpawner();
+        // Something to circle. Near-zero mass: this is about the trigger, not
+        // about the well.
+        spawner.SpawnOrbitingPlanet("models/planets/simple"_id, Vector2d{0., 0.}, 1e-9, 1., 1.0, 0.0);
+
+        flecs::entity shooter = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{2000., 0.},
+                                                    game.GetAIPresets().Default());
+        AIPersonality& p = shooter.get_mut<AIPilot>().personality;
+        p.engageRange = 1e6;
+        p.aimJitter = 0.0;
+        p.reactionJitter = 0.0;
+        p.dangerLookaheadSteps = 0;
+        // Hurt enough to stop pursuing, with the threat outside the range it
+        // would run from: what is left is a patrol with an enemy in front of it.
+        p.fleeHealthFraction = 0.5;
+        p.fleeRange = 50.0;
+        Damageable& mine = shooter.get_mut<Damageable>();
+        mine.hp = mine.maxHp * 0.2f;
+
+        flecs::entity target = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{2000., -250.});
+        Damageable& hull = target.get_mut<Damageable>();
+        hull.maxHp = 1e6f;
+        hull.hp = hull.maxHp;
+
+        int patrolling = 0;
+        int shots = 0;
+        std::uint32_t cursor = 0;
+        for (int tick = 0; tick < 600; ++tick) {
+            game.Update();
+            if (shooter.get<AIPilot>().behavior == AIBehavior::Orbit) ++patrolling;
+            cursor = game.GetEventQueue().ConsumeSince(cursor, [&](const GameEvent& event) {
+                if (event.type == GameEventType::BulletFired) ++shots;
+            });
+        }
+
+        Require(patrolling > 500,
+                "ai gunnery: the pilot spends the window on its patrol ring (setup check)");
+        Require(shots > 0,
+                "ai gunnery: a pilot that is not intercepting still shoots what is in front of it");
+    }
+
+    fs.Shutdown();
+}
+
 // A peer predicts and draws its own shots locally (ClientPrediction::Step),
 // so the server must not also send it the authoritative copies -- otherwise
 // the same shot draws twice, ~14 ticks apart (own ship renders ahead by
@@ -5859,6 +6089,7 @@ int main()
     TestStructures();
     TestFreighterEconomy();
     TestSelfDevelopment();
+    TestRebuildLockout();
     TestPlanetsideStructureHits();
     TestUpgradeCatalog();
     TestHardpointMounts();
@@ -5889,6 +6120,8 @@ int main()
     TestTakeoff();
     TestRepairAndReachability();
     TestAITactics();
+    TestAIGunnery();
+    TestAIWing();
     TestAIUsesItsUpgrades();
     TestInterceptKeepsTargetInSights();
     TestWebRtcRoundtrip();

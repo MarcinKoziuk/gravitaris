@@ -1,4 +1,5 @@
 #include <cmath>
+#include <string>
 
 #include <gravitaris/game/resource/common/resource-loader.hpp>
 #include <gravitaris/game/resource/body.hpp>
@@ -8,6 +9,7 @@
 #include <gravitaris/game/component/input-queue.hpp>
 #include <gravitaris/game/component/ai-pilot.hpp>
 #include <gravitaris/game/component/ai-strategy.hpp>
+#include <gravitaris/game/component/callsign.hpp>
 #include <gravitaris/game/component/landing-state.hpp>
 #include <gravitaris/game/component/ship-loadout.hpp>
 #include <gravitaris/game/component/research-access.hpp>
@@ -28,8 +30,10 @@ namespace Gravitaris {
 // What a building is worth in hull next to a fighter's. A complex is meant to
 // be a siege rather than a strafing run: at the model's own hp a passing pilot
 // could delete a Lab in one pass, and a High Port -- which a refit now
-// requires landing on -- with it.
-static constexpr float STRUCTURE_HP_SCALE = 10.f;
+// requires landing on -- with it. Halved from the original 10x once levelling
+// a structure cost the owner a rebuild lockout rather than one freighter run:
+// the siege had to be worth starting.
+static constexpr float STRUCTURE_HP_SCALE = 5.f;
 
 static Damageable MakeDamageable(const Body& body);
 static ShipLoadout MakeShipLoadout(const Body& body);
@@ -101,7 +105,7 @@ flecs::entity EntitySpawner::SpawnPlayer(id_t modelId, Vector2d position, TeamId
     return entity;
 }
 
-flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, const AIPreset& preset,
+flecs::entity EntitySpawner::SpawnAIHull(id_t modelId, Vector2d position, const AIPreset& preset,
                                          Vector2d velocity, double rot, TeamId team)
 {
     ResourcePtr<const Body> body = m_resourceLoader.Load<Body>(modelId);
@@ -132,10 +136,20 @@ flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, const 
     return entity;
 }
 
+flecs::entity EntitySpawner::SpawnAIShip(id_t modelId, Vector2d position, const AIPreset& preset,
+                                         Vector2d velocity, double rot, TeamId team)
+{
+    flecs::entity entity = SpawnAIHull(modelId, position, preset, velocity, rot, team);
+    const std::uint32_t ordinal = ++m_aiCallsignOrdinal[static_cast<std::size_t>(team)];
+    entity.emplace<Callsign>(std::string(TeamCallsignPrefix(team)) + "-" + std::to_string(ordinal));
+    return entity;
+}
+
 flecs::entity EntitySpawner::SpawnAILeader(id_t modelId, Vector2d position, TeamId team,
                                            const AIPreset& preset, Vector2d velocity, double rot)
 {
-    flecs::entity entity = SpawnAIShip(modelId, position, preset, velocity, rot, team);
+    flecs::entity entity = SpawnAIHull(modelId, position, preset, velocity, rot, team);
+    entity.emplace<Callsign>(std::string(TeamCallsignPrefix(team)) + "-leader");
     entity.emplace<AIStrategy>();
     AIPresetLibrary::ApplyStrategy(preset, entity.get_mut<AIStrategy>());
     return entity;

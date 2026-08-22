@@ -294,6 +294,25 @@ needed. Not yet manually playtested.
 Done when: claim a fresh planet in a real playthrough and watch the complex
 grow unattended; sim-test proof passes.
 
+**Update (2026-08-22) — a levelled site stays levelled for a while.** Nothing
+used to be lost by having a structure shot off a rock: `EconomySystem` sees
+the gap on the tick after the wreck clears and dispatches a replacement, and
+a producer on that same planet is already inside the arrival radius, so a
+Colony was back inside ten seconds. `RebuildLockout`
+(`component/rebuild-lockout.hpp`) now rides the planet, one counter per
+`StructureType`, written by `DeathSystem` as the structure comes down and aged
+by `EconomySystem`. Everything that builds honours it: freighter dispatch
+(which falls through to the next missing type rather than stalling the whole
+rock), a Base developing its own Lab or Comm Center, and the unload at the far
+end of a run that was already in the air — that one *holds* its pod in orbit
+rather than writing it off, since dispatch is gated on the same counter and
+the only way to arrive during a lockout is to have been flying when it
+started. `[rebuild] lockout_ticks` in `data/economy.toml`, 1800 (30 s).
+Structure hull came down by half in the same pass
+(`EntitySpawner::STRUCTURE_HP_SCALE`, 10 → 5): a siege has to be worth
+starting, and it now costs the defender something when it succeeds. Covered by
+`TestRebuildLockout`.
+
 ## Phase 4 — Fighter production, respawn, win/lose
 
 Goal: complexes rebuild your fighter; a round can be won and lost.

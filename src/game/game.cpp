@@ -46,7 +46,7 @@ Game::Game(IFilesystem& filesystem, std::unique_ptr<EntitySpawner> entitySpawner
         , m_landingStateSystem(m_registry, m_physicsSystem, m_factionSystem)
         , m_repairSystem(m_registry, *m_entitySpawner, m_upgradeCatalog, m_economyConfig)
         , m_conquestSystem(m_registry, *m_entitySpawner, m_eventQueue, m_factionSystem, m_economyConfig)
-        , m_deathSystem(m_registry, *m_entitySpawner, m_eventQueue)
+        , m_deathSystem(m_registry, *m_entitySpawner, m_eventQueue, m_economyConfig)
         , m_trajectoryPredictor(m_registry, m_physicsSystem)
         , m_aiPilotSystem(m_registry, m_physicsSystem, m_trajectoryPredictor, m_upgradeCatalog)
         , m_aiStrategySystem(m_registry, m_physicsSystem, m_upgradeCatalog)
@@ -166,11 +166,12 @@ void Game::AddAIFaction(TeamId team, id_t preset)
     m_aiFactions.push_back(AIFaction{team, preset});
     AIFaction& faction = m_aiFactions.back();
 
+    faction.wing.resize(m_economyConfig.ai.wingSize);
+
     if (const std::optional<FactionSystem::SpawnPoint> site = m_factionSystem.SpawnPosition(team)) {
         faction.leader = m_entitySpawner->SpawnAILeader("models/ships/fighter-1"_id, site->pos, team,
                                                         ResolveAIPreset(faction.preset), site->vel,
                                                         site->rot);
-        faction.leader->emplace<Callsign>(LeaderCallsign(team));
     }
 }
 
@@ -182,8 +183,8 @@ bool Game::HasAIFaction(TeamId team) const
 
 std::vector<TeamId> Game::FillEmptyTeamsWithAI(id_t preset)
 {
-    // A Callsign with no AIPilot behind it is a person: leaders carry one too
-    // (LeaderCallsign), so the name alone cannot tell a pilot from a bot.
+    // A Callsign with no AIPilot behind it is a person: every AI ship carries
+    // one too, so the name alone cannot tell a pilot from a bot.
     std::vector<TeamId> flown;
     m_registry.each([&](flecs::entity ship, const Callsign&, const Team& team) {
         if (!ship.has<AIPilot>()) flown.push_back(team.id);
@@ -197,22 +198,6 @@ std::vector<TeamId> Game::FillEmptyTeamsWithAI(id_t preset)
         filled.push_back(team);
     }
     return filled;
-}
-
-// One per faction, so it needs no counter to stay unique -- and it is what
-// somebody flying alone types to go and find the enemy (/tp red-leader).
-std::string Game::LeaderCallsign(TeamId team)
-{
-    switch (team) {
-    case TeamId::Blue: return "blue-leader";
-    case TeamId::Red: return "red-leader";
-    case TeamId::Violet: return "violet-leader";
-    case TeamId::Yellow: return "yellow-leader";
-    case TeamId::Magenta: return "magenta-leader";
-    case TeamId::Cyan: return "cyan-leader";
-    case TeamId::None: break;
-    }
-    return "leader";
 }
 
 void Game::Start()
@@ -313,7 +298,7 @@ void Game::Update()
         m_researchSystem.Update(m_step);
         // Detect a player death from DeathSystem before any system reads m_player.
         HandlePlayerRespawn();
-        HandleAILeaderRespawns();
+        HandleAIRespawns();
         // Before AIPilotSystem, so an order issued this tick is flown this tick.
         m_aiStrategySystem.Update();
         m_aiPilotSystem.Update(m_step);
@@ -363,7 +348,7 @@ void Game::HandlePlayerRespawn()
     }
 }
 
-void Game::HandleAILeaderRespawns()
+void Game::HandleAIRespawns()
 {
     for (AIFaction& faction : m_aiFactions) {
         if (const std::optional<FactionSystem::SpawnPoint> spawn =
@@ -371,9 +356,27 @@ void Game::HandleAILeaderRespawns()
             faction.leader = m_entitySpawner->SpawnAILeader("models/ships/fighter-1"_id, spawn->pos,
                                                             faction.team, ResolveAIPreset(faction.preset), spawn->vel,
                                                             spawn->rot);
-            faction.leader->emplace<Callsign>(LeaderCallsign(faction.team));
+        }
+
+        // No AIStrategy: a wingman takes the leader's objective through
+        // AIPilotSystem's wing orders, and its own reflexes for everything
+        // else. Its preset is picked rather than inherited, so a wing fights
+        // as a mix of temperaments.
+        for (AIFaction::Wingman& wingman : faction.wing) {
+            if (const std::optional<FactionSystem::SpawnPoint> spawn =
+                        TickRespawn(wingman.ship, wingman.respawnTimer, faction.team)) {
+                wingman.ship = m_entitySpawner->SpawnAIShip("models/ships/fighter-1"_id, spawn->pos,
+                                                            PickWingPreset(), spawn->vel, spawn->rot,
+                                                            faction.team);
+            }
         }
     }
+}
+
+const AIPreset& Game::PickWingPreset()
+{
+    std::uint64_t rng = SplitMix64Seed(m_step, m_randomAIShipSpawnCount++);
+    return m_aiPresets.PickRandom(static_cast<std::uint32_t>(SplitMix64Next(rng)));
 }
 
 const AIPreset& Game::ResolveAIPreset(id_t id) const

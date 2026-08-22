@@ -8,6 +8,7 @@
 #include <gravitaris/game/component/net-id.hpp>
 #include <gravitaris/game/component/orbit.hpp>
 #include <gravitaris/game/component/planet-attachment.hpp>
+#include <gravitaris/game/component/rebuild-lockout.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/component/transform.hpp>
@@ -53,6 +54,14 @@ EconomySystem::EconomySystem(flecs::world& registry, EntitySpawner& entitySpawne
 
 void EconomySystem::Update()
 {
+    // Every build decision below reads these, so they age here, once, before
+    // any of them is taken.
+    m_registry.each([](RebuildLockout& lockout) {
+        for (std::uint32_t& ticks : lockout.ticks) {
+            if (ticks > 0) --ticks;
+        }
+    });
+
     ankerl::unordered_dense::map<std::uint32_t, PlanetEconomy> byPlanet;
 
     m_registry.each([&](flecs::entity e, const Structure& s, const PlanetSurfaceAttachment& attach) {
@@ -109,10 +118,10 @@ void EconomySystem::Update()
         if (pe.base.is_alive()) {
             Structure& base = pe.base.get_mut<Structure>();
             if (base.finishedMaterials >= m_config.production.selfDevelopmentCost) {
-                if (!pe.lab.is_alive()) {
+                const flecs::entity planet = m_entitySpawner.EntityForNetId(netId);
+                if (!pe.lab.is_alive() && !RebuildBlocked(planet, StructureType::Lab)) {
                     base.finishedMaterials -= m_config.production.selfDevelopmentCost;
                     const Team& team = pe.base.get<Team>();
-                    flecs::entity planet = m_entitySpawner.EntityForNetId(netId);
                     flecs::entity built = m_entitySpawner.SpawnStructure(StructureType::Lab, "models/structures/lab"_id,
                                                                          planet, team.id);
                     const Transform& builtTransf = built.get<Transform>();
@@ -121,10 +130,13 @@ void EconomySystem::Update()
                                                       static_cast<float>(builtTransf.pos.y())},
                                       static_cast<std::uint32_t>(StructureType::Lab));
                 }
-                else if (!HasStructure(m_registry, netId, StructureType::CommCenter)) {
+                // Still in order while a site is shut: a rock whose Lab was
+                // shot off waits for the Lab rather than skipping ahead to
+                // the Comm Center it was going to build next.
+                else if (pe.lab.is_alive() && !HasStructure(m_registry, netId, StructureType::CommCenter)
+                         && !RebuildBlocked(planet, StructureType::CommCenter)) {
                     base.finishedMaterials -= m_config.production.selfDevelopmentCost;
                     const Team& team = pe.base.get<Team>();
-                    flecs::entity planet = m_entitySpawner.EntityForNetId(netId);
                     flecs::entity built = m_entitySpawner.SpawnStructure(
                             StructureType::CommCenter, "models/structures/comm-center"_id, planet, team.id);
                     const Transform& builtTransf = built.get<Transform>();
@@ -156,18 +168,25 @@ void EconomySystem::Update()
         const std::uint32_t netId = planet.get<NetId>().value;
         if (alreadyTasked.count(netId)) return;
 
+        // Priority order, skipping anything the planet is still refusing:
+        // a site somebody has just levelled is rubble for a while
+        // (RebuildLockout), and there is no sense holding the whole rock's
+        // development up over it when the next thing on the list is buildable.
         BuildOrder order;
-        if (!HasStructure(m_registry, netId, StructureType::Base)) {
+        if (!HasStructure(m_registry, netId, StructureType::Base)
+            && !RebuildBlocked(planet, StructureType::Base)) {
             order = BuildOrder::Base;
         }
-        else if (!HasStructure(m_registry, netId, StructureType::Colony)) {
+        else if (!HasStructure(m_registry, netId, StructureType::Colony)
+                 && !RebuildBlocked(planet, StructureType::Colony)) {
             order = BuildOrder::Colony;
         }
-        else if (!HasStructure(m_registry, netId, StructureType::HighPort)) {
+        else if (!HasStructure(m_registry, netId, StructureType::HighPort)
+                 && !RebuildBlocked(planet, StructureType::HighPort)) {
             order = BuildOrder::HighPort;
         }
         else {
-            return; // fully developed -- nothing to dispatch here
+            return; // fully developed, or nothing on it is open for building
         }
         candidates.push_back({planet, netId, transf.pos, order});
     });

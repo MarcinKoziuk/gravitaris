@@ -9,6 +9,7 @@
 #include <gravitaris/game/component/physics.hpp>
 #include <gravitaris/game/component/planet.hpp>
 #include <gravitaris/game/component/planet-attachment.hpp>
+#include <gravitaris/game/component/rebuild-lockout.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/transform.hpp>
 #include <gravitaris/game/event/game-event.hpp>
@@ -225,6 +226,16 @@ void FreighterSystem::Update()
         const StructureType orderedType = state.buildOrder == BuildOrder::Base   ? StructureType::Base
                                          : state.buildOrder == BuildOrder::Colony ? StructureType::Colony
                                                                                   : StructureType::HighPort;
+
+        // The site was flattened while this run was in the air. Dispatch is
+        // gated on the same lockout, so the pod is held rather than written
+        // off: the freighter waits out the rest of it in orbit and unloads
+        // when the ground reopens.
+        if (RebuildBlocked(planet, orderedType)) {
+            state.ticksSinceUnload = m_config.freighter.cargoUnloadIntervalTicks;
+            return;
+        }
+
         if (planet.is_alive() && !HasStructure(m_registry, state.targetPlanetNetId, orderedType)) {
             flecs::entity built;
             switch (state.buildOrder) {
