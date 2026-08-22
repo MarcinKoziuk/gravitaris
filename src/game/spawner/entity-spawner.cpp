@@ -224,6 +224,26 @@ flecs::entity EntitySpawner::SpawnBullet(id_t modelId, Vector2d position, Vector
 // would have them resolve against each other before they have separated.
 static constexpr double FRAG_SPAWN_OFFSET = 6.0;
 
+flecs::entity EntitySpawner::SpawnRound(id_t modelId, Vector2d position, Vector2d velocity, double rot,
+                                        const Bullet& round)
+{
+    flecs::entity entity = SpawnBullet(modelId, position, velocity, /*sensor=*/true, rot);
+
+    Bullet flown = round;
+    flown.clientFlown = true;
+    entity.emplace<Bullet>(flown);
+
+    m_shots.Emit(Shot{/*seq=*/0, round.ownerNetId, modelId,
+                      Magnum::Vector2{static_cast<float>(position.x()),
+                                      static_cast<float>(position.y())},
+                      Magnum::Vector2{static_cast<float>(velocity.x()),
+                                      static_cast<float>(velocity.y())},
+                      static_cast<float>(rot), static_cast<float>(round.remainingLifetime),
+                      round.team});
+
+    return entity;
+}
+
 void EntitySpawner::SpawnShrapnel(Vector2d pos, Vector2d vel, std::uint64_t step,
                                   std::uint64_t source, const ShrapnelBurst& burst)
 {
@@ -239,9 +259,9 @@ void EntitySpawner::SpawnShrapnel(Vector2d pos, Vector2d vel, std::uint64_t step
         const double speed =
                 burst.speedMin + SplitMix64NextUnit(rng) * (burst.speedMax - burst.speedMin);
 
-        flecs::entity frag = SpawnBullet("models/bullets/bullet-0"_id, pos + dir * FRAG_SPAWN_OFFSET,
-                                         vel + dir * speed, /*sensor=*/true);
-        frag.emplace<Bullet>(burst.lifetimeSeconds, TeamId::None, burst.damage);
+        SpawnRound("models/bullets/bullet-0"_id, pos + dir * FRAG_SPAWN_OFFSET, vel + dir * speed,
+                   /*rot=*/0.0,
+                   Bullet{burst.lifetimeSeconds, TeamId::None, burst.damage});
     }
 }
 

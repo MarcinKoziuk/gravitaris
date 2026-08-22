@@ -697,6 +697,8 @@ if(GRAVITARIS_BUILD_CLIENT)
         src/cgame/net/cosmetic-bullet-despawner.cpp
         include/gravitaris/cgame/net/remote-event-applier.hpp
         src/cgame/net/remote-event-applier.cpp
+        include/gravitaris/cgame/net/remote-shot-applier.hpp
+        src/cgame/net/remote-shot-applier.cpp
         include/gravitaris/cgame/net/snapshot-applier.hpp
         src/cgame/net/snapshot-applier.cpp
         include/gravitaris/cgame/net/snapshot-interpolator.hpp

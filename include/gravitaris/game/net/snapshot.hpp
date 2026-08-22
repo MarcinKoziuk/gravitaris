@@ -14,6 +14,7 @@
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/event/game-event.hpp>
+#include <gravitaris/game/event/shot-stream.hpp>
 
 namespace Gravitaris {
 
@@ -193,22 +194,33 @@ struct SnapshotData {
     std::vector<EntityState> entities;
     std::vector<FactionSnapshot> factions;
     std::vector<GameEvent> events;
+    // Rounds fired since the peer last heard, for it to fly its own copies of
+    // (see event/shot-stream.hpp). Not entities: a client-flown round never
+    // appears in `entities` at all.
+    std::vector<Shot> shots;
 };
 
-// Collects the replicated state of every NetId-bearing entity plus events
-// with seq > eventsSinceSeq. Reads only replicated components.
+// Collects the replicated state of every NetId-bearing entity, plus events
+// with seq > eventsSinceSeq and shots with seq > shotsSinceSeq. Reads only
+// replicated components.
 //
-// `suppressBulletsOwnedBy` (0 = suppress nothing) omits bullets fired by that
-// ship NetId. A client predicts its own shots locally and renders those (see
-// ClientPrediction::Step), so shipping it the authoritative copy too would
-// draw the same shot twice, ~14 ticks apart -- the own ship renders at
-// roughly serverTick + NetClient::INPUT_LEAD_TICKS while replicated entities
-// render at serverTick - the interpolation delay. Filtering per peer here,
-// rather than adding an owner field to EntityState and filtering client-side,
-// keeps the wire format unchanged: an omitted entity needs no new field.
-void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::uint64_t tick,
-                    std::uint32_t eventsSinceSeq, SnapshotData& out,
-                    std::uint32_t suppressBulletsOwnedBy = 0);
+// A round marked Bullet::clientFlown is left out of `entities` entirely: it
+// went out once as a Shot and every client is integrating its own copy. What
+// still travels as an entity is a guided round, which no client can
+// extrapolate.
+//
+// `suppressOwnedBy` (0 = suppress nothing) drops what that ship NetId fired.
+// A client predicts its own shots locally and renders those (see
+// ClientPrediction::Step), so handing it the authoritative copy too would draw
+// the same shot twice, ~14 ticks apart -- the own ship renders at roughly
+// serverTick + NetClient::INPUT_LEAD_TICKS while replicated entities render at
+// serverTick - the interpolation delay. Filtering per peer here, rather than
+// shipping an owner and filtering client-side, is what keeps a peer's own
+// rounds off its own wire rather than merely off its screen.
+void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue,
+                    const ShotStream& shotStream, std::uint64_t tick, std::uint32_t eventsSinceSeq,
+                    std::uint32_t shotsSinceSeq, SnapshotData& out,
+                    std::uint32_t suppressOwnedBy = 0);
 
 void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out);
 
@@ -231,8 +243,9 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out);
 void ApplyEntityShipState(flecs::entity entity, const EntityState& state);
 
 // Gather + Serialize in one call (the common server-side path).
-void WriteSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::uint64_t tick,
-                   std::uint32_t eventsSinceSeq, ByteWriter& out);
+void WriteSnapshot(flecs::world& world, const GameEventQueue& eventQueue,
+                   const ShotStream& shotStream, std::uint64_t tick, std::uint32_t eventsSinceSeq,
+                   std::uint32_t shotsSinceSeq, ByteWriter& out);
 
 // False on a truncated/garbage buffer (wrong version byte, counts that don't
 // fit the remaining bytes); `out` contents are unspecified then.

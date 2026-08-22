@@ -669,6 +669,49 @@ So: near-range / fire-instant kills are confirmable; full "everything on my
 screen is authoritative" over 300–500ms of travel is explicitly *not* a goal.
 Server stays authoritative always — client sim is prediction, never a claim.
 
+### Amendment (2026-08-22) — an unguided round travels as a Shot, not an entity
+
+Step 2 above ("server spawns the authoritative bullet ... the real bullet then
+travels in server time") is what shipped, and it is what made a fight cost
+almost a megabyte a second per peer. A snapshot is full state, every entity,
+sixty times a second, with no delta and no relevancy filter, and `EntityState`
+is one fixed ~145-byte record whatever it describes -- so **a bullet costs the
+same on the wire as a fully-loaded fighter**, for the whole three seconds it
+lives. Measured on a plain 3v3 melee: 93 rounds in the air, a 14.3 KB
+snapshot, 837 KB/s peak per peer. Over an unreliable data channel with
+`maxRetransmits = 0`, one lost fragment drops the whole snapshot, so the
+failure mode is not smooth degradation -- it is bursts of missing state, which
+is what the lag spikes were.
+
+An unguided round now goes out **once**, as a `Shot`
+(`game/event/shot-stream.hpp`): owner, model, position, velocity, rotation,
+lifetime, team -- 37 bytes, and never again. Each client flies its own copy in
+its own prediction registry, against the same `PhysicsSystem` the server is
+running it against, which is exactly the arrangement a peer's own shots have
+had since Phase 5. The same melee: 6 entities, a 1.5 KB snapshot, 86 KB/s
+peak -- **~10x on peak snapshot size, ~8x on mean bandwidth**.
+
+What it costs is authority over where a round *is*. A client's copy is its own
+extrapolation, and one the server despawned on a hit keeps flying until the
+client's own hit test or the lifetime catches it -- `CosmeticBulletDespawner`,
+already the mechanism for the shooter's own rounds, now covers everyone's.
+Damage was never client-side, so nothing about who dies changes.
+
+Two rules keep it honest:
+
+- **Guided rounds still travel as entities.** Nothing on a client can
+  extrapolate a seeker: `MissileSystem` steers it every tick off a target lock
+  the client never sees.
+- **The flag is `Bullet::clientFlown`, set by `EntitySpawner::SpawnRound`, and
+  it is opt-IN.** A round nobody thought about is replicated the old,
+  expensive, visible way. Forgetting costs bandwidth; it can never cost
+  visibility. `TestShotsReplaceBullets` holds both halves.
+
+Still open, and the reason this is an amendment rather than a rewrite:
+`BulletFired` is now redundant for anything that also emits a Shot -- the two
+describe the same event and only the audio system still needs the first.
+Folding one into the other is a follow-up, not part of this.
+
 ### Why this dissolves camera/minimap challenges 1 & 2
 
 The current mirror world (`SnapshotApplier` into `CGame::m_mirrorWorld`) is a

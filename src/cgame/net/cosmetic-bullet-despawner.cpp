@@ -78,20 +78,21 @@ void CosmeticBulletDespawner::CheckLocalHits()
     }
 }
 
-// No ownerNetId filter needed (fixed 2026-07-21 -- an earlier version had
-// one, and it silently never matched, so this whole check was dead code on
-// a real client). The bug: ClientPrediction::Step stamps Bullet::ownerNetId
-// from `m_ownShip.get<NetId>().value` -- but m_ownShip is spawned locally
-// via EntitySpawner::SpawnPlayer, which assigns NetId from *this client's
-// own* AssignNetId counter, a value with no relation to
-// NetClient::GetYourShipNetId() (the *server's* NetId for this ship,
-// received in ServerWelcome). Comparing one against the other can never
-// match. The actual fix doesn't need either value: m_registry (passed in as
-// `registry`) is this client's own local prediction registry, and in
-// net-client mode it only ever holds this client's own ship, its own
-// cosmetic bullets, and Phase 7's planet proxies -- nothing else is ever
-// spawned into it. So every Bullet found here is definitionally this
-// client's own; there is nothing to filter.
+// Matched by position, not by owner (fixed 2026-07-21 -- an earlier version
+// filtered on ownerNetId and silently never matched, so the whole check was
+// dead code on a real client). The bug: ClientPrediction::Step stamps
+// Bullet::ownerNetId from `m_ownShip.get<NetId>().value` -- but m_ownShip is
+// spawned locally via EntitySpawner::SpawnPlayer, which assigns NetId from
+// *this client's own* AssignNetId counter, a value with no relation to
+// NetClient::GetYourShipNetId() (the *server's* NetId for this ship, received
+// in ServerWelcome). Comparing one against the other can never match.
+//
+// Position is the right key anyway, and more so now that the registry holds
+// everybody's rounds rather than only this client's: an Impact says a round
+// arrived HERE, and the round that arrived there is the one to take off the
+// screen, whoever fired it. What that costs is the odd tracer from somebody
+// else's burst clipped early when it happens to be passing through the same
+// thirty units -- which is why the radius is as tight as it is.
 void CosmeticBulletDespawner::MatchImpact(const Vector2d& impactPos)
 {
     std::vector<flecs::entity> matchedBullets;

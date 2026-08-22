@@ -89,10 +89,9 @@ void StructureDefenseSystem::Update()
         // a round drawn as a streak has to lie on its line of flight.
         const double rot = std::atan2(aim.y(), aim.x()) + PI / 2.0;
 
-        const flecs::entity bullet =
-                m_entitySpawner.SpawnBullet(round->modelId, transf.pos, vel, /*sensor=*/true, rot);
-        bullet.emplace<Bullet>(round->lifetimeSeconds, turretTeam.id, round->damage,
-                               /*ownerNetId=*/0u, turret.id());
+        m_entitySpawner.SpawnRound(round->modelId, transf.pos, vel, rot,
+                                   Bullet{round->lifetimeSeconds, turretTeam.id, round->damage,
+                                          /*ownerNetId=*/0u, turret.id()});
 
         m_eventQueue.Emit(GameEventType::BulletFired, turret,
                           Magnum::Vector2{static_cast<float>(transf.pos.x()), static_cast<float>(transf.pos.y())},

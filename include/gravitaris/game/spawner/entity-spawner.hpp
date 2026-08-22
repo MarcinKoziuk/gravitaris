@@ -13,9 +13,11 @@
 #include <gravitaris/game/id.hpp>
 #include <gravitaris/game/component/freighter.hpp>
 #include <gravitaris/game/component/physics.hpp>
+#include <gravitaris/game/component/bullet.hpp>
 #include <gravitaris/game/component/structure.hpp>
 #include <gravitaris/game/component/team.hpp>
 #include <gravitaris/game/ai/ai-preset-library.hpp>
+#include <gravitaris/game/event/shot-stream.hpp>
 
 namespace Gravitaris {
 
@@ -90,6 +92,8 @@ private:
     ankerl::unordered_dense::map<std::uint32_t, flecs::entity> m_netIdToEntity;
     flecs::observer m_netIdRemovedObserver;
 
+    ShotStream m_shots;
+
 public:
     explicit EntitySpawner(flecs::world& registry, ResourceLoader& resourceLoader);
 
@@ -138,6 +142,23 @@ public:
     // `direction` is sign-only: positive/negative picks the orbit direction.
     flecs::entity SpawnOrbitingPlanet(id_t modelId, Vector2d center, double centerMass,
                                       double radius, double direction, double phase);
+
+    // A round every client flies its own copy of: the entity the server
+    // resolves hits against, plus the Shot that tells the clients to draw one
+    // (see event/shot-stream.hpp). This is how anything unguided should be
+    // fired -- SpawnBullet below leaves a round travelling in every snapshot
+    // for its whole life, which is what a seeker needs and what a plain round
+    // costs 700x too much for.
+    flecs::entity SpawnRound(id_t modelId, Vector2d position, Vector2d velocity, double rot,
+                             const Bullet& round);
+
+    // Every shot fired since a consumer last looked. Only the server reads
+    // this -- a client spawns its own cosmetic rounds and never gathers a
+    // snapshot -- but it fills wherever a round is fired, single-player
+    // included, since nothing is cheap enough about a ring of 256 to be worth
+    // a mode check.
+    [[nodiscard]] ShotStream& Shots() { return m_shots; }
+    [[nodiscard]] const ShotStream& Shots() const { return m_shots; }
 
     // sensor: true for bullets whose hits are resolved by DamageSystem's
     // segment query rather than Chipmunk collision response (see RigidBodyDesc).

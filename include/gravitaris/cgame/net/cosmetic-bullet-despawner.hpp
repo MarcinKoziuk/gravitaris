@@ -6,11 +6,15 @@
 
 namespace Gravitaris {
 
-// Stops a client's own locally-predicted cosmetic bullet (ClientPrediction::
-// Step spawns a purely visual copy of every shot fired -- zero damage,
-// DamageSystem never runs against it) as soon as it's actually hit
-// something, via two independent mechanisms that both exist because either
-// alone was observed to fail in practice:
+// Stops a cosmetic bullet as soon as it has actually hit something. Every
+// unguided round on a client is one of these now: its own, spawned the
+// instant its trigger went down (ClientPrediction::Step), and everybody
+// else's, spawned from the Shot the server sent once instead of replicating
+// a travelling entity (RemoteShotApplier). None of them decides anything --
+// zero damage, and DamageSystem never runs against this world -- so taking
+// them off the screen at the right moment is the whole job, and it is done
+// by two independent mechanisms, because either alone was observed to fail
+// in practice:
 //
 // - CheckLocalHits: a local hit test against the mirror world, independent of
 //   any network message. GameEventQueue's own doc comment describes a
@@ -25,11 +29,12 @@ namespace Gravitaris {
 //   position rather than owner id -- see its own doc comment (in the .cpp)
 //   for why an owner id can never work here.
 //
-// `registry` is the client's own local prediction world (its own ship, own
-// cosmetic bullets, and Phase 7's planet proxies -- nothing else); the mirror
-// world is presentation-only (ADR 0001) and has no Chipmunk space, so hits
-// there are resolved against the authored Body geometry directly
-// (QueryBodySegment, via the HitOutline SnapshotApplier attaches).
+// `registry` is the client's own local prediction world -- its own ship, its
+// planet proxies, and every cosmetic round in the sector, whoever fired it.
+// That is where rounds have to live to move at all: the mirror world is
+// presentation-only (ADR 0001) and has no Chipmunk space behind it, which is
+// also why hits there are resolved against the authored Body geometry
+// directly (QueryBodySegment, via the HitOutline SnapshotApplier attaches).
 class CosmeticBulletDespawner {
 public:
     // Forgiveness margin around a bullet's swept segment, the same one

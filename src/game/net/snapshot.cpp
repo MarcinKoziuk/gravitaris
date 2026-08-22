@@ -27,25 +27,27 @@ namespace Gravitaris {
 
 // Bump on any wire-layout change; ReadSnapshot rejects mismatches outright
 // (no cross-version compatibility until there's a reason to have it).
-static constexpr std::uint8_t SNAPSHOT_VERSION = 17; // v17: maxHp
+static constexpr std::uint8_t SNAPSHOT_VERSION = 18; // v18: shots replace replicated bullets
 
 // Sanity caps so a garbage buffer can't make ReadSnapshot allocate wildly.
 static constexpr std::uint32_t MAX_ENTITIES = 4096;
 static constexpr std::uint32_t MAX_EVENTS = GameEventQueue::CAPACITY;
+static constexpr std::uint32_t MAX_SHOTS = ShotStream::CAPACITY;
 
-void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::uint64_t tick,
-                    std::uint32_t eventsSinceSeq, SnapshotData& out, std::uint32_t suppressBulletsOwnedBy)
+void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue,
+                    const ShotStream& shotStream, std::uint64_t tick, std::uint32_t eventsSinceSeq,
+                    std::uint32_t shotsSinceSeq, SnapshotData& out, std::uint32_t suppressOwnedBy)
 {
     out.tick = tick;
     out.entities.clear();
     out.events.clear();
+    out.shots.clear();
 
     world.each([&](flecs::entity entity, const NetId& netId, const Transform& t) {
-        if (suppressBulletsOwnedBy != 0) {
-            if (const Bullet* bullet = entity.try_get<Bullet>();
-                bullet && bullet->ownerNetId == suppressBulletsOwnedBy) {
-                return;
-            }
+        if (const Bullet* bullet = entity.try_get<Bullet>()) {
+            // Already sent as a spawn instruction; the peer is flying it.
+            if (bullet->clientFlown) return;
+            if (suppressOwnedBy != 0 && bullet->ownerNetId == suppressOwnedBy) return;
         }
 
         EntityState state;
@@ -192,6 +194,12 @@ void GatherSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::
     eventQueue.ConsumeSince(eventsSinceSeq, [&](const GameEvent& event) {
         out.events.push_back(event);
     });
+
+    shotStream.ConsumeSince(shotsSinceSeq, [&](const Shot& shot) {
+        // A peer already drew this one the moment its own trigger went down.
+        if (suppressOwnedBy != 0 && shot.ownerNetId == suppressOwnedBy) return;
+        out.shots.push_back(shot);
+    });
 }
 
 void ApplyEntityShipState(flecs::entity entity, const EntityState& state)
@@ -320,13 +328,28 @@ void SerializeSnapshot(const SnapshotData& snapshot, ByteWriter& out)
         out.WriteF32(event.pos.y());
         out.WriteU32(event.param);
     }
+
+    out.WriteU32(static_cast<std::uint32_t>(snapshot.shots.size()));
+    for (const Shot& shot : snapshot.shots) {
+        out.WriteU32(shot.seq);
+        out.WriteU32(shot.ownerNetId);
+        out.WriteU32(shot.modelId);
+        out.WriteF32(shot.pos.x());
+        out.WriteF32(shot.pos.y());
+        out.WriteF32(shot.vel.x());
+        out.WriteF32(shot.vel.y());
+        out.WriteF32(shot.rot);
+        out.WriteF32(shot.lifetimeSeconds);
+        out.WriteU8(static_cast<std::uint8_t>(shot.team));
+    }
 }
 
-void WriteSnapshot(flecs::world& world, const GameEventQueue& eventQueue, std::uint64_t tick,
-                   std::uint32_t eventsSinceSeq, ByteWriter& out)
+void WriteSnapshot(flecs::world& world, const GameEventQueue& eventQueue,
+                   const ShotStream& shotStream, std::uint64_t tick, std::uint32_t eventsSinceSeq,
+                   std::uint32_t shotsSinceSeq, ByteWriter& out)
 {
     SnapshotData snapshot;
-    GatherSnapshot(world, eventQueue, tick, eventsSinceSeq, snapshot);
+    GatherSnapshot(world, eventQueue, shotStream, tick, eventsSinceSeq, shotsSinceSeq, snapshot);
     SerializeSnapshot(snapshot, out);
 }
 
@@ -445,6 +468,25 @@ bool ReadSnapshot(ByteReader& in, SnapshotData& out)
         event.pos.y() = in.ReadF32();
         event.param = in.ReadU32();
         out.events.push_back(event);
+    }
+
+    const std::uint32_t shotCount = in.ReadU32();
+    if (shotCount > MAX_SHOTS) return false;
+    out.shots.clear();
+    out.shots.reserve(shotCount);
+    for (std::uint32_t i = 0; i < shotCount; ++i) {
+        Shot shot;
+        shot.seq = in.ReadU32();
+        shot.ownerNetId = in.ReadU32();
+        shot.modelId = in.ReadU32();
+        shot.pos.x() = in.ReadF32();
+        shot.pos.y() = in.ReadF32();
+        shot.vel.x() = in.ReadF32();
+        shot.vel.y() = in.ReadF32();
+        shot.rot = in.ReadF32();
+        shot.lifetimeSeconds = in.ReadF32();
+        shot.team = static_cast<TeamId>(in.ReadU8());
+        out.shots.push_back(shot);
     }
 
     return in.Ok();

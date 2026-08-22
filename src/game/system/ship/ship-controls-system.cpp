@@ -512,14 +512,13 @@ void ShipControlsSystem::Update(std::uint64_t step)
             // Fired along the barrel, so a round drawn as a streak
             // (models/bullets/bullet-heavy) lies down its own line of flight
             // rather than across it. A point-shaped round doesn't care.
-            flecs::entity bulletEntity =
-                    m_entitySpawner.SpawnBullet(gun.modelId, ret.first, ret.second, /*sensor=*/true,
-                                                static_cast<double>(transf.rot));
-            bulletEntity.emplace<Bullet>(gun.lifetimeSeconds,
-                                         shooterTeam ? shooterTeam->id : TeamId::Blue,
-                                         gun.damage,
-                                         shooterNetId ? shooterNetId->value : 0u,
-                                         entity.id());
+            m_entitySpawner.SpawnRound(gun.modelId, ret.first, ret.second,
+                                       static_cast<double>(transf.rot),
+                                       Bullet{gun.lifetimeSeconds,
+                                              shooterTeam ? shooterTeam->id : TeamId::Blue,
+                                              gun.damage,
+                                              shooterNetId ? shooterNetId->value : 0u,
+                                              entity.id()});
 
             // param carries the weapon's id so a listener that never sees the
             // shooter's loadout -- the audio system on a remote client --

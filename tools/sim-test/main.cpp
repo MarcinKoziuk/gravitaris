@@ -456,7 +456,8 @@ void TestOrbitReplication()
         game.SettleScenario();
 
         SnapshotData gathered;
-        GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), game.GetStep(), 0, gathered);
+        GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), game.GetEntitySpawner().Shots(),
+                       game.GetStep(), 0, 0, gathered);
         ByteWriter wire;
         SerializeSnapshot(gathered, wire);
         ByteReader reader(wire.Data(), wire.Size());
@@ -1536,6 +1537,86 @@ void TestAIWing()
     RunCheatCommand(game, player, TeamId::Blue, "/tp red-1");
     const double gap = (player.get<Transform>().pos - wingman.get<Transform>().pos).length();
     Require(gap < 200.0, "ai wing: /tp reaches a wingman by name");
+
+    fs.Shutdown();
+}
+
+// An unguided round travels as one Shot, not as an entity in every snapshot
+// for the three seconds it lives. That is the whole of the change: a bullet
+// was a fixed-size EntityState, 145 bytes, sixty times a second, per peer.
+// A guided round still travels as an entity, because nothing on a client can
+// extrapolate a seeker.
+void TestShotsReplaceBullets()
+{
+    FilesystemPhysFS fs;
+    if (!fs.Init()) {
+        std::fprintf(stderr, "sim-test: filesystem init failed\n");
+        std::exit(1);
+    }
+    Game game(fs);
+    EntitySpawner& spawner = game.GetEntitySpawner();
+
+    flecs::entity shooter = spawner.SpawnAIShip("models/ships/fighter-1"_id, Vector2d{-400., 0.},
+                                                game.GetAIPresets().Default());
+    AIPersonality& p = shooter.get_mut<AIPilot>().personality;
+    p.engageRange = 1e6;
+    p.dangerLookaheadSteps = 0;
+    p.fleeHealthFraction = 0.0;
+    flecs::entity target = spawner.SpawnPlayer("models/ships/fighter-1"_id, Vector2d{0., 0.});
+    Damageable& hull = target.get_mut<Damageable>();
+    hull.maxHp = 1e6f;
+    hull.hp = hull.maxHp;
+
+    std::uint32_t shotCursor = 0;
+    std::size_t shotsSeen = 0;
+    // What replicating rounds as entities would have cost, in EntityState
+    // records: every round, every tick it was alive.
+    std::size_t roundTicks = 0;
+    for (int tick = 0; tick < 600; ++tick) {
+        game.Update();
+
+        SnapshotData snapshot;
+        GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), spawner.Shots(), game.GetStep(), 0,
+                       shotCursor, snapshot);
+        if (!snapshot.shots.empty()) shotCursor = snapshot.shots.back().seq;
+        shotsSeen += snapshot.shots.size();
+
+        game.GetRegistry().each([&](const Bullet&) { ++roundTicks; });
+
+        for (const EntityState& e : snapshot.entities) {
+            Require(e.type != NetEntityType::Bullet,
+                    "shots: no unguided round ever appears in a snapshot as an entity");
+        }
+    }
+
+    Require(shotsSeen > 0, "shots: firing puts rounds on the wire as spawn instructions");
+    Require(roundTicks > 500, "shots: rounds really were in the air to leave out (setup check)");
+    // The saving, measured rather than asserted in the abstract: one message
+    // per round against one record per round per tick of its flight. A shot
+    // is also the smaller message, so this understates it.
+    Require(shotsSeen * 10 < roundTicks,
+            "shots: a round costs one message, not one per tick it lives");
+
+    // A round nobody marked as client-flown still travels the old way, which
+    // is what makes the rule fail safe: a guided round (MissileSystem steers
+    // it every tick off a target lock no client knows) is spawned exactly
+    // like this, and so is anything a future weapon forgets to think about.
+    // Forgetting costs bandwidth, never visibility.
+    {
+        const flecs::entity raw = spawner.SpawnBullet("models/bullets/bullet-0"_id,
+                                                      Vector2d{50., 50.}, Vector2d{10., 0.},
+                                                      /*sensor=*/true);
+        raw.emplace<Bullet>(3.0, TeamId::Red, 10.f);
+
+        SnapshotData snapshot;
+        GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), spawner.Shots(), game.GetStep(), 0,
+                       shotCursor, snapshot);
+
+        const std::uint32_t netId = raw.get<NetId>().value;
+        const bool present = std::any_of(snapshot.entities.begin(), snapshot.entities.end(),
+                                         [&](const EntityState& e) { return e.netId == netId; });
+        Require(present, "shots: a round not handed out as a shot still travels as an entity");
+    }
 
     fs.Shutdown();
 }
@@ -5190,13 +5271,15 @@ void TestOwnBulletSuppression()
     };
 
     SnapshotData unfiltered;
-    GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), 0, 0, unfiltered);
+    GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), game.GetEntitySpawner().Shots(), 0, 0, 0,
+                   unfiltered);
     Require(contains(unfiltered, myBullet.get<NetId>().value)
                     && contains(unfiltered, theirBullet.get<NetId>().value),
             "bullet suppression: an unfiltered snapshot carries every bullet (setup check)");
 
     SnapshotData forMe;
-    GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), 0, 0, forMe, mine.get<NetId>().value);
+    GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), game.GetEntitySpawner().Shots(), 0, 0, 0,
+                   forMe, mine.get<NetId>().value);
     Require(!contains(forMe, myBullet.get<NetId>().value),
             "bullet suppression: my own bullet is omitted from my own snapshot");
     Require(contains(forMe, theirBullet.get<NetId>().value),
@@ -5213,7 +5296,8 @@ void TestOwnBulletSuppression()
 void TestSnapshotRoundtrip(Game& game)
 {
     SnapshotData original;
-    GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), game.GetStep(), 0, original);
+    GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), game.GetEntitySpawner().Shots(),
+                   game.GetStep(), 0, 0, original);
     Require(!original.entities.empty(), "snapshot gathered entities");
     for (std::size_t i = 1; i < original.entities.size(); ++i) {
         Require(original.entities[i - 1].netId < original.entities[i].netId,
@@ -5288,7 +5372,8 @@ void TestLoadoutReplication()
     server.get_mut<Damageable>().hp = 37.f;
 
     SnapshotData gathered;
-    GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), game.GetStep(), 0, gathered);
+    GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), game.GetEntitySpawner().Shots(),
+                       game.GetStep(), 0, 0, gathered);
 
     ByteWriter wire;
     SerializeSnapshot(gathered, wire);
@@ -5547,7 +5632,8 @@ void TestStructureHullCapacityReplicates()
     base.get_mut<Damageable>().hp = maxHp * 0.5f;
 
     SnapshotData gathered;
-    GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), game.GetStep(), 0, gathered);
+    GatherSnapshot(game.GetRegistry(), game.GetEventQueue(), game.GetEntitySpawner().Shots(),
+                       game.GetStep(), 0, 0, gathered);
 
     ByteWriter wire;
     SerializeSnapshot(gathered, wire);
@@ -6152,6 +6238,7 @@ void TestPlayerRespawnAfterDeath()
 }
 
 
+
 } // namespace
 
 int main()
@@ -6172,6 +6259,7 @@ int main()
     TestFreighterEconomy();
     TestSelfDevelopment();
     TestRebuildLockout();
+    TestShotsReplaceBullets();
     TestPlanetsideStructureHits();
     TestUpgradeCatalog();
     TestHardpointMounts();

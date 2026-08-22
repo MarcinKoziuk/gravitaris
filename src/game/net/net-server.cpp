@@ -336,16 +336,22 @@ void NetServer::BroadcastSnapshot(std::uint64_t currentTick)
         if (!state.welcomed) continue;
 
         // This peer predicts and draws its own shots locally, so it must not
-        // also receive the authoritative copies (see GatherSnapshot's
-        // suppressBulletsOwnedBy). Every other peer still gets them.
+        // also be told to fly them (see GatherSnapshot's suppressOwnedBy).
+        // Every other peer still gets them.
         const std::uint32_t ownShipNetId =
                 state.ship.is_alive() ? state.ship.get<NetId>().value : 0u;
 
         SnapshotData snapshot;
-        GatherSnapshot(m_registry, m_eventQueue, currentTick, state.lastSentEventSeq, snapshot, ownShipNetId);
+        GatherSnapshot(m_registry, m_eventQueue, m_game.GetEntitySpawner().Shots(), currentTick,
+                       state.lastSentEventSeq, state.lastSentShotSeq, snapshot, ownShipNetId);
         if (!snapshot.events.empty()) {
             state.lastSentEventSeq = snapshot.events.back().seq;
         }
+        // Advanced past everything the stream holds, not just what this peer
+        // was sent: its own rounds are filtered out above, and leaving the
+        // cursor behind them would re-offer them every tick until the ring
+        // rolled over.
+        state.lastSentShotSeq = m_game.GetEntitySpawner().Shots().LatestSeq();
 
         ByteWriter writer;
         WriteSnapshotPacket(snapshot, writer);

@@ -25,6 +25,7 @@
 #include <gravitaris/cgame/net/cosmetic-bullet-despawner.hpp>
 #include <gravitaris/cgame/net/net-diagnostics.hpp>
 #include <gravitaris/cgame/net/remote-event-applier.hpp>
+#include <gravitaris/cgame/net/remote-shot-applier.hpp>
 #include <gravitaris/cgame/net/snapshot-applier.hpp>
 #include <gravitaris/game/net/snapshot.hpp>
 #include <gravitaris/game/upgrade/upgrade-catalog.hpp>
@@ -70,6 +71,7 @@ protected:
     SnapshotApplier m_snapshotApplier;
     ByteWriter m_snapshotScratch;
     std::uint32_t m_mirrorEventCursor = 0;
+    std::uint32_t m_mirrorShotCursor = 0;
 
     StarfieldRenderer m_starfieldRenderer;
     MinimapRenderer m_minimapRenderer;
@@ -294,6 +296,7 @@ protected:
     // runs, since that's only ever called from RenderNetClient, itself gated
     // on m_netClient being set (see Render()).
     std::optional<RemoteEventApplier> m_remoteEventApplier;
+    std::optional<RemoteShotApplier> m_remoteShotApplier;
     void ApplyRemoteEvents();
 
     // Phase 4 tunables (Net debug tab): how far behind the estimated server

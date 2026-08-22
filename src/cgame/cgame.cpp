@@ -864,6 +864,7 @@ void CGame::ConnectToServer(const std::string& wsUrl, TeamId requestedTeam)
     m_netClient->SetRequestedTeam(requestedTeam);
     m_ownShipSync.emplace(m_clientPrediction, *m_netClient, m_predictedTickClock);
     m_remoteEventApplier.emplace(*m_netClient, m_eventQueue, m_cosmeticBulletDespawner);
+    m_remoteShotApplier.emplace(*m_netClient, *m_entitySpawner);
     m_netTransport->ConnectSignaling(wsUrl);
 }
 
@@ -976,6 +977,9 @@ void CGame::ApplyRemoteEvents()
         return sourceNetId == yourShipNetId ? GetPlayer().value_or(flecs::entity{})
                                             : m_snapshotApplier.EntityForNetId(sourceNetId);
     });
+    // After the events, so an Impact that arrived in the same snapshot as the
+    // round that caused it does not despawn a round spawned a line later.
+    m_remoteShotApplier->Apply();
 }
 
 std::uint16_t CGame::ViewDelayTicks(std::uint64_t commandTick) const
@@ -1260,14 +1264,21 @@ void CGame::Render(double delta)
                 {
                     ScopedPerfTimer mirrorTimer(m_perfMonitor, "Snapshot Mirror");
                     m_snapshotScratch.Clear();
-                    WriteSnapshot(m_registry, m_eventQueue, GetStep(), m_mirrorEventCursor,
-                                  m_snapshotScratch);
+                    WriteSnapshot(m_registry, m_eventQueue, GetEntitySpawner().Shots(), GetStep(),
+                                  m_mirrorEventCursor, m_mirrorShotCursor, m_snapshotScratch);
                     ByteReader reader(m_snapshotScratch.Data(), m_snapshotScratch.Size());
                     SnapshotData snapshot;
                     if (ReadSnapshot(reader, snapshot)) {
                         m_snapshotApplier.Apply(snapshot);
                         if (!snapshot.events.empty()) {
                             m_mirrorEventCursor = snapshot.events.back().seq;
+                        }
+                        // The mirror renderer draws the real world's own
+                        // rounds, so it wants no cosmetic copies of them --
+                        // only the cursor, kept current so the debug path
+                        // never re-reads the same shots.
+                        if (!snapshot.shots.empty()) {
+                            m_mirrorShotCursor = snapshot.shots.back().seq;
                         }
                     }
                 }

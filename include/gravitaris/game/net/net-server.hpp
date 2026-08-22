@@ -40,6 +40,7 @@ class NetServer {
         // is received but deliberately not trusted for this -- a peer that
         // never acks correctly must not get its event stream wedged).
         std::uint32_t lastSentEventSeq = 0;
+        std::uint32_t lastSentShotSeq = 0;
         bool welcomed = false;
         // Highest InputCommand::tick already pushed into this peer's
         // InputQueue. The client resends its last CLIENT_INPUT_BACKUP

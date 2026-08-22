@@ -25,6 +25,18 @@ struct Bullet {
     // death shrapnel, which belongs to nobody and hits everyone. Sim state
     // like ownerNetId, and deliberately not serialized for the same reason.
     std::uint64_t shooter = 0;
+    // Whether this round went out to clients as a Shot (see
+    // event/shot-stream.hpp) rather than as a replicated entity. Set by
+    // EntitySpawner::SpawnRound, read by GatherSnapshot, which leaves such a
+    // round out of the snapshot entirely -- every client is flying its own
+    // copy from the spawn instruction.
+    //
+    // The flag rather than the inverse: a round nobody thought about is
+    // replicated the old, expensive, visible way. A guided round has to be,
+    // since no client can extrapolate a seeker, and the box the secondary
+    // fire throws out is not a round at all. Server-only, like the two fields
+    // above and for the same reason.
+    bool clientFlown = false;
 };
 
 } // namespace Gravitaris
